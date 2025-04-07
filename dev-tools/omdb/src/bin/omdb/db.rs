@@ -23,6 +23,7 @@ use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
 use anyhow::Context;
+use anyhow::anyhow;
 use anyhow::bail;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -140,6 +141,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -154,6 +156,7 @@ use std::collections::HashSet;
 use std::fmt::Display;
 use std::future::Future;
 use std::num::NonZeroU32;
+use std::str::FromStr;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
@@ -555,11 +558,104 @@ enum CollectionsCommands {
 
 #[derive(Debug, Args, Clone)]
 struct CollectionsShowArgs {
-    /// id of the collection
-    id: CollectionUuid,
+    /// id of the collection (or `latest`)
+    id_or_latest: CollectionIdOrLatest,
     /// show long strings in their entirety
     #[clap(long)]
     show_long_strings: bool,
+
+    #[clap(subcommand)]
+    filter: Option<CollectionsShowFilter>,
+}
+
+#[derive(Debug, Clone, Copy, Args)]
+struct CollectionIdArgs {
+    /// id of collection (or `latest` for the latest one)
+    collection_id: CollectionIdOrLatest,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CollectionIdOrLatest {
+    Latest,
+    CollectionId(CollectionUuid),
+}
+
+impl FromStr for CollectionIdOrLatest {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "latest" {
+            Ok(Self::Latest)
+        } else {
+            let id = s.parse()?;
+            Ok(Self::CollectionId(id))
+        }
+    }
+}
+
+impl CollectionIdOrLatest {
+    async fn to_collection(
+        &self,
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> anyhow::Result<Collection> {
+        match self {
+            CollectionIdOrLatest::Latest => datastore
+                .inventory_get_latest_collection(opctx)
+                .await
+                .context("fetching latest collection")?
+                .ok_or_else(|| anyhow!("no inventory collections found")),
+            CollectionIdOrLatest::CollectionId(id) => datastore
+                .inventory_collection_read(opctx, *id)
+                .await
+                .with_context(|| format!("fetching collection {id}")),
+        }
+    }
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum CollectionsShowFilter {
+    /// show all information from the collection
+    All,
+    /// show information about service processors (baseboard)
+    Sp {
+        /// show only information about one SP
+        serial: Option<String>,
+    },
+}
+
+impl CollectionsShowFilter {
+    fn include_sp_unknown_serial(&self) -> bool {
+        match self {
+            CollectionsShowFilter::All => true,
+            CollectionsShowFilter::Sp { serial: None } => true,
+            CollectionsShowFilter::Sp { serial: Some(_) } => false,
+        }
+    }
+
+    fn include_sp(&self, this_serial: &str) -> bool {
+        match self {
+            CollectionsShowFilter::All => true,
+            CollectionsShowFilter::Sp { serial: None } => true,
+            CollectionsShowFilter::Sp { serial: Some(serial) } => {
+                this_serial == serial
+            }
+        }
+    }
+
+    fn include_sleds(&self) -> bool {
+        match self {
+            CollectionsShowFilter::All => true,
+            CollectionsShowFilter::Sp { .. } => false,
+        }
+    }
+
+    fn include_keeper_membership(&self) -> bool {
+        match self {
+            CollectionsShowFilter::All => true,
+            CollectionsShowFilter::Sp { .. } => false,
+        }
+    }
 }
 
 #[derive(Debug, Args, Clone, Copy)]
@@ -6078,17 +6174,20 @@ async fn cmd_db_inventory(
         InventoryCommands::Collections(CollectionsArgs {
             command:
                 CollectionsCommands::Show(CollectionsShowArgs {
-                    id,
+                    id_or_latest,
                     show_long_strings,
+                    ref filter,
                 }),
         }) => {
             let long_string_formatter =
                 LongStringFormatter { show_long_strings };
+            let filter = filter.as_ref().unwrap_or(&CollectionsShowFilter::All);
             cmd_db_inventory_collections_show(
                 opctx,
                 datastore,
-                id,
+                id_or_latest,
                 long_string_formatter,
+                filter,
             )
             .await
         }
@@ -6377,19 +6476,22 @@ async fn cmd_db_inventory_collections_list(
 async fn cmd_db_inventory_collections_show(
     opctx: &OpContext,
     datastore: &DataStore,
-    id: CollectionUuid,
+    id_or_latest: CollectionIdOrLatest,
     long_string_formatter: LongStringFormatter,
+    filter: &CollectionsShowFilter,
 ) -> Result<(), anyhow::Error> {
-    let collection = datastore
-        .inventory_collection_read(opctx, id)
-        .await
-        .context("reading collection")?;
+    let collection = id_or_latest.to_collection(opctx, datastore).await?;
 
     inv_collection_print(&collection).await?;
     let nerrors = inv_collection_print_errors(&collection).await?;
-    inv_collection_print_devices(&collection, &long_string_formatter).await?;
-    inv_collection_print_sleds(&collection);
-    inv_collection_print_keeper_membership(&collection);
+    inv_collection_print_devices(&collection, filter, &long_string_formatter)
+        .await?;
+    if filter.include_sleds() {
+        inv_collection_print_sleds(&collection);
+    }
+    if filter.include_keeper_membership() {
+        inv_collection_print_keeper_membership(&collection);
+    }
 
     if nerrors > 0 {
         eprintln!(
@@ -6445,6 +6547,7 @@ async fn inv_collection_print_errors(
 
 async fn inv_collection_print_devices(
     collection: &Collection,
+    filter: &CollectionsShowFilter,
     long_string_formatter: &LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
     // Assemble a list of baseboard ids, sorted first by device type (sled,
@@ -6466,7 +6569,6 @@ async fn inv_collection_print_devices(
         let baseboard = collection.baseboards.get(baseboard_id);
         let rot = collection.rots.get(baseboard_id);
 
-        println!("");
         match baseboard {
             None => {
                 // It should be impossible to find an SP whose baseboard
@@ -6474,6 +6576,11 @@ async fn inv_collection_print_devices(
                 // in this tool (for failing to fetch or find the right
                 // baseboard information) or the inventory system (for failing
                 // to insert a record into the hw_baseboard_id table).
+                if !filter.include_sp_unknown_serial() {
+                    continue;
+                }
+
+                println!("");
                 println!(
                     "{:?} (serial number unknown -- this is a bug)",
                     sp.sp_type
@@ -6481,6 +6588,11 @@ async fn inv_collection_print_devices(
                 println!("    part number: unknown");
             }
             Some(baseboard) => {
+                if !filter.include_sp(&baseboard.serial_number) {
+                    continue;
+                }
+
+                println!("");
                 println!("{:?} {}", sp.sp_type, baseboard.serial_number);
                 println!("    part number: {}", baseboard.part_number);
             }

@@ -69,7 +69,7 @@ use sled_agent_types::zone_bundle::{
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
 use sled_diagnostics::{SledDiagnosticsCmdError, SledDiagnosticsCmdOutput};
-use sled_hardware::{HardwareManager, underlay};
+use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::manager::StorageHandle;
@@ -80,11 +80,9 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use illumos_utils::running_zone::ZoneBuilderFactory;
-#[cfg(not(test))]
-use illumos_utils::{dladm::Dladm, zone::Zones};
-#[cfg(test)]
-use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
+use illumos_utils::dladm::Dladm;
+use illumos_utils::zone::Api;
+use illumos_utils::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -495,6 +493,16 @@ impl SledAgent {
             *sled_address.ip(),
         );
 
+        // The VMM reservoir is configured with respect to what's left after
+        // accounting for relatively fixed and predictable uses.
+        // We expect certain amounts of memory to be set aside for kernel,
+        // buffer, or control plane uses.
+        let memory_sizes = MemoryReservations::new(
+            parent_log.new(o!("component" => "MemoryReservations")),
+            long_running_task_handles.hardware_manager.clone(),
+            config.control_plane_memory_earmark_mb,
+        );
+
         // Configure the VMM reservoir as either a percentage of DRAM or as an
         // exact size in MiB.
         let reservoir_mode = ReservoirMode::from_config(
@@ -502,20 +510,21 @@ impl SledAgent {
             config.vmm_reservoir_size_mb,
         );
 
-        let vmm_reservoir_manager = VmmReservoirManager::spawn(
-            &log,
-            long_running_task_handles.hardware_manager.clone(),
-            reservoir_mode,
-        );
+        let vmm_reservoir_manager =
+            VmmReservoirManager::spawn(&log, memory_sizes, reservoir_mode);
 
+        let instance_vnic_allocator = illumos_utils::link::VnicAllocator::new(
+            "Instance",
+            etherstub.clone(),
+            Arc::new(illumos_utils::dladm::Dladm::real_api()),
+        );
         let instances = InstanceManager::new(
             parent_log.clone(),
             nexus_client.clone(),
-            etherstub.clone(),
+            instance_vnic_allocator,
             port_manager.clone(),
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
-            ZoneBuilderFactory::default(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
         )?;
@@ -799,7 +808,8 @@ impl SledAgent {
 
     /// List the zones that the sled agent is currently managing.
     pub async fn zones_list(&self) -> Result<Vec<String>, Error> {
-        Zones::get()
+        Zones::real_api()
+            .get()
             .await
             .map(|zones| {
                 let mut zn: Vec<_> = zones
@@ -1023,7 +1033,7 @@ impl SledAgent {
 
         self.inner
             .services
-            .ensure_all_omicron_zones_persistent(requested_zones, None)
+            .ensure_all_omicron_zones_persistent(requested_zones)
             .await?;
         Ok(())
     }

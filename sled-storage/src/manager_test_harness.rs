@@ -19,6 +19,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use xshell::{Shell, cmd};
 
 /// A [`key-manager::SecretRetriever`] that only returns hardcoded IKM for
 /// epoch 0
@@ -85,7 +86,8 @@ impl Drop for StorageManagerTestHarness {
         if let Some(vdev_dir) = self.vdev_dir.take() {
             eprint!(
                 "WARNING: StorageManagerTestHarness called without 'cleanup()'.\n\
-                 Attempting automated cleanup ... ",
+                 Attempting automated cleanup of {}",
+                vdev_dir.path(),
             );
 
             let pools = [
@@ -119,6 +121,25 @@ impl Drop for StorageManagerTestHarness {
             }
 
             let vdev_path = vdev_dir.path();
+            let sh = Shell::new().unwrap();
+            match cmd!(sh, "find {vdev_path} -type d").read() {
+                Err(err) => {
+                    failed_commands
+                        .push(format!("find {vdev_path} -type d: {err}"));
+                }
+                Ok(vdev_dirs) => {
+                    for dir in vdev_dirs.lines() {
+                        if let Err(err) =
+                            cmd!(sh, "pfexec chmod S-ci {dir}").quiet().run()
+                        {
+                            failed_commands.push(format!(
+                                "pfexec chmod S-ci {dir}: {err}"
+                            ));
+                        }
+                    }
+                }
+            }
+
             if let Err(_) = std::process::Command::new(illumos_utils::PFEXEC)
                 .args(["rm", "-rf", vdev_path.as_str()])
                 .status()
@@ -149,8 +170,6 @@ impl Drop for StorageManagerTestHarness {
 impl StorageManagerTestHarness {
     /// Creates a new StorageManagerTestHarness with no associated disks.
     pub async fn new(log: &Logger) -> Self {
-        #[cfg(all(test, feature = "testing"))]
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let tmp = camino_tempfile::tempdir_in("/var/tmp")
             .expect("Failed to make temporary directory");
         info!(log, "Using tmp: {}", tmp.path());
@@ -400,15 +419,16 @@ impl StorageManagerTestHarness {
         eprintln!("Terminating StorageManagerTestHarness");
         let disks = self.handle().get_latest_disks().await;
         let pools = disks.get_all_zpools();
+
+        self.key_manager_task.abort();
+        self.storage_manager_task.abort();
+
         for (pool, _) in pools {
             eprintln!("Destroying pool: {pool:?}");
             if let Err(e) = illumos_utils::zpool::Zpool::destroy(&pool) {
                 eprintln!("Failed to destroy {pool:?}: {e:?}");
             }
         }
-
-        self.key_manager_task.abort();
-        self.storage_manager_task.abort();
 
         // Make sure that we're actually able to delete everything within the
         // temporary directory.
@@ -421,6 +441,19 @@ impl StorageManagerTestHarness {
         // accessible to everyone before destroying them.
         let mut command = std::process::Command::new("/usr/bin/pfexec");
         let mount = vdev_dir.path();
+
+        let sh = Shell::new().unwrap();
+        let dirs = cmd!(sh, "find {mount} -type d")
+            .read()
+            .expect("Failed to find dirs");
+        for dir in dirs.lines() {
+            println!("Making {dir} mutable");
+            cmd!(sh, "pfexec chmod S-ci {dir}")
+                .quiet()
+                .run()
+                .expect("Failed to make directory mutable");
+        }
+
         let cmd = command.args(["chmod", "-R", "a+rw", mount.as_str()]);
         cmd.output().expect(
             "Failed to change ownership of the temporary directory we're trying to delete"

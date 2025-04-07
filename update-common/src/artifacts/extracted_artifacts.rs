@@ -9,8 +9,6 @@ use camino_tempfile::NamedUtf8TempFile;
 use camino_tempfile::Utf8TempDir;
 use futures::Stream;
 use futures::StreamExt;
-use omicron_common::update::ArtifactHash;
-use omicron_common::update::ArtifactHashId;
 use sha2::Digest;
 use sha2::Sha256;
 use slog::Logger;
@@ -21,6 +19,8 @@ use std::sync::Arc;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactHashId;
 use tufaceous_artifact::ArtifactKind;
 
 /// Handle to the data of an extracted artifact.

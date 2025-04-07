@@ -16,7 +16,6 @@ use omicron_common::{
         DatasetManagementStatus, DatasetsConfig, DiskManagementStatus,
         DiskVariant, OmicronPhysicalDisksConfig,
     },
-    update::ArtifactHash,
     zpool_name::ZpoolName,
 };
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
@@ -27,6 +26,7 @@ use serde::{Deserialize, Serialize};
 // depend on sled-hardware-types.
 pub use sled_hardware_types::Baseboard;
 use strum::EnumIter;
+use tufaceous_artifact::ArtifactHash;
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

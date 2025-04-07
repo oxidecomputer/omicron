@@ -19,4 +19,5 @@ semver.workspace = true
 serde.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
+tufaceous-artifact.workspace = true
 wicket-common.workspace = true
