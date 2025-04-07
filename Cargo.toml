@@ -461,7 +461,7 @@ itertools = "0.14.0"
 internet-checksum = "0.2"
 ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
-jiff = "0.2.5"
+jiff = { version = "0.2.5", features = ["tzdb-bundle-always"] }
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
 libc = "0.2.170"
