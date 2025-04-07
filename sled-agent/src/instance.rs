@@ -2765,6 +2765,69 @@ mod tests {
         (services, rx)
     }
 
+    /// Holds assorted objects that are needed to test an Instance and its
+    /// interactions with other parts of the system (e.g. Nexus and metrics).
+    #[allow(dead_code)]
+    struct InstanceTestObjects {
+        storage_harness: StorageManagerTestHarness,
+        nexus: FakeNexusParts,
+        _temp_guard: Utf8TempDir,
+        instance_manager: crate::instance_manager::InstanceManager,
+        metrics_rx: MetricsRx,
+    }
+
+    impl InstanceTestObjects {
+        async fn new(log: &slog::Logger) -> Self {
+            let storage_harness = setup_storage_manager(log).await;
+            let nexus = FakeNexusParts::new(&log).await;
+            let temp_guard = Utf8TempDir::new().unwrap();
+            let (services, metrics_rx) = fake_instance_manager_services(
+                log,
+                storage_harness.handle().clone(),
+                nexus.nexus_client.clone(),
+                &temp_guard.path().to_string(),
+            );
+
+            let InstanceManagerServices {
+                nexus_client,
+                vnic_allocator,
+                port_manager,
+                storage,
+                zone_bundler,
+                zone_builder_factory,
+                metrics_queue,
+            } = services;
+
+            let vmm_reservoir_manager =
+                VmmReservoirManagerHandle::stub_for_test();
+            let instance_manager =
+                crate::instance_manager::InstanceManager::new_inner(
+                    log.new(o!("component" => "InstanceManager")),
+                    nexus_client,
+                    vnic_allocator,
+                    port_manager,
+                    storage,
+                    zone_bundler,
+                    zone_builder_factory,
+                    vmm_reservoir_manager,
+                    metrics_queue,
+                )
+                .unwrap();
+
+            Self {
+                storage_harness,
+                nexus,
+                _temp_guard: temp_guard,
+                instance_manager,
+                metrics_rx,
+            }
+        }
+
+        async fn cleanup(mut self) {
+            self.storage_harness.cleanup().await;
+        }
+    }
+
     #[tokio::test]
     async fn test_instance_create_events_normal() {
         let logctx = omicron_test_utils::dev::test_setup_log(
@@ -2928,49 +2991,7 @@ mod tests {
         );
         let log = logctx.log.new(o!(FileKv));
 
-        let mut storage_harness = setup_storage_manager(&logctx.log).await;
-        let storage_handle = storage_harness.handle().clone();
-
-        let FakeNexusParts {
-            nexus_client,
-            mut state_rx,
-            _dns_server,
-            _nexus_server,
-        } = FakeNexusParts::new(&log).await;
-
-        let temp_guard = Utf8TempDir::new().unwrap();
-        let temp_dir = temp_guard.path().to_string();
-
-        let (services, mut metrics_rx) = fake_instance_manager_services(
-            &log,
-            storage_handle,
-            nexus_client,
-            &temp_dir,
-        );
-        let InstanceManagerServices {
-            nexus_client,
-            vnic_allocator,
-            port_manager,
-            storage,
-            zone_bundler,
-            zone_builder_factory,
-            metrics_queue,
-        } = services;
-
-        let vmm_reservoir_manager = VmmReservoirManagerHandle::stub_for_test();
-
-        let mgr = crate::instance_manager::InstanceManager::new_inner(
-            logctx.log.new(o!("component" => "InstanceManager")),
-            nexus_client,
-            vnic_allocator,
-            port_manager,
-            storage,
-            zone_bundler,
-            zone_builder_factory,
-            vmm_reservoir_manager,
-            metrics_queue,
-        )
-        .unwrap();
+        let mut test_objects = InstanceTestObjects::new(&log).await;
 
         let (propolis_server, _propolis_client) =
             propolis_mock_server(&logctx.log);
@@ -2997,33 +3018,39 @@ mod tests {
             serial: "fake-serial".into(),
         };
 
-        mgr.ensure_registered(
-            propolis_id,
-            InstanceEnsureBody {
-                instance_id,
-                migration_id: None,
-                hardware,
-                vmm_runtime,
-                propolis_addr,
-                metadata,
-            },
-            sled_identifiers,
-        )
-        .await
-        .unwrap();
+        test_objects
+            .instance_manager
+            .ensure_registered(
+                propolis_id,
+                InstanceEnsureBody {
+                    instance_id,
+                    migration_id: None,
+                    hardware,
+                    vmm_runtime,
+                    propolis_addr,
+                    metadata,
+                },
+                sled_identifiers,
+            )
+            .await
+            .unwrap();
 
-        mgr.ensure_state(propolis_id, VmmStateRequested::Running)
+        test_objects
+            .instance_manager
+            .ensure_state(propolis_id, VmmStateRequested::Running)
             .await
             .unwrap();
 
         timeout(
             TIMEOUT_DURATION,
-            state_rx.wait_for(|maybe_state| match maybe_state {
-                ReceivedInstanceState::InstancePut(sled_inst_state) => {
-                    sled_inst_state.vmm_state.state == VmmState::Running
-                }
-                _ => false,
-            }),
+            test_objects.nexus.state_rx.wait_for(
+                |maybe_state| match maybe_state {
+                    ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                        sled_inst_state.vmm_state.state == VmmState::Running
+                    }
+                    _ => false,
+                },
+            ),
         )
         .await
         .expect("timed out waiting for InstanceState::Running in FakeNexus")
@@ -3031,8 +3058,10 @@ mod tests {
 
         // We should have received exactly one message on the metrics request
         // queue, for the control VNIC. The instance has no OPTE ports.
-        let message =
-            metrics_rx.try_recv().expect("Should have received a message");
+        let message = test_objects
+            .metrics_rx
+            .try_recv()
+            .expect("Should have received a message");
         let zone_name = propolis_zone_name(&propolis_id);
         assert_eq!(
             message,
@@ -3043,11 +3072,12 @@ mod tests {
             "Expected instance zone to send a message on its metrics \
             request queue, asking to track its control VNIC",
         );
-        metrics_rx
+        test_objects
+            .metrics_rx
             .try_recv()
             .expect_err("The metrics request queue should have one message");
 
-        storage_harness.cleanup().await;
+        test_objects.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -3063,49 +3093,7 @@ mod tests {
         );
         let log = logctx.log.new(o!(FileKv));
 
-        let mut storage_harness = setup_storage_manager(&logctx.log).await;
-        let storage_handle = storage_harness.handle().clone();
-
-        let FakeNexusParts {
-            nexus_client,
-            mut state_rx,
-            _dns_server,
-            _nexus_server,
-        } = FakeNexusParts::new(&log).await;
-
-        let temp_guard = Utf8TempDir::new().unwrap();
-        let temp_dir = temp_guard.path().to_string();
-
-        let (services, _metrics_rx) = fake_instance_manager_services(
-            &log,
-            storage_handle,
-            nexus_client,
-            &temp_dir,
-        );
-        let InstanceManagerServices {
-            nexus_client,
-            vnic_allocator,
-            port_manager,
-            storage,
-            zone_bundler,
-            zone_builder_factory,
-            metrics_queue,
-        } = services;
-
-        let vmm_reservoir_manager = VmmReservoirManagerHandle::stub_for_test();
-
-        let mgr = crate::instance_manager::InstanceManager::new_inner(
-            logctx.log.new(o!("component" => "InstanceManager")),
-            nexus_client,
-            vnic_allocator,
-            port_manager,
-            storage,
-            zone_bundler,
-            zone_builder_factory,
-            vmm_reservoir_manager,
-            metrics_queue,
-        )
-        .unwrap();
+        let mut test_objects = InstanceTestObjects::new(&log).await;
 
         let (propolis_server, propolis_client) =
             propolis_mock_server(&logctx.log);
@@ -3132,33 +3120,39 @@ mod tests {
             serial: "fake-serial".into(),
         };
 
-        mgr.ensure_registered(
-            propolis_id,
-            InstanceEnsureBody {
-                instance_id,
-                migration_id: None,
-                hardware,
-                vmm_runtime,
-                propolis_addr,
-                metadata,
-            },
-            sled_identifiers,
-        )
-        .await
-        .unwrap();
+        test_objects
+            .instance_manager
+            .ensure_registered(
+                propolis_id,
+                InstanceEnsureBody {
+                    instance_id,
+                    migration_id: None,
+                    hardware,
+                    vmm_runtime,
+                    propolis_addr,
+                    metadata,
+                },
+                sled_identifiers,
+            )
+            .await
+            .unwrap();
 
-        mgr.ensure_state(propolis_id, VmmStateRequested::Running)
+        test_objects
+            .instance_manager
+            .ensure_state(propolis_id, VmmStateRequested::Running)
             .await
             .unwrap();
 
         timeout(
             TIMEOUT_DURATION,
-            state_rx.wait_for(|maybe_state| match maybe_state {
-                ReceivedInstanceState::InstancePut(sled_inst_state) => {
-                    sled_inst_state.vmm_state.state == VmmState::Running
-                }
-                _ => false,
-            }),
+            test_objects.nexus.state_rx.wait_for(
+                |maybe_state| match maybe_state {
+                    ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                        sled_inst_state.vmm_state.state == VmmState::Running
+                    }
+                    _ => false,
+                },
+            ),
         )
         .await
         .expect("timed out waiting for InstanceState::Running in FakeNexus")
@@ -3172,7 +3166,9 @@ mod tests {
         .await;
 
         // Request the VMM stop
-        mgr.ensure_state(propolis_id, VmmStateRequested::Stopped)
+        test_objects
+            .instance_manager
+            .ensure_state(propolis_id, VmmStateRequested::Stopped)
             .await
             .unwrap();
 
@@ -3181,12 +3177,14 @@ mod tests {
 
         timeout(
             TIMEOUT_DURATION,
-            state_rx.wait_for(|maybe_state| match maybe_state {
-                ReceivedInstanceState::InstancePut(sled_inst_state) => {
-                    sled_inst_state.vmm_state.state == VmmState::Stopping
-                }
-                _ => false,
-            }),
+            test_objects.nexus.state_rx.wait_for(
+                |maybe_state| match maybe_state {
+                    ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                        sled_inst_state.vmm_state.state == VmmState::Stopping
+                    }
+                    _ => false,
+                },
+            ),
         )
         .await
         .expect("timed out waiting for VmmState::Stopping in FakeNexus")
@@ -3210,18 +3208,20 @@ mod tests {
 
         timeout(
             TIMEOUT_DURATION,
-            state_rx.wait_for(|maybe_state| match maybe_state {
-                ReceivedInstanceState::InstancePut(sled_inst_state) => {
-                    sled_inst_state.vmm_state.state == VmmState::Destroyed
-                }
-                _ => false,
-            }),
+            test_objects.nexus.state_rx.wait_for(
+                |maybe_state| match maybe_state {
+                    ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                        sled_inst_state.vmm_state.state == VmmState::Destroyed
+                    }
+                    _ => false,
+                },
+            ),
         )
         .await
         .expect("timed out waiting for VmmState::Stopped in FakeNexus")
         .expect("failed to receive FakeNexus' InstanceState");
 
-        storage_harness.cleanup().await;
+        test_objects.cleanup().await;
         logctx.cleanup_successful();
     }
 }
