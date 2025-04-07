@@ -9,8 +9,6 @@ use slog_error_chain::InlineErrorChain;
 #[allow(unused)]
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use cfg_if::cfg_if;
-
 pub mod addrobj;
 pub mod coreadm;
 pub mod destructor;
@@ -32,6 +30,8 @@ pub mod vmm_reservoir;
 pub mod zfs;
 pub mod zone;
 pub mod zpool;
+
+pub mod fakes;
 
 pub const PFEXEC: &str = "/usr/bin/pfexec";
 pub const ZONEADM: &str = "/usr/sbin/zoneadm";
@@ -87,85 +87,44 @@ impl From<ExecutionError> for HttpError {
     }
 }
 
-// We wrap this method in an inner module to make it possible to mock
-// these free functions.
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
-mod inner {
-    use super::*;
+fn command_to_string(command: &mut std::process::Command) -> String {
+    command
+        .get_args()
+        .map(|s| s.to_string_lossy().into())
+        .collect::<Vec<String>>()
+        .join(" ")
+}
 
-    pub fn to_string(command: &mut std::process::Command) -> String {
-        command
+pub fn output_to_exec_error(
+    command: &std::process::Command,
+    output: &std::process::Output,
+) -> ExecutionError {
+    ExecutionError::CommandFailure(Box::new(CommandFailureInfo {
+        command: command
             .get_args()
             .map(|s| s.to_string_lossy().into())
             .collect::<Vec<String>>()
-            .join(" ")
-    }
-
-    pub fn output_to_exec_error(
-        command: &std::process::Command,
-        output: &std::process::Output,
-    ) -> ExecutionError {
-        ExecutionError::CommandFailure(Box::new(CommandFailureInfo {
-            command: command
-                .get_args()
-                .map(|s| s.to_string_lossy().into())
-                .collect::<Vec<String>>()
-                .join(" "),
-            status: output.status,
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        }))
-    }
-
-    // Helper function for starting the process and checking the
-    // exit code result.
-    pub fn execute_helper(
-        command: &mut std::process::Command,
-    ) -> Result<std::process::Output, ExecutionError> {
-        let output = command.output().map_err(|err| {
-            ExecutionError::ExecutionStart { command: to_string(command), err }
-        })?;
-
-        if !output.status.success() {
-            return Err(output_to_exec_error(command, &output));
-        }
-
-        Ok(output)
-    }
+            .join(" "),
+        status: output.status,
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    }))
 }
 
-// Due to feature unification, the `testing` feature is enabled when some tests
-// don't actually want to use it. We allow them to opt out of the use of the
-// free function here. We also explicitly opt-in where mocks are used.
-//
-// Note that this only works if the tests that use mocks and those that  don't
-// are run sequentially. However, this is how we do things in CI with nextest,
-// so there is no problem currently.
-//
-// We can remove all this when we get rid of the mocks.
-#[cfg(any(test, feature = "testing"))]
-pub static USE_MOCKS: AtomicBool = AtomicBool::new(false);
-
+// Helper function for starting the process and checking the
+// exit code result.
 pub fn execute(
     command: &mut std::process::Command,
 ) -> Result<std::process::Output, ExecutionError> {
-    cfg_if! {
-        if #[cfg(any(test, feature = "testing"))] {
-            if USE_MOCKS.load(Ordering::SeqCst) {
-                mock_inner::execute_helper(command)
-            } else {
-                inner::execute_helper(command)
-            }
-        } else {
-            inner::execute_helper(command)
-        }
-    }
-}
+    let output =
+        command.output().map_err(|err| ExecutionError::ExecutionStart {
+            command: command_to_string(command),
+            err,
+        })?;
 
-cfg_if! {
-    if #[cfg(any(test, feature = "testing"))] {
-        pub use mock_inner::*;
-    } else {
-        pub use inner::*;
+    if !output.status.success() {
+        return Err(output_to_exec_error(command, &output));
     }
+
+    Ok(output)
 }

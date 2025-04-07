@@ -10,7 +10,6 @@ use crate::{ExecutionError, PFEXEC, execute};
 /// Wraps commands for interacting with svcadm.
 pub struct Svcadm {}
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock)]
 impl Svcadm {
     pub fn refresh_logadm_upgrade() -> Result<(), ExecutionError> {
         let mut cmd = std::process::Command::new(PFEXEC);
