@@ -13,6 +13,10 @@ use slog::{Logger, o};
 use std::time::Instant;
 
 /// An entity capable of participating in trust quorum
+///
+/// This is a `sans-io` implementation that is deterministic (except for
+/// `RackSecretGeneration`, which currently hardcodes use of an OsRng). This
+/// style is primarily for testing purposes.
 pub struct Node {
     log: Logger,
 
