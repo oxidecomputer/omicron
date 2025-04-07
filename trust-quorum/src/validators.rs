@@ -12,7 +12,7 @@ use slog::{Logger, error, info, warn};
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-/// RackId's must remain the same over the lifetime of a trust quorum instance
+/// Rack IDs must remain the same over the lifetime of a trust quorum instance
 pub fn check_rack_id(
     msg_rack_id: RackUuid,
     persistent_state: &PersistentStateSummary,

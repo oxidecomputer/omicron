@@ -123,9 +123,6 @@ impl CoordinatorState {
         configuration: Configuration,
         op: CoordinatorOperation,
     ) -> CoordinatorState {
-        // We always set the retry deadline to `now` so that we will send
-        // messages upon new construction. This field gets updated after
-        // prepares are sent.
         let retry_deadline = now + reconfigure_msg.retry_timeout;
         CoordinatorState {
             platform_id,
