@@ -375,7 +375,7 @@ enum DbCommands {
     /// Print information about the oximeter collector.
     Oximeter(OximeterArgs),
     /// Commands for querying and interacting with pools
-    Pool(PoolArgs),
+    Zpool(ZpoolArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -986,22 +986,22 @@ struct VmmListArgs {
 }
 
 #[derive(Debug, Args, Clone)]
-struct PoolArgs {
+struct ZpoolArgs {
     #[command(subcommand)]
-    command: PoolCommands,
+    command: ZpoolCommands,
 }
 
 #[derive(Debug, Subcommand, Clone)]
-enum PoolCommands {
+enum ZpoolCommands {
     /// List pools
-    List(PoolListArgs),
+    List(ZpoolListArgs),
 
     /// Set the control plane storage buffer for a pool
     SetStorageBuffer(SetStorageBufferArgs),
 }
 
 #[derive(Debug, Args, Clone)]
-struct PoolListArgs {
+struct ZpoolListArgs {
     /// Only output zpool ids
     #[clap(short, long)]
     id_only: bool,
@@ -1323,11 +1323,11 @@ impl DbArgs {
                     DbCommands::Oximeter(OximeterArgs {
                         command: OximeterCommands::ListProducers
                     }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
-                    DbCommands::Pool(PoolArgs {
-                        command: PoolCommands::List(args)
+                    DbCommands::Zpool(ZpoolArgs {
+                        command: ZpoolCommands::List(args)
                     }) => cmd_db_zpool_list(&opctx, &datastore, &args).await,
-                    DbCommands::Pool(PoolArgs {
-                        command: PoolCommands::SetStorageBuffer(args)
+                    DbCommands::Zpool(ZpoolArgs {
+                        command: ZpoolCommands::SetStorageBuffer(args)
                     }) => {
                         let token = omdb.check_allow_destructive()?;
                         cmd_db_zpool_set_storage_buffer(
@@ -7717,7 +7717,7 @@ fn datetime_opt_rfc3339_concise(t: &Option<DateTime<Utc>>) -> String {
 async fn cmd_db_zpool_list(
     opctx: &OpContext,
     datastore: &DataStore,
-    args: &PoolListArgs,
+    args: &ZpoolListArgs,
 ) -> Result<(), anyhow::Error> {
     let zpools = datastore.zpool_list_all_external_batched(opctx).await?;
 
