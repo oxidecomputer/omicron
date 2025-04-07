@@ -1528,58 +1528,29 @@ async fn lookup_project(
 
 // Crucible datasets
 
-async fn cmd_crucible_dataset_list(
-    opctx: &OpContext,
-    datastore: &DataStore,
-) -> Result<(), anyhow::Error> {
-    let crucible_datasets =
-        datastore.crucible_dataset_list_all_batched(opctx).await?;
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct CrucibleDatasetRow {
+    // dataset fields
+    id: Uuid,
+    time_deleted: String,
+    pool_id: Uuid,
+    address: String,
+    size_used: i64,
+    no_provision: bool,
 
-    #[derive(Tabled)]
-    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct CrucibleDatasetRow {
-        id: Uuid,
-        time_deleted: String,
-        pool_id: Uuid,
-        address: String,
-        size_used: i64,
-        no_provision: bool,
-    }
+    // zpool fields
+    control_plane_storage_buffer: i64,
+    pool_total_size: i64,
 
-    let rows: Vec<_> = crucible_datasets
-        .into_iter()
-        .map(|d| CrucibleDatasetRow {
-            id: d.id().into_untyped_uuid(),
-            time_deleted: match d.time_deleted() {
-                Some(t) => t.to_string(),
-                None => String::from(""),
-            },
-            pool_id: d.pool_id,
-            address: d.address().to_string(),
-            size_used: d.size_used,
-            no_provision: d.no_provision(),
-        })
-        .collect();
-
-    let table = tabled::Table::new(rows)
-        .with(tabled::settings::Style::psql())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-        .to_string();
-
-    println!("{}", table);
-
-    Ok(())
+    // computed fields
+    size_left: i128,
 }
 
-async fn cmd_crucible_dataset_show_overprovisioned(
+async fn get_crucible_dataset_rows(
     opctx: &OpContext,
     datastore: &DataStore,
-) -> Result<(), anyhow::Error> {
-    // A Crucible dataset is overprovisioned if size_used (amount taken up by
-    // Crucible region reservations) plus the control plane storage buffer
-    // (note this is _not_ a ZFS reservation! it's currently just a per-pool
-    // value in the database) is larger than the backing pool's total size.
-
+) -> Result<Vec<CrucibleDatasetRow>, anyhow::Error> {
     let crucible_datasets =
         datastore.crucible_dataset_list_all_batched(opctx).await?;
 
@@ -1605,54 +1576,78 @@ async fn cmd_crucible_dataset_show_overprovisioned(
         .map(|(zpool, _)| (zpool.id().into_untyped_uuid(), zpool))
         .collect();
 
-    #[derive(Tabled)]
-    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct CrucibleDatasetOverprovisionedRow {
-        // dataset fields
-        id: Uuid,
-        size_used: i64,
-        no_provision: bool,
+    let mut result: Vec<CrucibleDatasetRow> =
+        Vec::with_capacity(crucible_datasets.len());
 
-        // zpool fields
-        pool_id: Uuid,
-        control_plane_storage_buffer: i64,
-        pool_total_size: i64,
-    }
-
-    let mut rows = vec![];
-
-    for crucible_dataset in crucible_datasets {
-        if crucible_dataset.time_deleted().is_some() {
-            continue;
-        }
-
+    for d in crucible_datasets {
         let control_plane_storage_buffer: i64 = zpools
-            .get(&crucible_dataset.pool_id)
+            .get(&d.pool_id)
             .unwrap()
             .control_plane_storage_buffer()
             .into();
 
-        let total_dataset_size =
-            crucible_dataset.size_used + control_plane_storage_buffer;
+        let pool_total_size = *zpool_total_size.get(&d.pool_id).unwrap();
 
-        match zpool_total_size.get(&crucible_dataset.pool_id) {
-            Some(pool_total_size) => {
-                if total_dataset_size >= *pool_total_size {
-                    rows.push(CrucibleDatasetOverprovisionedRow {
-                        id: crucible_dataset.id().into_untyped_uuid(),
-                        size_used: crucible_dataset.size_used,
-                        no_provision: crucible_dataset.no_provision(),
+        result.push(CrucibleDatasetRow {
+            // dataset fields
+            id: d.id().into_untyped_uuid(),
+            time_deleted: match d.time_deleted() {
+                Some(t) => t.to_string(),
+                None => String::from(""),
+            },
+            pool_id: d.pool_id,
+            address: d.address().to_string(),
+            size_used: d.size_used,
+            no_provision: d.no_provision(),
 
-                        pool_id: crucible_dataset.pool_id,
-                        control_plane_storage_buffer,
-                        pool_total_size: *pool_total_size,
-                    });
-                }
-            }
+            // zpool fields
+            control_plane_storage_buffer,
+            pool_total_size,
 
-            None => {}
-        }
+            // computed fields
+            size_left: i128::from(pool_total_size)
+                - i128::from(control_plane_storage_buffer)
+                - i128::from(d.size_used),
+        });
     }
+
+    Ok(result)
+}
+
+async fn cmd_crucible_dataset_list(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    let rows: Vec<_> = get_crucible_dataset_rows(opctx, datastore).await?;
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::psql())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_crucible_dataset_show_overprovisioned(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    // A Crucible dataset is overprovisioned if size_used (amount taken up by
+    // Crucible region reservations) plus the control plane storage buffer
+    // (note this is _not_ a ZFS reservation! it's currently just a per-pool
+    // value in the database) is larger than the backing pool's total size.
+
+    let rows: Vec<_> = get_crucible_dataset_rows(opctx, datastore).await?;
+    let rows: Vec<_> = rows
+        .into_iter()
+        .filter(|row| {
+            (i128::from(row.size_used)
+                + i128::from(row.control_plane_storage_buffer))
+                >= i128::from(row.pool_total_size)
+        })
+        .collect();
 
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::psql())
