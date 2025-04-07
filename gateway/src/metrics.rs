@@ -1218,7 +1218,7 @@ fn comms_error_str(error: CommunicationError) -> &'static str {
             "bad_trailing_data_size"
         }
         CommunicationError::BadDecompressionSize { .. } => {
-            "bad_decompressed_size"
+            "bad_decompression_size"
         }
     }
 }
