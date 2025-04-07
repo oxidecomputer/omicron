@@ -994,10 +994,17 @@ struct PoolArgs {
 #[derive(Debug, Subcommand, Clone)]
 enum PoolCommands {
     /// List pools
-    List,
+    List(PoolListArgs),
 
     /// Set the control plane storage buffer for a pool
     SetStorageBuffer(SetStorageBufferArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct PoolListArgs {
+    /// Only output zpool ids
+    #[clap(short, long)]
+    id_only: bool,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1317,8 +1324,8 @@ impl DbArgs {
                         command: OximeterCommands::ListProducers
                     }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
                     DbCommands::Pool(PoolArgs {
-                        command: PoolCommands::List
-                    }) => cmd_db_zpool_list(&opctx, &datastore).await,
+                        command: PoolCommands::List(args)
+                    }) => cmd_db_zpool_list(&opctx, &datastore, &args).await,
                     DbCommands::Pool(PoolArgs {
                         command: PoolCommands::SetStorageBuffer(args)
                     }) => {
@@ -7715,6 +7722,7 @@ fn datetime_opt_rfc3339_concise(t: &Option<DateTime<Utc>>) -> String {
 async fn cmd_db_zpool_list(
     opctx: &OpContext,
     datastore: &DataStore,
+    args: &PoolListArgs,
 ) -> Result<(), anyhow::Error> {
     let zpools = datastore.zpool_list_all_external_batched(opctx).await?;
 
@@ -7764,12 +7772,18 @@ async fn cmd_db_zpool_list(
         })
         .collect();
 
-    let table = tabled::Table::new(rows)
-        .with(tabled::settings::Style::psql())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-        .to_string();
+    if args.id_only {
+        for row in rows {
+            println!("{}", row.id);
+        }
+    } else {
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::psql())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
 
-    println!("{}", table);
+        println!("{}", table);
+    }
 
     Ok(())
 }
