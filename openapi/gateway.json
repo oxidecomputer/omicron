@@ -1953,6 +1953,20 @@
             "required": [
               "kind"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "cpu_tctl"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
           }
         ]
       },
