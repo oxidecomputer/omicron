@@ -7,6 +7,7 @@ use clickward::{BasePorts, Deployment, DeploymentConfig, KeeperId};
 use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
+use oximeter_db::oxql::query::QueryAuthzScope;
 use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
 use oximeter_test_utils::wait_for_keepers;
 use slog::{Logger, info};
@@ -213,6 +214,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     let oxql_res1 = client1
         .oxql_query(
             "get virtual_machine:cpu_busy | filter timestamp > @2000-01-01",
+            QueryAuthzScope::Fleet,
         )
         .await
         .expect("failed to get all samples");
@@ -427,7 +429,9 @@ async fn wait_for_num_points(
     poll::wait_for_condition(
         || async {
             let oxql_res = client
-                .oxql_query("get virtual_machine:cpu_busy | filter timestamp > @2000-01-01")
+                .oxql_query(
+                    "get virtual_machine:cpu_busy | filter timestamp > @2000-01-01",
+                    QueryAuthzScope::Fleet)
                 .await
                 .map_err(|_| {
                     poll::CondCheckError::<oximeter_db::Error>::NotYet

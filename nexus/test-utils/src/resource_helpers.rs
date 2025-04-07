@@ -563,6 +563,7 @@ pub async fn create_instance_with(
             boot_disk: None,
             start,
             auto_restart_policy,
+            anti_affinity_groups: Vec::new(),
         },
     )
     .await
@@ -1184,7 +1185,7 @@ pub struct DiskTest<'a, N: NexusServer> {
 }
 
 impl<'a, N: NexusServer> DiskTest<'a, N> {
-    pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
+    pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 16;
     pub const DEFAULT_ZPOOL_COUNT: u32 = 3;
 
     /// Creates a new [DiskTest] with default configuration.
@@ -1233,7 +1234,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
 
     pub async fn add_blueprint_disks(&mut self, blueprint: &Blueprint) {
         for (sled_id, sled_config) in blueprint.sleds.iter() {
-            for disk in &sled_config.disks_config.disks {
+            for disk in &sled_config.disks {
                 self.add_zpool_with_dataset_ext(
                     *sled_id,
                     disk.id,

@@ -13,9 +13,8 @@ use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
-use omicron_common::update::ArtifactHashId;
 use tokio::sync::oneshot;
-use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
+use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
 use update_engine::NestedError;
 use uuid::Uuid;
 use wicket::OutputKind;
@@ -106,7 +105,7 @@ async fn test_updates() {
     let mut kinds = BTreeSet::new();
     let mut installable_kinds = BTreeSet::new();
     for artifact in response.artifacts {
-        kinds.insert(artifact.artifact_id.kind.parse().unwrap());
+        kinds.insert(artifact.artifact_id.kind);
         for installable in artifact.installable {
             installable_kinds.insert(installable.kind.parse().unwrap());
         }
@@ -278,10 +277,16 @@ async fn test_installinator_fetch() {
     let temp_dir = Utf8TempDir::new().expect("temp dir created");
     let archive_path = temp_dir.path().join("archive.zip");
 
+    // Test ingestion of an artifact with non-semver versions. This ensures that
+    // wicketd for v14 and above can handle non-semver versions.
+    //
+    // --allow-non-semver can be removed once customer systems are updated to
+    // v14 and above.
     let args = tufaceous::Args::try_parse_from([
         "tufaceous",
         "assemble",
-        "../update-common/manifests/fake.toml",
+        "../update-common/manifests/fake-non-semver.toml",
+        "--allow-non-semver",
         archive_path.as_str(),
     ])
     .expect("args parsed correctly");

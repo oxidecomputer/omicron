@@ -43,7 +43,7 @@ impl DataStore {
         &self,
         dataset_id: DatasetUuid,
     ) -> LookupResult<CrucibleDataset> {
-        use db::schema::crucible_dataset::dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl;
 
         dsl::crucible_dataset
             .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
@@ -75,7 +75,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         dataset: CrucibleDataset,
     ) -> Result<CrucibleDataset, TransactionError<Error>> {
-        use db::schema::crucible_dataset::dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl;
 
         let dataset_id = dataset.id();
         let zpool_id = dataset.pool_id;
@@ -125,7 +125,7 @@ impl DataStore {
         &self,
         dataset: CrucibleDataset,
     ) -> CreateResult<Option<CrucibleDataset>> {
-        use db::schema::crucible_dataset::dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl;
 
         let zpool_id = dataset.pool_id;
         Zpool::insert_resource(
@@ -157,7 +157,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<CrucibleDataset> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use db::schema::crucible_dataset::dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl;
 
         paginated(dsl::crucible_dataset, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
@@ -205,7 +205,7 @@ impl DataStore {
         let conn = self.pool_connection_unauthorized().await?;
 
         let dataset = {
-            use db::schema::crucible_dataset::dsl;
+            use nexus_db_schema::schema::crucible_dataset::dsl;
 
             dsl::crucible_dataset
                 .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
@@ -218,7 +218,7 @@ impl DataStore {
         };
 
         let zpool = {
-            use db::schema::zpool::dsl;
+            use nexus_db_schema::schema::zpool::dsl;
 
             dsl::zpool
                 .filter(dsl::id.eq(dataset.pool_id))
@@ -231,7 +231,7 @@ impl DataStore {
         };
 
         let physical_disk = {
-            use db::schema::physical_disk::dsl;
+            use nexus_db_schema::schema::physical_disk::dsl;
 
             dsl::physical_disk
                 .filter(dsl::id.eq(zpool.physical_disk_id))

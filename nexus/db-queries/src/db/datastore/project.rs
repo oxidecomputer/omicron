@@ -57,7 +57,7 @@ macro_rules! generate_fn_to_ensure_none_in_project {
                 opctx: &OpContext,
                 authz_project: &authz::Project,
             ) -> DeleteResult {
-                use db::schema::$i;
+                use nexus_db_schema::schema::$i;
 
                 let maybe_label = $i::dsl::$i
                     .filter($i::dsl::project_id.eq(authz_project.id()))
@@ -149,7 +149,7 @@ impl DataStore {
         let silo_id = authz_silo.id();
         let authz_silo_inner = authz_silo.clone();
 
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
 
         let err = OptionalError::new();
         let name = project.name().as_str().to_string();
@@ -248,7 +248,7 @@ impl DataStore {
         self.ensure_no_anti_affinity_groups_in_project(opctx, authz_project)
             .await?;
 
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -311,7 +311,7 @@ impl DataStore {
             opctx.authn.silo_required().internal_context("listing Projects")?;
         opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
 
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::project, dsl::id, &pagparams)
@@ -339,7 +339,7 @@ impl DataStore {
     ) -> UpdateResult<Project> {
         opctx.authorize(authz::Action::Modify, authz_project).await?;
 
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_project.id()))

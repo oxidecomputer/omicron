@@ -16,7 +16,6 @@ use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::SharedDatasetConfig;
-use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -38,6 +37,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
+use tufaceous_artifact::ArtifactHash;
 use zip::result::ZipError;
 
 // The final name of the bundle, as it is stored within the dedicated
@@ -189,7 +189,7 @@ impl LocalStorage for StorageHandle {
     }
 
     fn zpool_mountpoint_root(&self) -> Cow<Utf8Path> {
-        Cow::Borrowed(illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into())
+        Cow::Borrowed(self.mount_config().root.as_path())
     }
 }
 
@@ -521,6 +521,7 @@ impl<'a> SupportBundleManager<'a> {
             "dataset_id" => dataset_id.to_string(),
             "bundle_id" => support_bundle_id.to_string(),
         ));
+        info!(log, "creating support bundle");
         let root =
             self.get_configured_dataset(zpool_id, dataset_id).await?.name;
         let dataset =

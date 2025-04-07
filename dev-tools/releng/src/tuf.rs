@@ -18,6 +18,7 @@ use sha2::Digest;
 use sha2::Sha256;
 use slog::Logger;
 use tokio::io::AsyncReadExt;
+use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::Key;
 use tufaceous_lib::assemble::ArtifactManifest;
@@ -40,6 +41,11 @@ pub(crate) async fn build_tuf_repo(
     // able to download a manifest. So we build up a `DeserializedManifest`,
     // write it to disk, and then turn it into an `ArtifactManifest` to actually
     // build the repo.
+
+    let artifact_version =
+        version.to_string().parse::<ArtifactVersion>().with_context(|| {
+            format!("failed to parse artifact version from {}", version)
+        })?;
 
     // Start a new manifest by loading the Hubris staging manifest.
     let mut manifest = DeserializedManifest::from_path(
@@ -71,7 +77,7 @@ pub(crate) async fn build_tuf_repo(
         KnownArtifactKind::Host,
         vec![DeserializedArtifactData {
             name: "host".to_string(),
-            version: manifest.system_version.clone(),
+            version: artifact_version.clone(),
             source: DeserializedArtifactSource::File {
                 path: output_dir.join("os-host/os.tar.gz"),
             },
@@ -81,7 +87,7 @@ pub(crate) async fn build_tuf_repo(
         KnownArtifactKind::Trampoline,
         vec![DeserializedArtifactData {
             name: "trampoline".to_string(),
-            version: manifest.system_version.clone(),
+            version: artifact_version.clone(),
             source: DeserializedArtifactSource::File {
                 path: output_dir.join("os-recovery/os.tar.gz"),
             },
@@ -109,7 +115,7 @@ pub(crate) async fn build_tuf_repo(
         KnownArtifactKind::ControlPlane,
         vec![DeserializedArtifactData {
             name: "control-plane".to_string(),
-            version: manifest.system_version.clone(),
+            version: artifact_version.clone(),
             source: DeserializedArtifactSource::CompositeControlPlane { zones },
         }],
     );
@@ -123,6 +129,7 @@ pub(crate) async fn build_tuf_repo(
 
     // Convert the manifest.
     let manifest = ArtifactManifest::from_deserialized(&output_dir, manifest)?;
+    manifest.verify_all_semver()?;
     manifest.verify_all_present()?;
     // Assemble the repo.
     let keys = vec![Key::generate_ed25519()?];

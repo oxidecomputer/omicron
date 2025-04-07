@@ -44,13 +44,13 @@ ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
 
 
 /*
- * The deployment strategy for clickhouse 
+ * The deployment strategy for clickhouse
  */
 CREATE TYPE IF NOT EXISTS omicron.public.clickhouse_mode AS ENUM (
-   -- Only deploy a single node clickhouse 
+   -- Only deploy a single node clickhouse
    'single_node_only',
 
-   -- Only deploy a clickhouse cluster without any single node deployments 
+   -- Only deploy a clickhouse cluster without any single node deployments
    'cluster_only',
 
    -- Deploy both a single node and cluster deployment.
@@ -598,6 +598,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.crucible_dataset (
      * Reconfigurator rendezvous process, this field is set to 0. Reconfigurator
      * otherwise ignores this field. It's updated by Nexus as region allocations
      * and deletions are performed using this dataset.
+     *
+     * Note that the value in this column is _not_ the sum of requested region
+     * sizes, but sum of the size *reserved* by the Crucible agent for the
+     * dataset that contains the regions (which is larger than the the actual
+     * region size).
      */
     size_used INT NOT NULL
 );
@@ -614,6 +619,10 @@ CREATE INDEX IF NOT EXISTS lookup_crucible_dataset_by_zpool ON
 
 CREATE INDEX IF NOT EXISTS lookup_crucible_dataset_by_ip ON
   omicron.public.crucible_dataset (ip);
+
+CREATE TYPE IF NOT EXISTS omicron.public.region_reservation_percent AS ENUM (
+  '25'
+);
 
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
@@ -639,7 +648,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
 
     read_only BOOL NOT NULL,
 
-    deleting BOOL NOT NULL
+    deleting BOOL NOT NULL,
+
+    /*
+     * The Crucible Agent will reserve space for a region with overhead for
+     * on-disk metadata that the downstairs needs to store. Record here the
+     * overhead associated with a specific region as this may change or be
+     * configurable in the future.
+     */
+    reservation_percent omicron.public.region_reservation_percent NOT NULL
 );
 
 /*
@@ -2381,7 +2398,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    version STRING(63) NOT NULL,
+    version STRING(64) NOT NULL,
     -- This used to be an enum but is now a string, because it can represent
     -- artifact kinds currently unknown to a particular version of Nexus as
     -- well.
@@ -2396,8 +2413,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- The length of the artifact, in bytes.
     artifact_size INT8 NOT NULL,
 
+    -- The generation number this artifact was added for.
+    generation_added INT8 NOT NULL,
+
     CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_added
+    ON omicron.public.tuf_artifact (generation_added, id)
+    STORING (name, version, kind, time_created, sha256, artifact_size);
+
+-- RFD 554: (kind, hash) is unique for artifacts. This index is used while
+-- looking up artifacts.
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_kind_sha256
+    ON omicron.public.tuf_artifact (kind, sha256);
 
 -- Reflects that a particular artifact was provided by a particular TUF repo.
 -- This is a many-many mapping.
@@ -2407,6 +2436,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
 
     PRIMARY KEY (tuf_repo_id, tuf_artifact_id)
 );
+
+-- Generation number for the current list of TUF artifacts the system wants.
+-- This is incremented whenever a TUF repo is added or removed.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_generation (
+    -- There should only be one row of this table for the whole DB.
+    -- It's a little goofy, but filter on "singleton = true" before querying
+    -- or applying updates, and you'll access the singleton row.
+    --
+    -- We also add a constraint on this table to ensure it's not possible to
+    -- access the version of this table with "singleton = false".
+    singleton BOOL NOT NULL PRIMARY KEY,
+    -- Generation number owned and incremented by Nexus
+    generation INT8 NOT NULL,
+
+    CHECK (singleton = true)
+);
+INSERT INTO omicron.public.tuf_generation (
+    singleton,
+    generation
+) VALUES
+    (TRUE, 1)
+ON CONFLICT DO NOTHING;
 
 /*******************************************************************/
 
@@ -3513,7 +3564,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     -- the firmware version string for each NVMe slot (0 indexed), a NULL means the
     -- slot exists but is empty
     slot_firmware_versions STRING(8)[] CHECK (array_length(slot_firmware_versions, 1) BETWEEN 1 AND 7),
-    
+
     -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
@@ -3726,9 +3777,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
  * will eventually prune old blueprint targets, so it will not always be
  * possible to view the entire history.
  *
- * `bp_sled_omicron_zones`, `bp_omicron_zone`, and `bp_omicron_zone_nic` are
- * nearly identical to their `inv_*` counterparts, and record the
- * `OmicronZonesConfig` for each sled.
+ * `bp_omicron_zone` and `bp_omicron_zone_nic` are nearly identical to their
+ * `inv_*` counterparts, and record the `OmicronZoneConfig`s for each sled.
  */
 
 CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_disposition AS ENUM (
@@ -3807,23 +3857,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
--- state of a sled in a blueprint
-CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_state (
+-- metadata associated with a single sled in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     -- foreign key into `blueprint` table
     blueprint_id UUID NOT NULL,
 
     sled_id UUID NOT NULL,
     sled_state omicron.public.sled_state NOT NULL,
-    PRIMARY KEY (blueprint_id, sled_id)
-);
-
--- description of a collection of omicron physical disks stored in a blueprint.
-CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_physical_disks (
-    -- foreign key into `blueprint` table
-    blueprint_id UUID NOT NULL,
-
-    sled_id UUID NOT NULL,
-    generation INT8 NOT NULL,
+    sled_agent_generation INT8 NOT NULL,
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
@@ -3862,16 +3903,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
     )
 );
 
--- description of a collection of omicron datasets stored in a blueprint
-CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_datasets (
-    -- foreign key into the `blueprint` table
-    blueprint_id UUID NOT NULL,
-    sled_id UUID NOT NULL,
-    generation INT8 NOT NULL,
-
-    PRIMARY KEY (blueprint_id, sled_id)
-);
-
 -- description of an omicron dataset specified in a blueprint.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
     -- foreign key into the `blueprint` table
@@ -3908,15 +3939,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
     PRIMARY KEY (blueprint_id, id)
 );
 
--- see inv_sled_omicron_zones, which is identical except it references a
--- collection whereas this table references a blueprint
-CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
-    -- foreign key into `blueprint` table
-    blueprint_id UUID NOT NULL,
-
-    sled_id UUID NOT NULL,
-    generation INT8 NOT NULL,
-    PRIMARY KEY (blueprint_id, sled_id)
+CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_image_source AS ENUM (
+    'install_dataset',
+    'artifact'
 );
 
 -- description of omicron zones specified in a blueprint
@@ -3998,9 +4023,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- created yet.
     external_ip_id UUID,
 
-    -- TODO: This is nullable for backwards compatibility.
-    -- Eventually, that nullability should be removed.
-    filesystem_pool UUID,
+    filesystem_pool UUID NOT NULL,
 
     -- Zone disposition
     disposition omicron.public.bp_zone_disposition NOT NULL,
@@ -4008,6 +4031,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- Specific properties of the `expunged` disposition
     disposition_expunged_as_of_generation INT,
     disposition_expunged_ready_for_cleanup BOOL NOT NULL,
+
+    -- Blueprint zone image source
+    image_source omicron.public.bp_zone_image_source NOT NULL,
+    image_artifact_sha256 STRING(64),
 
     PRIMARY KEY (blueprint_id, id),
 
@@ -4018,6 +4045,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
         OR
         (disposition = 'expunged'
             AND disposition_expunged_as_of_generation IS NOT NULL)
+    ),
+
+    CONSTRAINT zone_image_source_artifact_hash_present CHECK (
+        (image_source = 'artifact'
+            AND image_artifact_sha256 IS NOT NULL)
+        OR
+        (image_source != 'artifact'
+            AND image_artifact_sha256 IS NULL)
     )
 );
 
@@ -5005,7 +5040,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '129.0.0', NULL)
+    (TRUE, NOW(), NOW(), '135.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

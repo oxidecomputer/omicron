@@ -279,3 +279,60 @@ schema for pagination parameters: page selector, scan by name or id
     }
   }
 }
+schema for pagination parameters: page selector, scan by time and id
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PageSelector_for_ScanByTimeAndId_for_Null_and_Tuple_of_DateTime_and_Uuid",
+  "description": "Specifies which page of results we're on\n\nThis type is generic over the different scan modes that we support.",
+  "type": "object",
+  "required": [
+    "last_seen"
+  ],
+  "properties": {
+    "last_seen": {
+      "description": "value of the marker field last seen by the client",
+      "type": "array",
+      "items": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "string",
+          "format": "uuid"
+        }
+      ],
+      "maxItems": 2,
+      "minItems": 2
+    },
+    "sort_by": {
+      "default": "ascending",
+      "allOf": [
+        {
+          "$ref": "#/definitions/TimeAndIdSortMode"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "TimeAndIdSortMode": {
+      "description": "Supported set of sort modes for scanning by timestamp and ID",
+      "oneOf": [
+        {
+          "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
+          "type": "string",
+          "enum": [
+            "ascending"
+          ]
+        },
+        {
+          "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
+          "type": "string",
+          "enum": [
+            "descending"
+          ]
+        }
+      ]
+    }
+  }
+}

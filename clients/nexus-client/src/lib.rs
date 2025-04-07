@@ -30,8 +30,8 @@ progenitor::generate_api!(
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
         BlueprintPhysicalDiskConfig = nexus_types::deployment::BlueprintPhysicalDiskConfig,
-        BlueprintPhysicalDisksConfig = nexus_types::deployment::BlueprintPhysicalDisksConfig,
         BlueprintPhysicalDiskDisposition = nexus_types::deployment::BlueprintPhysicalDiskDisposition,
+        BlueprintZoneImageSource = nexus_types::deployment::BlueprintZoneImageSource,
         Certificate = omicron_common::api::internal::nexus::Certificate,
         ClickhouseMode = nexus_types::deployment::ClickhouseMode,
         ClickhousePolicy = nexus_types::deployment::ClickhousePolicy,

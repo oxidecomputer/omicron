@@ -13,7 +13,7 @@ members = [
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
-    "clients/dpd-client",
+    "clients/ereport-client",
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
@@ -43,16 +43,21 @@ members = [
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/reconfigurator-exec-unsafe",
     "dev-tools/releng",
+    "dev-tools/repo-depot-standalone",
     "dev-tools/xtask",
     "dns-server",
     "dns-server-api",
     "end-to-end-tests",
+    "ereport/api",
+    "ereport/types",
     "gateway",
     "gateway-api",
     "gateway-cli",
     "gateway-test-utils",
     "gateway-types",
+    "id-map",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -73,6 +78,7 @@ members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
+    "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
     "nexus/internal-api",
@@ -147,7 +153,7 @@ default-members = [
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
-    "clients/dpd-client",
+    "clients/ereport-client",
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
@@ -177,18 +183,23 @@ default-members = [
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/reconfigurator-exec-unsafe",
     "dev-tools/releng",
+    "dev-tools/repo-depot-standalone",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
     "dns-server",
     "dns-server-api",
     "end-to-end-tests",
+    "ereport/api",
+    "ereport/types",
     "gateway",
     "gateway-api",
     "gateway-cli",
     "gateway-test-utils",
     "gateway-types",
+    "id-map",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -209,6 +220,7 @@ default-members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
+    "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
     "nexus/internal-api",
@@ -314,7 +326,7 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.16"
 async-bb8-diesel = "0.2"
-async-trait = "0.1.87"
+async-trait = "0.1.88"
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -334,7 +346,7 @@ cargo_metadata = "0.19.2"
 chacha20poly1305 = "0.10.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
-chrono-tz = "0.10.1"
+chrono-tz = "0.10.3"
 ciborium = "0.2.2"
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 clickana = { path = "dev-tools/clickana" }
@@ -357,14 +369,14 @@ crossterm = { version = "0.28.1", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "81a3528adacdbde18fcbf3938247fef17233db11" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "81a3528adacdbde18fcbf3938247fef17233db11" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "81a3528adacdbde18fcbf3938247fef17233db11" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "81a3528adacdbde18fcbf3938247fef17233db11" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "da3cf198a0e000bb89efc3a1c77d7ba09340a600" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "da3cf198a0e000bb89efc3a1c77d7ba09340a600" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "da3cf198a0e000bb89efc3a1c77d7ba09340a600" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "da3cf198a0e000bb89efc3a1c77d7ba09340a600" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
-daft = { version = "0.1.1", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
+daft = { version = "0.1.2", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
@@ -377,10 +389,13 @@ diesel-dtrace = "0.4.2"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { path = "clients/dpd-client" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite" }
 dropshot = { version = "0.16.0", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
 either = "1.14.0"
+ereport-api = { path = "ereport/api" }
+ereport-client = { path = "clients/ereport-client" }
+ereport-types = { path = "ereport/types" }
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
@@ -419,7 +434,7 @@ highway = "1.3.0"
 hkdf = "0.12.4"
 http = "1.2.0"
 http-body = "1.0.1"
-http-body-util = "0.1.2"
+http-body-util = "0.1.3"
 http-range = "0.1.5"
 httpmock = "0.8.0-alpha.1"
 httptest = "0.16.3"
@@ -429,6 +444,7 @@ hyper = "1.6.0"
 hyper-util = "0.1.10"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.10.1"
+id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.61"
 indent_write = "2.2.0"
@@ -458,10 +474,9 @@ live-tests-macros = { path = "live-tests/macros" }
 lldpd-client = { git = "https://github.com/oxidecomputer/lldp" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
-mockall = "0.13"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "caafd889f31faacfaa51e02902990c220c20ef60" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "caafd889f31faacfaa51e02902990c220c20ef60" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8452936a53c3b16e53cbbf4e34e5e59899afc965" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8452936a53c3b16e53cbbf4e34e5e59899afc965" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -469,6 +484,7 @@ nexus-config = { path = "nexus-config" }
 nexus-db-fixed-data = { path = "nexus/db-fixed-data" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
+nexus-db-schema = { path = "nexus/db-schema" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
 nexus-inventory = { path = "nexus/inventory" }
@@ -560,10 +576,10 @@ progenitor-client = "0.9.1"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "6b5f2af796a3ea57405721407ab70520a93ec73f" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "6b5f2af796a3ea57405721407ab70520a93ec73f" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "6b5f2af796a3ea57405721407ab70520a93ec73f" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "6b5f2af796a3ea57405721407ab70520a93ec73f" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
 # NOTE: see above!
 proptest = "1.6.0"
 qorb = "0.2.1"
@@ -664,7 +680,7 @@ tokio-tungstenite = "0.23.1"
 tokio-util = { version = "0.7.13", features = ["io", "io-util"] }
 toml = "0.8.20"
 toml_edit = "0.22.24"
-tough = { version = "0.19.0", features = [ "http" ] }
+tough = { version = "0.20.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 trybuild = "1.0.103"
 tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
@@ -687,10 +703,11 @@ wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
+xshell = "0.2.7"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
 # NOTE: Avoid upgrading zip until https://github.com/zip-rs/zip2/issues/231 is resolved
 zip = { version = "=2.1.3", default-features = false, features = ["deflate","bzip2"] }
-zone = { version = "0.3", default-features = false, features = ["async"] }
+zone = { version = "0.3.1", default-features = false, features = ["async"] }
 
 # newtype-uuid is set to default-features = false because we don't want to
 # depend on std in omicron-uuid-kinds (in case a no-std library wants to access

@@ -3,11 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod dns;
-mod overridables;
+pub mod overridables;
 mod spec;
 mod utils;
 
 pub use dns::*;
-pub use overridables::*;
+pub use overridables::Overridables;
 pub use spec::*;
 pub use utils::*;

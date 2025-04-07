@@ -9,13 +9,12 @@ use crate::app::{
     background::tasks::networking::{
         api_to_dpd_port_settings, build_dpd_clients, build_mgd_clients,
     },
-    map_switch_zone_addrs,
+    switch_zone_address_mappings,
 };
 use oxnet::Ipv4Net;
 use slog::o;
 
 use internal_dns_resolver::Resolver;
-use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
     AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
@@ -25,7 +24,7 @@ use uuid::Uuid;
 
 use crate::app::background::BackgroundTask;
 use display_error_chain::DisplayErrorChain;
-use dpd_client::types::PortId;
+use dpd_client::{Client as DpdClient, types as DpdTypes};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use mg_admin_client::types::{
@@ -322,22 +321,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // lookup switch zones via DNS
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                let switch_zone_addresses = match self
-                    .resolver
-                    .lookup_all_ipv6(ServiceName::Dendrite)
-                    .await
+                let mappings = match
+                    switch_zone_address_mappings(&self.resolver, &log).await
                 {
-                    Ok(addrs) => addrs,
+                    Ok(mappings) => mappings,
                     Err(e) => {
-                        error!(log, "failed to resolve addresses for Dendrite services";
-                            "error" => %DisplayErrorChain::new(&e));
+                        error!(
+                            log,
+                            "failed to resolve addresses for Dendrite services";
+                            "error" => %e);
                         continue;
                     },
                 };
-
-                // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                let mappings =
-                    map_switch_zone_addrs(&log, switch_zone_addresses).await;
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build sled agent clients
@@ -1343,6 +1338,97 @@ where
     left == right
 }
 
+/// Ensure that a loopback address is created.
+///
+/// loopback_ipv\[46\]_create are not idempotent (see
+/// oxidecomputer/dendrite#343), but this wrapper function is. Call this
+/// from sagas instead.
+async fn ensure_loopback_created(
+    log: &slog::Logger,
+    client: &DpdClient,
+    address: IpAddr,
+    tag: &str,
+) -> Result<(), serde_json::Value> {
+    let result = match &address {
+        IpAddr::V4(a) => {
+            client
+                .loopback_ipv4_create(&DpdTypes::Ipv4Entry {
+                    addr: *a,
+                    tag: tag.into(),
+                })
+                .await
+        }
+        IpAddr::V6(a) => {
+            client
+                .loopback_ipv6_create(&DpdTypes::Ipv6Entry {
+                    addr: *a,
+                    tag: tag.into(),
+                })
+                .await
+        }
+    };
+
+    match result {
+        Ok(_) => {
+            info!(log, "created loopback address"; "address" => ?address);
+            Ok(())
+        }
+        Err(e) => match e.status() {
+            Some(http::StatusCode::CONFLICT) => {
+                info!(log, "loopback address already created"; "address" => ?address);
+
+                Ok(())
+            }
+
+            _ => Err(json!({
+            "error":
+                format!(
+                    "failed to create loopback address: \
+                        {:#}",
+                    e
+                )})),
+        },
+    }
+}
+
+/// Ensure that a loopback address is deleted.
+///
+/// loopback_ipv\[46\]_delete are not idempotent (see
+/// oxidecomputer/dendrite#343), but this wrapper function is. Call this
+/// from sagas instead.
+async fn ensure_loopback_deleted(
+    log: &slog::Logger,
+    client: &DpdClient,
+    address: IpAddr,
+) -> Result<(), serde_json::Value> {
+    let result = match &address {
+        IpAddr::V4(a) => client.loopback_ipv4_delete(&a).await,
+        IpAddr::V6(a) => client.loopback_ipv6_delete(&a).await,
+    };
+
+    match result {
+        Ok(_) => {
+            info!(log, "deleted loopback address"; "address" => ?address);
+            Ok(())
+        }
+        Err(e) => match e.status() {
+            Some(http::StatusCode::NOT_FOUND) => {
+                info!(log, "loopback address already deleted"; "address" => ?address);
+
+                Ok(())
+            }
+
+            _ => Err(json!({
+            "error":
+                format!(
+                    "failed to deleted loopback address: \
+                        {:#}",
+                    e
+                )})),
+        },
+    }
+}
+
 async fn add_loopback_addresses_to_switch(
     loopbacks_to_add: &[(SwitchLocation, IpAddr)],
     dpd_clients: HashMap<SwitchLocation, dpd_client::Client>,
@@ -1358,7 +1444,8 @@ async fn add_loopback_addresses_to_switch(
         };
 
         if let Err(e) =
-            client.ensure_loopback_created(log, *address, OMICRON_DPD_TAG).await
+            ensure_loopback_created(log, client, *address, OMICRON_DPD_TAG)
+                .await
         {
             error!(log, "error while creating loopback address"; "error" => %e);
         };
@@ -1379,7 +1466,7 @@ async fn delete_loopback_addresses_from_switch(
             }
         };
 
-        if let Err(e) = client.ensure_loopback_deleted(log, *address).await {
+        if let Err(e) = ensure_loopback_deleted(log, client, *address).await {
             error!(log, "error while deleting loopback address"; "error" => %e);
         };
     }
@@ -1714,7 +1801,7 @@ async fn apply_switch_port_changes(
 
         let port_name = switch_port.port_name.clone();
 
-        let dpd_port_id = match PortId::from_str(port_name.as_str()) {
+        let dpd_port_id = match DpdTypes::PortId::from_str(port_name.as_str()) {
             Ok(port_id) => port_id,
             Err(e) => {
                 error!(

@@ -191,7 +191,6 @@ pub trait BpTableSchema {
 
 // Provide data specific to an instance of a [`BpTable`]
 pub trait BpTableData {
-    fn bp_generation(&self) -> BpGeneration;
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow>;
 }
 
@@ -199,17 +198,17 @@ pub trait BpTableData {
 pub struct BpTable {
     table_name: &'static str,
     column_names: &'static [&'static str],
-    generation: BpGeneration,
+    generation: Option<BpGeneration>,
     rows: Vec<BpTableRow>,
 }
 
 impl BpTable {
     pub fn new(
         schema: impl BpTableSchema,
-        generation: BpGeneration,
+        generation: Option<BpGeneration>,
         rows: Vec<BpTableRow>,
-    ) -> BpTable {
-        BpTable {
+    ) -> Self {
+        Self {
             table_name: schema.table_name(),
             column_names: schema.column_names(),
             generation,
@@ -251,11 +250,15 @@ impl fmt::Display for BpTable {
         total_width -= COLUMN_GAP;
 
         // Write the name of the subtable
-        writeln!(
-            f,
-            "{:<SUBTABLE_INDENT$}{} {}:",
-            "", self.table_name, self.generation
-        )?;
+        if let Some(generation) = self.generation {
+            writeln!(
+                f,
+                "{:<SUBTABLE_INDENT$}{} {}:",
+                "", self.table_name, generation
+            )?;
+        } else {
+            writeln!(f, "{:<SUBTABLE_INDENT$}{}:", "", self.table_name,)?;
+        }
 
         // Write the top header border
         writeln!(f, "{:<SUBTABLE_INDENT$}{:-<total_width$}", "", "")?;

@@ -19,6 +19,7 @@ clickhouse-admin-types.workspace = true
 cockroach-admin-client.workspace = true
 chrono.workspace = true
 futures.workspace = true
+id-map.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 newtype-uuid.workspace = true
@@ -52,6 +53,7 @@ diesel.workspace = true
 httptest.workspace = true
 ipnet.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
+nexus-db-schema.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-inventory.workspace = true

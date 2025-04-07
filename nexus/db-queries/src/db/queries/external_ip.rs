@@ -8,10 +8,8 @@
 use crate::db::model::ExternalIp;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
-use crate::db::model::IpKindEnum;
 use crate::db::model::Name;
 use crate::db::pool::DbConnection;
-use crate::db::schema;
 use crate::db::true_or_cast_error::{TrueOrCastError, matches_sentinel};
 use chrono::DateTime;
 use chrono::Utc;
@@ -28,8 +26,10 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use nexus_db_model::InstanceState as DbInstanceState;
 use nexus_db_model::IpAttachState;
-use nexus_db_model::IpAttachStateEnum;
 use nexus_db_model::VmmState as DbVmmState;
+use nexus_db_schema::enums::IpAttachStateEnum;
+use nexus_db_schema::enums::IpKindEnum;
+use nexus_db_schema::schema;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external;
 use uuid::Uuid;
@@ -955,7 +955,7 @@ mod tests {
 
         async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
             // Find the target IP pool
-            use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
+            use nexus_db_schema::schema::ip_pool::dsl as ip_pool_dsl;
             let conn = self
                 .db
                 .datastore()
@@ -973,7 +973,7 @@ mod tests {
             // Insert a range into this IP pool
             let pool_range = IpPoolRange::new(&range, pool.id());
             diesel::insert_into(
-                crate::db::schema::ip_pool_range::dsl::ip_pool_range,
+                nexus_db_schema::schema::ip_pool_range::dsl::ip_pool_range,
             )
             .values(pool_range)
             .execute_async(
@@ -1004,6 +1004,7 @@ mod tests {
                 boot_disk: None,
                 start: false,
                 auto_restart_policy: Default::default(),
+                anti_affinity_groups: Vec::new(),
             });
 
             let conn = self
@@ -1013,7 +1014,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            use crate::db::schema::instance::dsl as instance_dsl;
+            use nexus_db_schema::schema::instance::dsl as instance_dsl;
             diesel::insert_into(instance_dsl::instance)
                 .values(instance.clone())
                 .execute_async(&*conn)

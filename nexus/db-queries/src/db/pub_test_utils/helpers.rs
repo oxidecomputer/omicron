@@ -222,6 +222,7 @@ pub async fn create_stopped_instance_record(
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
         },
     );
 
@@ -366,12 +367,8 @@ pub async fn create_affinity_group_member(
         .lookup_for(authz::Action::Modify)
         .await?;
 
-    db.affinity_group_member_add(
-        opctx,
-        &authz_group,
-        external::AffinityGroupMember::Instance(instance_id),
-    )
-    .await?;
+    db.affinity_group_member_instance_add(opctx, &authz_group, instance_id)
+        .await?;
     Ok(())
 }
 
@@ -390,10 +387,10 @@ pub async fn create_anti_affinity_group_member(
         .lookup_for(authz::Action::Modify)
         .await?;
 
-    db.anti_affinity_group_member_add(
+    db.anti_affinity_group_member_instance_add(
         opctx,
         &authz_group,
-        external::AntiAffinityGroupMember::Instance(instance_id),
+        instance_id,
     )
     .await?;
     Ok(())

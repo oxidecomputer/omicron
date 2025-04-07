@@ -12,6 +12,7 @@ use slog::Logger;
 use slog::info;
 use std::net::{IpAddr, Ipv6Addr};
 
+use crate::ExecutionError;
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
 use crate::zpool::PathInPool;
@@ -69,7 +70,25 @@ pub struct AdmError {
     op: Operation,
     zone: String,
     #[source]
-    err: zone::ZoneError,
+    err: AdmErrorKind,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum AdmErrorKind {
+    /// The zone is currently in a state in which it cannot be uninstalled.
+    /// These states are generally transient, so this error is likely to be
+    /// retryable.
+    #[error("this operation cannot be performed in the '{:?}' state", .0)]
+    InvalidState(zone::State),
+    /// Another zoneadm error occurred.
+    #[error(transparent)]
+    Zoneadm(#[from] zone::ZoneError),
+}
+
+impl AdmError {
+    pub fn is_invalid_state(&self) -> bool {
+        matches!(self.err, AdmErrorKind::InvalidState(_))
+    }
 }
 
 /// Errors which may be encountered when deleting addresses.
@@ -186,9 +205,6 @@ impl AddressRequest {
     }
 }
 
-/// Wraps commands for interacting with Zones.
-pub struct Zones {}
-
 // Helper function to parse the output of `ipadm show-addr -o ADDR`, which might
 // or might not contain an interface scope (which `ipnetwork` doesn't know how
 // to parse).
@@ -216,74 +232,32 @@ fn parse_ip_network(s: &str) -> Result<IpNetwork, IpNetworkError> {
     }
 }
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
-impl Zones {
-    /// Ensures a zone is halted before both uninstalling and deleting it.
-    ///
-    /// Returns the state the zone was in before it was removed, or None if the
-    /// zone did not exist.
-    pub async fn halt_and_remove(
-        name: &str,
-    ) -> Result<Option<zone::State>, AdmError> {
-        match Self::find(name).await? {
-            None => Ok(None),
-            Some(zone) => {
-                let state = zone.state();
-                let (halt, uninstall) = match state {
-                    // For states where we could be running, attempt to halt.
-                    zone::State::Running | zone::State::Ready => (true, true),
-                    // For zones where we never performed installation, simply
-                    // delete the zone - uninstallation is invalid.
-                    zone::State::Configured => (false, false),
-                    // For most zone states, perform uninstallation.
-                    _ => (false, true),
-                };
+/// Wraps commands for interacting with Zones.
+pub struct Zones(());
 
-                if halt {
-                    zone::Adm::new(name).halt().await.map_err(|err| {
-                        AdmError {
-                            op: Operation::Halt,
-                            zone: name.to_string(),
-                            err,
-                        }
-                    })?;
-                }
-                if uninstall {
-                    zone::Adm::new(name)
-                        .uninstall(/* force= */ true)
-                        .await
-                        .map_err(|err| AdmError {
-                            op: Operation::Uninstall,
-                            zone: name.to_string(),
-                            err,
-                        })?;
-                }
-                zone::Config::new(name)
-                    .delete(/* force= */ true)
-                    .run()
-                    .await
-                    .map_err(|err| AdmError {
-                    op: Operation::Delete,
-                    zone: name.to_string(),
-                    err,
-                })?;
-                Ok(Some(state))
-            }
-        }
+/// Describes the API for interfacing with Zones.
+///
+/// This is a trait so that it can be faked out for tests.
+#[async_trait::async_trait]
+pub trait Api: Send + Sync {
+    async fn get(&self) -> Result<Vec<zone::Zone>, crate::zone::AdmError> {
+        Ok(zone::Adm::list()
+            .await
+            .map_err(|err| AdmError {
+                op: Operation::List,
+                zone: "<all>".to_string(),
+                err: err.into(),
+            })?
+            .into_iter()
+            .filter(|z| z.name().starts_with(ZONE_PREFIX))
+            .collect())
     }
 
-    /// Halt and remove the zone, logging the state in which the zone was found.
-    pub async fn halt_and_remove_logged(
-        log: &Logger,
+    async fn find(
+        &self,
         name: &str,
-    ) -> Result<(), AdmError> {
-        if let Some(state) = Self::halt_and_remove(name).await? {
-            info!(
-                log,
-                "halt_and_remove_logged: Previous zone state: {:?}", state
-            );
-        }
-        Ok(())
+    ) -> Result<Option<zone::Zone>, crate::zone::AdmError> {
+        Ok(self.get().await?.into_iter().find(|zone| zone.name() == name))
     }
 
     /// Installs a zone with the provided arguments.
@@ -292,7 +266,8 @@ impl Zones {
     /// we return immediately.
     /// - Otherwise, the zone is deleted.
     #[allow(clippy::too_many_arguments)]
-    pub async fn install_omicron_zone(
+    async fn install_omicron_zone(
+        &self,
         log: &Logger,
         zone_root_path: &PathInPool,
         zone_name: &str,
@@ -302,8 +277,8 @@ impl Zones {
         devices: &[zone::Device],
         links: Vec<String>,
         limit_priv: Vec<String>,
-    ) -> Result<(), AdmError> {
-        if let Some(zone) = Self::find(zone_name).await? {
+    ) -> Result<(), crate::zone::AdmError> {
+        if let Some(zone) = self.find(zone_name).await? {
             info!(
                 log,
                 "install_omicron_zone: Found zone: {} in state {:?}",
@@ -320,7 +295,7 @@ impl Zones {
                     "Invalid state; uninstalling and deleting zone {}",
                     zone_name
                 );
-                Zones::halt_and_remove_logged(log, zone.name()).await?;
+                self.halt_and_remove_logged(log, zone.name()).await?;
             }
         }
 
@@ -359,7 +334,7 @@ impl Zones {
         cfg.run().await.map_err(|err| AdmError {
             op: Operation::Configure,
             zone: zone_name.to_string(),
-            err,
+            err: err.into(),
         })?;
 
         info!(log, "Installing Omicron zone: {}", zone_name);
@@ -373,59 +348,134 @@ impl Zones {
             .map_err(|err| AdmError {
                 op: Operation::Install,
                 zone: zone_name.to_string(),
-                err,
+                err: err.into(),
             })?;
         Ok(())
     }
 
     /// Boots a zone (named `name`).
-    pub async fn boot(name: &str) -> Result<(), AdmError> {
+    async fn boot(&self, name: &str) -> Result<(), crate::zone::AdmError> {
         zone::Adm::new(name).boot().await.map_err(|err| AdmError {
             op: Operation::Boot,
             zone: name.to_string(),
-            err,
+            err: err.into(),
         })?;
         Ok(())
     }
 
-    /// Returns all zones that may be managed by the Sled Agent.
-    ///
-    /// These zones must have names starting with [`ZONE_PREFIX`].
-    pub async fn get() -> Result<Vec<zone::Zone>, AdmError> {
-        Ok(zone::Adm::list()
-            .await
-            .map_err(|err| AdmError {
-                op: Operation::List,
-                zone: "<all>".to_string(),
-                err,
-            })?
-            .into_iter()
-            .filter(|z| z.name().starts_with(ZONE_PREFIX))
-            .collect())
-    }
-
-    /// Finds a zone with a specified name.
-    ///
-    /// Can only return zones that start with [`ZONE_PREFIX`], as they
-    /// are managed by the Sled Agent.
-    pub async fn find(name: &str) -> Result<Option<zone::Zone>, AdmError> {
-        Ok(Self::get().await?.into_iter().find(|zone| zone.name() == name))
-    }
-
     /// Return the ID for a _running_ zone with the specified name.
-    //
-    // NOTE: This mostly exists for testing purposes. It's simple enough to call
-    // `Zones::find()` and then use the `zone::Zone::id()` method on that
-    // object. But that can't easily be done, because we need to supply
-    // `mockall` with a value to return, and `zone::Zone` objects can't be
-    // constructed since they have private fields.
-    pub async fn id(name: &str) -> Result<Option<i32>, AdmError> {
+    async fn id(
+        &self,
+        name: &str,
+    ) -> Result<Option<i32>, crate::zone::AdmError> {
         // Safety: illumos defines `zoneid_t` as a typedef for an integer, i.e.,
         // an `i32`, so this unwrap should always be safe.
-        match Self::find(name).await?.map(|zn| zn.id()) {
+        match self.find(name).await?.map(|zn| zn.id()) {
             Some(Some(id)) => Ok(Some(id.try_into().unwrap())),
             Some(None) | None => Ok(None),
         }
+    }
+
+    async fn wait_for_service(
+        &self,
+        zone: Option<&str>,
+        fmri: &str,
+        log: Logger,
+    ) -> Result<(), omicron_common::api::external::Error> {
+        crate::svc::wait_for_service(zone, fmri, log).await
+    }
+
+    /// Ensures a zone is halted before both uninstalling and deleting it.
+    ///
+    /// Returns the state the zone was in before it was removed, or None if the
+    /// zone did not exist.
+    async fn halt_and_remove(
+        &self,
+        name: &str,
+    ) -> Result<Option<zone::State>, AdmError> {
+        match self.find(name).await? {
+            None => Ok(None),
+            Some(zone) => {
+                let state = zone.state();
+                let (halt, uninstall) = match state {
+                    // For states where we could be running, attempt to halt.
+                    zone::State::Running | zone::State::Ready => (true, true),
+                    // For zones where we never performed installation, simply
+                    // delete the zone - uninstallation is invalid.
+                    zone::State::Configured => (false, false),
+                    // Attempting to uninstall a zone in the "down" state will
+                    // fail. Instead, the caller must wait until the zone
+                    // transitions to "installed".
+                    zone::State::Down | zone::State::ShuttingDown => {
+                        return Err(AdmError {
+                            op: Operation::Uninstall,
+                            zone: name.to_string(),
+                            err: AdmErrorKind::InvalidState(state),
+                        });
+                    }
+                    // For most zone states, perform uninstallation.
+                    _ => (false, true),
+                };
+
+                if halt {
+                    zone::Adm::new(name).halt().await.map_err(|err| {
+                        AdmError {
+                            op: Operation::Halt,
+                            zone: name.to_string(),
+                            err: err.into(),
+                        }
+                    })?;
+                }
+                if uninstall {
+                    zone::Adm::new(name)
+                        .uninstall(/* force= */ true)
+                        .await
+                        .map_err(|err| AdmError {
+                            op: Operation::Uninstall,
+                            zone: name.to_string(),
+                            err: err.into(),
+                        })?;
+                }
+                zone::Config::new(name)
+                    .delete(/* force= */ true)
+                    .run()
+                    .await
+                    .map_err(|err| AdmError {
+                    op: Operation::Delete,
+                    zone: name.to_string(),
+                    err: err.into(),
+                })?;
+                Ok(Some(state))
+            }
+        }
+    }
+
+    /// Halt and remove the zone, logging the state in which the zone was found.
+    async fn halt_and_remove_logged(
+        &self,
+        log: &Logger,
+        name: &str,
+    ) -> Result<(), AdmError> {
+        if let Some(state) = self.halt_and_remove(name).await? {
+            info!(
+                log,
+                "halt_and_remove_logged: Previous zone state: {:?}", state
+            );
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Api for Zones {}
+
+impl Zones {
+    /// Access the real zone API, which will invoke commands on the host OS.
+    ///
+    /// If you're interested in testing this interface, consider using
+    /// [crate::fakes::zone::Zones] instead.
+    pub fn real_api() -> Self {
+        Self(())
     }
 
     /// Returns the name of the VNIC used to communicate with the control plane.
@@ -687,11 +737,21 @@ impl Zones {
         Ok(())
     }
 
+    /// Delete an address object.
+    ///
+    /// This method attempts to be idempotent: deleting a nonexistent address
+    /// object returns `Ok(())`.
     #[allow(clippy::needless_lifetimes)]
     pub fn delete_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), DeleteAddressError> {
+        // Expected output on stderr if we try to delete an address that doesn't
+        // exist. (We look for this error and return `Ok(_)`, making this method
+        // idempotent.)
+        const OBJECT_NOT_FOUND: &str =
+            "could not delete address: Object not found";
+
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![];
         if let Some(zone) = zone {
@@ -704,12 +764,19 @@ impl Zones {
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
-        execute(cmd).map_err(|err| DeleteAddressError {
-            zone: zone.unwrap_or("global").to_string(),
-            addrobj: addrobj.clone(),
-            err,
-        })?;
-        Ok(())
+        match execute(cmd) {
+            Ok(_) => Ok(()),
+            Err(ExecutionError::CommandFailure(err))
+                if err.stderr.contains(OBJECT_NOT_FOUND) =>
+            {
+                Ok(())
+            }
+            Err(err) => Err(DeleteAddressError {
+                zone: zone.unwrap_or("global").to_string(),
+                addrobj: addrobj.clone(),
+                err,
+            }),
+        }
     }
 
     /// Ensures a link-local IPv6 exists with the name provided in `addrobj`.
@@ -877,6 +944,22 @@ mod tests {
             let parsed = parse_ip_network(s).unwrap();
             assert_eq!(parsed.ip(), ip);
             assert_eq!(parsed.prefix(), prefix);
+        }
+    }
+
+    // This test validates that we correctly detect an attempt to delete an
+    // address that does not exist and return `Ok(())`.
+    #[cfg(target_os = "illumos")]
+    #[test]
+    fn delete_nonexistent_address() {
+        // We'll pick a name that hopefully no system actually has...
+        let addr = AddrObject::new("nonsense", "shouldnotexist").unwrap();
+        match Zones::delete_address(None, &addr) {
+            Ok(()) => (),
+            Err(err) => panic!(
+                "unexpected error deleting nonexistent address: {}",
+                slog_error_chain::InlineErrorChain::new(&err)
+            ),
         }
     }
 }

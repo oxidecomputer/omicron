@@ -871,7 +871,7 @@
         ]
       },
       "ArtifactHashId": {
-        "description": "A hash-based identifier for an artifact.\n\nSome places, e.g. the installinator, request artifacts by hash rather than by name and version. This type indicates that.",
+        "description": "A hash-based identifier for an artifact or deployment unit: the kind and hash.",
         "type": "object",
         "properties": {
           "hash": {
@@ -903,8 +903,11 @@
           },
           "version": {
             "description": "The artifact's version.",
-            "type": "string",
-            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactVersion"
+              }
+            ]
           }
         },
         "required": [
@@ -912,6 +915,11 @@
           "name",
           "version"
         ]
+      },
+      "ArtifactVersion": {
+        "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9._+-]{1,63}$"
       },
       "Aux1Monitor": {
         "description": "The first auxlliary CMIS monitor.",

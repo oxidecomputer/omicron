@@ -45,6 +45,8 @@ use crate::api::external::Name;
 use crate::api::external::NameOrId;
 use crate::api::external::ObjectIdentity;
 use crate::api::external::PaginationOrder;
+use chrono::DateTime;
+use chrono::Utc;
 use dropshot::HttpError;
 use dropshot::PaginationParams;
 use dropshot::RequestContext;
@@ -421,6 +423,57 @@ impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
     }
 }
 
+/// Query parameters for pagination by timestamp and ID
+pub type PaginatedByTimeAndId<Selector = ()> = PaginationParams<
+    ScanByTimeAndId<Selector>,
+    PageSelectorByTimeAndId<Selector>,
+>;
+/// Page selector for pagination by timestamp and ID
+pub type PageSelectorByTimeAndId<Selector = ()> =
+    PageSelector<ScanByTimeAndId<Selector>, (DateTime<Utc>, Uuid)>;
+
+/// Scan parameters for resources that support scanning by (timestamp, id)
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct ScanByTimeAndId<Selector = ()> {
+    #[serde(default = "default_ts_id_sort_mode")]
+    sort_by: TimeAndIdSortMode,
+
+    #[serde(flatten)]
+    pub selector: Selector,
+}
+
+/// Supported set of sort modes for scanning by timestamp and ID
+#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimeAndIdSortMode {
+    /// sort in increasing order of timestamp and ID, i.e., earliest first
+    Ascending,
+    /// sort in increasing order of timestamp and ID, i.e., most recent first
+    Descending,
+}
+
+fn default_ts_id_sort_mode() -> TimeAndIdSortMode {
+    TimeAndIdSortMode::Ascending
+}
+
+impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
+    ScanParams for ScanByTimeAndId<T>
+{
+    type MarkerValue = (DateTime<Utc>, Uuid);
+    fn direction(&self) -> PaginationOrder {
+        match self.sort_by {
+            TimeAndIdSortMode::Ascending => PaginationOrder::Ascending,
+            TimeAndIdSortMode::Descending => PaginationOrder::Descending,
+        }
+    }
+    fn from_query(p: &PaginatedByTimeAndId<T>) -> Result<&Self, HttpError> {
+        Ok(match p.page {
+            WhichPage::First(ref scan_params) => scan_params,
+            WhichPage::Next(PageSelector { ref scan, .. }) => scan,
+        })
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::IdSortMode;
@@ -432,14 +485,18 @@ mod test {
     use super::PageSelectorById;
     use super::PageSelectorByName;
     use super::PageSelectorByNameOrId;
+    use super::PageSelectorByTimeAndId;
     use super::PaginatedBy;
     use super::PaginatedById;
     use super::PaginatedByName;
     use super::PaginatedByNameOrId;
+    use super::PaginatedByTimeAndId;
     use super::ScanById;
     use super::ScanByName;
     use super::ScanByNameOrId;
+    use super::ScanByTimeAndId;
     use super::ScanParams;
+    use super::TimeAndIdSortMode;
     use super::data_page_params_with_limit;
     use super::marker_for_id;
     use super::marker_for_name;
@@ -448,6 +505,8 @@ mod test {
     use crate::api::external::IdentityMetadata;
     use crate::api::external::ObjectIdentity;
     use crate::api::external::http_pagination::name_or_id_pagination;
+    use chrono::DateTime;
+    use chrono::TimeZone;
     use chrono::Utc;
     use dropshot::PaginationOrder;
     use dropshot::PaginationParams;
@@ -486,6 +545,10 @@ mod test {
                 "page selector, scan by name or id",
                 schema_for!(PageSelectorByNameOrId),
             ),
+            (
+                "page selector, scan by time and id",
+                schema_for!(PageSelectorByTimeAndId),
+            ),
         ];
 
         let mut found_output = String::new();
@@ -515,8 +578,14 @@ mod test {
             sort_by: NameOrIdSortMode::IdAscending,
             selector: (),
         };
+        let scan_by_time_and_id = ScanByTimeAndId::<()> {
+            sort_by: TimeAndIdSortMode::Ascending,
+            selector: (),
+        };
         let id: Uuid = "61a78113-d3c6-4b35-a410-23e9eae64328".parse().unwrap();
         let name: Name = "bort".parse().unwrap();
+        let time: DateTime<Utc> =
+            Utc.with_ymd_and_hms(2025, 3, 20, 10, 30, 45).unwrap();
         let examples = vec![
             // scan parameters only
             ("scan by id ascending", to_string_pretty(&scan_by_id).unwrap()),
@@ -531,6 +600,14 @@ mod test {
             (
                 "scan by name or id, using name ascending",
                 to_string_pretty(&scan_by_nameid_name).unwrap(),
+            ),
+            (
+                "scan by name or id, using name ascending",
+                to_string_pretty(&scan_by_nameid_name).unwrap(),
+            ),
+            (
+                "scan by time and id, ascending",
+                to_string_pretty(&scan_by_time_and_id).unwrap(),
             ),
             // page selectors
             (
@@ -562,6 +639,14 @@ mod test {
                 to_string_pretty(&PageSelectorByNameOrId {
                     scan: scan_by_nameid_name,
                     last_seen: NameOrId::Name(name),
+                })
+                .unwrap(),
+            ),
+            (
+                "page selector: by time and id, ascending",
+                to_string_pretty(&PageSelectorByTimeAndId {
+                    scan: scan_by_time_and_id,
+                    last_seen: (time, id),
                 })
                 .unwrap(),
             ),
@@ -834,6 +919,7 @@ mod test {
         let thing0_marker = NameOrId::Id(list[0].identity.id);
         let thinglast_id = list[list.len() - 1].identity.id;
         let thinglast_marker = NameOrId::Id(list[list.len() - 1].identity.id);
+
         let (p0, p1) = test_scan_param_common(
             &list,
             &scan,
@@ -870,5 +956,90 @@ mod test {
         assert_eq!(data_page.marker, Some(&thinglast_id));
         assert_eq!(data_page.direction, PaginationOrder::Ascending);
         assert_eq!(data_page.limit, limit);
+    }
+
+    #[test]
+    fn test_scan_by_time_and_id() {
+        let scan = ScanByTimeAndId {
+            sort_by: TimeAndIdSortMode::Ascending,
+            selector: (),
+        };
+
+        let list = list_of_things();
+        let item0_time = list[0].identity.time_created;
+        let item0_id = list[0].identity.id;
+        let item0_marker = (item0_time, item0_id);
+
+        let last_idx = list.len() - 1;
+        let item_last_time = list[last_idx].identity.time_created;
+        let item_last_id = list[last_idx].identity.id;
+        let item_last_marker = (item_last_time, item_last_id);
+
+        let marker_fn =
+            |_: &ScanByTimeAndId, item: &MyThing| -> (DateTime<Utc>, Uuid) {
+                (item.identity.time_created, item.identity.id)
+            };
+        let (p0, p1) = test_scan_param_common(
+            &list,
+            &scan,
+            "sort_by=ascending",
+            &item0_marker,
+            &item_last_marker,
+            &scan,
+            &marker_fn,
+        );
+
+        assert_eq!(scan.direction(), PaginationOrder::Ascending);
+
+        // Verify data pages based on the query params.
+        let limit = NonZeroU32::new(123).unwrap();
+        let data_page = data_page_params_with_limit(limit, &p0).unwrap();
+        assert_eq!(data_page.marker, None);
+        assert_eq!(data_page.direction, PaginationOrder::Ascending);
+        assert_eq!(data_page.limit, limit);
+
+        let data_page = data_page_params_with_limit(limit, &p1).unwrap();
+        assert_eq!(data_page.marker, Some(&item_last_marker));
+        assert_eq!(data_page.direction, PaginationOrder::Ascending);
+        assert_eq!(data_page.limit, limit);
+
+        // test descending too, why not (it caught a mistake!)
+        let scan_desc = ScanByTimeAndId {
+            sort_by: TimeAndIdSortMode::Descending,
+            selector: (),
+        };
+        let (p0, p1) = test_scan_param_common(
+            &list,
+            &scan_desc,
+            "sort_by=descending",
+            &item0_marker,
+            &item_last_marker,
+            &scan,
+            &marker_fn,
+        );
+        assert_eq!(scan_desc.direction(), PaginationOrder::Descending);
+
+        // Verify data pages based on the query params.
+        let limit = NonZeroU32::new(123).unwrap();
+        let data_page = data_page_params_with_limit(limit, &p0).unwrap();
+        assert_eq!(data_page.marker, None);
+        assert_eq!(data_page.direction, PaginationOrder::Descending);
+        assert_eq!(data_page.limit, limit);
+
+        let data_page = data_page_params_with_limit(limit, &p1).unwrap();
+        assert_eq!(data_page.marker, Some(&item_last_marker));
+        assert_eq!(data_page.direction, PaginationOrder::Descending);
+        assert_eq!(data_page.limit, limit);
+
+        // Test error case
+        let error = serde_urlencoded::from_str::<PaginatedByTimeAndId>(
+            "sort_by=nothing",
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "unknown variant `nothing`, expected `ascending` or `descending`"
+        );
     }
 }

@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::lookup::LookupPath;
@@ -91,8 +90,8 @@ impl DataStore {
                 let err = err.clone();
 
                 async move {
-                    use db::schema::rendezvous_debug_dataset::dsl as dataset_dsl;
-                    use db::schema::support_bundle::dsl as support_bundle_dsl;
+                    use nexus_db_schema::schema::rendezvous_debug_dataset::dsl as dataset_dsl;
+                    use nexus_db_schema::schema::support_bundle::dsl as support_bundle_dsl;
 
                     // Observe all "non-deleted, debug datasets".
                     //
@@ -174,7 +173,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SupportBundle> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::support_bundle::dsl;
+        use nexus_db_schema::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         paginated(dsl::support_bundle, dsl::id, pagparams)
@@ -194,7 +193,7 @@ impl DataStore {
         states: Vec<SupportBundleState>,
     ) -> ListResultVec<SupportBundle> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::support_bundle::dsl;
+        use nexus_db_schema::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         paginated(dsl::support_bundle, dsl::id, pagparams)
@@ -256,7 +255,7 @@ impl DataStore {
                 let invalid_nexus_zones = invalid_nexus_zones.clone();
                 let invalid_datasets = invalid_datasets.clone();
                 async move {
-                    use db::schema::support_bundle::dsl;
+                    use nexus_db_schema::schema::support_bundle::dsl;
 
                     // Find all bundles without backing storage.
                     let bundles_with_bad_datasets = dsl::support_bundle
@@ -410,7 +409,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_bundle).await?;
 
-        use db::schema::support_bundle::dsl;
+        use nexus_db_schema::schema::support_bundle::dsl;
 
         let id = authz_bundle.id().into_untyped_uuid();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -445,7 +444,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Delete, authz_bundle).await?;
 
-        use db::schema::support_bundle::dsl;
+        use nexus_db_schema::schema::support_bundle::dsl;
 
         let id = authz_bundle.id().into_untyped_uuid();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -528,7 +527,6 @@ mod test {
             let mut sleds = vec![];
             for (sled, config) in &blueprint.sleds {
                 let pools = config
-                    .datasets_config
                     .datasets
                     .iter()
                     .filter_map(|dataset| {
@@ -928,7 +926,7 @@ mod test {
             .values()
             .flat_map(|sled_config| {
                 let mut nexus_zones = vec![];
-                for zone in &sled_config.zones_config.zones {
+                for zone in &sled_config.zones {
                     if matches!(zone.zone_type, BlueprintZoneType::Nexus(_))
                         && zone.disposition.is_in_service()
                     {
@@ -947,7 +945,7 @@ mod test {
             .values()
             .flat_map(|sled_config| {
                 let mut debug_datasets = vec![];
-                for dataset in sled_config.datasets_config.datasets.iter() {
+                for dataset in sled_config.datasets.iter() {
                     if matches!(dataset.kind, DebugDatasetKind)
                         && dataset.disposition.is_in_service()
                     {
@@ -961,7 +959,7 @@ mod test {
 
     fn expunge_dataset_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
         for sled in bp.sleds.values_mut() {
-            for mut dataset in sled.datasets_config.datasets.iter_mut() {
+            for mut dataset in sled.datasets.iter_mut() {
                 if dataset.id == bundle.dataset_id.into() {
                     dataset.disposition = BlueprintDatasetDisposition::Expunged;
                 }
@@ -971,7 +969,7 @@ mod test {
 
     fn expunge_nexus_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
         for sled in bp.sleds.values_mut() {
-            for mut zone in &mut sled.zones_config.zones {
+            for mut zone in &mut sled.zones {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
                     zone.disposition = BlueprintZoneDisposition::Expunged {
                         as_of_generation: *Generation::new(),

@@ -1,0 +1,87 @@
+# This is an artifact manifest that generates fake entries for all components.
+# Some of the components have non-semver artifact versions.
+#
+# This is completely non-functional and is only useful for testing archive
+# extraction in other parts of the repository.
+
+system_version = "2.0.0"
+
+[[artifact.gimlet_sp]]
+name = "fake-gimlet-sp"
+version = "2.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[[artifact.gimlet_rot]]
+name = "fake-gimlet-rot"
+version = "2.0.0"
+[artifact.gimlet_rot.source]
+kind = "composite-rot"
+archive_a = { kind = "fake", size = "512KiB" }
+archive_b = { kind = "fake", size = "512KiB" }
+
+[[artifact.host]]
+name = "fake-host"
+version = "2.0.0"
+[artifact.host.source]
+kind = "composite-host"
+phase_1 = { kind = "fake", size = "512KiB" }
+phase_2 = { kind = "fake", size = "1MiB" }
+
+[[artifact.trampoline]]
+name = "fake-trampoline"
+version = "non-semver"
+[artifact.trampoline.source]
+kind = "composite-host"
+phase_1 = { kind = "fake", size = "512KiB" }
+phase_2 = { kind = "fake", size = "1MiB" }
+
+[[artifact.control_plane]]
+name = "fake-control-plane"
+version = "2.0.0"
+[artifact.control_plane.source]
+kind = "composite-control-plane"
+zones = [
+    { kind = "fake", name = "zone1", size = "1MiB" },
+    { kind = "fake", name = "zone2", size = "1MiB" },
+]
+
+[[artifact.psc_sp]]
+name = "fake-psc-sp"
+version = "2.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[[artifact.psc_rot]]
+name = "fake-psc-rot"
+version = "2.0.0"
+[artifact.psc_rot.source]
+kind = "composite-rot"
+archive_a = { kind = "fake", size = "512KiB" }
+archive_b = { kind = "fake", size = "512KiB" }
+
+[[artifact.switch_sp]]
+name = "fake-switch-sp"
+version = "2.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[[artifact.switch_rot]]
+name = "fake-switch-rot"
+version = "2.0.0"
+[artifact.switch_rot.source]
+kind = "composite-rot"
+archive_a = { kind = "fake", size = "512KiB" }
+archive_b = { kind = "fake", size = "512KiB" }
+
+[[artifact.gimlet_rot_bootloader]]
+name = "fake-gimlet-rot-bootloader"
+version = "2.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[[artifact.psc_rot_bootloader]]
+name = "fake-psc-rot-bootloader"
+version = "2.0.0"
+source = { kind = "fake", size = "1MiB" }
+
+[[artifact.switch_rot_bootloader]]
+name = "fake-switch-rot-bootloader"
+version = "non-semver-2"
+source = { kind = "fake", size = "1MiB" }

@@ -95,7 +95,35 @@ impl InstanceManager {
     pub fn new(
         log: Logger,
         nexus_client: NexusClient,
-        etherstub: Etherstub,
+        vnic_allocator: VnicAllocator<Etherstub>,
+        port_manager: PortManager,
+        storage: StorageHandle,
+        zone_bundler: ZoneBundler,
+        vmm_reservoir_manager: VmmReservoirManagerHandle,
+        metrics_queue: MetricsRequestQueue,
+    ) -> Result<InstanceManager, Error> {
+        Self::new_inner(
+            log,
+            nexus_client,
+            vnic_allocator,
+            port_manager,
+            storage,
+            zone_bundler,
+            ZoneBuilderFactory::new(),
+            vmm_reservoir_manager,
+            metrics_queue,
+        )
+    }
+
+    /// Initializes a new [`InstanceManager`] object, with more control
+    /// over internal interfaces.
+    ///
+    /// Prefer [InstanceManager::new] unless you're writing tests.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_inner(
+        log: Logger,
+        nexus_client: NexusClient,
+        vnic_allocator: VnicAllocator<Etherstub>,
         port_manager: PortManager,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
@@ -114,7 +142,7 @@ impl InstanceManager {
             terminate_rx,
             nexus_client,
             jobs: BTreeMap::new(),
-            vnic_allocator: VnicAllocator::new("Instance", etherstub),
+            vnic_allocator,
             port_manager,
             storage_generation: None,
             storage,
