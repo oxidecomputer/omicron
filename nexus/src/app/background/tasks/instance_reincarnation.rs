@@ -99,7 +99,7 @@ impl BackgroundTask for InstanceReincarnation {
                 ));
             }
 
-            if !status.total_errors() > 0 {
+            if status.total_errors() > 0 {
                 warn!(
                     &opctx.log,
                     "instance reincarnation completed with errors";
@@ -387,6 +387,7 @@ mod test {
                     ssh_public_keys: None,
                     start: state == InstanceState::Vmm,
                     auto_restart_policy,
+                    anti_affinity_groups: Vec::new(),
                 },
             )
             .await;

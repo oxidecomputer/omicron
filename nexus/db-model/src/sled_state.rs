@@ -20,12 +20,9 @@ use std::fmt;
 use strum::EnumIter;
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "sled_state", schema = "public"))]
-    pub struct SledStateEnum;
+    SledStateEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, Eq, EnumIter)]
-    #[diesel(sql_type = SledStateEnum)]
     pub enum SledState;
 
     // Enum values

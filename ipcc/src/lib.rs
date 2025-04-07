@@ -10,10 +10,10 @@
 //! (through MGS) or set from userland via libipcc.
 
 use libipcc::{IpccError, IpccHandle};
-use omicron_common::update::ArtifactHash;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 #[cfg(test)]

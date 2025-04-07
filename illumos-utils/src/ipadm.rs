@@ -32,7 +32,6 @@ pub enum AddrObjType {
     Static(IpAddr),
 }
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock)]
 impl Ipadm {
     /// Ensure that an IP interface exists on the provided datalink.
     pub fn ensure_ip_interface_exists(

@@ -7,7 +7,7 @@
 // Copyright 2024 Oxide Computer
 
 use super::{list_timeseries, prepare_columns};
-use crate::{Client, OxqlResult, make_client};
+use crate::{Client, OxqlResult, make_client, oxql::query::QueryAuthzScope};
 use clap::Args;
 use crossterm::style::Stylize;
 use oxql_types::Table;
@@ -126,7 +126,10 @@ pub async fn shell(
                             }
                         } else {
                             match client
-                                .oxql_query(cmd.trim().trim_end_matches(';'))
+                                .oxql_query(
+                                    cmd.trim().trim_end_matches(';'),
+                                    QueryAuthzScope::Fleet,
+                                )
                                 .await
                             {
                                 Ok(result) => {

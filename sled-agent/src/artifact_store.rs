@@ -34,7 +34,6 @@ use futures::{Stream, TryStreamExt};
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
 use omicron_common::ledger::Ledger;
-use omicron_common::update::ArtifactHash;
 use repo_depot_api::*;
 use sha2::{Digest, Sha256};
 use sled_agent_api::{
@@ -48,6 +47,7 @@ use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::File;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinSet;
+use tufaceous_artifact::ArtifactHash;
 
 // These paths are defined under the artifact storage dataset. They
 // cannot conflict with any artifact paths because all artifact paths are
@@ -883,7 +883,6 @@ mod test {
         DatasetConfig, DatasetKind, DatasetName, DatasetsConfig,
         SharedDatasetConfig,
     };
-    use omicron_common::update::ArtifactHash;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::{DatasetUuid, ZpoolUuid};
@@ -891,6 +890,7 @@ mod test {
     use sled_storage::error::Error as StorageError;
     use tokio::io::AsyncReadExt;
     use tokio::sync::oneshot;
+    use tufaceous_artifact::ArtifactHash;
 
     use super::{ArtifactStore, DatasetsManager, Error};
 

@@ -1,15 +1,13 @@
-use crate::schema::bfd_session;
 use crate::{SqlU32, impl_enum_type};
 use chrono::DateTime;
 use chrono::Utc;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::bfd_session;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "bfd_mode", schema = "public"))]
-    pub struct BfdModeEnum;
+    BfdModeEnum:
 
     #[derive(
         Clone,
@@ -21,7 +19,6 @@ impl_enum_type!(
         Serialize,
         Deserialize
     )]
-    #[diesel(sql_type = BfdModeEnum)]
     pub enum BfdMode;
 
     SingleHop => b"single_hop"
