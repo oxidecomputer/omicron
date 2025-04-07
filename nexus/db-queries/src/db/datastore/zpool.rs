@@ -323,6 +323,12 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
+        info!(
+            opctx.log,
+            "changing {id} control plane storage buffer to \
+            {control_plane_storage_buffer}",
+        );
+
         diesel::update(dsl::zpool)
             .filter(dsl::id.eq(to_db_typed_uuid(id)))
             .set(
