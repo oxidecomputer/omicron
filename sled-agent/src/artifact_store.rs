@@ -770,7 +770,7 @@ impl RepoDepotApi for RepoDepotImpl {
 }
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
-pub(crate) enum Error {
+pub enum Error {
     #[error("Another task is already writing artifact {sha256}")]
     AlreadyInProgress { sha256: ArtifactHash },
 

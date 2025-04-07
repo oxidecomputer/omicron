@@ -34,7 +34,8 @@ use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
+    OmicronSledConfig, OmicronSledConfigResult, OmicronZoneImageSource,
+    OmicronZonesConfig, SledRole,
 };
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
@@ -54,7 +55,9 @@ use omicron_common::disk::{
     OmicronPhysicalDisksConfig,
 };
 use omicron_ddm_admin_client::Client as DdmAdminClient;
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
+use omicron_uuid_kinds::{
+    GenericUuid, OmicronZoneUuid, PropolisUuid, SledUuid,
+};
 use sled_agent_api::Zpool;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -78,6 +81,7 @@ use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use illumos_utils::dladm::Dladm;
@@ -169,6 +173,18 @@ pub enum Error {
 
     #[error(transparent)]
     RepoDepotStart(#[from] crate::artifact_store::StartError),
+
+    #[error(
+        "Couldn't find requested zone image ({hash}) for \
+        {zone_kind:?} {id} in artifact store: {err}"
+    )]
+    ArtifactNotFound {
+        hash: ArtifactHash,
+        zone_kind: &'static str,
+        id: OmicronZoneUuid,
+        #[source]
+        err: crate::artifact_store::Error,
+    },
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -1029,6 +1045,21 @@ impl SledAgent {
             // - If a subsequent call to "datasets_ensure" tries to set a UUID,
             // it should be able to get set (once).
             self.inner.storage.upsert_filesystem(None, dataset_name).await?;
+        }
+
+        // Ensure that any zone images from the artifact store are present.
+        for zone in &requested_zones.zones {
+            if let OmicronZoneImageSource::Artifact { hash } = zone.image_source
+            {
+                if let Err(err) = self.artifact_store().get(hash).await {
+                    return Err(Error::ArtifactNotFound {
+                        hash,
+                        zone_kind: zone.zone_type.kind().report_str(),
+                        id: zone.id,
+                        err,
+                    });
+                }
+            }
         }
 
         self.inner
