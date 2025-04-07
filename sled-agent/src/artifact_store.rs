@@ -605,7 +605,7 @@ impl ArtifactWriter {
             OverwriteBehavior::AllowOverwrite,
             temp_dir,
         );
-        let (tx, mut rx) = mpsc::channel(16); // TODO
+        let (tx, mut rx) = mpsc::channel(1);
         let expected = self.sha256;
         self.senders.push(tx);
         self.write_tasks.spawn_blocking(move || {
@@ -653,8 +653,16 @@ impl ArtifactWriter {
         while let Some(chunk) = stream.try_next().await? {
             // Send the chunk to all the write tasks, pruning any that failed
             // because the other end hung up.
-            for sender in self.senders.drain(..) {
-                if sender.send(chunk.clone()).await.is_ok() {
+            let mut join_set = self
+                .senders
+                .drain(..)
+                .zip(std::iter::repeat(chunk))
+                .map(async |(sender, chunk)| {
+                    sender.send(chunk).await.ok().map(|()| sender)
+                })
+                .collect::<JoinSet<_>>();
+            while let Some(maybe_sender) = join_set.join_next().await {
+                if let Some(sender) = maybe_sender.map_err(Error::Join)? {
                     swap.push(sender);
                 }
             }
