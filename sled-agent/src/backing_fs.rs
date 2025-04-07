@@ -145,7 +145,7 @@ pub(crate) fn ensure_backing_fs(
         });
 
         Zfs::ensure_dataset(DatasetEnsureArgs {
-            name: &dataset,
+            name: dataset.clone(),
             mountpoint: mountpoint.clone(),
             can_mount: CanMount::NoAuto,
             zoned: false,

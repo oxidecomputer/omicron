@@ -52,7 +52,7 @@ impl ExternalDiskMap {
         Self { disks: IdMap::default(), mount_config }
     }
 
-    pub(super) fn mount_config(&self) -> &MountConfig {
+    pub(super) fn mount_config(&self) -> &Arc<MountConfig> {
         &self.mount_config
     }
 

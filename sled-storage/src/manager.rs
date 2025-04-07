@@ -1487,7 +1487,7 @@ impl StorageManager {
             compression: config.compression,
         });
         Zfs::ensure_dataset(DatasetEnsureArgs {
-            name: &full_name,
+            name: full_name.clone(),
             mountpoint: mountpoint.clone(),
             can_mount: CanMount::On,
             zoned: *zoned,
@@ -1519,7 +1519,7 @@ impl StorageManager {
         }
 
         let zoned = true;
-        let fs_name = &request.dataset_name.full_name();
+        let fs_name = request.dataset_name.full_name();
         let encryption_details = None;
         let size_details = None;
         Zfs::ensure_dataset(DatasetEnsureArgs {

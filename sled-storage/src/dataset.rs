@@ -265,7 +265,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
         );
         let name = format!("{}/{}", zpool_name, dataset);
         let result = Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
-            name: &name,
+            name: name.clone(),
             mountpoint: Mountpoint::Path(mountpoint),
             can_mount: zfs::CanMount::On,
             zoned,
@@ -278,7 +278,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             warn!(
                 log,
                 "Failed to ensure encrypted root filesystem";
-                "name" => ?name,
+                "name" => name,
                 "err" => InlineErrorChain::new(&err),
             );
         });
@@ -293,7 +293,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
     for dataset in datasets.into_iter() {
         let mountpoint =
             zpool_name.dataset_mountpoint(&mount_config.root, dataset.name);
-        let name = &format!("{}/{}", zpool_name, dataset.name);
+        let name = format!("{}/{}", zpool_name, dataset.name);
 
         // Use a value that's alive for the duration of this sled agent
         // to answer the question: should we wipe this disk, or have
@@ -307,13 +307,13 @@ pub(crate) async fn ensure_zpool_has_datasets(
         });
 
         if dataset.wipe {
-            match Zfs::get_oxide_value(name, "agent") {
+            match Zfs::get_oxide_value(&name, "agent") {
                 Ok(v) if &v == agent_local_value => {
                     info!(log, "Skipping automatic wipe for dataset: {}", name);
                 }
                 Ok(_) | Err(_) => {
                     info!(log, "Automatically destroying dataset: {}", name);
-                    Zfs::destroy_dataset(name).or_else(|err| {
+                    Zfs::destroy_dataset(&name).or_else(|err| {
                         // If we can't find the dataset, that's fine -- it might
                         // not have been formatted yet.
                         if matches!(
@@ -336,7 +336,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             compression: dataset.compression,
         });
         Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
-            name,
+            name: name.clone(),
             mountpoint: Mountpoint::Path(mountpoint),
             can_mount: zfs::CanMount::On,
             zoned,
@@ -349,15 +349,15 @@ pub(crate) async fn ensure_zpool_has_datasets(
             warn!(
                 log,
                 "Failed to ensure dataset";
-                "name" => ?name,
+                "name" => &name,
                 "err" => InlineErrorChain::new(&err),
             );
         })?;
 
         if dataset.wipe {
-            Zfs::set_oxide_value(name, "agent", agent_local_value).map_err(
+            Zfs::set_oxide_value(&name, "agent", agent_local_value).map_err(
                 |err| DatasetError::CannotSetAgentProperty {
-                    dataset: name.clone(),
+                    dataset: name,
                     err: Box::new(err),
                 },
             )?;

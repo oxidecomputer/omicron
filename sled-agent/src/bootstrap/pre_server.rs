@@ -274,7 +274,7 @@ fn ensure_zfs_key_directory_exists(log: &Logger) -> Result<(), StartError> {
 
 fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
     Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
-        name: zfs::ZONE_ZFS_RAMDISK_DATASET,
+        name: zfs::ZONE_ZFS_RAMDISK_DATASET.to_string(),
         mountpoint: zfs::Mountpoint::Path(Utf8PathBuf::from(
             zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
         )),

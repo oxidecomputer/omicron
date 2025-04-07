@@ -220,11 +220,11 @@ impl LedgerTask {
         }
 
         // TODO-correctness We should check that the incoming config is
-        // self-consistent (e.g., that zones reference datasets that exist which
-        // themselves reference disks that exist) and that it's not violating
-        // constraints we ourselves enforce (e.g., at most one dataset of a
-        // given kind per zpool:
-        // https://github.com/oxidecomputer/omicron/issues/7311).
+        // self-consistent. Checks should include at least:
+        //
+        // 1. zones reference datasets that exist
+        // 2. at most one dataset kind per zpool
+        // 3. any non-install-dataset zone sources exist in our tuf repo depot
 
         let config_paths = config_datasets
             .iter()

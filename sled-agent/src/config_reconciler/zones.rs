@@ -598,7 +598,8 @@ impl ShutdownDependencies for RealShutdownDependencies<'_> {
         // This may leave our `RunningZone` is a bogus state where it still
         // holds a `zoneid_t` that doesn't exist anymore, but if we're in the
         // shutdown path we never use that `zoneid_t`.
-        Zones::real_api().halt_and_remove_logged(log, zone.name())
+        Zones::real_api()
+            .halt_and_remove_logged(log, zone.name())
             .await
             .map_err(ZoneShutdownError::HaltAndRemove)
     }

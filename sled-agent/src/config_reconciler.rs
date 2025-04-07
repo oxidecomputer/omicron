@@ -25,6 +25,7 @@ use omicron_common::disk::DiskIdentity;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use tokio::sync::watch;
 
 mod datasets;
@@ -40,6 +41,8 @@ use crate::services::ServiceManager;
 use crate::services::TimeSyncConfig;
 use crate::zone_bundle::ZoneBundler;
 
+use self::datasets::DatasetMap;
+use self::datasets::DatasetTaskReconcilerHandle;
 use self::external_disks::ExternalDiskMap;
 use self::internal_disks::InternalDisksTask;
 use self::ledger::LedgerTask;
@@ -63,6 +66,7 @@ struct ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
     current_config_rx: watch::Receiver<CurrentConfig>,
     raw_disks_rx: watch::Receiver<IdMap<RawDisk>>,
     key_requester: StorageKeyRequester,
+    dataset_task_handle: DatasetTaskReconcilerHandle,
     time_sync_config: TimeSyncConfig,
     log: Logger,
 }
@@ -70,6 +74,7 @@ struct ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
 impl ConfigReconcilerHandle {
     pub(crate) fn new(
         key_requester: StorageKeyRequester,
+        dataset_task_handle: DatasetTaskReconcilerHandle,
         mount_config: Arc<MountConfig>,
         time_sync_config: TimeSyncConfig,
         base_log: &Logger,
@@ -95,6 +100,7 @@ impl ConfigReconcilerHandle {
                 current_config_rx,
                 raw_disks_rx,
                 key_requester,
+                dataset_task_handle,
                 time_sync_config,
                 log: base_log.new(slog::o!("component" => "ReconcilerTask")),
             },
@@ -141,6 +147,7 @@ impl ConfigReconcilerHandle {
             current_config_rx,
             raw_disks_rx,
             key_requester,
+            dataset_task_handle,
             time_sync_config,
             log,
         } = deps;
@@ -152,6 +159,7 @@ impl ConfigReconcilerHandle {
             time_sync_config,
             service_manager,
             key_requester,
+            dataset_task_handle,
             metrics_queue,
             zone_bundler,
             ddm_reconciler,
@@ -239,6 +247,7 @@ pub(crate) enum ReconcilerTaskStatus {
 #[derive(Debug, Clone)]
 pub(crate) struct ReconcilerTaskState {
     external_disks: ExternalDiskMap,
+    datasets: DatasetMap,
     zones: ZoneMap,
     timesync_status: TimeSyncStatus,
     status: ReconcilerTaskStatus,
@@ -248,6 +257,7 @@ impl ReconcilerTaskState {
     fn new(mount_config: Arc<MountConfig>) -> Self {
         Self {
             external_disks: ExternalDiskMap::new(mount_config),
+            datasets: DatasetMap::default(),
             zones: ZoneMap::default(),
             timesync_status: TimeSyncStatus::NotYetChecked,
             status: ReconcilerTaskStatus::WaitingForInternalDisks,
@@ -255,8 +265,8 @@ impl ReconcilerTaskState {
     }
 
     fn has_retryable_error(&self) -> bool {
-        // TODO-john also check datasets once they exist
         self.external_disks.has_disk_with_retryable_error()
+            || self.datasets.has_dataset_with_retryable_error()
             || self.zones.has_zone_with_retryable_error()
     }
 }
@@ -268,6 +278,7 @@ struct ReconcilerTask {
     time_sync_config: TimeSyncConfig,
     service_manager: ServiceManager,
     key_requester: StorageKeyRequester,
+    dataset_task_handle: DatasetTaskReconcilerHandle,
     metrics_queue: MetricsRequestQueue,
     zone_bundler: ZoneBundler,
     ddm_reconciler: DdmReconciler,
@@ -498,7 +509,34 @@ impl ReconcilerTask {
             )
             .await;
 
-        // TODO datasets
+        // Both dataset and zone creation want to check zpool details against
+        // what zpools we are managing; grab that snapshot now that we've
+        // (potentially) started managing more disks.
+        let managed_external_zpools = state.external_disks.all_u2_pools();
+
+        match self
+            .dataset_task_handle
+            .datasets_ensure(
+                sled_config.datasets.clone(),
+                Arc::clone(state.external_disks.mount_config()),
+                managed_external_zpools
+                    .iter()
+                    .map(|zpool| zpool.id())
+                    .collect(),
+            )
+            .await
+        {
+            Ok(datasets) => {
+                state.datasets = datasets;
+            }
+            Err(err) => {
+                warn!(
+                    self.log,
+                    "Failed to ensure datasets";
+                    InlineErrorChain::new(&err),
+                );
+            }
+        }
 
         // Finally, start up any new zones. This may include relaunching zones
         // we shut down above (e.g., if they've just been upgraded).
