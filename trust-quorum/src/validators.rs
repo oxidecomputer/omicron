@@ -526,6 +526,35 @@ mod tests {
 
         let persistent_state = original_persistent_state.clone();
 
+        // Coordinator must be a member of the new group
+        let msg = original_msg.clone();
+        let bad_platform_id = PlatformId::new("bad".into(), "bad".into());
+        let err = ValidatedReconfigureMsg::new(
+            &logctx.log,
+            &bad_platform_id,
+            msg,
+            persistent_state.clone(),
+            last_reconfig_msg.as_ref(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            ReconfigurationError::CoordinatorMustBeAMemberOfNewGroup
+        );
+
+        // Invalid threshold
+        let mut msg = original_msg.clone();
+        msg.threshold = Threshold(1);
+        let err = ValidatedReconfigureMsg::new(
+            &logctx.log,
+            &platform_id,
+            msg,
+            persistent_state.clone(),
+            last_reconfig_msg.as_ref(),
+        )
+        .unwrap_err();
+        assert_eq!(err, ReconfigurationError::InvalidThreshold(Threshold(1)));
+
         if original_persistent_state.rack_id.is_some() {
             let mut msg = original_msg.clone();
             // Rack IDs must match

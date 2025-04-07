@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 1a1ccd3ab0e161b1b83994b7d8539117d836d5a6f1f2a72b61085a2239e24126 # shrinks to input = _TestValidateReconfigureMsgFailureArgs { input: TestInput { rack_id: 01010101-0101-0101-0101-010101010101 (rack), members: {PlatformId { part_number: "test", serial_number: "0" }, PlatformId { part_number: "test", serial_number: "1" }, PlatformId { part_number: "test", serial_number: "2" }}, epoch: Epoch(1), new_config: false } }
