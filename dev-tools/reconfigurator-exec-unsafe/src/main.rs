@@ -210,7 +210,7 @@ impl ReconfiguratorExec {
                 log.new(o!("repo_depot_url" => repo_depot_url.clone())),
             );
             let artifact_cache =
-                Arc::new(ArtifactCache::new(repo_depot_client));
+                Arc::new(ArtifactCache::new_one_client(repo_depot_client));
             let (requests_tx, requests_rx) =
                 watch::channel(PendingMgsUpdates::new());
             let driver = MgsUpdateDriver::new(
