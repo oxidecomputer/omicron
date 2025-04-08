@@ -1495,6 +1495,235 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    async fn is_mounted(dataset: &str) -> bool {
+        let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
+        let cmd = command.args(&["list", "-Hpo", "mounted", dataset]);
+        let output = cmd.output().await.unwrap();
+        assert!(output.status.success(), "Failed to list dataset: {output:?}");
+        String::from_utf8_lossy(&output.stdout).trim() == "yes"
+    }
+
+    async fn unmount(dataset: &str) {
+        let mut command = tokio::process::Command::new(illumos_utils::PFEXEC);
+        let cmd =
+            command.args(&[illumos_utils::zfs::ZFS, "unmount", "-f", dataset]);
+        let output = cmd.output().await.unwrap();
+        assert!(
+            output.status.success(),
+            "Failed to unmount dataset: {output:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn cannot_create_bundle_on_unmounted_parent() {
+        let logctx = test_setup_log("cannot_create_bundle_on_unmounted_parent");
+        let log = &logctx.log;
+
+        // Set up storage
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // For this test, we'll add a dataset that can contain our bundles.
+        let dataset_id = DatasetUuid::new_v4();
+        harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
+
+        // Access the Support Bundle API
+        let mgr = SupportBundleManager::new(
+            log,
+            harness.storage_test_harness.handle(),
+        );
+        let support_bundle_id = SupportBundleUuid::new_v4();
+        let zipfile_data = example_zipfile();
+        let hash = ArtifactHash(
+            Sha256::digest(zipfile_data.as_slice())
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+
+        // Before we actually create the bundle:
+        //
+        // Unmount the "parent dataset". This is equivalent to trying to create
+        // a support bundle when the debug dataset exists, but has not been
+        // mounted yet.
+        let parent_dataset = mgr
+            .get_configured_dataset_if_mounted(harness.zpool_id, dataset_id)
+            .await
+            .expect("Could not get parent dataset from test harness")
+            .name;
+        let parent_dataset_name = parent_dataset.full_name();
+        assert!(is_mounted(&parent_dataset_name).await);
+        unmount(&parent_dataset_name).await;
+        assert!(!is_mounted(&parent_dataset_name).await);
+
+        // Create a new bundle
+        let err = mgr
+            .create(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+                stream::once(async {
+                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+                }),
+            )
+            .await
+            .expect_err("Should not have been able to create support bundle");
+        let Error::DatasetNotMounted { dataset } = err else {
+            panic!("Unexpected error: {err:?}");
+        };
+        assert_eq!(
+            dataset, parent_dataset,
+            "Unexpected 'parent dataset' in error message"
+        );
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn listing_bundles_mounts_them() {
+        let logctx = test_setup_log("listing_bundles_mounts_them");
+        let log = &logctx.log;
+
+        // Set up storage
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // For this test, we'll add a dataset that can contain our bundles.
+        let dataset_id = DatasetUuid::new_v4();
+        harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
+
+        // Access the Support Bundle API
+        let mgr = SupportBundleManager::new(
+            log,
+            harness.storage_test_harness.handle(),
+        );
+        let support_bundle_id = SupportBundleUuid::new_v4();
+        let zipfile_data = example_zipfile();
+        let hash = ArtifactHash(
+            Sha256::digest(zipfile_data.as_slice())
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+
+        // Create a new bundle
+        let _ = mgr
+            .create(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+                stream::once(async {
+                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+                }),
+            )
+            .await
+            .expect("Should have created support bundle");
+
+        // Peek under the hood: We should be able to observe the support
+        // bundle as a nested dataset.
+        let root = mgr
+            .get_configured_dataset_if_mounted(harness.zpool_id, dataset_id)
+            .await
+            .expect("Could not get parent dataset from test harness")
+            .name;
+        let nested_dataset =
+            NestedDatasetLocation { path: support_bundle_id.to_string(), root };
+        let nested_dataset_name = nested_dataset.full_name();
+
+        // The dataset was mounted after creation.
+        assert!(is_mounted(&nested_dataset_name).await);
+
+        // We can manually unmount this dataset.
+        unmount(&nested_dataset_name).await;
+        assert!(!is_mounted(&nested_dataset_name).await);
+
+        // When we "list" this nested dataset, it'll be mounted once more.
+        let _ = mgr
+            .list(harness.zpool_id, dataset_id)
+            .await
+            .expect("Should have been able to list bundle");
+        assert!(is_mounted(&nested_dataset_name).await);
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn getting_bundles_mounts_them() {
+        let logctx = test_setup_log("getting_bundles_mounts_them");
+        let log = &logctx.log;
+
+        // Set up storage
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // For this test, we'll add a dataset that can contain our bundles.
+        let dataset_id = DatasetUuid::new_v4();
+        harness.configure_dataset(dataset_id, DatasetKind::Debug).await;
+
+        // Access the Support Bundle API
+        let mgr = SupportBundleManager::new(
+            log,
+            harness.storage_test_harness.handle(),
+        );
+        let support_bundle_id = SupportBundleUuid::new_v4();
+        let zipfile_data = example_zipfile();
+        let hash = ArtifactHash(
+            Sha256::digest(zipfile_data.as_slice())
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+
+        // Create a new bundle
+        let _ = mgr
+            .create(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+                stream::once(async {
+                    Ok(Bytes::copy_from_slice(zipfile_data.as_slice()))
+                }),
+            )
+            .await
+            .expect("Should have created support bundle");
+
+        // Peek under the hood: We should be able to observe the support
+        // bundle as a nested dataset.
+        let root = mgr
+            .get_configured_dataset_if_mounted(harness.zpool_id, dataset_id)
+            .await
+            .expect("Could not get parent dataset from test harness")
+            .name;
+        let nested_dataset =
+            NestedDatasetLocation { path: support_bundle_id.to_string(), root };
+        let nested_dataset_name = nested_dataset.full_name();
+
+        // The dataset was mounted after creation.
+        assert!(is_mounted(&nested_dataset_name).await);
+
+        // We can manually unmount this dataset.
+        unmount(&nested_dataset_name).await;
+        assert!(!is_mounted(&nested_dataset_name).await);
+
+        // When we "get" this nested dataset, it'll be mounted once more.
+        let _ = mgr
+            .get(
+                harness.zpool_id,
+                dataset_id,
+                support_bundle_id,
+                None,
+                SupportBundleQueryType::Whole,
+            )
+            .await
+            .expect("Should have been able to GET bundle");
+        assert!(is_mounted(&nested_dataset_name).await);
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
     #[tokio::test]
     async fn creation_idempotency() {
         let logctx = test_setup_log("creation_idempotency");
