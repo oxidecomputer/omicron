@@ -2141,9 +2141,9 @@ dependencies = [
 
 [[package]]
 name = "daft"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca607475e0cd38d41f8d1a5bd8985e7cdc1a205a69942211a475b02e48e406e0"
+checksum = "e09ff0315ed35eef47b90604921246c9eac0ace59aec99d46f7031eeea8cc0ec"
 dependencies = [
  "daft-derive",
  "newtype-uuid",
@@ -2154,9 +2154,9 @@ dependencies = [
 
 [[package]]
 name = "daft-derive"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a78e2436bc785be168ec3641025f713acc89b541ab41c318d7a1cfb4a4c2c50e"
+checksum = "1c3ea205baff86c8c0fc59f725aa55acfe159aaad7b1a99d84bcd203e4103245"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5297,7 +5297,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
