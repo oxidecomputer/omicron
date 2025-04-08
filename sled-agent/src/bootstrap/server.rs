@@ -259,11 +259,6 @@ impl Server {
                 .map_err(|_| ())
                 .expect("Failed to send to StorageMonitor");
 
-            // For cold boot specifically, we now need to load the services
-            // we're responsible for, while continuing to handle hardware
-            // notifications. This cannot fail: we retry indefinitely until
-            // we're done loading services.
-            sled_agent.load_services().await;
             SledAgentState::ServerStarted(sled_agent_server)
         } else {
             SledAgentState::Bootstrapping(Some(sled_agent_started_tx))

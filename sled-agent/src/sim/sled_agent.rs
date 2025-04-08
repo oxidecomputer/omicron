@@ -25,7 +25,7 @@ use dropshot::HttpError;
 use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
+    OmicronSledConfig, OmicronZonesConfig, SledRole,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -904,7 +904,7 @@ impl SledAgent {
     pub fn set_omicron_config(
         &self,
         config: OmicronSledConfig,
-    ) -> Result<OmicronSledConfigResult, HttpError> {
+    ) -> Result<(), HttpError> {
         // TODO We should ledger and operate on OmicronSledConfig directly, but
         // we don't yet; for now break this out into three separate configs.
         // Tracked by https://github.com/oxidecomputer/omicron/issues/7774
@@ -920,16 +920,14 @@ impl SledAgent {
             generation: config.generation,
             zones: config.zones.into_iter().collect(),
         };
-        let (disks, datasets) = {
-            let mut storage = self.storage.lock();
-            let DisksManagementResult { status: disks } =
-                storage.omicron_physical_disks_ensure(disks_config)?;
-            let DatasetsManagementResult { status: datasets } =
-                storage.datasets_ensure(datasets_config)?;
-            (disks, datasets)
-        };
+
+        let mut storage = self.storage.lock();
+        // TODO-john clean up the simulator?
+        let _ = storage.omicron_physical_disks_ensure(disks_config)?;
+        let _ = storage.datasets_ensure(datasets_config)?;
         *self.fake_zones.lock().unwrap() = zones_config;
-        Ok(OmicronSledConfigResult { disks, datasets })
+
+        Ok(())
     }
 
     pub fn omicron_zones_list(&self) -> OmicronZonesConfig {

@@ -6,6 +6,7 @@ use super::CurrentConfig;
 use super::internal_disks::InternalDisksReceiver;
 use crate::services::OmicronZonesConfigLocal;
 use camino::Utf8PathBuf;
+use dropshot::HttpError;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetsConfig;
@@ -40,6 +41,23 @@ pub enum LedgerTaskError {
     Busy,
     #[error("internal error: ledger task exited!")]
     Exited,
+}
+
+impl From<LedgerTaskError> for HttpError {
+    fn from(err: LedgerTaskError) -> Self {
+        let message = InlineErrorChain::new(&err).to_string();
+        match err {
+            LedgerTaskError::NoM2Disks
+            | LedgerTaskError::WaitingForKeyManager
+            | LedgerTaskError::Busy => HttpError::for_unavail(None, message),
+            LedgerTaskError::GenerationOutdated { .. }
+            | LedgerTaskError::ConfigurationChanged { .. } => {
+                HttpError::for_bad_request(None, message)
+            }
+            LedgerTaskError::LedgerCommitFailed(_)
+            | LedgerTaskError::Exited => HttpError::for_internal_error(message),
+        }
+    }
 }
 
 #[derive(Debug)]

@@ -18,7 +18,7 @@ use dropshot::{
     Query, RequestContext, StreamingBody, TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, OmicronSledConfigResult, SledRole,
+    Inventory, OmicronSledConfig, SledRole,
 };
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
@@ -26,9 +26,7 @@ use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
     SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
 };
-use omicron_common::disk::{
-    DatasetsConfig, DiskVariant, M2Slot, OmicronPhysicalDisksConfig,
-};
+use omicron_common::disk::{DiskVariant, M2Slot};
 use range_requests::RequestContextEx;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::{
@@ -413,13 +411,6 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseDeleted())
     }
 
-    async fn datasets_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.datasets_config_list().await?))
-    }
-
     async fn zone_bundle_cleanup(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BTreeMap<Utf8PathBuf, CleanupCount>>, HttpError>
@@ -441,27 +432,14 @@ impl SledAgentApi for SledAgentImpl {
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronSledConfig>,
-    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError> {
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
         sa.set_omicron_config(body_args)
             .await
             .map(HttpResponseOk)
-            .map_err(HttpError::from)
-    }
-
-    async fn omicron_physical_disks_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.omicron_physical_disks_list().await?))
-    }
-
-    async fn zpools_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.zpools_get().await))
+            .map_err(HttpError::from)?;
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn sled_role_get(
@@ -814,7 +792,7 @@ impl SledAgentApi for SledAgentImpl {
 
         // Find our corresponding disk.
         let maybe_disk_path =
-            sa.internal_disks_rx().current().managed_disks().find_map(|disk| {
+            sa.managed_internal_disks().iter().find_map(|disk| {
                 // Synthetic disks panic if asked for their `slot()`, so filter
                 // them out first; additionally, filter out any non-M2 disks.
                 if disk.is_synthetic() || disk.variant() != DiskVariant::M2 {

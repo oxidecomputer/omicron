@@ -48,14 +48,14 @@ use self::external_disks::ExternalDiskMap;
 use self::internal_disks::InternalDisksTask;
 use self::ledger::LedgerTask;
 use self::ledger::LedgerTaskHandle;
-use self::zones::TimeSyncStatus;
 use self::zones::ZoneMap;
 
-pub use self::datasets::DatasetTask;
-pub use self::datasets::DatasetTaskError;
-pub use self::datasets::DatasetTaskSupportBundleHandle;
-pub use self::internal_disks::InternalDisksReceiver;
-pub use self::ledger::LedgerTaskError;
+pub(crate) use self::datasets::DatasetTask;
+pub(crate) use self::datasets::DatasetTaskError;
+pub(crate) use self::datasets::DatasetTaskSupportBundleHandle;
+pub(crate) use self::internal_disks::InternalDisksReceiver;
+pub(crate) use self::ledger::LedgerTaskError;
+pub(crate) use self::zones::TimeSyncStatus;
 
 #[derive(Debug)]
 pub struct RawDisksSender {
@@ -318,6 +318,10 @@ impl ReconcilerTaskState {
         self.external_disks.all_managed_external_disk_pools()
     }
 
+    pub(crate) fn timesync_status(&self) -> &TimeSyncStatus {
+        &self.timesync_status
+    }
+
     pub(crate) fn all_mounted_zone_root_datasets(
         &self,
     ) -> impl Iterator<Item = PathInPool> + '_ {
@@ -553,6 +557,13 @@ impl ReconcilerTask {
             &sled_config.disks,
             &self.log,
         );
+
+        // Make sure the zone bundler has stopped writing to any disk(s) we just
+        // stopped managing.
+        self.service_manager
+            .zone_bundler()
+            .await_completion_of_prior_bundles()
+            .await;
 
         // ---
         // Now go through the add process: start managing disks, create

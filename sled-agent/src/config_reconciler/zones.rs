@@ -57,7 +57,7 @@ pub enum TimeSyncError {
 pub(crate) enum TimeSyncStatus {
     NotYetChecked,
     ConfiguredToSkip,
-    FailedToGetSyncStatus(TimeSyncError), // TODO error type
+    FailedToGetSyncStatus(TimeSyncError),
     TimeSync(TimeSync),
 }
 
