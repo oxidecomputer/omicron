@@ -430,6 +430,7 @@ struct UpdateAttemptResult {
     result: Result<ApplyUpdateResult, ApplyUpdateError>,
 }
 
+#[derive(Debug)]
 pub struct DriverStatus {
     pub recent: Vec<CompletedAttempt>,
     pub in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdateStatus>,
