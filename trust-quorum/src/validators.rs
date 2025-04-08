@@ -127,14 +127,14 @@ pub enum ReconfigurationError {
 /// manner.
 #[derive(Debug)]
 pub struct ValidatedReconfigureMsg {
-    pub rack_id: RackUuid,
-    pub epoch: Epoch,
-    pub last_committed_epoch: Option<Epoch>,
-    pub members: BTreeSet<PlatformId>,
-    pub threshold: Threshold,
+    rack_id: RackUuid,
+    epoch: Epoch,
+    last_committed_epoch: Option<Epoch>,
+    members: BTreeSet<PlatformId>,
+    threshold: Threshold,
 
     // The timeout before we send a follow up request to a peer
-    pub retry_timeout: Duration,
+    retry_timeout: Duration,
 }
 
 impl PartialEq<ValidatedReconfigureMsg> for ReconfigureMsg {
@@ -223,6 +223,30 @@ impl ValidatedReconfigureMsg {
             threshold,
             retry_timeout,
         }))
+    }
+
+    pub fn rack_id(&self) -> RackUuid {
+        self.rack_id
+    }
+
+    pub fn epoch(&self) -> Epoch {
+        self.epoch
+    }
+
+    pub fn last_committed_epoch(&self) -> Option<Epoch> {
+        self.last_committed_epoch
+    }
+
+    pub fn members(&self) -> &BTreeSet<PlatformId> {
+        &self.members
+    }
+
+    pub fn threshold(&self) -> Threshold {
+        self.threshold
+    }
+
+    pub fn retry_timeout(&self) -> Duration {
+        self.retry_timeout
     }
 
     /// Verify that the cluster membership and threshold sizes are within

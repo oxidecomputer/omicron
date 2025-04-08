@@ -7,7 +7,7 @@
 use crate::crypto::{EncryptedRackSecret, RackSecret, Salt, Sha3_256Digest};
 use crate::validators::ValidatedReconfigureMsg;
 use crate::{Epoch, PlatformId, Threshold};
-use gfss::shamir::{SecretShares, SplitError};
+use gfss::shamir::{Share, SplitError};
 use omicron_uuid_kinds::RackUuid;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
@@ -59,37 +59,41 @@ impl Configuration {
     pub fn new(
         coordinator: PlatformId,
         reconfigure_msg: &ValidatedReconfigureMsg,
-    ) -> Result<(Configuration, SecretShares), ConfigurationError> {
+    ) -> Result<(Configuration, BTreeMap<PlatformId, Share>), ConfigurationError>
+    {
         let rack_secret = RackSecret::new();
         let shares = rack_secret.split(
-            reconfigure_msg.threshold,
+            reconfigure_msg.threshold(),
             reconfigure_msg
-                .members
+                .members()
                 .len()
                 .try_into()
                 .map_err(|_| ConfigurationError::TooManyMembers)?,
         )?;
 
-        let share_digests = shares.shares.expose_secret().iter().map(|s| {
-            let mut digest = Sha3_256Digest::default();
-            s.digest::<sha3::Sha3_256>(&mut digest.0);
-            digest
-        });
+        let shares_and_digests =
+            shares.shares.expose_secret().iter().map(|s| {
+                let mut digest = Sha3_256Digest::default();
+                s.digest::<sha3::Sha3_256>(&mut digest.0);
+                (s.clone(), digest)
+            });
 
-        let members = reconfigure_msg
-            .members
-            .iter()
-            .cloned()
-            .zip(share_digests)
-            .collect();
+        let mut members: BTreeMap<PlatformId, Sha3_256Digest> = BTreeMap::new();
+        let mut shares: BTreeMap<PlatformId, Share> = BTreeMap::new();
+        for (platform_id, (share, digest)) in
+            reconfigure_msg.members().iter().cloned().zip(shares_and_digests)
+        {
+            members.insert(platform_id.clone(), digest);
+            shares.insert(platform_id, share);
+        }
 
         Ok((
             Configuration {
-                rack_id: reconfigure_msg.rack_id,
-                epoch: reconfigure_msg.epoch,
+                rack_id: reconfigure_msg.rack_id(),
+                epoch: reconfigure_msg.epoch(),
                 coordinator,
                 members,
-                threshold: reconfigure_msg.threshold,
+                threshold: reconfigure_msg.threshold(),
                 previous_configuration: None,
             },
             shares,

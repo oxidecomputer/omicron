@@ -63,7 +63,7 @@ impl Node {
             &self.platform_id,
             msg,
             (&self.persistent_state).into(),
-            self.coordinator_state.as_ref().map(|cs| &cs.reconfigure_msg),
+            self.coordinator_state.as_ref().map(|cs| cs.reconfigure_msg()),
         )?
         else {
             // This was an idempotent (duplicate) request.

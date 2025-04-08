@@ -8,8 +8,7 @@ use crate::crypto::{LrtqShare, Sha3_256Digest, ShareDigestLrtq};
 use crate::messages::{PeerMsg, PrepareMsg};
 use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
 use crate::{Configuration, Envelope, Epoch, PlatformId};
-use gfss::shamir::{SecretShares, Share};
-use secrecy::ExposeSecret;
+use gfss::shamir::Share;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
@@ -31,20 +30,20 @@ pub struct CoordinatorState {
     platform_id: PlatformId,
 
     /// When the reconfiguration started
-    pub start_time: Instant,
+    start_time: Instant,
 
     /// A copy of the message used to start this reconfiguration
-    pub reconfigure_msg: ValidatedReconfigureMsg,
+    reconfigure_msg: ValidatedReconfigureMsg,
 
     /// Configuration that will get persisted inside a `Prepare` message in a
     /// `Node`s `PersistentState`, once it is possible to create the Prepare.
-    pub configuration: Configuration,
+    configuration: Configuration,
 
     /// What is the coordinator currently doing
-    pub op: CoordinatorOperation,
+    op: CoordinatorOperation,
 
     /// When to resend prepare messages next
-    pub retry_deadline: Instant,
+    retry_deadline: Instant,
 }
 
 impl CoordinatorState {
@@ -52,10 +51,6 @@ impl CoordinatorState {
     ///
     /// Return the newly constructed `CoordinatorState` along with this node's
     /// `PrepareMsg` so that it can be persisted.
-    ///
-    /// Precondition: This node must be a member of the new configuration
-    /// or this method will panic. This is ensured as part of passing in a
-    /// `ValidatedReconfigureMsg`.
     pub fn new_uninitialized(
         my_platform_id: PlatformId,
         now: Instant,
@@ -65,16 +60,13 @@ impl CoordinatorState {
         let (config, shares) =
             Configuration::new(my_platform_id.clone(), &msg)?;
 
-        let shares_by_member: BTreeMap<PlatformId, Share> = config
-            .members
-            .keys()
-            .cloned()
-            .zip(shares.shares.expose_secret().iter().cloned())
-            .collect();
-
         let mut prepares = BTreeMap::new();
+        // `my_prepare_msg` is optional only so that we can fill it in via
+        // the loop. It will always become `Some`, as a `Configuration` always
+        // contains the coordinator as a member as validated by construction of
+        // `ValidatedReconfigureMsg`.
         let mut my_prepare_msg: Option<PrepareMsg> = None;
-        for (platform_id, share) in shares_by_member.into_iter() {
+        for (platform_id, share) in shares.into_iter() {
             let prepare_msg = PrepareMsg { config: config.clone(), share };
             if platform_id == my_platform_id {
                 // The prepare message to add to our `PersistentState`
@@ -90,6 +82,10 @@ impl CoordinatorState {
         };
 
         let state = CoordinatorState::new(my_platform_id, now, msg, config, op);
+
+        // Safety: Construction of a `ValidatedReconfigureMsg` ensures that
+        // `my_platform_id` is part of the new configuration and has a share.
+        // We can therefore safely unwrap here.
         Ok((state, my_prepare_msg.unwrap()))
     }
 
@@ -123,7 +119,7 @@ impl CoordinatorState {
         configuration: Configuration,
         op: CoordinatorOperation,
     ) -> CoordinatorState {
-        let retry_deadline = now + reconfigure_msg.retry_timeout;
+        let retry_deadline = now + reconfigure_msg.retry_timeout();
         CoordinatorState {
             platform_id,
             start_time: now,
@@ -132,6 +128,11 @@ impl CoordinatorState {
             op,
             retry_deadline,
         }
+    }
+
+    // Return the `ValidatedReconfigureMsg` that started this reconfiguration
+    pub fn reconfigure_msg(&self) -> &ValidatedReconfigureMsg {
+        &self.reconfigure_msg
     }
 
     // Send any required messages as a reconfiguration coordinator
@@ -175,7 +176,7 @@ pub enum CoordinatorOperation {
         epoch: Epoch,
         members: BTreeMap<PlatformId, Sha3_256Digest>,
         collected_shares: BTreeMap<PlatformId, Share>,
-        new_shares: SecretShares,
+        new_shares: BTreeMap<PlatformId, Share>,
     },
     // Epoch is always 0
     CollectLrtqShares {
