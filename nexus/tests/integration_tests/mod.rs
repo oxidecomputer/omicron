@@ -59,6 +59,7 @@ mod vpc_firewall;
 mod vpc_routers;
 mod vpc_subnets;
 mod vpcs;
+mod webhooks;
 
 // This module is used only for shared data, not test cases.
 mod endpoints;
