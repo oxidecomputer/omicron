@@ -14684,3 +14684,8 @@ dependencies = [
  "once_cell",
  "simd-adler32",
 ]
+
+[[patch.unused]]
+name = "reqwest"
+version = "0.12.12"
+source = "git+https://github.com/hawkw/reqwest?branch=eliza%2Fip-bound-if#098e970b1e27e1834f78fe22b4c0da5824bc4b5b"
