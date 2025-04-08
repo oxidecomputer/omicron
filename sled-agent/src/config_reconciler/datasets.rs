@@ -13,12 +13,16 @@ use illumos_utils::zfs::EnsureDatasetError;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
+use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::U2_DEBUG_DATASET;
+use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::NestedDatasetLocation;
@@ -68,6 +72,49 @@ impl DatasetMap {
             DatasetState::FailedToMount(_) => true,
         })
     }
+
+    pub(super) fn all_mounted_zone_root_datasets<'a>(
+        &'a self,
+        mount_config: &'a MountConfig,
+    ) -> impl Iterator<Item = PathInPool> + 'a {
+        self.all_mounted_datasets().filter_map(|dataset| {
+            match dataset.config.name.kind() {
+                DatasetKind::TransientZoneRoot => {
+                    let pool = dataset.config.name.pool().clone();
+                    let path = pool
+                        .dataset_mountpoint(&mount_config.root, ZONE_DATASET);
+                    Some(PathInPool { pool: ZpoolOrRamdisk::Zpool(pool), path })
+                }
+
+                _ => None,
+            }
+        })
+    }
+
+    pub(super) fn all_mounted_debug_datasets<'a>(
+        &'a self,
+        mount_config: &'a MountConfig,
+    ) -> impl Iterator<Item = PathInPool> + 'a {
+        self.all_mounted_datasets().filter_map(|dataset| {
+            match dataset.config.name.kind() {
+                DatasetKind::Debug => {
+                    let pool = dataset.config.name.pool().clone();
+                    let path = pool.dataset_mountpoint(
+                        &mount_config.root,
+                        U2_DEBUG_DATASET,
+                    );
+                    Some(PathInPool { pool: ZpoolOrRamdisk::Zpool(pool), path })
+                }
+                _ => None,
+            }
+        })
+    }
+
+    fn all_mounted_datasets(&self) -> impl Iterator<Item = &OmicronDataset> {
+        self.0
+            .iter()
+            .filter(|dataset| matches!(dataset.state, DatasetState::Mounted))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -94,11 +141,17 @@ enum DatasetState {
     ParentFailedToMount,
 }
 
+#[derive(Debug)]
 pub struct DatasetTaskReconcilerHandle {
     tx: mpsc::Sender<ReconcilerRequest>,
+    mount_config: Arc<MountConfig>,
 }
 
 impl DatasetTaskReconcilerHandle {
+    pub fn mount_config(&self) -> &Arc<MountConfig> {
+        &self.mount_config
+    }
+
     pub(super) async fn datasets_ensure(
         &self,
         dataset_configs: IdMap<DatasetConfig>,
@@ -116,11 +169,25 @@ impl DatasetTaskReconcilerHandle {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct DatasetTaskSupportBundleHandle {
     tx: mpsc::Sender<SupportBundleRequest>,
+    mount_config: Arc<MountConfig>,
 }
 
 impl DatasetTaskSupportBundleHandle {
+    pub fn mount_config(&self) -> &Arc<MountConfig> {
+        &self.mount_config
+    }
+
+    pub async fn get_configured_dataset(
+        &self,
+        _zpool_id: ZpoolUuid,
+        _dataset_id: DatasetUuid,
+    ) -> Result<Result<DatasetConfig, ()>, DatasetTaskError> {
+        unimplemented!("fixme")
+    }
+
     pub async fn nested_dataset_ensure(
         &self,
         config: NestedDatasetConfig,
@@ -216,15 +283,20 @@ pub struct DatasetTask {
 
 impl DatasetTask {
     pub fn spawn(
-        log: Logger,
+        mount_config: MountConfig,
+        base_log: &Logger,
     ) -> (DatasetTaskReconcilerHandle, DatasetTaskSupportBundleHandle) {
-        Self::spawn_impl(log, RealZfs)
+        let log = base_log.new(slog::o!("component" => "DatasetTask"));
+        Self::spawn_impl(mount_config, log, RealZfs)
     }
 
     fn spawn_impl<T: ZfsImpl>(
+        mount_config: MountConfig,
         log: Logger,
         zfs_impl: T,
     ) -> (DatasetTaskReconcilerHandle, DatasetTaskSupportBundleHandle) {
+        let mount_config = Arc::new(mount_config);
+
         // The Reconciler never sends concurrent requests, so this channel size
         // can be tiny.
         let (reconciler_tx, reconciler_rx) = mpsc::channel(1);
@@ -246,8 +318,14 @@ impl DatasetTask {
         });
 
         (
-            DatasetTaskReconcilerHandle { tx: reconciler_tx },
-            DatasetTaskSupportBundleHandle { tx: support_bundle_tx },
+            DatasetTaskReconcilerHandle {
+                tx: reconciler_tx,
+                mount_config: Arc::clone(&mount_config),
+            },
+            DatasetTaskSupportBundleHandle {
+                tx: support_bundle_tx,
+                mount_config,
+            },
         )
     }
 

@@ -6,13 +6,12 @@
 //! and dispatches them to other parts of the bootstrap agent and sled agent
 //! code.
 
+use std::sync::Arc;
+
+use crate::config_reconciler::InternalDisksReceiver;
+use crate::config_reconciler::ReconcilerStateReceiver;
 use crate::dump_setup::DumpSetup;
-use omicron_common::api::external::Generation;
-use sled_storage::config::MountConfig;
-use sled_storage::manager::StorageHandle;
-use sled_storage::resources::AllDisks;
 use slog::Logger;
-use tokio::sync::watch;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -22,14 +21,14 @@ pub enum Error {
 
 pub struct StorageMonitor {
     log: Logger,
-    storage_manager: StorageHandle,
+    internal_disks_rx: InternalDisksReceiver,
+    reconciler_state_rx: ReconcilerStateReceiver,
 
     // Invokes dumpadm(8) and savecore(8) when new disks are encountered
     dump_setup: DumpSetup,
-
-    tx: watch::Sender<StorageMonitorStatus>,
 }
 
+/*
 /// Emits status about storage monitoring.
 #[derive(Debug, Clone)]
 pub struct StorageMonitorStatus {
@@ -67,20 +66,18 @@ impl StorageMonitorHandle {
         Ok(())
     }
 }
+*/
 
 impl StorageMonitor {
     pub fn new(
         log: &Logger,
-        mount_config: MountConfig,
-        storage_manager: StorageHandle,
-    ) -> (StorageMonitor, StorageMonitorHandle) {
-        let dump_setup = DumpSetup::new(&log, mount_config);
+        internal_disks_rx: InternalDisksReceiver,
+        reconciler_state_rx: ReconcilerStateReceiver,
+    ) -> Self {
+        let dump_setup =
+            DumpSetup::new(&log, Arc::clone(internal_disks_rx.mount_config()));
         let log = log.new(o!("component" => "StorageMonitor"));
-        let (tx, rx) = watch::channel(StorageMonitorStatus::new());
-        (
-            StorageMonitor { log, storage_manager, dump_setup, tx },
-            StorageMonitorHandle { rx },
-        )
+        Self { log, internal_disks_rx, reconciler_state_rx, dump_setup }
     }
 
     /// Run the main receive loop of the `StorageMonitor`
@@ -88,28 +85,44 @@ impl StorageMonitor {
     /// This should be spawned into a tokio task
     pub async fn run(mut self) {
         loop {
+            self.handle_resource_update().await;
+
+            // Wait until either the internal disks or the set of mounted debug
+            // datasets changes.
             tokio::select! {
-                disks = self.storage_manager.wait_for_changes() => {
-                    info!(
-                        self.log,
-                        "Received storage manager update";
-                        "disks" => ?disks
-                    );
-                    self.handle_resource_update(disks).await;
+                res = self.internal_disks_rx.changed() => {
+                    if res.is_err() {
+                        // This should never happen in production, but may
+                        // happen in tests.
+                        warn!(
+                            self.log,
+                            "internal disk task exited; exiting StorageMonitor",
+                        );
+                    }
+                }
+
+                res = self.reconciler_state_rx.changed() => {
+                    if res.is_err() {
+                        // This should never happen in production, but may
+                        // happen in tests.
+                        warn!(
+                            self.log,
+                            "reconciler task exited; exiting StorageMonitor",
+                        );
+                    }
                 }
             }
         }
     }
 
-    async fn handle_resource_update(&mut self, updated_disks: AllDisks) {
-        let generation = updated_disks.generation();
+    async fn handle_resource_update(&mut self) {
+        let internal_disks = self.internal_disks_rx.current_and_update();
+        let reconciler_state = self.reconciler_state_rx.current_and_update();
         self.dump_setup
             .update_dumpdev_setup(
-                updated_disks.iter_managed().map(|(_id, disk)| disk),
+                internal_disks.managed_disks(),
+                reconciler_state.all_mounted_debug_datasets(),
             )
             .await;
-        self.tx.send_replace(StorageMonitorStatus {
-            latest_gen: Some(*generation),
-        });
     }
 }

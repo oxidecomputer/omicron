@@ -19,6 +19,7 @@ use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use crate::bootstrap::sprockets_server::SprocketsServer;
 use crate::config::Config as SledConfig;
 use crate::config::ConfigError;
+use crate::config_reconciler::InternalDisksReceiver;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::server::Server as SledAgentServer;
 use crate::services::ServiceManager;
@@ -43,7 +44,6 @@ use sled_agent_types::rack_init::RackInitializeRequest;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::io;
 use std::net::SocketAddr;
@@ -183,9 +183,11 @@ impl Server {
         } = BootstrapAgentStartup::run(config).await?;
 
         // Do we have a StartSledAgentRequest stored in the ledger?
-        let paths =
-            sled_config_paths(&long_running_task_handles.storage_manager)
-                .await?;
+        let internal_disks_rx = long_running_task_handles
+            .config_reconciler
+            .internal_disks_rx()
+            .clone();
+        let paths = sled_config_paths(&internal_disks_rx).await?;
         let maybe_ledger =
             Ledger::<StartSledAgentRequest>::new(&startup_log, paths).await;
 
@@ -204,7 +206,7 @@ impl Server {
         let bootstrap_context = BootstrapServerContext {
             base_log: base_log.clone(),
             global_zone_bootstrap_ip,
-            storage_manager: long_running_task_handles.storage_manager.clone(),
+            internal_disks_rx,
             bootstore_node_handle: long_running_task_handles.bootstore.clone(),
             baseboard: long_running_task_handles.hardware_manager.baseboard(),
             rss_access,
@@ -386,9 +388,6 @@ async fn start_sled_agent(
         }
     }
 
-    // Inform the storage service that the key manager is available
-    long_running_task_handles.storage_manager.key_manager_ready().await;
-
     // Inform our DDM reconciler of our underlay subnet and the information it
     // needs for maghemite to enable Oximeter stats.
     let ddm_reconciler = service_manager.ddm_reconciler();
@@ -413,8 +412,10 @@ async fn start_sled_agent(
 
     // Record this request so the sled agent can be automatically
     // initialized on the next boot.
-    let paths =
-        sled_config_paths(&long_running_task_handles.storage_manager).await?;
+    let paths = sled_config_paths(
+        long_running_task_handles.config_reconciler.internal_disks_rx(),
+    )
+    .await?;
 
     let mut ledger = Ledger::new_with(&log, paths, request);
     ledger.commit().await?;
@@ -468,12 +469,11 @@ impl From<MissingM2Paths> for SledAgentServerStartError {
 }
 
 async fn sled_config_paths(
-    storage: &StorageHandle,
+    internal_disks_rx: &InternalDisksReceiver,
 ) -> Result<Vec<Utf8PathBuf>, MissingM2Paths> {
-    let resources = storage.get_latest_disks().await;
-    let paths: Vec<_> = resources
-        .all_m2_mountpoints(CONFIG_DATASET)
-        .into_iter()
+    let paths: Vec<_> = internal_disks_rx
+        .current()
+        .all_config_datasets()
         .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
         .collect();
 
@@ -620,15 +620,13 @@ impl Inner {
     }
 
     async fn uninstall_sled_local_config(&self) -> Result<(), BootstrapError> {
-        let config_dirs = self
+        let internal_disks = self
             .long_running_task_handles
-            .storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter();
+            .config_reconciler
+            .internal_disks_rx()
+            .current();
 
-        for dir in config_dirs {
+        for dir in internal_disks.all_config_datasets() {
             for entry in dir.read_dir_utf8().map_err(|err| {
                 BootstrapError::Io { message: format!("Deleting {dir}"), err }
             })? {

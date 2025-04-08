@@ -38,14 +38,14 @@ use sha2::{Digest, Sha256};
 use sled_agent_api::{
     ArtifactConfig, ArtifactListResponse, ArtifactPutResponse,
 };
-use sled_storage::dataset::M2_ARTIFACT_DATASET;
-use sled_storage::manager::StorageHandle;
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot, watch};
 use tufaceous_artifact::ArtifactHash;
+
+use crate::config_reconciler::InternalDisksReceiver;
 
 // These paths are defined under the artifact storage dataset. They
 // cannot conflict with any artifact paths because all artifact paths are
@@ -156,13 +156,15 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     }
 }
 
-impl ArtifactStore<StorageHandle> {
+impl ArtifactStore<InternalDisksReceiver> {
     pub(crate) async fn start(
         self,
         sled_address: SocketAddrV6,
         dropshot_config: &ConfigDropshot,
-    ) -> Result<dropshot::HttpServer<ArtifactStore<StorageHandle>>, StartError>
-    {
+    ) -> Result<
+        dropshot::HttpServer<ArtifactStore<InternalDisksReceiver>>,
+        StartError,
+    > {
         let mut depot_address = sled_address;
         depot_address.set_port(REPO_DEPOT_PORT);
 
@@ -593,14 +595,11 @@ pub(crate) trait DatasetsManager: Clone + Send + Sync + 'static {
     ) -> impl Future<Output = impl Iterator<Item = Utf8PathBuf> + Send + '_> + Send;
 }
 
-impl DatasetsManager for StorageHandle {
+impl DatasetsManager for InternalDisksReceiver {
     async fn artifact_storage_paths(
         &self,
     ) -> impl Iterator<Item = Utf8PathBuf> + '_ {
-        self.get_latest_disks()
-            .await
-            .all_m2_mountpoints(M2_ARTIFACT_DATASET)
-            .into_iter()
+        self.current().all_artifact_datasets().collect::<Vec<_>>().into_iter()
     }
 }
 
@@ -749,11 +748,11 @@ impl ArtifactWriter {
 }
 
 /// Implementation of the Repo Depot API backed by an
-/// `ArtifactStore<StorageHandle>`.
+/// `ArtifactStore<InternalDisksReceiver>`.
 enum RepoDepotImpl {}
 
 impl RepoDepotApi for RepoDepotImpl {
-    type Context = ArtifactStore<StorageHandle>;
+    type Context = ArtifactStore<InternalDisksReceiver>;
 
     async fn artifact_get_by_sha256(
         rqctx: RequestContext<Self::Context>,

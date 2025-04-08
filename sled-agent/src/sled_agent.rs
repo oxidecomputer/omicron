@@ -9,16 +9,17 @@ use crate::boot_disk_os_writer::BootDiskOsWriter;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
+use crate::config_reconciler::{
+    DatasetTaskSupportBundleHandle, InternalDisksReceiver,
+};
 use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
-use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
-use crate::storage_monitor::StorageMonitorHandle;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
@@ -33,13 +34,15 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
+    Inventory, OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig,
+    SledRole,
 };
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
 };
-use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
+use omicron_common::api::external::{
+    ByteCount, ByteCountRangeError, Generation, Vni,
+};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
@@ -72,7 +75,6 @@ use sled_diagnostics::{SledDiagnosticsCmdError, SledDiagnosticsCmdOutput};
 use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
@@ -331,12 +333,16 @@ struct SledAgentInner {
     // This is used for idempotence checks during RSS/Add-Sled internal APIs
     start_request: StartSledAgentRequest,
 
+    // TODO-john comments
+    internal_disks_rx: InternalDisksReceiver,
+    support_bundle_dataset_task_handle: DatasetTaskSupportBundleHandle,
+
     // Component of Sled Agent responsible for storage and dataset management.
-    storage: StorageHandle,
+    //storage: StorageHandle,
 
     // Component of Sled Agent responsible for monitoring storage and updating
     // dump devices.
-    storage_monitor: StorageMonitorHandle,
+    //storage_monitor: StorageMonitorHandle,
 
     // Component of Sled Agent responsible for managing Propolis instances.
     instances: InstanceManager,
@@ -372,10 +378,10 @@ struct SledAgentInner {
     boot_disk_os_writer: BootDiskOsWriter,
 
     // Component of Sled Agent responsible for managing instrumentation probes.
-    probes: ProbeManager,
+    //probes: ProbeManager,
 
     // Component of Sled Agent responsible for managing the artifact store.
-    repo_depot: dropshot::HttpServer<ArtifactStore<StorageHandle>>,
+    repo_depot: dropshot::HttpServer<ArtifactStore<InternalDisksReceiver>>,
 }
 
 impl SledAgentInner {
@@ -416,11 +422,11 @@ impl SledAgent {
         ));
         info!(&log, "SledAgent::new(..) starting");
 
-        let storage_manager = &long_running_task_handles.storage_manager;
-        let boot_disk = storage_manager
-            .get_latest_disks()
-            .await
-            .boot_disk()
+        let boot_disk_zpool = long_running_task_handles
+            .config_reconciler
+            .internal_disks_rx()
+            .current()
+            .boot_disk_zpool()
             .ok_or_else(|| Error::BootDiskNotFound)?;
 
         // Configure a swap device of the configured size before other system setup.
@@ -429,7 +435,7 @@ impl SledAgent {
                 info!(log, "Requested swap device of size {} GiB", sz);
                 crate::swap_device::ensure_swap_device(
                     &parent_log,
-                    &boot_disk.1,
+                    &boot_disk_zpool,
                     sz,
                 )?;
             }
@@ -442,7 +448,7 @@ impl SledAgent {
         }
 
         info!(log, "Mounting backing filesystems");
-        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1)?;
+        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk_zpool)?;
 
         // TODO-correctness Bootstrap-agent already ensures the underlay
         // etherstub and etherstub VNIC exist on startup - could it pass them
@@ -523,7 +529,7 @@ impl SledAgent {
             nexus_client.clone(),
             instance_vnic_allocator,
             port_manager.clone(),
-            storage_manager.clone(),
+            long_running_task_handles.config_reconciler.reconciler_state_rx(),
             long_running_task_handles.zone_bundler.clone(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
@@ -572,8 +578,15 @@ impl SledAgent {
             .await
             .expect(
                 "Expected an infinite retry loop getting \
-             network config from bootstore",
+                 network config from bootstore",
             );
+
+        // Start reconciling against our ledgered sled config
+        long_running_task_handles.config_reconciler.spawn_reconciliation_task(
+            services.clone(),
+            metrics_manager.request_queue(),
+            etherstub_vnic,
+        );
 
         services
             .sled_agent_started(
@@ -586,10 +599,16 @@ impl SledAgent {
             )
             .await?;
 
-        let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
-            .await
-            .start(sled_address, &config.dropshot)
-            .await?;
+        let repo_depot = ArtifactStore::new(
+            &log,
+            long_running_task_handles
+                .config_reconciler
+                .internal_disks_rx()
+                .clone(),
+        )
+        .await
+        .start(sled_address, &config.dropshot)
+        .await?;
 
         // Spawn a background task for managing notifications to nexus
         // about this sled-agent.
@@ -608,11 +627,11 @@ impl SledAgent {
             nexus_notifier_task.run().await;
         });
 
-        let probes = ProbeManager::new(
+        ProbeManager::spawn(
             request.body.id.into_untyped_uuid(),
             nexus_client.clone(),
             etherstub.clone(),
-            storage_manager.clone(),
+            long_running_task_handles.config_reconciler.reconciler_state_rx(),
             port_manager.clone(),
             metrics_manager.request_queue(),
             log.new(o!("component" => "ProbeManager")),
@@ -623,12 +642,14 @@ impl SledAgent {
                 id: request.body.id,
                 subnet: request.body.subnet,
                 start_request: request,
-                storage: long_running_task_handles.storage_manager.clone(),
-                storage_monitor: long_running_task_handles
-                    .storage_monitor_handle
+                internal_disks_rx: long_running_task_handles
+                    .config_reconciler
+                    .internal_disks_rx()
+                    .clone(),
+                support_bundle_dataset_task_handle: long_running_task_handles
+                    .support_bundle_dataset_task_handle
                     .clone(),
                 instances,
-                probes,
                 hardware: long_running_task_handles.hardware_manager.clone(),
                 port_manager,
                 services,
@@ -644,8 +665,6 @@ impl SledAgent {
             log: log.clone(),
             sprockets: config.sprockets.clone(),
         };
-
-        sled_agent.inner.probes.run().await;
 
         // We immediately add a notification to the request queue about our
         // existence. If inspection of the hardware later informs us that we're
@@ -710,7 +729,10 @@ impl SledAgent {
 
     /// Accesses the [SupportBundleManager] API.
     pub(crate) fn as_support_bundle_storage(&self) -> SupportBundleManager<'_> {
-        SupportBundleManager::new(&self.log, self.storage())
+        SupportBundleManager::new(
+            &self.log,
+            &self.inner.support_bundle_dataset_task_handle,
+        )
     }
 
     pub(crate) fn switch_zone_underlay_info(
@@ -862,13 +884,20 @@ impl SledAgent {
     }
 
     pub async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
+        // TODO-john remove
+        unimplemented!()
+        /*
         Ok(self.storage().datasets_config_list().await?)
+        */
     }
 
     async fn datasets_ensure(
         &self,
-        config: DatasetsConfig,
+        _config: DatasetsConfig,
     ) -> Result<DatasetsManagementResult, Error> {
+        // TODO-john remove
+        unimplemented!()
+        /*
         info!(self.log, "datasets ensure");
         let datasets_result = self.storage().datasets_ensure(config).await?;
         info!(self.log, "datasets ensure: Updated storage");
@@ -882,6 +911,7 @@ impl SledAgent {
         // omicron_physical_disks_ensure).
 
         Ok(datasets_result)
+        */
     }
 
     /// Requests the set of physical disks currently managed by the Sled Agent.
@@ -892,7 +922,11 @@ impl SledAgent {
     pub async fn omicron_physical_disks_list(
         &self,
     ) -> Result<OmicronPhysicalDisksConfig, Error> {
+        // TODO-john remove
+        unimplemented!()
+        /*
         Ok(self.storage().omicron_physical_disks_list().await?)
+        */
     }
 
     /// Ensures that the specific set of Omicron Physical Disks are running
@@ -901,8 +935,12 @@ impl SledAgent {
     /// in-use).
     async fn omicron_physical_disks_ensure(
         &self,
-        config: OmicronPhysicalDisksConfig,
+        _config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, Error> {
+        // TODO-john remove
+        // make sure we handle the zone_bundler / probes / instances logic!
+        unimplemented!()
+        /*
         info!(self.log, "physical disks ensure");
         // Tell the storage subsystem which disks should be managed.
         let disk_result =
@@ -957,6 +995,7 @@ impl SledAgent {
         info!(self.log, "physical disks ensure: Updated instances");
 
         Ok(disk_result)
+        */
     }
 
     /// Ensures that the specific sets of disks, datasets, and zones specified
@@ -1017,8 +1056,11 @@ impl SledAgent {
     /// (and that no other zones are running)
     async fn omicron_zones_ensure(
         &self,
-        requested_zones: OmicronZonesConfig,
+        _requested_zones: OmicronZonesConfig,
     ) -> Result<(), Error> {
+        // TODO-john remove
+        unimplemented!()
+        /*
         // TODO(https://github.com/oxidecomputer/omicron/issues/6043):
         // - If these are the set of filesystems, we should also consider
         // removing the ones which are not listed here.
@@ -1051,6 +1093,7 @@ impl SledAgent {
             .ensure_all_omicron_zones_persistent(requested_zones)
             .await?;
         Ok(())
+        */
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
@@ -1060,6 +1103,9 @@ impl SledAgent {
 
     /// Gets the sled's current list of all zpools.
     pub async fn zpools_get(&self) -> Vec<Zpool> {
+        // TODO-john remove
+        unimplemented!()
+        /*
         self.inner
             .storage
             .get_latest_disks()
@@ -1071,6 +1117,7 @@ impl SledAgent {
                 disk_type: variant.into(),
             })
             .collect()
+            */
     }
 
     /// Returns whether or not the sled believes itself to be a scrimlet
@@ -1183,7 +1230,7 @@ impl SledAgent {
         todo!("Disk attachment not yet implemented");
     }
 
-    pub fn artifact_store(&self) -> &ArtifactStore<StorageHandle> {
+    pub fn artifact_store(&self) -> &ArtifactStore<InternalDisksReceiver> {
         &self.inner.repo_depot.app_private()
     }
 
@@ -1305,8 +1352,13 @@ impl SledAgent {
         Ok(())
     }
 
+    /*
     pub(crate) fn storage(&self) -> &StorageHandle {
         &self.inner.storage
+    }
+    */
+    pub(crate) fn internal_disks_rx(&self) -> &InternalDisksReceiver {
+        &self.inner.internal_disks_rx
     }
 
     pub(crate) fn boot_disk_os_writer(&self) -> &BootDiskOsWriter {
@@ -1350,9 +1402,11 @@ impl SledAgent {
         let sled_role =
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
 
-        let mut disks = vec![];
-        let mut zpools = vec![];
-        let mut datasets = vec![];
+        // TODO-john wrong
+        let disks = vec![];
+        let zpools = vec![];
+        let datasets = vec![];
+        /*
         let (all_disks, omicron_zones) = tokio::join!(
             self.storage().get_latest_disks(),
             self.inner.services.omicron_zones_list()
@@ -1407,6 +1461,7 @@ impl SledAgent {
                 };
             datasets.extend(inv_props);
         }
+        */
 
         Ok(Inventory {
             sled_id,
@@ -1416,11 +1471,16 @@ impl SledAgent {
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
-            omicron_zones,
+            // TODO-john wrong
+            omicron_zones: OmicronZonesConfig {
+                generation: Generation::new(),
+                zones: vec![],
+            },
             disks,
             zpools,
             datasets,
-            omicron_physical_disks_generation: *all_disks.generation(),
+            // TODO-john wrong
+            omicron_physical_disks_generation: Generation::new(),
         })
     }
 

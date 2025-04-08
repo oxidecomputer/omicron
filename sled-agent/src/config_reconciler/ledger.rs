@@ -42,6 +42,7 @@ pub enum LedgerTaskError {
     Exited,
 }
 
+#[derive(Debug)]
 pub struct LedgerTaskHandle {
     tx: mpsc::Sender<WriteNewConfig>,
 }
@@ -148,13 +149,14 @@ impl LedgerTask {
         &mut self,
         new_config: OmicronSledConfig,
     ) -> Result<(), LedgerTaskError> {
-        let config_datasets =
-            self.internal_disks.borrow_and_update().all_config_datasets();
+        let internal_disks = self.internal_disks.current_and_update();
+        let mut config_datasets =
+            internal_disks.all_config_datasets().peekable();
 
         // This would be very unusual: We waited for at least one M.2 to be
         // present in `run_impl`, so if this is empty that means we've lost all
         // M.2s. Refuse to accept new config.
-        if config_datasets.is_empty() {
+        if config_datasets.peek().is_none() {
             error!(self.log, "no M.2 drives available any longer");
             return Err(LedgerTaskError::NoM2Disks);
         }
@@ -227,7 +229,6 @@ impl LedgerTask {
         // 3. any non-install-dataset zone sources exist in our tuf repo depot
 
         let config_paths = config_datasets
-            .iter()
             .map(|p| p.join(CONFIG_LEDGER_FILENAME))
             .collect::<Vec<_>>();
         let mut ledger = Ledger::new_with(&self.log, config_paths, new_config);
@@ -264,11 +265,13 @@ impl LedgerTask {
 
     async fn wait_for_m2_disks(&mut self) -> Result<(), LedgerTaskExit> {
         loop {
-            let config_datasets =
-                self.internal_disks.borrow_and_update().all_config_datasets();
+            let internal_disks = self.internal_disks.current_and_update();
+            let mut config_datasets =
+                internal_disks.all_config_datasets().peekable();
 
             // The condition we're waiting for: do we have at least one M.2?
-            if !config_datasets.is_empty() {
+            if !config_datasets.peek().is_some() {
+                let config_datasets = config_datasets.collect::<Vec<_>>();
                 let loaded_config =
                     load_sled_config(&config_datasets, &self.log).await;
                 assert_ne!(
@@ -576,7 +579,7 @@ mod tests {
         // Our fake disk's datasets live underneath our `tempdir`; create the
         // intermediate subdirectories.
         let config_datasets =
-            internal_disks.borrow_and_update().all_config_datasets();
+            internal_disks.current_and_update().all_config_datasets();
         assert!(!config_datasets.is_empty());
         for path in &config_datasets {
             assert!(

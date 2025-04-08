@@ -5,6 +5,7 @@
 //! sled-agent's handle to the Rack Setup Service it spawns
 
 use super::client as bootstrap_agent_client;
+use crate::config_reconciler::InternalDisksReceiver;
 use crate::rack_setup::service::RackSetupService;
 use crate::rack_setup::service::SetupServiceError;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
@@ -17,7 +18,6 @@ use omicron_common::backoff::retry_policy_local;
 use sled_agent_types::rack_init::RackInitializeRequest;
 use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
 use std::net::Ipv6Addr;
@@ -50,7 +50,7 @@ impl RssHandle {
         sprockets: SprocketsConfig,
         config: RackInitializeRequest,
         our_bootstrap_address: Ipv6Addr,
-        storage_manager: StorageHandle,
+        internal_disks_rx: InternalDisksReceiver,
         bootstore: bootstore::NodeHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
@@ -59,7 +59,7 @@ impl RssHandle {
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
             config,
-            storage_manager,
+            internal_disks_rx,
             tx,
             bootstore,
             step_tx,

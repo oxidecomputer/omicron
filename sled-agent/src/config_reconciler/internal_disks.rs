@@ -6,11 +6,16 @@ use camino::Utf8PathBuf;
 use futures::future;
 use futures::future::Either;
 use id_map::IdMap;
+use illumos_utils::zpool::ZpoolName;
 use omicron_common::backoff::Backoff;
 use omicron_common::backoff::ExponentialBackoffBuilder;
+use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::CLUSTER_DATASET;
 use sled_storage::dataset::CONFIG_DATASET;
+use sled_storage::dataset::M2_ARTIFACT_DATASET;
+use sled_storage::dataset::M2_DEBUG_DATASET;
 use sled_storage::disk::Disk;
 use sled_storage::disk::DiskError;
 use sled_storage::disk::RawDisk;
@@ -23,6 +28,12 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::sync::watch::error::RecvError;
 
+// The directory within the debug dataset in which bundles are created.
+const BUNDLE_DIRECTORY: &str = "bundle";
+
+// The directory for zone bundles.
+const ZONE_BUNDLE_DIRECTORY: &str = "zone";
+
 /// A thin wrapper around a [`watch::Receiver`] that presents a similar API.
 #[derive(Debug, Clone)]
 pub struct InternalDisksReceiver {
@@ -31,10 +42,33 @@ pub struct InternalDisksReceiver {
 }
 
 impl InternalDisksReceiver {
-    pub fn borrow_and_update(&mut self) -> InternalDisks<'_> {
+    pub fn mount_config(&self) -> &Arc<MountConfig> {
+        &self.mount_config
+    }
+
+    pub fn current(&self) -> InternalDisks {
         InternalDisks {
-            disks: self.disks.borrow_and_update(),
-            mount_config: &self.mount_config,
+            disks: Arc::clone(&*self.disks.borrow()),
+            mount_config: Arc::clone(&self.mount_config),
+        }
+    }
+
+    pub async fn wait_for_boot_disk(&mut self) -> DiskIdentity {
+        loop {
+            let disks = self.disks.borrow_and_update();
+            if let Some(disk) = disks.iter().find(|d| d.is_boot_disk()) {
+                return disk.identity().clone();
+            }
+            mem::drop(disks);
+
+            self.disks.changed().await.expect("InternalDisks task never dies");
+        }
+    }
+
+    pub fn current_and_update(&mut self) -> InternalDisks {
+        InternalDisks {
+            disks: Arc::clone(&*self.disks.borrow_and_update()),
+            mount_config: Arc::clone(&self.mount_config),
         }
     }
 
@@ -53,25 +87,63 @@ impl InternalDisksReceiver {
     }
 }
 
-pub struct InternalDisks<'a> {
-    disks: watch::Ref<'a, Arc<IdMap<Disk>>>,
-    mount_config: &'a MountConfig,
+pub struct InternalDisks {
+    disks: Arc<IdMap<Disk>>,
+    mount_config: Arc<MountConfig>,
 }
 
-impl InternalDisks<'_> {
+impl InternalDisks {
+    pub fn boot_disk_zpool(&self) -> Option<ZpoolName> {
+        self.disks.iter().find_map(|d| {
+            if d.is_boot_disk() { Some(d.zpool_name().clone()) } else { None }
+        })
+    }
+
+    pub fn mount_config(&self) -> &MountConfig {
+        &self.mount_config
+    }
+
+    pub fn managed_disks(&self) -> impl ExactSizeIterator<Item = &Disk> {
+        self.disks.iter()
+    }
+
     /// Returns all `CONFIG_DATASET` paths within available M.2 disks.
-    pub fn all_config_datasets(&self) -> Vec<Utf8PathBuf> {
+    pub fn all_config_datasets(
+        &self,
+    ) -> impl ExactSizeIterator<Item = Utf8PathBuf> + '_ {
         self.all_datasets(CONFIG_DATASET)
     }
 
-    fn all_datasets(&self, dataset_name: &str) -> Vec<Utf8PathBuf> {
-        self.disks
-            .iter()
-            .map(|disk| {
-                disk.zpool_name()
-                    .dataset_mountpoint(&self.mount_config.root, dataset_name)
-            })
-            .collect()
+    /// Returns all `CLUSTER_DATASET` paths within available M.2 disks.
+    pub fn all_cluster_datasets(
+        &self,
+    ) -> impl ExactSizeIterator<Item = Utf8PathBuf> + '_ {
+        self.all_datasets(CLUSTER_DATASET)
+    }
+
+    /// Returns all `ARTIFACT_DATASET` paths within available M.2 disks.
+    pub fn all_artifact_datasets(
+        &self,
+    ) -> impl ExactSizeIterator<Item = Utf8PathBuf> + '_ {
+        self.all_datasets(M2_ARTIFACT_DATASET)
+    }
+
+    /// Return the directories for storing zone service bundles.
+    pub fn all_zone_bundle_directories(
+        &self,
+    ) -> impl ExactSizeIterator<Item = Utf8PathBuf> + '_ {
+        self.all_datasets(M2_DEBUG_DATASET)
+            .map(|p| p.join(BUNDLE_DIRECTORY).join(ZONE_BUNDLE_DIRECTORY))
+    }
+
+    fn all_datasets(
+        &self,
+        dataset_name: &'static str,
+    ) -> impl ExactSizeIterator<Item = Utf8PathBuf> + '_ {
+        self.disks.iter().map(|disk| {
+            disk.zpool_name()
+                .dataset_mountpoint(&self.mount_config.root, dataset_name)
+        })
     }
 }
 
@@ -414,7 +486,7 @@ mod tests {
         );
 
         // There should be no disks to start.
-        assert_eq!(*disks_handle.borrow_and_update().disks, Arc::default());
+        assert_eq!(*disks_handle.current_and_update().disks, Arc::default());
 
         // Add four disks: two M.2 and two U.2.
         raw_disks_tx.send_modify(|disks| {
@@ -437,7 +509,7 @@ mod tests {
             .expect("changed() succeeded");
 
         // We should see the two M.2s only.
-        let adopted_disks = disks_handle.borrow_and_update().disks.clone();
+        let adopted_disks = disks_handle.current_and_update().disks.clone();
         assert_eq!(adopted_disks.len(), 2);
         assert!(
             adopted_disks.iter().any(|disk| disk.identity().serial == "m2-0"),

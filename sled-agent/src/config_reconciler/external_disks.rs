@@ -52,20 +52,17 @@ impl ExternalDiskMap {
         Self { disks: IdMap::default(), mount_config }
     }
 
-    pub(super) fn mount_config(&self) -> &Arc<MountConfig> {
-        &self.mount_config
+    pub fn all_managed_external_disk_pools(
+        &self,
+    ) -> impl Iterator<Item = &ZpoolName> + '_ {
+        self.disks.iter().filter_map(|disk| match &*disk.state {
+            DiskState::Managed(disk) => Some(disk.zpool_name()),
+            DiskState::FailedToStartManaging(_) => None,
+        })
     }
 
-    // TODO-cleanup Remove this? Wrong level of abstraction: should be working
-    // in terms of datasets, not pools
-    pub(super) fn all_u2_pools(&self) -> Vec<ZpoolName> {
-        self.disks
-            .iter()
-            .filter_map(|disk| match &*disk.state {
-                DiskState::Managed(disk) => Some(disk.zpool_name().clone()),
-                DiskState::FailedToStartManaging(_) => None,
-            })
-            .collect()
+    pub(super) fn mount_config(&self) -> &Arc<MountConfig> {
+        &self.mount_config
     }
 
     pub(super) fn has_disk_with_retryable_error(&self) -> bool {

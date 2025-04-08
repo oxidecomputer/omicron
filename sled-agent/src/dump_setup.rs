@@ -89,15 +89,19 @@ use illumos_utils::ExecutionError;
 use illumos_utils::coreadm::{CoreAdm, CoreFileOption};
 use illumos_utils::dumpadm::{DumpAdm, DumpContentType};
 use illumos_utils::zone::ZONE_PREFIX;
-use illumos_utils::zpool::{ZpoolHealth, ZpoolName};
+use illumos_utils::zpool::{
+    PathInPool, ZpoolHealth, ZpoolName, ZpoolOrRamdisk,
+};
 use omicron_common::disk::DiskVariant;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::{CRASH_DATASET, DUMP_DATASET};
 use sled_storage::disk::Disk;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot;
@@ -121,13 +125,13 @@ struct CoreDataset(Utf8PathBuf);
 
 #[derive(AsRef, Clone, Debug, From)]
 pub(super) struct CoreZpool {
-    mount_config: MountConfig,
+    mount_config: Arc<MountConfig>,
     name: ZpoolName,
 }
 
 #[derive(AsRef, Clone, Debug, From)]
 pub(super) struct DebugZpool {
-    mount_config: MountConfig,
+    mount_config: Arc<MountConfig>,
     name: ZpoolName,
 }
 
@@ -203,13 +207,13 @@ struct DumpSetupWorker {
 
 pub struct DumpSetup {
     tx: tokio::sync::mpsc::Sender<DumpSetupCmd>,
-    mount_config: MountConfig,
+    mount_config: Arc<MountConfig>,
     _poller: tokio::task::JoinHandle<()>,
     log: Logger,
 }
 
 impl DumpSetup {
-    pub fn new(log: &Logger, mount_config: MountConfig) -> Self {
+    pub fn new(log: &Logger, mount_config: Arc<MountConfig>) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(16);
         let worker = DumpSetupWorker::new(
             Box::new(RealCoreDumpAdm {}),
@@ -232,14 +236,14 @@ impl DumpSetup {
     /// being used by [DumpSetup].
     pub(crate) async fn update_dumpdev_setup(
         &self,
-        disks: impl Iterator<Item = &Disk>,
+        internal_disks: impl Iterator<Item = &Disk>,
+        debug_datasets: impl Iterator<Item = PathInPool>,
     ) {
         let log = &self.log;
         let mut m2_dump_slices = Vec::new();
-        let mut u2_debug_datasets = Vec::new();
         let mut m2_core_datasets = Vec::new();
-        let mount_config = self.mount_config.clone();
-        for disk in disks {
+        let mount_config = Arc::clone(&self.mount_config);
+        for disk in internal_disks {
             if disk.is_synthetic() {
                 // We only setup dump devices on real disks
                 continue;
@@ -261,7 +265,7 @@ impl DumpSetup {
                     {
                         if info.health() == ZpoolHealth::Online {
                             m2_core_datasets.push(CoreZpool {
-                                mount_config: mount_config.clone(),
+                                mount_config: Arc::clone(&mount_config),
                                 name: name.clone(),
                             });
                         } else {
@@ -273,32 +277,66 @@ impl DumpSetup {
                     }
                 }
                 DiskVariant::U2 => {
-                    let name = disk.zpool_name();
-                    if let Ok(info) =
-                        illumos_utils::zpool::Zpool::get_info(&name.to_string())
-                    {
-                        if info.health() == ZpoolHealth::Online {
-                            u2_debug_datasets.push(DebugZpool {
-                                mount_config: mount_config.clone(),
-                                name: name.clone(),
-                            });
-                        } else {
-                            warn!(
-                                log,
-                                "Zpool {name:?} not online, won't attempt to save kernel core dumps there"
-                            );
-                        }
-                    }
+                    // This should be a list of _internal_ disks; any U2s
+                    // present are very unexpected. Warn and ignore.
+                    warn!(
+                        log,
+                        "ignoring U2 disk in list of internal disks";
+                        "disk" => ?disk.identity(),
+                    );
                 }
             }
         }
+        let debug_datasets = debug_datasets
+            .filter_map(|d| {
+                let pool = match &d.pool {
+                    ZpoolOrRamdisk::Zpool(zpool_name) => zpool_name,
+                    ZpoolOrRamdisk::Ramdisk => {
+                        warn!(
+                            self.log,
+                            "ignoring debug dataset on ramdisk";
+                            "path" => %d.path,
+                        );
+                        return None;
+                    }
+                };
+                let info = match illumos_utils::zpool::Zpool::get_info(
+                    &pool.to_string(),
+                ) {
+                    Ok(info) => info,
+                    Err(err) => {
+                        warn!(
+                            self.log,
+                            "could not determine zpool info";
+                            "pool" => %pool,
+                            InlineErrorChain::new(&err),
+                        );
+                        return None;
+                    }
+                };
+                if info.health() == ZpoolHealth::Online {
+                    Some(DebugZpool {
+                        mount_config: Arc::clone(&mount_config),
+                        name: pool.clone(),
+                    })
+                } else {
+                    warn!(
+                        log,
+                        "Zpool not online, won't attempt to save \
+                         kernel core dumps there";
+                        "name" => %pool,
+                    );
+                    None
+                }
+            })
+            .collect();
 
         let (tx, rx) = oneshot::channel();
         if let Err(err) = self
             .tx
             .send(DumpSetupCmd::UpdateDumpdevSetup {
                 dump_slices: m2_dump_slices,
-                debug_datasets: u2_debug_datasets,
+                debug_datasets,
                 core_datasets: m2_core_datasets,
                 update_complete_tx: tx,
             })

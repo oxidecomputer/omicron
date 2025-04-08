@@ -28,8 +28,6 @@ use illumos_utils::zfs::ZFS;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zone::AdmError;
 use sled_agent_types::zone_bundle::*;
-use sled_storage::dataset::U2_DEBUG_DATASET;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -46,6 +44,9 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 use tokio::time::sleep;
 use uuid::Uuid;
+
+use crate::config_reconciler::InternalDisksReceiver;
+use crate::config_reconciler::ReconcilerStateReceiver;
 
 // The name of the snapshot created from the zone root filesystem.
 const ZONE_ROOT_SNAPSHOT_NAME: &'static str = "zone-root";
@@ -136,7 +137,8 @@ pub struct ZoneBundler {
 // State shared between tasks, e.g., used when creating a bundle in different
 // tasks or between a creation and cleanup.
 struct Inner {
-    storage_handle: StorageHandle,
+    internal_disks_rx: InternalDisksReceiver,
+    reconciler_state_rx: ReconcilerStateReceiver,
     cleanup_context: CleanupContext,
     last_cleanup_at: Instant,
 }
@@ -164,13 +166,13 @@ impl Inner {
     // that can exist but do not, i.e., those whose parent datasets already
     // exist; and returns those.
     async fn bundle_directories(&self) -> Vec<Utf8PathBuf> {
-        let resources = self.storage_handle.get_latest_disks().await;
         // NOTE: These bundle directories are always stored on M.2s, so we don't
         // need to worry about synchronizing with U.2 disk expungement at the
         // callsite.
-        let expected = resources.all_zone_bundle_directories();
+        let internal_disks = self.internal_disks_rx.current();
+        let expected = internal_disks.all_zone_bundle_directories();
         let mut out = Vec::with_capacity(expected.len());
-        for each in expected.into_iter() {
+        for each in expected {
             if tokio::fs::create_dir_all(&each).await.is_ok() {
                 out.push(each);
             }
@@ -233,7 +235,8 @@ impl ZoneBundler {
     /// to clean them up to free up space.
     pub fn new(
         log: Logger,
-        storage_handle: StorageHandle,
+        internal_disks_rx: InternalDisksReceiver,
+        reconciler_state_rx: ReconcilerStateReceiver,
         cleanup_context: CleanupContext,
     ) -> Self {
         // This is compiled out in tests because there's no way to set our
@@ -251,7 +254,8 @@ impl ZoneBundler {
             .expect("Failed to initialize existing ZFS resources");
         let notify_cleanup = Arc::new(Notify::new());
         let inner = Arc::new(Mutex::new(Inner {
-            storage_handle,
+            internal_disks_rx,
+            reconciler_state_rx,
             cleanup_context,
             last_cleanup_at: Instant::now(),
         }));
@@ -352,11 +356,11 @@ impl ZoneBundler {
         // prior bundles have completed.
         let inner = self.inner.lock().await;
         let storage_dirs = inner.bundle_directories().await;
-        let resources = inner.storage_handle.get_latest_disks().await;
-        let extra_log_dirs = resources
-            .all_u2_mountpoints(U2_DEBUG_DATASET)
-            .into_iter()
-            .map(|pool_path| pool_path.path)
+        let extra_log_dirs = inner
+            .reconciler_state_rx
+            .current()
+            .all_mounted_debug_datasets()
+            .map(|p| p.path)
             .collect();
         let context = ZoneBundleContext { cause, storage_dirs, extra_log_dirs };
         info!(

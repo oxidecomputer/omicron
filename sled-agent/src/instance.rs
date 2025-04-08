@@ -8,6 +8,7 @@ use crate::common::instance::{
     Action as InstanceAction, InstanceStates, ObservedPropolisState,
     PublishedVmmState,
 };
+use crate::config_reconciler::ReconcilerStateReceiver;
 use crate::instance_manager::{
     Error as ManagerError, InstanceManagerServices, InstanceTicket,
 };
@@ -41,8 +42,6 @@ use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::{ZoneBundleCause, ZoneBundleMetadata};
-use sled_storage::dataset::ZONE_DATASET;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -502,7 +501,7 @@ struct InstanceRunner {
     nexus_client: NexusClient,
 
     // Storage resources
-    storage: StorageHandle,
+    reconciler_state_rx: ReconcilerStateReceiver,
 
     // Used to create propolis zones
     zone_builder_factory: ZoneBuilderFactory,
@@ -1724,7 +1723,7 @@ impl Instance {
             nexus_client,
             vnic_allocator,
             port_manager,
-            storage,
+            reconciler_state_rx,
             zone_bundler,
             zone_builder_factory,
             metrics_queue,
@@ -1822,7 +1821,7 @@ impl Instance {
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,
-            storage,
+            reconciler_state_rx,
             zone_builder_factory,
             zone_bundler,
             metrics_queue,
@@ -2149,14 +2148,11 @@ impl InstanceRunner {
         // configured VNICs.
         let zname = propolis_zone_name(&self.propolis_id);
         let mut rng = rand::rngs::StdRng::from_entropy();
-        let latest_disks = self
-            .storage
-            .get_latest_disks()
-            .await
-            .all_u2_mountpoints(ZONE_DATASET);
 
-        let root = latest_disks
-            .into_iter()
+        let root = self
+            .reconciler_state_rx
+            .current()
+            .all_mounted_zone_root_datasets()
             .choose(&mut rng)
             .ok_or_else(|| Error::U2NotFound)?;
         let installed_zone = self

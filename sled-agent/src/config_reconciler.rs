@@ -19,6 +19,8 @@ use id_map::Entry;
 use id_map::IdMap;
 use id_map::IdMappable as _;
 use illumos_utils::dladm::EtherstubVnic;
+use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use omicron_common::disk::DiskIdentity;
@@ -27,6 +29,7 @@ use sled_storage::disk::RawDisk;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use tokio::sync::watch;
+use tokio::sync::watch::error::RecvError;
 
 mod datasets;
 mod external_disks;
@@ -35,11 +38,9 @@ mod ledger;
 mod raw_disks;
 mod zones;
 
-use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::services::ServiceManager;
 use crate::services::TimeSyncConfig;
-use crate::zone_bundle::ZoneBundler;
 
 use self::datasets::DatasetMap;
 use self::datasets::DatasetTaskReconcilerHandle;
@@ -50,17 +51,88 @@ use self::ledger::LedgerTaskHandle;
 use self::zones::TimeSyncStatus;
 use self::zones::ZoneMap;
 
+pub use self::datasets::DatasetTask;
+pub use self::datasets::DatasetTaskError;
+pub use self::datasets::DatasetTaskSupportBundleHandle;
+pub use self::internal_disks::InternalDisksReceiver;
 pub use self::ledger::LedgerTaskError;
 
+#[derive(Debug)]
+pub struct RawDisksSender {
+    tx: watch::Sender<IdMap<RawDisk>>,
+}
+
+impl RawDisksSender {
+    pub fn set_raw_disks<I>(&self, raw_disks: I)
+    where
+        I: Iterator<Item = RawDisk>,
+    {
+        let new_raw_disks = raw_disks.collect::<IdMap<_>>();
+        self.tx.send_if_modified(|prev_raw_disks| {
+            if *prev_raw_disks == new_raw_disks {
+                false
+            } else {
+                *prev_raw_disks = new_raw_disks;
+                true
+            }
+        });
+    }
+
+    pub fn add_or_update_raw_disk(&self, raw_disk: RawDisk) {
+        self.tx.send_if_modified(|raw_disks| {
+            match raw_disks.entry(raw_disk.id()) {
+                Entry::Vacant(vacant_entry) => {
+                    vacant_entry.insert(raw_disk);
+                    true
+                }
+                Entry::Occupied(mut occupied_entry) => {
+                    if *occupied_entry.get() == raw_disk {
+                        false
+                    } else {
+                        occupied_entry.insert(raw_disk);
+                        true
+                    }
+                }
+            }
+        });
+    }
+
+    pub fn remove_raw_disk(&self, identity: &DiskIdentity) {
+        self.tx
+            .send_if_modified(|raw_disks| raw_disks.remove(identity).is_some());
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReconcilerStateReceiver {
+    rx: watch::Receiver<Arc<ReconcilerTaskState>>,
+}
+
+impl ReconcilerStateReceiver {
+    pub(crate) fn current(&self) -> Arc<ReconcilerTaskState> {
+        Arc::clone(&*self.rx.borrow())
+    }
+
+    pub(crate) fn current_and_update(&mut self) -> Arc<ReconcilerTaskState> {
+        Arc::clone(&*self.rx.borrow_and_update())
+    }
+
+    pub(crate) async fn changed(&mut self) -> Result<(), RecvError> {
+        self.rx.changed().await
+    }
+}
+
+#[derive(Debug)]
 pub struct ConfigReconcilerHandle {
     reconciler_state_rx: watch::Receiver<Arc<ReconcilerTaskState>>,
-    raw_disks: watch::Sender<IdMap<RawDisk>>,
+    internal_disks_rx: InternalDisksReceiver,
     ledger_task: LedgerTaskHandle,
     hold_while_waiting_for_sled_agent:
         Mutex<Option<ReconcilerTaskDependenciesHeldUntilSledAgentStarted>>,
     log: Logger,
 }
 
+#[derive(Debug)]
 struct ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
     reconciler_state_tx: watch::Sender<Arc<ReconcilerTaskState>>,
     current_config_rx: watch::Receiver<CurrentConfig>,
@@ -75,11 +147,11 @@ impl ConfigReconcilerHandle {
     pub(crate) fn new(
         key_requester: StorageKeyRequester,
         dataset_task_handle: DatasetTaskReconcilerHandle,
-        mount_config: Arc<MountConfig>,
         time_sync_config: TimeSyncConfig,
         base_log: &Logger,
-    ) -> Self {
-        let (raw_disks, raw_disks_rx) = watch::channel(IdMap::new());
+    ) -> (Self, RawDisksSender) {
+        let mount_config = Arc::clone(dataset_task_handle.mount_config());
+        let (raw_disks_tx, raw_disks_rx) = watch::channel(IdMap::new());
         let internal_disks_rx = InternalDisksTask::spawn(
             Arc::clone(&mount_config),
             raw_disks_rx.clone(),
@@ -87,7 +159,7 @@ impl ConfigReconcilerHandle {
         );
 
         let (ledger_task, current_config_rx) = LedgerTask::spawn(
-            internal_disks_rx,
+            internal_disks_rx.clone(),
             base_log.new(slog::o!("component" => "LedgerTask")),
         );
 
@@ -109,21 +181,30 @@ impl ConfigReconcilerHandle {
         let log =
             base_log.new(slog::o!("component" => "ConfigReconcilerHandle"));
 
-        Self {
-            reconciler_state_rx,
-            raw_disks,
-            ledger_task,
-            hold_while_waiting_for_sled_agent,
-            log,
-        }
+        (
+            Self {
+                reconciler_state_rx,
+                internal_disks_rx,
+                ledger_task,
+                hold_while_waiting_for_sled_agent,
+                log,
+            },
+            RawDisksSender { tx: raw_disks_tx },
+        )
+    }
+
+    pub(crate) fn internal_disks_rx(&self) -> &InternalDisksReceiver {
+        &self.internal_disks_rx
+    }
+
+    pub(crate) fn reconciler_state_rx(&self) -> ReconcilerStateReceiver {
+        ReconcilerStateReceiver { rx: self.reconciler_state_rx.clone() }
     }
 
     pub(crate) fn spawn_reconciliation_task(
         &self,
         service_manager: ServiceManager,
         metrics_queue: MetricsRequestQueue,
-        zone_bundler: ZoneBundler,
-        ddm_reconciler: DdmReconciler,
         underlay_vnic: EtherstubVnic,
     ) {
         let deps =
@@ -161,52 +242,11 @@ impl ConfigReconcilerHandle {
             key_requester,
             dataset_task_handle,
             metrics_queue,
-            zone_bundler,
-            ddm_reconciler,
             underlay_vnic,
             log,
         };
 
         tokio::task::spawn(reconciler_task.run());
-    }
-
-    pub fn set_raw_disks<I>(&self, raw_disks: I)
-    where
-        I: Iterator<Item = RawDisk>,
-    {
-        let new_raw_disks = raw_disks.collect::<IdMap<_>>();
-        self.raw_disks.send_if_modified(|prev_raw_disks| {
-            if *prev_raw_disks == new_raw_disks {
-                false
-            } else {
-                *prev_raw_disks = new_raw_disks;
-                true
-            }
-        });
-    }
-
-    pub fn add_or_insert_raw_disk(&self, raw_disk: RawDisk) {
-        self.raw_disks.send_if_modified(|raw_disks| {
-            match raw_disks.entry(raw_disk.id()) {
-                Entry::Vacant(vacant_entry) => {
-                    vacant_entry.insert(raw_disk);
-                    true
-                }
-                Entry::Occupied(mut occupied_entry) => {
-                    if *occupied_entry.get() == raw_disk {
-                        false
-                    } else {
-                        occupied_entry.insert(raw_disk);
-                        true
-                    }
-                }
-            }
-        });
-    }
-
-    pub fn remove_raw_disk(&self, identity: &DiskIdentity) {
-        self.raw_disks
-            .send_if_modified(|raw_disks| raw_disks.remove(identity).is_some());
     }
 
     pub async fn set_new_config(
@@ -269,6 +309,28 @@ impl ReconcilerTaskState {
             || self.datasets.has_dataset_with_retryable_error()
             || self.zones.has_zone_with_retryable_error()
     }
+
+    // TODO-john comments! only use this for "is the zpool still here"; maybe we
+    // need a different function?
+    pub fn all_managed_external_disk_pools(
+        &self,
+    ) -> impl Iterator<Item = &ZpoolName> + '_ {
+        self.external_disks.all_managed_external_disk_pools()
+    }
+
+    pub(crate) fn all_mounted_zone_root_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.datasets
+            .all_mounted_zone_root_datasets(self.external_disks.mount_config())
+    }
+
+    pub(crate) fn all_mounted_debug_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.datasets
+            .all_mounted_debug_datasets(self.external_disks.mount_config())
+    }
 }
 
 struct ReconcilerTask {
@@ -280,8 +342,6 @@ struct ReconcilerTask {
     key_requester: StorageKeyRequester,
     dataset_task_handle: DatasetTaskReconcilerHandle,
     metrics_queue: MetricsRequestQueue,
-    zone_bundler: ZoneBundler,
-    ddm_reconciler: DdmReconciler,
     underlay_vnic: EtherstubVnic,
     log: Logger,
 }
@@ -475,8 +535,8 @@ impl ReconcilerTask {
             .shut_down_zones_if_needed(
                 &sled_config.zones,
                 &self.metrics_queue,
-                &self.zone_bundler,
-                &self.ddm_reconciler,
+                self.service_manager.zone_bundler(),
+                self.service_manager.ddm_reconciler(),
                 &self.underlay_vnic,
                 &self.log,
             )
@@ -512,7 +572,11 @@ impl ReconcilerTask {
         // Both dataset and zone creation want to check zpool details against
         // what zpools we are managing; grab that snapshot now that we've
         // (potentially) started managing more disks.
-        let managed_external_zpools = state.external_disks.all_u2_pools();
+        let managed_external_zpools = state
+            .external_disks
+            .all_managed_external_disk_pools()
+            .cloned()
+            .collect::<Vec<_>>();
 
         match self
             .dataset_task_handle
@@ -545,6 +609,11 @@ impl ReconcilerTask {
         state.timesync_status =
             state.zones.timesync_status(&self.time_sync_config).await;
 
+        if state.timesync_status.is_synchronized() {
+            // TODO-cleanup Should we do this work instead?
+            self.service_manager.on_time_sync().await;
+        }
+
         state
             .zones
             .start_zones_if_needed(
@@ -552,7 +621,7 @@ impl ReconcilerTask {
                 &self.service_manager,
                 state.external_disks.mount_config(),
                 state.timesync_status.is_synchronized(),
-                &state.external_disks.all_u2_pools(),
+                &managed_external_zpools,
                 &self.log,
             )
             .await;

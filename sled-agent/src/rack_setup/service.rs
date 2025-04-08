@@ -73,6 +73,7 @@ use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
+use crate::config_reconciler::InternalDisksReceiver;
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
@@ -125,8 +126,6 @@ use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::time_sync::TimeSync;
 use sled_hardware_types::underlay::BootstrapInterface;
-use sled_storage::dataset::CONFIG_DATASET;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet, btree_map};
@@ -255,15 +254,15 @@ impl RackSetupService {
     /// Arguments:
     /// - `log`: The logger.
     /// - `config`: The config file, which is used to setup the rack.
-    /// - `storage_manager`: A handle for interacting with the storage manager
-    ///   task
+    /// - `internal_disks_rx`: A handle for viewing the state of managed
+    ///   internal disks
     /// - `local_bootstrap_agent`: Communication channel by which we can send
     ///   commands to our local bootstrap-agent (e.g., to start sled-agents)
     /// - `bootstore` - A handle to call bootstore APIs
     pub(crate) fn new(
         log: Logger,
         config: Config,
-        storage_manager: StorageHandle,
+        internal_disks_rx: InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
         step_tx: watch::Sender<RssStep>,
@@ -273,7 +272,7 @@ impl RackSetupService {
             if let Err(e) = svc
                 .run(
                     &config,
-                    &storage_manager,
+                    &internal_disks_rx,
                     local_bootstrap_agent,
                     bootstore,
                     step_tx,
@@ -1115,7 +1114,7 @@ impl ServiceInner {
     async fn run(
         &self,
         config: &Config,
-        storage_manager: &StorageHandle,
+        internal_disks_rx: &InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
         step_tx: watch::Sender<RssStep>,
@@ -1128,19 +1127,15 @@ impl ServiceInner {
             config.az_subnet(),
         )?;
 
-        let started_marker_paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter()
+        let internal_disks = internal_disks_rx.current();
+
+        let started_marker_paths: Vec<Utf8PathBuf> = internal_disks
+            .all_config_datasets()
             .map(|p| p.join(RSS_STARTED_FILENAME))
             .collect();
 
-        let completed_marker_paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter()
+        let completed_marker_paths: Vec<Utf8PathBuf> = internal_disks
+            .all_config_datasets()
             .map(|p| p.join(RSS_COMPLETED_FILENAME))
             .collect();
 

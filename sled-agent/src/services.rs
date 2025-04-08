@@ -30,6 +30,7 @@ use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::config::SidecarRevision;
+use crate::config_reconciler::InternalDisksReceiver;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
@@ -108,14 +109,11 @@ use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
-use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
-use sled_storage::manager::StorageHandle;
+use sled_storage::dataset::{INSTALL_DATASET, ZONE_DATASET};
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use tokio::io::AsyncWriteExt;
@@ -125,8 +123,6 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use illumos_utils::zone::Zones;
-
-const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
 
 const COCKROACH: &str = "/opt/oxide/cockroachdb/bin/cockroach";
 
@@ -502,9 +498,6 @@ impl RealSystemApi {
 
 impl SystemApi for RealSystemApi {}
 
-// The filename of the ledger, within the provided directory.
-const ZONES_LEDGER_FILENAME: &str = "omicron-zones.json";
-
 /// Combines the Nexus-provided `OmicronZonesConfig` (which describes what Nexus
 /// wants for all of its zones) with the locally-determined configuration for
 /// these zones.
@@ -718,6 +711,7 @@ enum SwitchZoneState {
     },
 }
 
+/*
 // The return type for `start_omicron_zones`.
 //
 // When multiple zones are started concurrently, some can fail while others
@@ -731,12 +725,14 @@ struct StartZonesResult {
     // The set of (zone name, error) of zones that failed to start.
     errors: Vec<(String, Error)>,
 }
+*/
 
 // A running zone and the configuration which started it.
+// TODO-john remove
 #[derive(Debug)]
 pub(crate) struct OmicronZone {
     runtime: RunningZone,
-    config: OmicronZoneConfigLocal,
+    //config: OmicronZoneConfigLocal,
 }
 
 impl OmicronZone {
@@ -759,7 +755,6 @@ pub struct ServiceManagerInner {
     global_zone_bootstrap_link_local_address: Ipv6Addr,
     switch_zone: Mutex<SwitchZoneState>,
     sled_mode: SledMode,
-    time_sync_config: TimeSyncConfig,
     time_synced: AtomicBool,
     switch_zone_maghemite_links: Vec<PhysicalLink>,
     sidecar_revision: SidecarRevision,
@@ -771,9 +766,9 @@ pub struct ServiceManagerInner {
     ddm_reconciler: DdmReconciler,
     sled_info: OnceLock<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
-    storage: StorageHandle,
+    internal_disks_rx: InternalDisksReceiver,
     zone_bundler: ZoneBundler,
-    ledger_directory_override: OnceLock<Utf8PathBuf>,
+    //ledger_directory_override: OnceLock<Utf8PathBuf>,
     image_directory_override: OnceLock<Utf8PathBuf>,
     system_api: Box<dyn SystemApi>,
 }
@@ -790,6 +785,7 @@ struct SledAgentInfo {
     metrics_queue: MetricsRequestQueue,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum TimeSyncConfig {
     // Waits for NTP to confirm that time has been synchronized.
     Normal,
@@ -908,21 +904,20 @@ impl ServiceManager {
     /// - `bootstrap_networking`: Collection of etherstubs/VNICs set up when
     ///    bootstrap agent begins
     /// - `sled_mode`: The sled's mode of operation (Gimlet vs Scrimlet).
-    /// - `time_sync_config`: Describes how the sled awaits synced time.
     /// - `sidecar_revision`: Rev of attached sidecar, if present.
     /// - `switch_zone_maghemite_links`: List of physical links on which
     ///    maghemite should listen.
-    /// - `storage`: Shared handle to get the current state of disks/zpools.
+    /// - `internal_disks_rx`: Watch channel receiver to get current state
+    ///    of internal (M.2) disks
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         log: &Logger,
         ddm_reconciler: DdmReconciler,
         bootstrap_networking: BootstrapNetworking,
         sled_mode: SledMode,
-        time_sync_config: TimeSyncConfig,
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
-        storage: StorageHandle,
+        internal_disks_rx: InternalDisksReceiver,
         zone_bundler: ZoneBundler,
     ) -> Self {
         Self::new_inner(
@@ -930,10 +925,9 @@ impl ServiceManager {
             ddm_reconciler,
             bootstrap_networking,
             sled_mode,
-            time_sync_config,
             sidecar_revision,
             switch_zone_maghemite_links,
-            storage,
+            internal_disks_rx,
             zone_bundler,
             RealSystemApi::new(),
         )
@@ -945,10 +939,9 @@ impl ServiceManager {
         ddm_reconciler: DdmReconciler,
         bootstrap_networking: BootstrapNetworking,
         sled_mode: SledMode,
-        time_sync_config: TimeSyncConfig,
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
-        storage: StorageHandle,
+        internal_disks_rx: InternalDisksReceiver,
         zone_bundler: ZoneBundler,
         system_api: Box<dyn SystemApi>,
     ) -> Self {
@@ -963,7 +956,6 @@ impl ServiceManager {
                 // Load the switch zone if it already exists?
                 switch_zone: Mutex::new(SwitchZoneState::Disabled),
                 sled_mode,
-                time_sync_config,
                 time_synced: AtomicBool::new(false),
                 sidecar_revision,
                 switch_zone_maghemite_links,
@@ -983,23 +975,29 @@ impl ServiceManager {
                 sled_info: OnceLock::new(),
                 switch_zone_bootstrap_address: bootstrap_networking
                     .switch_zone_bootstrap_ip,
-                storage,
+                internal_disks_rx,
                 zone_bundler,
-                ledger_directory_override: OnceLock::new(),
+                //ledger_directory_override: OnceLock::new(),
                 image_directory_override: OnceLock::new(),
                 system_api,
             }),
         }
     }
 
+    /*
     #[cfg(all(test, target_os = "illumos"))]
     fn override_ledger_directory(&self, path: Utf8PathBuf) {
         self.inner.ledger_directory_override.set(path).unwrap();
     }
+    */
 
     #[cfg(all(test, target_os = "illumos"))]
     fn override_image_directory(&self, path: Utf8PathBuf) {
         self.inner.image_directory_override.set(path).unwrap();
+    }
+
+    pub(crate) fn zone_bundler(&self) -> &ZoneBundler {
+        &self.inner.zone_bundler
     }
 
     pub(crate) fn ddm_reconciler(&self) -> &DdmReconciler {
@@ -1010,6 +1008,7 @@ impl ServiceManager {
         self.inner.switch_zone_bootstrap_address
     }
 
+    /*
     // TODO: This function refers to an old, deprecated format for storing
     // service information. It is not deprecated for cleanup purposes, but
     // should otherwise not be called in new code.
@@ -1037,6 +1036,7 @@ impl ServiceManager {
             .map(|p| p.join(ZONES_LEDGER_FILENAME))
             .collect()
     }
+    */
 
     // Loads persistent configuration about any Omicron-managed zones that we're
     // supposed to be running.
@@ -1046,6 +1046,9 @@ impl ServiceManager {
         // lock.
         _map: &MutexGuard<'_, ZoneMap>,
     ) -> Result<Option<Ledger<OmicronZonesConfigLocal>>, Error> {
+        // TODO-john
+        unimplemented!("removed")
+        /*
         let log = &self.inner.log;
 
         // NOTE: This is a function where we used to access zones by "service
@@ -1088,6 +1091,7 @@ impl ServiceManager {
             "zones_config" => ?ledger.data()
         );
         Ok(Some(ledger))
+        */
     }
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
@@ -1712,10 +1716,10 @@ impl ServiceManager {
 
         // If the boot disk exists, look for the image in the "install" dataset
         // there too.
-        let all_disks = self.inner.storage.get_latest_disks().await;
-        if let Some((_, boot_zpool)) = all_disks.boot_disk() {
+        let internal_disks = self.inner.internal_disks_rx.current();
+        if let Some(boot_zpool) = internal_disks.boot_disk_zpool() {
             zone_image_paths.push(boot_zpool.dataset_mountpoint(
-                &all_disks.mount_config().root,
+                &internal_disks.mount_config().root,
                 INSTALL_DATASET,
             ));
         }
@@ -3495,9 +3499,10 @@ impl ServiceManager {
             )
             .await?;
 
-        Ok(OmicronZone { runtime, config })
+        Ok(OmicronZone { runtime })
     }
 
+    /*
     // Concurrently attempts to start all zones identified by requests.
     //
     // This method is NOT idempotent.
@@ -3551,6 +3556,7 @@ impl ServiceManager {
         }
         Ok(StartZonesResult { new_zones, errors })
     }
+    */
 
     /// Create a zone bundle for the provided zone.
     pub async fn create_zone_bundle(
@@ -3581,6 +3587,9 @@ impl ServiceManager {
 
     /// Returns the current Omicron zone configuration
     pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
+        // TODO-john
+        unimplemented!("removed")
+        /*
         let log = &self.inner.log;
 
         // We need to take the lock in order for the information in the ledger
@@ -3600,6 +3609,7 @@ impl ServiceManager {
         };
 
         ledger_data.to_omicron_zones_config()
+        */
     }
 
     /// Ensures that particular Omicron zones are running
@@ -3609,8 +3619,11 @@ impl ServiceManager {
     /// boot.
     pub async fn ensure_all_omicron_zones_persistent(
         &self,
-        mut request: OmicronZonesConfig,
+        _request: OmicronZonesConfig,
     ) -> Result<(), Error> {
+        // TODO-john
+        unimplemented!("removed")
+        /*
         let log = &self.inner.log;
 
         let mut existing_zones = self.inner.zones.lock().await;
@@ -3695,6 +3708,7 @@ impl ServiceManager {
         ledger.commit().await?;
 
         Ok(())
+            */
     }
 
     // Ensures that only the following Omicron zones are running.
@@ -3721,9 +3735,12 @@ impl ServiceManager {
         &self,
         // The MutexGuard here attempts to ensure that the caller has the right
         // lock held when calling this function.
-        existing_zones: &mut MutexGuard<'_, ZoneMap>,
-        new_request: OmicronZonesConfig,
+        _existing_zones: &mut MutexGuard<'_, ZoneMap>,
+        _new_request: OmicronZonesConfig,
     ) -> Result<(), Error> {
+        // TODO-john remove
+        unimplemented!("removed")
+        /*
         // Do some data-normalization to ensure we can compare the "requested
         // set" vs the "existing set" as HashSets.
         let ReconciledNewZonesRequest {
@@ -3772,8 +3789,10 @@ impl ServiceManager {
             return Err(Error::ZoneEnsure { errors });
         }
         Ok(())
+        */
     }
 
+    /*
     // Attempts to take a zone bundle and remove a zone.
     //
     // Logs, but does not return an error on failure.
@@ -3828,6 +3847,7 @@ impl ServiceManager {
             );
         }
     }
+    */
 
     // Ensures that if a zone is about to be installed, it does not exist.
     async fn ensure_removed(
@@ -4097,95 +4117,99 @@ impl ServiceManager {
 
     async fn timesync_get_locked(
         &self,
-        existing_zones: &tokio::sync::MutexGuard<'_, ZoneMap>,
+        _existing_zones: &tokio::sync::MutexGuard<'_, ZoneMap>,
     ) -> Result<TimeSync, Error> {
-        let skip_timesync = match &self.inner.time_sync_config {
-            TimeSyncConfig::Normal => false,
-            TimeSyncConfig::Skip => true,
-            #[cfg(all(test, target_os = "illumos"))]
-            TimeSyncConfig::Fail => {
-                info!(self.inner.log, "Configured to fail timesync checks");
-                return Err(Error::TimeNotSynchronized);
-            }
-        };
+        // TODO-john
+        unimplemented!("removed")
+        /*
+            let skip_timesync = match &self.inner.time_sync_config {
+                TimeSyncConfig::Normal => false,
+                TimeSyncConfig::Skip => true,
+                #[cfg(all(test, target_os = "illumos"))]
+                TimeSyncConfig::Fail => {
+                    info!(self.inner.log, "Configured to fail timesync checks");
+                    return Err(Error::TimeNotSynchronized);
+                }
+            };
 
-        if skip_timesync {
-            info!(self.inner.log, "Configured to skip timesync checks");
-            self.on_time_sync().await;
-            return Ok(TimeSync {
-                sync: true,
-                ref_id: 0,
-                ip_addr: IPV6_UNSPECIFIED,
-                stratum: 0,
-                ref_time: 0.0,
-                correction: 0.00,
-            });
-        };
+            if skip_timesync {
+                info!(self.inner.log, "Configured to skip timesync checks");
+                self.on_time_sync().await;
+                return Ok(TimeSync {
+                    sync: true,
+                    ref_id: 0,
+                    ip_addr: IPV6_UNSPECIFIED,
+                    stratum: 0,
+                    ref_time: 0.0,
+                    correction: 0.00,
+                });
+            };
 
-        let ntp_zone_name =
-            InstalledZone::get_zone_name(ZoneKind::NTP_PREFIX, None);
+            let ntp_zone_name =
+                InstalledZone::get_zone_name(ZoneKind::NTP_PREFIX, None);
 
-        let ntp_zone = existing_zones
-            .iter()
-            .find(|(name, _)| name.starts_with(&ntp_zone_name))
-            .ok_or_else(|| Error::NtpZoneNotReady)?
-            .1;
+            let ntp_zone = existing_zones
+                .iter()
+                .find(|(name, _)| name.starts_with(&ntp_zone_name))
+                .ok_or_else(|| Error::NtpZoneNotReady)?
+                .1;
 
-        // XXXNTP - This could be replaced with a direct connection to the
-        // daemon using a patched version of the chrony_candm crate to allow
-        // a custom server socket path. From the GZ, it should be possible to
-        // connect to the UNIX socket at
-        // format!("{}/var/run/chrony/chronyd.sock", ntp_zone.root())
+            // XXXNTP - This could be replaced with a direct connection to the
+            // daemon using a patched version of the chrony_candm crate to allow
+            // a custom server socket path. From the GZ, it should be possible to
+            // connect to the UNIX socket at
+            // format!("{}/var/run/chrony/chronyd.sock", ntp_zone.root())
 
-        match ntp_zone.runtime.run_cmd(&["/usr/bin/chronyc", "-c", "tracking"])
-        {
-            Ok(stdout) => {
-                let v: Vec<&str> = stdout.split(',').collect();
+            match ntp_zone.runtime.run_cmd(&["/usr/bin/chronyc", "-c", "tracking"])
+            {
+                Ok(stdout) => {
+                    let v: Vec<&str> = stdout.split(',').collect();
 
-                if v.len() > 9 {
-                    let ref_id = u32::from_str_radix(v[0], 16)
-                        .map_err(|_| Error::NtpZoneNotReady)?;
-                    let ip_addr =
-                        IpAddr::from_str(v[1]).unwrap_or(IPV6_UNSPECIFIED);
-                    let stratum = u8::from_str(v[2])
-                        .map_err(|_| Error::NtpZoneNotReady)?;
-                    let ref_time = f64::from_str(v[3])
-                        .map_err(|_| Error::NtpZoneNotReady)?;
-                    let correction = f64::from_str(v[4])
-                        .map_err(|_| Error::NtpZoneNotReady)?;
+                    if v.len() > 9 {
+                        let ref_id = u32::from_str_radix(v[0], 16)
+                            .map_err(|_| Error::NtpZoneNotReady)?;
+                        let ip_addr =
+                            IpAddr::from_str(v[1]).unwrap_or(IPV6_UNSPECIFIED);
+                        let stratum = u8::from_str(v[2])
+                            .map_err(|_| Error::NtpZoneNotReady)?;
+                        let ref_time = f64::from_str(v[3])
+                            .map_err(|_| Error::NtpZoneNotReady)?;
+                        let correction = f64::from_str(v[4])
+                            .map_err(|_| Error::NtpZoneNotReady)?;
 
-                    // Per `chronyc waitsync`'s implementation, if either the
-                    // reference IP address is not unspecified or the reference
-                    // ID is not 0 or 0x7f7f0101, we are synchronized to a peer.
-                    let peer_sync = !ip_addr.is_unspecified()
-                        || (ref_id != 0 && ref_id != 0x7f7f0101);
+                        // Per `chronyc waitsync`'s implementation, if either the
+                        // reference IP address is not unspecified or the reference
+                        // ID is not 0 or 0x7f7f0101, we are synchronized to a peer.
+                        let peer_sync = !ip_addr.is_unspecified()
+                            || (ref_id != 0 && ref_id != 0x7f7f0101);
 
-                    let sync = stratum < 10
-                        && ref_time > 1234567890.0
-                        && peer_sync
-                        && correction.abs() <= 0.05;
+                        let sync = stratum < 10
+                            && ref_time > 1234567890.0
+                            && peer_sync
+                            && correction.abs() <= 0.05;
 
-                    if sync {
-                        self.on_time_sync().await;
+                        if sync {
+                            self.on_time_sync().await;
+                        }
+
+                        Ok(TimeSync {
+                            sync,
+                            ref_id,
+                            ip_addr,
+                            stratum,
+                            ref_time,
+                            correction,
+                        })
+                    } else {
+                        Err(Error::NtpZoneNotReady)
                     }
-
-                    Ok(TimeSync {
-                        sync,
-                        ref_id,
-                        ip_addr,
-                        stratum,
-                        ref_time,
-                        correction,
-                    })
-                } else {
+                }
+                Err(e) => {
+                    error!(self.inner.log, "chronyc command failed: {}", e);
                     Err(Error::NtpZoneNotReady)
                 }
             }
-            Err(e) => {
-                error!(self.inner.log, "chronyc command failed: {}", e);
-                Err(Error::NtpZoneNotReady)
-            }
-        }
+        */
     }
 
     /// Check if the synchronization state of the sled has shifted to true and
@@ -4193,7 +4217,7 @@ impl ServiceManager {
     ///
     /// This function only executes the out-of-band actions once, once the
     /// synchronization state has shifted to true.
-    async fn on_time_sync(&self) {
+    pub(crate) async fn on_time_sync(&self) {
         if self
             .inner
             .time_synced
@@ -4990,6 +5014,7 @@ pub(crate) fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
     format!("internaldns{gz_address_index}")
 }
 
+/*
 #[derive(Debug)]
 struct ReconciledNewZonesRequest {
     zones_to_be_removed: HashSet<OmicronZoneConfig>,
@@ -5151,6 +5176,7 @@ fn reconcile_running_zones_with_new_request_impl<'a>(
     );
     Ok(ReconciledNewZonesRequest { zones_to_be_removed, zones_to_be_added })
 }
+*/
 
 #[cfg(all(test, target_os = "illumos"))]
 mod illumos_tests {

@@ -14,7 +14,6 @@ use futures::StreamExt;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
-use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -28,7 +27,6 @@ use sled_agent_api::*;
 use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::NestedDatasetLocation;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
@@ -39,6 +37,9 @@ use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use tufaceous_artifact::ArtifactHash;
 use zip::result::ZipError;
+
+use crate::config_reconciler::DatasetTaskError;
+use crate::config_reconciler::DatasetTaskSupportBundleHandle;
 
 // The final name of the bundle, as it is stored within the dedicated
 // datasets.
@@ -85,6 +86,9 @@ pub enum Error {
 
     #[error(transparent)]
     Zip(#[from] ZipError),
+
+    #[error(transparent)]
+    DatasetTask(#[from] DatasetTaskError),
 }
 
 fn err_str(err: &dyn std::error::Error) -> String {
@@ -130,8 +134,12 @@ pub trait LocalStorage: Sync {
     // implementation, then a "missing function" dispatches to the trait instead
     // and results in infinite recursion.
 
-    /// Returns all configured datasets
-    async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error>;
+    /// TODO-john comments
+    async fn dyn_get_configured_dataset(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) -> Result<DatasetConfig, Error>;
 
     /// Returns all nested datasets within an existing dataset
     async fn dyn_nested_dataset_list(
@@ -161,9 +169,14 @@ pub trait LocalStorage: Sync {
 
 /// This implementation is effectively a pass-through to the real methods
 #[async_trait]
-impl LocalStorage for StorageHandle {
-    async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
-        self.datasets_config_list().await.map_err(|err| err.into())
+impl LocalStorage for DatasetTaskSupportBundleHandle {
+    async fn dyn_get_configured_dataset(
+        &self,
+        _zpool_id: ZpoolUuid,
+        _dataset_id: DatasetUuid,
+    ) -> Result<DatasetConfig, Error> {
+        todo!()
+        //self.get_configured_dataset(zpool_id, dataset_id)??
     }
 
     async fn dyn_nested_dataset_list(
@@ -171,21 +184,21 @@ impl LocalStorage for StorageHandle {
         name: NestedDatasetLocation,
         options: NestedDatasetListOptions,
     ) -> Result<Vec<NestedDatasetConfig>, Error> {
-        self.nested_dataset_list(name, options).await.map_err(|err| err.into())
+        self.nested_dataset_list(name, options).await.map_err(From::from)
     }
 
     async fn dyn_nested_dataset_ensure(
         &self,
         config: NestedDatasetConfig,
     ) -> Result<(), Error> {
-        self.nested_dataset_ensure(config).await.map_err(|err| err.into())
+        self.nested_dataset_ensure(config).await.map_err(From::from)
     }
 
     async fn dyn_nested_dataset_destroy(
         &self,
         name: NestedDatasetLocation,
     ) -> Result<(), Error> {
-        self.nested_dataset_destroy(name).await.map_err(|err| err.into())
+        self.nested_dataset_destroy(name).await.map_err(From::from)
     }
 
     fn zpool_mountpoint_root(&self) -> Cow<Utf8Path> {
@@ -196,9 +209,17 @@ impl LocalStorage for StorageHandle {
 /// This implementation allows storage bundles to be stored on simulated storage
 #[async_trait]
 impl LocalStorage for crate::sim::Storage {
-    async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
-        self.lock().datasets_config_list().map_err(|err| err.into())
+    async fn dyn_get_configured_dataset(
+        &self,
+        _zpool_id: ZpoolUuid,
+        _dataset_id: DatasetUuid,
+    ) -> Result<DatasetConfig, Error> {
+        todo!()
+        //self.get_configured_dataset(zpool_id, dataset_id)??
     }
+    //async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
+    //    self.lock().datasets_config_list().map_err(|err| err.into())
+    //}
 
     async fn dyn_nested_dataset_list(
         &self,
@@ -377,6 +398,7 @@ impl<'a> SupportBundleManager<'a> {
         Self { log, storage }
     }
 
+    /*
     // Returns a dataset that the sled has been explicitly configured to use.
     async fn get_configured_dataset(
         &self,
@@ -404,6 +426,7 @@ impl<'a> SupportBundleManager<'a> {
         }
         Ok(dataset.clone())
     }
+    */
 
     /// Lists all support bundles on a particular dataset.
     pub async fn list(
@@ -411,8 +434,11 @@ impl<'a> SupportBundleManager<'a> {
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> Result<Vec<SupportBundleMetadata>, Error> {
-        let root =
-            self.get_configured_dataset(zpool_id, dataset_id).await?.name;
+        let root = self
+            .storage
+            .dyn_get_configured_dataset(zpool_id, dataset_id)
+            .await?
+            .name;
         let dataset_location =
             NestedDatasetLocation { path: String::from(""), root };
         let datasets = self
@@ -522,8 +548,11 @@ impl<'a> SupportBundleManager<'a> {
             "bundle_id" => support_bundle_id.to_string(),
         ));
         info!(log, "creating support bundle");
-        let root =
-            self.get_configured_dataset(zpool_id, dataset_id).await?.name;
+        let root = self
+            .storage
+            .dyn_get_configured_dataset(zpool_id, dataset_id)
+            .await?
+            .name;
         let dataset =
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
         // The mounted root of the support bundle dataset
@@ -623,8 +652,11 @@ impl<'a> SupportBundleManager<'a> {
             "bundle_id" => support_bundle_id.to_string(),
         ));
         info!(log, "Destroying support bundle");
-        let root =
-            self.get_configured_dataset(zpool_id, dataset_id).await?.name;
+        let root = self
+            .storage
+            .dyn_get_configured_dataset(zpool_id, dataset_id)
+            .await?
+            .name;
         self.storage
             .dyn_nested_dataset_destroy(NestedDatasetLocation {
                 path: support_bundle_id.to_string(),
@@ -641,8 +673,11 @@ impl<'a> SupportBundleManager<'a> {
         dataset_id: DatasetUuid,
         support_bundle_id: SupportBundleUuid,
     ) -> Result<tokio::fs::File, Error> {
-        let root =
-            self.get_configured_dataset(zpool_id, dataset_id).await?.name;
+        let root = self
+            .storage
+            .dyn_get_configured_dataset(zpool_id, dataset_id)
+            .await?
+            .name;
         let dataset =
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
         // The mounted root of the support bundle dataset

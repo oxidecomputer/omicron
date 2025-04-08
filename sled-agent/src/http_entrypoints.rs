@@ -814,28 +814,25 @@ impl SledAgentApi for SledAgentImpl {
 
         // Find our corresponding disk.
         let maybe_disk_path =
-            sa.storage().get_latest_disks().await.iter_managed().find_map(
-                |(_identity, disk)| {
-                    // Synthetic disks panic if asked for their `slot()`, so filter
-                    // them out first; additionally, filter out any non-M2 disks.
-                    if disk.is_synthetic() || disk.variant() != DiskVariant::M2
-                    {
-                        return None;
-                    }
+            sa.internal_disks_rx().current().managed_disks().find_map(|disk| {
+                // Synthetic disks panic if asked for their `slot()`, so filter
+                // them out first; additionally, filter out any non-M2 disks.
+                if disk.is_synthetic() || disk.variant() != DiskVariant::M2 {
+                    return None;
+                }
 
-                    // Convert this M2 disk's slot to an M2Slot, and skip any that
-                    // don't match the requested boot_disk.
-                    let Ok(slot) = M2Slot::try_from(disk.slot()) else {
-                        return None;
-                    };
-                    if slot != boot_disk {
-                        return None;
-                    }
+                // Convert this M2 disk's slot to an M2Slot, and skip any that
+                // don't match the requested boot_disk.
+                let Ok(slot) = M2Slot::try_from(disk.slot()) else {
+                    return None;
+                };
+                if slot != boot_disk {
+                    return None;
+                }
 
-                    let raw_devs_path = true;
-                    Some(disk.boot_image_devfs_path(raw_devs_path))
-                },
-            );
+                let raw_devs_path = true;
+                Some(disk.boot_image_devfs_path(raw_devs_path))
+            });
 
         let disk_path = match maybe_disk_path {
             Some(Ok(path)) => path,
