@@ -6243,6 +6243,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "pq-sys",
  "reconfigurator-cli",
  "serde",
  "serde_json",

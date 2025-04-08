@@ -15,6 +15,8 @@ omicron-rpaths.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 omicron-workspace-hack.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 reconfigurator-cli.workspace = true
 
 [dev-dependencies]
