@@ -13,7 +13,7 @@ use omicron_uuid_kinds::SledUuid;
 
 use crate::{
     deployment::{
-        Blueprint, BlueprintZoneDisposition, BlueprintZoneType,
+        Blueprint, BlueprintZoneDisposition, BlueprintZoneType, SledFilter,
         blueprint_zone_type,
     },
     internal_api::params::{DnsConfigZone, DnsRecord},
@@ -129,6 +129,27 @@ pub fn blueprint_internal_dns_config(
             overrides.dendrite_port(scrimlet.id()),
             overrides.mgs_port(scrimlet.id()),
             overrides.mgd_port(scrimlet.id()),
+        )?;
+    }
+
+    // For each sled to which we are supposed to be replicating artifacts,
+    // define DNS entries for the repo depot service.
+    //
+    // Consumers need to be careful in using these names since artifacts are not
+    // replicated synchronously or atomically to all instances.  That is: a
+    // consumer should be careful when fetching an artifact about whether they
+    // really can just pick any backend of this service or not.
+    for (sled_id, sled) in sleds_by_id {
+        if sled.policy().matches(SledFilter::TufArtifactReplication) {
+            continue;
+        }
+
+        let dns_sled =
+            dns_builder.host_sled(*sled_id, *sled.sled_agent_address().ip())?;
+        dns_builder.service_backend_sled(
+            ServiceName::RepoDepot,
+            &dns_sled,
+            sled.repo_depot_address().port(),
         )?;
     }
 

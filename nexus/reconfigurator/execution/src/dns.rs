@@ -343,6 +343,8 @@ mod test {
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
@@ -353,6 +355,7 @@ mod test {
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::RACK_PREFIX;
+    use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::address::get_sled_address;
     use omicron_common::address::get_switch_zone_address;
@@ -733,7 +736,11 @@ mod test {
             .map(|(i, (sled_id, subnet))| {
                 let sled_info = Sled::new(
                     *sled_id,
+                    SledPolicy::InService {
+                        provision_policy: SledProvisionPolicy::Provisionable,
+                    },
                     get_sled_address(Ipv6Subnet::new(subnet.network())),
+                    REPO_DEPOT_PORT,
                     // The first two of these (arbitrarily) will be marked
                     // Scrimlets.
                     if i < 2 { SledRole::Scrimlet } else { SledRole::Gimlet },
