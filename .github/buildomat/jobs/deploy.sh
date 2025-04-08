@@ -397,6 +397,20 @@ until zoneadm list | grep nexus; do
 done
 echo "Waited for nexus: ${retry}s"
 
+# Wait for handoff, as zpools as inserted into the database during
+# `rack_initialize`, and the next omdb command requires them to exist in the
+# db.
+retry=0
+until grep "Handoff to Nexus is complete" /var/svc/log/oxide-sled-agent:default.log; do
+	if [[ $retry -gt 300 ]]; then
+		echo "Failed to handoff to Nexus after 300 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+done
+echo "Waited for handoff: ${retry}s"
+
 # The bootstrap command creates a disk, so before that: adjust the control plane
 # storage buffer to 0 as the virtual hardware only creates 20G pools
 
