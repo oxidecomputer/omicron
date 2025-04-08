@@ -400,8 +400,8 @@ echo "Waited for nexus: ${retry}s"
 # The bootstrap command creates a disk, so before that: adjust the control plane
 # storage buffer to 0 as the virtual hardware only creates 20G pools
 
-pfexec zlogin oxz_switch omdb db pool list -i | \
-    xargs -I{} -i pfexec zlogin oxz_switch omdb -w db pool set-storage-buffer "{}" 0
+pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db pool list -i | \
+    xargs -I{} -i pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb -w db pool set-storage-buffer "{}" 0
 
 export RUST_BACKTRACE=1
 export E2E_TLS_CERT IPPOOL_START IPPOOL_END
