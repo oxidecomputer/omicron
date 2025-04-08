@@ -32,8 +32,6 @@ pub mod update;
 pub mod vlan;
 pub mod zpool_name;
 
-pub use update::hex_schema;
-
 /// A type that allows adding file and line numbers to log messages
 /// automatically. It should be instantiated at the root logger of each
 /// executable that desires this functionality, as in the following example.
@@ -83,4 +81,15 @@ impl<T> std::fmt::Debug for NoDebug<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "..")
     }
+}
+
+pub fn hex_schema<const N: usize>(
+    gen: &mut schemars::SchemaGenerator,
+) -> schemars::schema::Schema {
+    use schemars::JsonSchema;
+
+    let mut schema: schemars::schema::SchemaObject =
+        <String>::json_schema(gen).into();
+    schema.format = Some(format!("hex string ({N} bytes)"));
+    schema.into()
 }

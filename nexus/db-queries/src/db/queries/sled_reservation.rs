@@ -4,14 +4,68 @@
 
 //! Implementation of queries for affinity groups
 
-use crate::db::model::AffinityPolicyEnum;
 use crate::db::model::Resources;
 use crate::db::model::SledResourceVmm;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TypedSqlQuery;
 use diesel::sql_types;
+use nexus_db_schema::enums::AffinityPolicyEnum;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+
+fn subquery_our_aa_groups(query: &mut QueryBuilder) {
+    query
+        .sql(
+            "
+        our_aa_groups AS (
+            SELECT group_id
+            FROM anti_affinity_group_instance_membership
+            WHERE instance_id = ",
+        )
+        .param()
+        .sql(
+            "
+        ),",
+        );
+}
+
+fn subquery_other_aa_instances(query: &mut QueryBuilder) {
+    query.sql("
+        other_aa_instances AS (
+            SELECT anti_affinity_group_instance_membership.group_id,instance_id
+            FROM anti_affinity_group_instance_membership
+            JOIN our_aa_groups
+            ON anti_affinity_group_instance_membership.group_id = our_aa_groups.group_id
+            WHERE instance_id != ").param().sql("
+        ),");
+}
+
+fn subquery_our_a_groups(query: &mut QueryBuilder) {
+    query
+        .sql(
+            "
+        our_a_groups AS (
+            SELECT group_id
+            FROM affinity_group_instance_membership
+            WHERE instance_id = ",
+        )
+        .param()
+        .sql(
+            "
+        ),",
+        );
+}
+
+fn subquery_other_a_instances(query: &mut QueryBuilder) {
+    query.sql("
+        other_a_instances AS (
+            SELECT affinity_group_instance_membership.group_id,instance_id
+            FROM affinity_group_instance_membership
+            JOIN our_a_groups
+            ON affinity_group_instance_membership.group_id = our_a_groups.group_id
+            WHERE instance_id != ").param().sql("
+        ),");
+}
 
 /// Return all possible Sleds where we might perform allocation
 ///
@@ -38,7 +92,8 @@ pub fn sled_find_targets_query(
     sql_types::Nullable<AffinityPolicyEnum>,
     sql_types::Nullable<AffinityPolicyEnum>,
 )> {
-    QueryBuilder::new().sql("
+    let mut query = QueryBuilder::new();
+    query.sql("
         WITH sled_targets AS (
             SELECT sled.id as sled_id
             FROM sled
@@ -56,19 +111,19 @@ pub fn sled_find_targets_query(
             ).param().sql(" <= sled.usable_physical_ram AND
                 COALESCE(SUM(CAST(sled_resource_vmm.reservoir_ram AS INT8)), 0) + "
             ).param().sql(" <= sled.reservoir_size
-        ),
-        our_aa_groups AS (
-            SELECT group_id
-            FROM anti_affinity_group_instance_membership
-            WHERE instance_id = ").param().sql("
-        ),
-        other_aa_instances AS (
-            SELECT anti_affinity_group_instance_membership.group_id,instance_id
-            FROM anti_affinity_group_instance_membership
-            JOIN our_aa_groups
-            ON anti_affinity_group_instance_membership.group_id = our_aa_groups.group_id
-            WHERE instance_id != ").param().sql("
-        ),
+        ),");
+
+    // "our_aa_groups": All the anti-affinity group_ids to which our instance belongs.
+    subquery_our_aa_groups(&mut query);
+    // "other_aa_instances": All the group_id,instance_ids of instances (other
+    // than our own) belonging to "our_aa_groups".
+    subquery_other_aa_instances(&mut query);
+
+    // Gather together all anti-affinity instances in the sled failure domain
+    // by policy. This will let us evaluate whether or not it's essential to
+    // fulfill the placement request.
+    query.sql(
+        "
         other_aa_instances_by_policy AS (
             SELECT policy,instance_id
             FROM other_aa_instances
@@ -77,26 +132,31 @@ pub fn sled_find_targets_query(
                 anti_affinity_group.id = other_aa_instances.group_id AND
                 anti_affinity_group.failure_domain = 'sled'
             WHERE anti_affinity_group.time_deleted IS NULL
-        ),
+        ),",
+    );
+
+    // Transform "other_aa_instances_by_policy" into a sled-specific view,
+    // which is what we actually care about when making placement decisions.
+    query.sql("
         aa_policy_and_sleds AS (
             SELECT DISTINCT policy,sled_id
             FROM other_aa_instances_by_policy
             JOIN sled_resource_vmm
             ON
                 sled_resource_vmm.instance_id = other_aa_instances_by_policy.instance_id
-        ),
-        our_a_groups AS (
-            SELECT group_id
-            FROM affinity_group_instance_membership
-            WHERE instance_id = ").param().sql("
-        ),
-        other_a_instances AS (
-            SELECT affinity_group_instance_membership.group_id,instance_id
-            FROM affinity_group_instance_membership
-            JOIN our_a_groups
-            ON affinity_group_instance_membership.group_id = our_a_groups.group_id
-            WHERE instance_id != ").param().sql("
-        ),
+        ),");
+
+    // "our_a_groups": All the affinity group_ids to which our instance belongs.
+    subquery_our_a_groups(&mut query);
+    // "other_a_instances": All the group_id,instance_ids of instances (other
+    // than our own) belonging to "our_a_instances").
+    subquery_other_a_instances(&mut query);
+
+    // Gather together all affinity instances in the sled failure domain
+    // by policy. This will let us evaluate whether or not it's essential to
+    // fulfill the placement request.
+    query.sql(
+        "
         other_a_instances_by_policy AS (
             SELECT policy,instance_id
             FROM other_a_instances
@@ -105,14 +165,24 @@ pub fn sled_find_targets_query(
                 affinity_group.id = other_a_instances.group_id AND
                 affinity_group.failure_domain = 'sled'
             WHERE affinity_group.time_deleted IS NULL
-        ),
+        ),",
+    );
+
+    // Transform "other_a_instances_by_policy" into a sled-specific view,
+    // which is what we actually care about when making placement decisions.
+    query.sql("
         a_policy_and_sleds AS (
             SELECT DISTINCT policy,sled_id
             FROM other_a_instances_by_policy
             JOIN sled_resource_vmm
             ON
                 sled_resource_vmm.instance_id = other_a_instances_by_policy.instance_id
-        ),
+        ),");
+
+    // Aggregate "sleds that have space", and provide context on the
+    // affinity/anti-affinity policies which are relevant to those sleds.
+    query.sql(
+        "
         sleds_with_space AS (
             SELECT
                 s.sled_id,
@@ -122,7 +192,13 @@ pub fn sled_find_targets_query(
                 sled_targets s
                 LEFT JOIN a_policy_and_sleds a ON a.sled_id = s.sled_id
                 LEFT JOIN aa_policy_and_sleds aa ON aa.sled_id = s.sled_id
-        ),
+        ),",
+    );
+
+    // Also return affinity/anti-affinity policy information for sleds that do
+    // NOT have space. This is critical for cases where affinity rules are
+    // strict, but we might not be able to fit on a desired sled.
+    query.sql("
         sleds_without_space AS (
             SELECT
                 sled_id,
@@ -132,19 +208,30 @@ pub fn sled_find_targets_query(
                 a_policy_and_sleds
             WHERE
                 a_policy_and_sleds.sled_id NOT IN (SELECT sled_id from sleds_with_space)
-        )
+        )");
+
+    // Return all known information about relevant sleds, including:
+    //
+    // - Sled UUID
+    // - Whether or not there is space on the sled for the specified instance
+    // - What affinity/anti-affinity policies apply
+    query
+        .sql(
+            "
         SELECT sled_id, TRUE, a_policy, aa_policy FROM sleds_with_space
         UNION
         SELECT sled_id, FALSE, a_policy, aa_policy FROM sleds_without_space
-    ")
-    .bind::<sql_types::BigInt, _>(resources.hardware_threads)
-    .bind::<sql_types::BigInt, _>(resources.rss_ram)
-    .bind::<sql_types::BigInt, _>(resources.reservoir_ram)
-    .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
-    .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
-    .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
-    .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
-    .query()
+    ",
+        )
+        .bind::<sql_types::BigInt, _>(resources.hardware_threads)
+        .bind::<sql_types::BigInt, _>(resources.rss_ram)
+        .bind::<sql_types::BigInt, _>(resources.reservoir_ram)
+        .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
+        .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
+        .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
+        .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid());
+
+    query.query()
 }
 
 /// Inserts a sled_resource_vmm record into the database, if it is
@@ -152,7 +239,12 @@ pub fn sled_find_targets_query(
 pub fn sled_insert_resource_query(
     resource: &SledResourceVmm,
 ) -> TypedSqlQuery<(sql_types::Numeric,)> {
-    QueryBuilder::new().sql("
+    let mut query = QueryBuilder::new();
+
+    // This is similar to the "sled_targets" subquery in
+    // "sled_find_targets_query", but it's scoped to the single sled we're
+    // trying to select.
+    query.sql("
         WITH sled_has_space AS (
             SELECT 1
             FROM sled
@@ -171,19 +263,18 @@ pub fn sled_insert_resource_query(
             ).param().sql(" <= sled.usable_physical_ram AND
                 COALESCE(SUM(CAST(sled_resource_vmm.reservoir_ram AS INT8)), 0) + "
             ).param().sql(" <= sled.reservoir_size
-        ),
-        our_aa_groups AS (
-            SELECT group_id
-            FROM anti_affinity_group_instance_membership
-            WHERE instance_id = ").param().sql("
-        ),
-        other_aa_instances AS (
-            SELECT anti_affinity_group_instance_membership.group_id,instance_id
-            FROM anti_affinity_group_instance_membership
-            JOIN our_aa_groups
-            ON anti_affinity_group_instance_membership.group_id = our_aa_groups.group_id
-            WHERE instance_id != ").param().sql("
-        ),
+        ),");
+
+    // "our_aa_groups": All the anti-affinity group_ids to which our instance belongs.
+    subquery_our_aa_groups(&mut query);
+    // "other_aa_instances": All the group_id,instance_ids of instances (other
+    // than our own) belonging to "our_aa_groups".
+    subquery_other_aa_instances(&mut query);
+
+    // Find instances with a strict anti-affinity policy in the sled failure
+    // domain. We must ensure we do not co-locate with these instances.
+    query.sql(
+        "
         banned_instances AS (
             SELECT instance_id
             FROM other_aa_instances
@@ -193,26 +284,29 @@ pub fn sled_insert_resource_query(
                 anti_affinity_group.failure_domain = 'sled' AND
                 anti_affinity_group.policy = 'fail'
             WHERE anti_affinity_group.time_deleted IS NULL
-        ),
+        ),",
+    );
+    query.sql(
+        "
         banned_sleds AS (
             SELECT DISTINCT sled_id
             FROM banned_instances
             JOIN sled_resource_vmm
             ON
                 sled_resource_vmm.instance_id = banned_instances.instance_id
-        ),
-        our_a_groups AS (
-            SELECT group_id
-            FROM affinity_group_instance_membership
-            WHERE instance_id = ").param().sql("
-        ),
-        other_a_instances AS (
-            SELECT affinity_group_instance_membership.group_id,instance_id
-            FROM affinity_group_instance_membership
-            JOIN our_a_groups
-            ON affinity_group_instance_membership.group_id = our_a_groups.group_id
-            WHERE instance_id != ").param().sql("
-        ),
+        ),",
+    );
+
+    // "our_a_groups": All the affinity group_ids to which our instance belongs.
+    subquery_our_a_groups(&mut query);
+    // "other_a_instances": All the group_id,instance_ids of instances (other
+    // than our own) belonging to "our_a_instances").
+    subquery_other_a_instances(&mut query);
+
+    // Find instances with a strict affinity policy in the sled failure
+    // domain. We must ensure we co-locate with these instances.
+    query.sql(
+        "
         required_instances AS (
             SELECT policy,instance_id
             FROM other_a_instances
@@ -222,24 +316,49 @@ pub fn sled_insert_resource_query(
                 affinity_group.failure_domain = 'sled' AND
                 affinity_group.policy = 'fail'
             WHERE affinity_group.time_deleted IS NULL
-        ),
+        ),",
+    );
+    query.sql(
+        "
         required_sleds AS (
             SELECT DISTINCT sled_id
             FROM required_instances
             JOIN sled_resource_vmm
             ON
                 sled_resource_vmm.instance_id = required_instances.instance_id
-        ),
+        ),",
+    );
+
+    // The insert is only valid if:
+    //
+    // - The sled still has space for our isntance
+    // - The sled is not banned (due to anti-affinity rules)
+    // - If the sled is required (due to affinity rules) we're selecting it
+    query
+        .sql(
+            "
         insert_valid AS (
             SELECT 1
             WHERE
                 EXISTS(SELECT 1 FROM sled_has_space) AND
-                NOT(EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = ").param().sql(")) AND
+                NOT(EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = ",
+        )
+        .param()
+        .sql(
+            ")) AND
                 (
-                    EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = ").param().sql(") OR
+                    EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = ",
+        )
+        .param()
+        .sql(
+            ") OR
                     NOT EXISTS (SELECT 1 FROM required_sleds)
                 )
-        )
+        )",
+        );
+
+    // Finally, perform the INSERT if it's still valid.
+    query.sql("
         INSERT INTO sled_resource_vmm (id, sled_id, hardware_threads, rss_ram, reservoir_ram, instance_id)
         SELECT
             ").param().sql(",
@@ -265,8 +384,9 @@ pub fn sled_insert_resource_query(
     .bind::<sql_types::BigInt, _>(resource.resources.hardware_threads)
     .bind::<sql_types::BigInt, _>(resource.resources.rss_ram)
     .bind::<sql_types::BigInt, _>(resource.resources.reservoir_ram)
-    .bind::<sql_types::Uuid, _>(resource.instance_id.unwrap().into_untyped_uuid())
-    .query()
+    .bind::<sql_types::Uuid, _>(resource.instance_id.unwrap().into_untyped_uuid());
+
+    query.query()
 }
 
 #[cfg(test)]

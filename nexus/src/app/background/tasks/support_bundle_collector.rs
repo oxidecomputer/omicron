@@ -27,7 +27,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -42,6 +41,7 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
+use tufaceous_artifact::ArtifactHash;
 use zip::ZipWriter;
 use zip::write::FullFileOptions;
 
@@ -626,6 +626,12 @@ impl BundleCollection<'_> {
                     .boxed(),
                     save_diag_cmd_output_or_error(
                         &sled_path,
+                        "nvmeadm",
+                        sled_client.support_nvmeadm_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
                         "pargs",
                         sled_client.support_pargs_info(),
                     )
@@ -640,6 +646,18 @@ impl BundleCollection<'_> {
                         &sled_path,
                         "pstack",
                         sled_client.support_pstack_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "zfs",
+                        sled_client.support_zfs_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "zpool",
+                        sled_client.support_zpool_info(),
                     )
                     .boxed(),
                 ])

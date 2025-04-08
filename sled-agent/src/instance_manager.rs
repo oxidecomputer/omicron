@@ -5,6 +5,7 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::instance::Instance;
+use crate::instance::VmmStateOwner;
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
@@ -95,7 +96,35 @@ impl InstanceManager {
     pub fn new(
         log: Logger,
         nexus_client: NexusClient,
-        etherstub: Etherstub,
+        vnic_allocator: VnicAllocator<Etherstub>,
+        port_manager: PortManager,
+        storage: StorageHandle,
+        zone_bundler: ZoneBundler,
+        vmm_reservoir_manager: VmmReservoirManagerHandle,
+        metrics_queue: MetricsRequestQueue,
+    ) -> Result<InstanceManager, Error> {
+        Self::new_inner(
+            log,
+            nexus_client,
+            vnic_allocator,
+            port_manager,
+            storage,
+            zone_bundler,
+            ZoneBuilderFactory::new(),
+            vmm_reservoir_manager,
+            metrics_queue,
+        )
+    }
+
+    /// Initializes a new [`InstanceManager`] object, with more control
+    /// over internal interfaces.
+    ///
+    /// Prefer [InstanceManager::new] unless you're writing tests.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_inner(
+        log: Logger,
+        nexus_client: NexusClient,
+        vnic_allocator: VnicAllocator<Etherstub>,
         port_manager: PortManager,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
@@ -114,7 +143,7 @@ impl InstanceManager {
             terminate_rx,
             nexus_client,
             jobs: BTreeMap::new(),
-            vnic_allocator: VnicAllocator::new("Instance", etherstub),
+            vnic_allocator,
             port_manager,
             storage_generation: None,
             storage,
@@ -389,7 +418,7 @@ enum InstanceManagerRequest {
 
 // Requests that the instance manager stop processing information about a
 // particular instance.
-struct InstanceDeregisterRequest {
+pub(crate) struct InstanceDeregisterRequest {
     id: PropolisUuid,
 }
 
@@ -653,8 +682,7 @@ impl InstanceManagerRunner {
 
         // Otherwise, we pipeline the request, and send it to the instance,
         // where it can receive an appropriate response.
-        let mark_failed = false;
-        instance.terminate(tx, mark_failed)?;
+        instance.terminate(tx, VmmStateOwner::Nexus)?;
         Ok(())
     }
 
@@ -824,8 +852,7 @@ impl InstanceManagerRunner {
             info!(self.log, "use_only_these_disks: Removing instance"; "instance_id" => ?id);
             if let Some(instance) = self.jobs.remove(&id) {
                 let (tx, rx) = oneshot::channel();
-                let mark_failed = true;
-                if let Err(e) = instance.terminate(tx, mark_failed) {
+                if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
                     warn!(self.log, "use_only_these_disks: Failed to request instance removal"; "err" => ?e);
                     continue;
                 }
@@ -847,7 +874,7 @@ pub struct InstanceTicket {
 impl InstanceTicket {
     // Creates a new instance ticket for the Propolis job with the supplied `id`
     // to be removed from the manager on destruction.
-    fn new(
+    pub(crate) fn new(
         id: PropolisUuid,
         terminate_tx: mpsc::UnboundedSender<InstanceDeregisterRequest>,
     ) -> Self {
@@ -859,10 +886,9 @@ impl InstanceTicket {
         Self { id, terminate_tx: None }
     }
 
-    /// Idempotently removes this instance from the tracked set of
-    /// instances. This acts as an "upcall" for instances to remove
-    /// themselves after stopping.
-    pub fn deregister(&mut self) {
+    /// Informs this instance's manager that it should release the instance.
+    /// Does nothing if the ticket has already been deregistered.
+    pub(crate) fn deregister(&mut self) {
         if let Some(terminate_tx) = self.terminate_tx.take() {
             let _ =
                 terminate_tx.send(InstanceDeregisterRequest { id: self.id });

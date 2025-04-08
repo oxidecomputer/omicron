@@ -18,11 +18,11 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use installinator_client::{ClientError, ResponseValue};
 use installinator_common::EventReport;
-use omicron_common::update::ArtifactHashId;
 use proptest::prelude::*;
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
 use tokio::sync::mpsc;
+use tufaceous_artifact::ArtifactHashId;
 use uuid::Uuid;
 
 use crate::{
@@ -575,7 +575,7 @@ mod tests {
         #[strategy(any::<[u8; 16]>().prop_map(Uuid::from_bytes))]
         update_id: Uuid,
     ) {
-        with_test_runtime(move || async move {
+        with_test_runtime(async move {
             let logctx = test_setup_log("proptest_fetch_artifact");
             let expected_result = universe.expected_result(timeout);
             let expected_artifact = universe.artifact.clone();
@@ -616,7 +616,7 @@ mod tests {
                     InstallinatorComponent::HostPhase2,
                     InstallinatorStepId::Download,
                     "Downloading artifact",
-                    |cx| async move {
+                    async move |cx| {
                         let artifact =
                             fetch_artifact(&cx, &log, attempts, timeout)
                                 .await?;

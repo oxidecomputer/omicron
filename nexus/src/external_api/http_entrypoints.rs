@@ -96,7 +96,6 @@ use omicron_common::api::external::http_pagination::ScanByNameOrId;
 use omicron_common::api::external::http_pagination::ScanByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::http_pagination::data_page_params_for;
-use omicron_common::api::external::http_pagination::id_pagination;
 use omicron_common::api::external::http_pagination::marker_for_id;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -2511,6 +2510,100 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn instance_affinity_group_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AffinityGroup>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let instance_selector = params::InstanceSelector {
+                project: scan_params.selector.project.clone(),
+                instance: path.instance,
+            };
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
+            let groups = nexus
+                .instance_list_affinity_groups(
+                    &opctx,
+                    &instance_lookup,
+                    &paginated_by,
+                )
+                .await?
+                .into_iter()
+                .map(|g| g.into())
+                .collect();
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                groups,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn instance_anti_affinity_group_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AntiAffinityGroup>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let instance_selector = params::InstanceSelector {
+                project: scan_params.selector.project.clone(),
+                instance: path.instance,
+            };
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
+            let groups = nexus
+                .instance_list_anti_affinity_groups(
+                    &opctx,
+                    &instance_lookup,
+                    &paginated_by,
+                )
+                .await?
+                .into_iter()
+                .map(|g| g.into())
+                .collect();
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                groups,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Affinity Groups
 
     async fn affinity_group_list(
@@ -2579,7 +2672,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn affinity_group_member_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>
     {
@@ -2591,8 +2686,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let scan_params = ScanById::from_query(&query)?;
-            let paginated_by = id_pagination(&pag_params, scan_params)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
 
             let group_selector = params::AffinityGroupSelector {
                 project: scan_params.selector.project.clone(),
@@ -2607,10 +2702,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &paginated_by,
                 )
                 .await?;
-            Ok(HttpResponseOk(ScanById::results_page(
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 affinity_group_member_instances,
-                &marker_for_id,
+                &marker_for_name_or_id,
             )?))
         };
         apictx
@@ -2914,7 +3009,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn anti_affinity_group_member_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>
     {
@@ -2926,8 +3023,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let scan_params = ScanById::from_query(&query)?;
-            let paginated_by = id_pagination(&pag_params, scan_params)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
 
             let group_selector = params::AntiAffinityGroupSelector {
                 project: scan_params.selector.project.clone(),
@@ -2942,10 +3039,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &paginated_by,
                 )
                 .await?;
-            Ok(HttpResponseOk(ScanById::results_page(
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 group_members,
-                &marker_for_id,
+                &marker_for_name_or_id,
             )?))
         };
         apictx
@@ -2985,7 +3082,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
             let group = nexus
-                .anti_affinity_group_member_view(
+                .anti_affinity_group_member_instance_view(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
@@ -3031,7 +3128,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
             let member = nexus
-                .anti_affinity_group_member_add(
+                .anti_affinity_group_member_instance_add(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
@@ -3076,7 +3173,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
             nexus
-                .anti_affinity_group_member_delete(
+                .anti_affinity_group_member_instance_delete(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
@@ -6444,14 +6541,44 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let params = body.into_inner();
             let system_version = params.system_version;
+
+            // We don't need a transaction for the following queries because
+            // (1) the generation numbers provide optimistic concurrency control:
+            // if another request were to successfully update the target release
+            // between when we fetch it here and when we try to update it below,
+            // our update would fail because the next generation number would
+            // would already be taken; and
+            // (2) we assume that TUF repo depot records are immutable, i.e.,
+            // system version X.Y.Z won't designate different repos over time.
+            let current_target_release =
+                nexus.datastore().target_release_get_current(&opctx).await?;
+
+            // Disallow downgrades.
+            if let views::TargetReleaseSource::SystemVersion { version } = nexus
+                .datastore()
+                .target_release_view(&opctx, &current_target_release)
+                .await?
+                .release_source
+            {
+                if version > system_version {
+                    return Err(HttpError::for_bad_request(
+                        None,
+                        format!(
+                            "The requested target system release ({system_version}) \
+                             is older than the current target system release ({version}). \
+                             This is not supported."
+                        ),
+                    ));
+                }
+            }
+
+            // Fetch the TUF repo metadata and update the target release.
             let tuf_repo_id = nexus
                 .datastore()
                 .update_tuf_repo_get(&opctx, system_version.into())
                 .await?
                 .repo
                 .id;
-            let current_target_release =
-                nexus.datastore().target_release_get_current(&opctx).await?;
             let next_target_release =
                 nexus_db_model::TargetRelease::new_system_version(
                     &current_target_release,
@@ -6461,6 +6588,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .datastore()
                 .target_release_insert(&opctx, next_target_release)
                 .await?;
+
             Ok(HttpResponseCreated(
                 nexus
                     .datastore()
@@ -7401,7 +7529,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let user =
                 nexus.login_local(&opctx, &silo_lookup, credentials).await?;
 
-            let session = nexus.create_session(opctx, user).await?;
+            let session = nexus.session_create(opctx, &user).await?;
             let mut response = HttpResponseHeaders::new_unnamed(
                 HttpResponseUpdatedNoContent(),
             );

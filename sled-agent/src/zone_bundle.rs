@@ -238,6 +238,14 @@ impl ZoneBundler {
     ) -> Self {
         // This is compiled out in tests because there's no way to set our
         // expectations on the mockall object it uses internally. Not great.
+        //
+        // NOTE: ^ This comment was written when mockall was still used in
+        // Omicron. It has since been removed; it may be possible to use
+        // dependency injection here ("fake" vs "real" implementation of ZFS)
+        // instead of conditional compilation.
+        // See also: The "sled-storage" `StorageManagerTestHarness`, which
+        // might be useful for making ZFS datasets on top of a test-only
+        // temporary directory.
         #[cfg(not(test))]
         initialize_zfs_resources(&log)
             .expect("Failed to initialize existing ZFS resources");

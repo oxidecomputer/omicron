@@ -26,7 +26,7 @@ pub struct Input {
     /// `omicron_nexus::db_model`, the name of the authz type in
     /// `omicron_nexus::authz`, and will be the name of the new type created by
     /// this macro.  The snake case version of the name is taken as the name of
-    /// the Diesel table interface in `db::schema`.
+    /// the Diesel table interface in `nexus_db_schema::schema`.
     ///
     /// This value is typically PascalCase (e.g., "Project").
     name: String,
@@ -847,7 +847,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             ) -> LookupResult<
                 (authz::#resource_name, nexus_db_model::#resource_name)
             > {
-                use db::schema::#resource_as_snake::dsl;
+                use ::nexus_db_schema::schema::#resource_as_snake::dsl;
 
                 dsl::#resource_as_snake
                     #soft_delete_filter
@@ -938,7 +938,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             datastore: &DataStore,
             #(#pkey_names: &#pkey_types,)*
         ) -> LookupResult<(#(authz::#path_types,)* nexus_db_model::#resource_name)> {
-            use db::schema::#resource_as_snake::dsl;
+            use ::nexus_db_schema::schema::#resource_as_snake::dsl;
 
             let db_row = dsl::#resource_as_snake
                 #soft_delete_filter

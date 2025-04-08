@@ -3,8 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use futures::Future;
-use omicron_common::update::{ArtifactHash, ArtifactHashId};
-use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_artifact::{ArtifactHash, ArtifactHashId, KnownArtifactKind};
 
 pub(crate) fn dummy_artifact_hash_id(
     kind: KnownArtifactKind,
@@ -17,9 +16,8 @@ pub(crate) fn dummy_artifact_hash_id(
     }
 }
 
-pub(crate) fn with_test_runtime<F, Fut, T>(f: F) -> T
+pub(crate) fn with_test_runtime<Fut, T>(fut: Fut) -> T
 where
-    F: FnOnce() -> Fut,
     Fut: Future<Output = T>,
 {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -27,5 +25,5 @@ where
         .start_paused(true)
         .build()
         .expect("tokio Runtime built successfully");
-    runtime.block_on(f())
+    runtime.block_on(fut)
 }

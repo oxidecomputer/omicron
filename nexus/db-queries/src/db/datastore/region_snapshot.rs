@@ -6,7 +6,6 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::model::PhysicalDiskPolicy;
@@ -26,7 +25,7 @@ impl DataStore {
         &self,
         region_snapshot: RegionSnapshot,
     ) -> CreateResult<()> {
-        use db::schema::region_snapshot::dsl;
+        use nexus_db_schema::schema::region_snapshot::dsl;
 
         diesel::insert_into(dsl::region_snapshot)
             .values(region_snapshot.clone())
@@ -43,7 +42,7 @@ impl DataStore {
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> LookupResult<Option<RegionSnapshot>> {
-        use db::schema::region_snapshot::dsl;
+        use nexus_db_schema::schema::region_snapshot::dsl;
 
         dsl::region_snapshot
             .filter(dsl::dataset_id.eq(to_db_typed_uuid(dataset_id)))
@@ -64,7 +63,7 @@ impl DataStore {
         region_id: Uuid,
         snapshot_id: Uuid,
     ) -> DeleteResult {
-        use db::schema::region_snapshot::dsl;
+        use nexus_db_schema::schema::region_snapshot::dsl;
 
         let conn = self.pool_connection_unauthorized().await?;
 
@@ -94,10 +93,10 @@ impl DataStore {
     ) -> LookupResult<Vec<RegionSnapshot>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::crucible_dataset::dsl as dataset_dsl;
-        use db::schema::physical_disk::dsl as physical_disk_dsl;
-        use db::schema::region_snapshot::dsl as region_snapshot_dsl;
-        use db::schema::zpool::dsl as zpool_dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::region_snapshot::dsl as region_snapshot_dsl;
+        use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
 
         region_snapshot_dsl::region_snapshot
             .filter(region_snapshot_dsl::dataset_id.eq_any(
@@ -129,10 +128,10 @@ impl DataStore {
     ) -> LookupResult<Vec<RegionSnapshot>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::crucible_dataset::dsl as dataset_dsl;
-        use db::schema::physical_disk::dsl as physical_disk_dsl;
-        use db::schema::region_snapshot::dsl as region_snapshot_dsl;
-        use db::schema::zpool::dsl as zpool_dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::region_snapshot::dsl as region_snapshot_dsl;
+        use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
 
         region_snapshot_dsl::region_snapshot
             .filter(region_snapshot_dsl::dataset_id.eq_any(
