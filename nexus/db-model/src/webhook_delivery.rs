@@ -9,10 +9,10 @@ use crate::WebhookDeliveryState;
 use crate::WebhookDeliveryTrigger;
 use crate::WebhookEvent;
 use crate::WebhookEventClass;
-use crate::schema::{webhook_delivery, webhook_delivery_attempt};
 use crate::serde_time_delta::optional_time_delta;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, TimeDelta, Utc};
+use nexus_db_schema::schema::{webhook_delivery, webhook_delivery_attempt};
 use nexus_types::external_api::views;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::{

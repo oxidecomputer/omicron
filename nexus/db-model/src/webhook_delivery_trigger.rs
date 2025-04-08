@@ -9,9 +9,7 @@ use serde::Serialize;
 use std::fmt;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone)]
-    #[diesel(postgres_type(name = "webhook_delivery_trigger", schema = "public"))]
-    pub struct WebhookDeliveryTriggerEnum;
+    WebhookDeliveryTriggerEnum:
 
     #[derive(
         Copy,
@@ -24,7 +22,6 @@ impl_enum_type!(
         FromSqlRow,
         strum::VariantArray,
     )]
-    #[diesel(sql_type = WebhookDeliveryTriggerEnum)]
     #[serde(rename_all = "snake_case")]
     pub enum WebhookDeliveryTrigger;
 
@@ -63,9 +60,4 @@ impl From<views::WebhookDeliveryTrigger> for WebhookDeliveryTrigger {
             views::WebhookDeliveryTrigger::Probe => Self::Probe,
         }
     }
-}
-
-impl diesel::query_builder::QueryId for WebhookDeliveryTriggerEnum {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
 }

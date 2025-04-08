@@ -364,9 +364,9 @@ mod test {
     // dispatching.
     #[nexus_test(server = crate::Server)]
     async fn test_glob_reprocessing(cptestctx: &ControlPlaneTestContext) {
-        use nexus_db_model::schema::webhook_receiver::dsl as rx_dsl;
-        use nexus_db_model::schema::webhook_rx_event_glob::dsl as glob_dsl;
-        use nexus_db_model::schema::webhook_rx_subscription::dsl as subscription_dsl;
+        use nexus_db_schema::schema::webhook_receiver::dsl as rx_dsl;
+        use nexus_db_schema::schema::webhook_rx_event_glob::dsl as glob_dsl;
+        use nexus_db_schema::schema::webhook_rx_subscription::dsl as subscription_dsl;
 
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();

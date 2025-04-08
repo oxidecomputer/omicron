@@ -8,14 +8,14 @@ use crate::Name;
 use crate::SemverVersion;
 use crate::WebhookEventClass;
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{
-    webhook_receiver, webhook_rx_event_glob, webhook_rx_subscription,
-    webhook_secret,
-};
 use crate::schema_versions;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
+use nexus_db_schema::schema::{
+    webhook_receiver, webhook_rx_event_glob, webhook_rx_subscription,
+    webhook_secret,
+};
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;

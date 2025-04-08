@@ -2068,8 +2068,10 @@ fn after_136_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 FROM webhook_event
                 WHERE time_dispatched IS NOT NULL
                 "#,
-            &[]).await
-                            .expect("loaded bp_omicron_zone rows");
+                &[],
+            )
+            .await
+            .expect("loaded bp_omicron_zone rows");
 
         let records = process_rows(&rows);
 
@@ -2093,7 +2095,7 @@ fn after_136_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             ],
             "singleton liveness probe webhook event record must have the \
              correct values",
-            );
+        );
     })
 }
 
@@ -2155,8 +2157,8 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     );
     map.insert(
         Version::new(136, 0, 0),
-        DataMigrationFns::new().after(after_136_0_0)
-    )
+        DataMigrationFns::new().after(after_136_0_0),
+    );
 
     map
 }

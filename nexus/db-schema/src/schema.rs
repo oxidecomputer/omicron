@@ -2209,7 +2209,7 @@ table! {
 table! {
     webhook_rx_subscription (rx_id, event_class) {
         rx_id -> Uuid,
-        event_class -> crate::WebhookEventClassEnum,
+        event_class -> crate::enums::WebhookEventClassEnum,
         glob -> Nullable<Text>,
         time_created -> Timestamptz,
     }
@@ -2241,7 +2241,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        event_class -> crate::WebhookEventClassEnum,
+        event_class -> crate::enums::WebhookEventClassEnum,
         event -> Jsonb,
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
@@ -2253,11 +2253,11 @@ table! {
         id -> Uuid,
         event_id -> Uuid,
         rx_id -> Uuid,
-        triggered_by -> crate::WebhookDeliveryTriggerEnum,
+        triggered_by -> crate::enums::WebhookDeliveryTriggerEnum,
         attempts -> Int2,
         time_created -> Timestamptz,
         time_completed -> Nullable<Timestamptz>,
-        state -> crate::WebhookDeliveryStateEnum,
+        state -> crate::enums::WebhookDeliveryStateEnum,
         deliverator_id -> Nullable<Uuid>,
         time_leased -> Nullable<Timestamptz>,
     }
@@ -2275,7 +2275,7 @@ table! {
         delivery_id -> Uuid,
         attempt -> Int2,
         rx_id -> Uuid,
-        result -> crate::WebhookDeliveryAttemptResultEnum,
+        result -> crate::enums::WebhookDeliveryAttemptResultEnum,
         response_status -> Nullable<Int4>,
         response_duration -> Nullable<Interval>,
         time_created -> Timestamptz,

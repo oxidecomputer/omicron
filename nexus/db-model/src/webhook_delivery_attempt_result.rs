@@ -9,9 +9,7 @@ use serde::Serialize;
 use std::fmt;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone)]
-    #[diesel(postgres_type(name = "webhook_delivery_attempt_result", schema = "public"))]
-    pub struct WebhookDeliveryAttemptResultEnum;
+    WebhookDeliveryAttemptResultEnum:
 
     #[derive(
         Copy,
@@ -24,7 +22,6 @@ impl_enum_type!(
         Deserialize,
         strum::VariantArray,
     )]
-    #[diesel(sql_type = WebhookDeliveryAttemptResultEnum)]
     pub enum WebhookDeliveryAttemptResult;
 
     FailedHttpError => b"failed_http_error"

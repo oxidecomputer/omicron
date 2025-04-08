@@ -9,9 +9,7 @@ use serde::ser::{Serialize, Serializer};
 use std::fmt;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone)]
-    #[diesel(postgres_type(name = "webhook_event_class", schema = "public"))]
-    pub struct WebhookEventClassEnum;
+    WebhookEventClassEnum:
 
     #[derive(
         Copy,
@@ -24,7 +22,6 @@ impl_enum_type!(
         FromSqlRow,
         strum::VariantArray,
     )]
-    #[diesel(sql_type = WebhookEventClassEnum)]
     pub enum WebhookEventClass;
 
     Probe => b"probe"
@@ -111,11 +108,6 @@ impl<'de> Deserialize<'de> for WebhookEventClass {
             .parse::<WebhookEventClass>()
             .map_err(de::Error::custom)
     }
-}
-
-impl diesel::query_builder::QueryId for WebhookEventClassEnum {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
 }
 
 impl std::str::FromStr for WebhookEventClass {
