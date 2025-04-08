@@ -589,11 +589,11 @@ mod test {
             parse_phc_hash("dummy").unwrap_err(),
             "password hash: password hash string missing field"
         );
-        // This input was generated from argon2.online using the empty string as
-        // input.
+        // This input was generated via `cargo run --example argon2 -- --input ""`.
         let _ = parse_phc_hash(
-            "$argon2id$v=19$m=98304,t=13,p=1$MDEyMzQ1Njc4OTAxMjM0NQ\
-            $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I",
+            "$argon2id$v=19$m=98304,t=23,\
+             p=1$E4DE+f6Yduuy0nSubo5qtg$57JDYGov3SZoEZnLyZZBHOACH95s\
+             8aOpG22zBoWZ2S4",
         )
         .unwrap();
 
@@ -601,16 +601,17 @@ mod test {
         // and adjusting the string by hand.
         assert_eq!(
             parse_phc_hash(
-                "$argon2i$v=19$m=98304,t=13,p=1$MDEyMzQ1Njc4OTAxMjM0NQ\
-                $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I"
+                "$argon2i$v=19$m=98304,t=23,\
+                 p=1$E4DE+f6Yduuy0nSubo5qtg$57JDYGov3SZoEZnLyZZBHOACH95s\
+                 8aOpG22zBoWZ2S4",
             )
             .unwrap_err(),
             "password hash: algorithm: expected argon2id, found argon2i"
         );
         assert_eq!(
             parse_phc_hash(
-                "$argon2id$v=19$m=98304,t=13,p=1$\
-                $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I"
+                "$argon2id$v=19$m=98304,t=23,p=1$\
+                 $57JDYGov3SZoEZnLyZZBHOACH95s8aOpG22zBoWZ2S4",
             )
             .unwrap_err(),
             // sic
@@ -618,16 +619,17 @@ mod test {
         );
         assert_eq!(
             parse_phc_hash(
-                "$argon2id$v=19$m=98304,t=13,p=1$MDEyMzQ1Njc\
-                $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I"
+                "$argon2id$v=19$m=98304,t=23,p=1$E4DE+f6Ydu$\
+                 57JDYGov3SZoEZnLyZZBHOACH95s8aOpG22zBoWZ2S4",
             )
             .unwrap_err(),
             "password hash: salt: expected at least 16 bytes",
         );
         assert_eq!(
             parse_phc_hash(
-                "$argon2id$v=19$m=4096,t=13,p=1$MDEyMzQ1Njc4OTAxMjM0NQ\
-                $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I"
+                "$argon2id$v=19$m=4096,t=23,\
+                 p=1$E4DE+f6Yduuy0nSubo5qtg$57JDYGov3SZoEZnLyZZBHOACH95s\
+                 8aOpG22zBoWZ2S4",
             )
             .unwrap_err(),
             "password hash: parameter 'm': expected at least 98304 (KiB), \
@@ -635,16 +637,18 @@ mod test {
         );
         assert_eq!(
             parse_phc_hash(
-                "$argon2id$v=19$m=98304,t=12,p=1$MDEyMzQ1Njc4OTAxMjM0NQ\
-                $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I"
+                "$argon2id$v=19$m=98304,t=22,\
+                 p=1$E4DE+f6Yduuy0nSubo5qtg$57JDYGov3SZoEZnLyZZBHOACH95s\
+                 8aOpG22zBoWZ2S4",
             )
             .unwrap_err(),
-            "password hash: parameter 't': expected at least 13, found 12"
+            "password hash: parameter 't': expected at least 23, found 22"
         );
         assert_eq!(
             parse_phc_hash(
-                "$argon2id$v=19$m=98304,t=13,p=0$MDEyMzQ1Njc4OTAxMjM0NQ\
-                $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I"
+                "$argon2id$v=19$m=98304,t=23,\
+                 p=0$E4DE+f6Yduuy0nSubo5qtg$57JDYGov3SZoEZnLyZZBHOACH95s\
+                 8aOpG22zBoWZ2S4",
             )
             .unwrap_err(),
             // sic
