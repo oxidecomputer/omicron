@@ -11,9 +11,11 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use futures::StreamExt;
+use illumos_utils::zfs::DatasetProperties;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetName;
 use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
@@ -63,6 +65,12 @@ pub enum Error {
 
     #[error("Dataset not found")]
     DatasetNotFound,
+
+    #[error("Could not look up dataset")]
+    DatasetLookup(#[source] anyhow::Error),
+
+    #[error("Cannot access dataset {dataset:?} which is not mounted")]
+    DatasetNotMounted { dataset: DatasetName },
 
     #[error(
         "Dataset exists, but has an invalid configuration: (wanted {wanted}, saw {actual})"
@@ -133,6 +141,12 @@ pub trait LocalStorage: Sync {
     /// Returns all configured datasets
     async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error>;
 
+    /// Returns properties about a dataset
+    fn dyn_dataset_get(
+        &self,
+        dataset_name: &String,
+    ) -> Result<DatasetProperties, Error>;
+
     /// Returns all nested datasets within an existing dataset
     async fn dyn_nested_dataset_list(
         &self,
@@ -164,6 +178,19 @@ pub trait LocalStorage: Sync {
 impl LocalStorage for StorageHandle {
     async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
         self.datasets_config_list().await.map_err(|err| err.into())
+    }
+
+    // TODO: Should this be a part of "StorageHandle"?
+    fn dyn_dataset_get(
+        &self,
+        dataset_name: &String,
+    ) -> Result<DatasetProperties, Error> {
+        Ok(illumos_utils::zfs::Zfs::get_dataset_properties(
+            &[dataset_name.clone()],
+            illumos_utils::zfs::WhichDatasets::SelfOnly,
+        )
+        .map_err(|err| Error::DatasetLookup(err))?
+        .remove(0))
     }
 
     async fn dyn_nested_dataset_list(
@@ -198,6 +225,13 @@ impl LocalStorage for StorageHandle {
 impl LocalStorage for crate::sim::Storage {
     async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
         self.lock().datasets_config_list().map_err(|err| err.into())
+    }
+
+    fn dyn_dataset_get(
+        &self,
+        dataset_name: &String,
+    ) -> Result<DatasetProperties, Error> {
+        self.lock().dataset_get(dataset_name).map_err(|err| err.into())
     }
 
     async fn dyn_nested_dataset_list(
@@ -378,7 +412,9 @@ impl<'a> SupportBundleManager<'a> {
     }
 
     // Returns a dataset that the sled has been explicitly configured to use.
-    async fn get_configured_dataset(
+    //
+    // Returns an error if this dataset is not mounted.
+    async fn get_configured_dataset_if_mounted(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
@@ -388,6 +424,14 @@ impl<'a> SupportBundleManager<'a> {
             .datasets
             .get(&dataset_id)
             .ok_or_else(|| Error::DatasetNotFound)?;
+
+        let dataset_props =
+            self.storage.dyn_dataset_get(&dataset.name.full_name())?;
+        if !dataset_props.mounted {
+            return Err(Error::DatasetNotMounted {
+                dataset: dataset.name.clone(),
+            });
+        }
 
         if dataset.id != dataset_id {
             return Err(Error::DatasetExistsBadConfig {
@@ -411,8 +455,10 @@ impl<'a> SupportBundleManager<'a> {
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> Result<Vec<SupportBundleMetadata>, Error> {
-        let root =
-            self.get_configured_dataset(zpool_id, dataset_id).await?.name;
+        let root = self
+            .get_configured_dataset_if_mounted(zpool_id, dataset_id)
+            .await?
+            .name;
         let dataset_location =
             NestedDatasetLocation { path: String::from(""), root };
         let datasets = self
@@ -436,7 +482,10 @@ impl<'a> SupportBundleManager<'a> {
             // The dataset for a support bundle exists.
             let support_bundle_path = dataset
                 .name
-                .mountpoint(&self.storage.zpool_mountpoint_root())
+                .ensure_mounted_and_get_mountpoint(
+                    &self.storage.zpool_mountpoint_root(),
+                )
+                .await?
                 .join(BUNDLE_FILE_NAME);
 
             // Identify whether or not the final "bundle" file exists.
@@ -522,13 +571,36 @@ impl<'a> SupportBundleManager<'a> {
             "bundle_id" => support_bundle_id.to_string(),
         ));
         info!(log, "creating support bundle");
-        let root =
-            self.get_configured_dataset(zpool_id, dataset_id).await?.name;
+
+        // Access the parent dataset (presumably "crypt/debug")
+        // where the support bundled will be mounted.
+        let root = self
+            .get_configured_dataset_if_mounted(zpool_id, dataset_id)
+            .await?
+            .name;
         let dataset =
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
+
+        // Ensure that the dataset exists.
+        info!(log, "Ensuring dataset exists for bundle");
+        self.storage
+            .dyn_nested_dataset_ensure(NestedDatasetConfig {
+                name: dataset.clone(),
+                inner: SharedDatasetConfig {
+                    compression: CompressionAlgorithm::On,
+                    quota: None,
+                    reservation: None,
+                },
+            })
+            .await?;
+        info!(log, "Dataset does exist for bundle");
+
         // The mounted root of the support bundle dataset
-        let support_bundle_dir =
-            dataset.mountpoint(&self.storage.zpool_mountpoint_root());
+        let support_bundle_dir = dataset
+            .ensure_mounted_and_get_mountpoint(
+                &self.storage.zpool_mountpoint_root(),
+            )
+            .await?;
         let support_bundle_path = support_bundle_dir.join(BUNDLE_FILE_NAME);
         let support_bundle_path_tmp = support_bundle_dir.join(format!(
             "bundle-{}.tmp",
@@ -538,20 +610,6 @@ impl<'a> SupportBundleManager<'a> {
                 .map(char::from)
                 .collect::<String>()
         ));
-
-        // Ensure that the dataset exists.
-        info!(log, "Ensuring dataset exists for bundle");
-        self.storage
-            .dyn_nested_dataset_ensure(NestedDatasetConfig {
-                name: dataset,
-                inner: SharedDatasetConfig {
-                    compression: CompressionAlgorithm::On,
-                    quota: None,
-                    reservation: None,
-                },
-            })
-            .await?;
-        info!(log, "Dataset does exist for bundle");
 
         // Exit early if the support bundle already exists
         if tokio::fs::try_exists(&support_bundle_path).await? {
@@ -623,8 +681,10 @@ impl<'a> SupportBundleManager<'a> {
             "bundle_id" => support_bundle_id.to_string(),
         ));
         info!(log, "Destroying support bundle");
-        let root =
-            self.get_configured_dataset(zpool_id, dataset_id).await?.name;
+        let root = self
+            .get_configured_dataset_if_mounted(zpool_id, dataset_id)
+            .await?
+            .name;
         self.storage
             .dyn_nested_dataset_destroy(NestedDatasetLocation {
                 path: support_bundle_id.to_string(),
@@ -641,13 +701,20 @@ impl<'a> SupportBundleManager<'a> {
         dataset_id: DatasetUuid,
         support_bundle_id: SupportBundleUuid,
     ) -> Result<tokio::fs::File, Error> {
-        let root =
-            self.get_configured_dataset(zpool_id, dataset_id).await?.name;
+        // Access the parent dataset where the support bundle is stored.
+        let root = self
+            .get_configured_dataset_if_mounted(zpool_id, dataset_id)
+            .await?
+            .name;
         let dataset =
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
+
         // The mounted root of the support bundle dataset
-        let support_bundle_dir =
-            dataset.mountpoint(&self.storage.zpool_mountpoint_root());
+        let support_bundle_dir = dataset
+            .ensure_mounted_and_get_mountpoint(
+                &self.storage.zpool_mountpoint_root(),
+            )
+            .await?;
         let path = support_bundle_dir.join(BUNDLE_FILE_NAME);
 
         let f = tokio::fs::File::open(&path).await?;
