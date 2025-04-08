@@ -135,6 +135,10 @@ pub struct ValidatedReconfigureMsg {
 
     // The timeout before we send a follow up request to a peer
     retry_timeout: Duration,
+
+    // This is not included in the original `ReconfigureMsg`. It's implicit
+    // in the node that Nexus sends the request to.
+    coordinator_id: PlatformId,
 }
 
 impl PartialEq<ValidatedReconfigureMsg> for ReconfigureMsg {
@@ -155,6 +159,9 @@ impl PartialEq<ValidatedReconfigureMsg> for ReconfigureMsg {
             members: other_members,
             threshold: other_threshold,
             retry_timeout: other_retry_timeout,
+            // This field doesn't exist in `ReconfigureMsg` and is not relevant
+            // for comparisons.
+            coordinator_id: _,
         } = other;
 
         rack_id == other_rack_id
@@ -180,7 +187,7 @@ impl ValidatedReconfigureMsg {
     /// that the ongoing coordination can continue.
     pub fn new(
         log: &Logger,
-        platform_id: &PlatformId,
+        coordinator_id: &PlatformId,
         msg: ReconfigureMsg,
         persistent_state: PersistentStateSummary,
         last_reconfig_msg: Option<&ValidatedReconfigureMsg>,
@@ -189,7 +196,7 @@ impl ValidatedReconfigureMsg {
             return Err(ReconfigurationError::UpgradeFromLrtqRequired);
         }
 
-        if !msg.members.contains(platform_id) {
+        if !msg.members.contains(coordinator_id) {
             return Err(
                 ReconfigurationError::CoordinatorMustBeAMemberOfNewGroup,
             );
@@ -222,6 +229,7 @@ impl ValidatedReconfigureMsg {
             members,
             threshold,
             retry_timeout,
+            coordinator_id: coordinator_id.clone(),
         }))
     }
 
@@ -247,6 +255,10 @@ impl ValidatedReconfigureMsg {
 
     pub fn retry_timeout(&self) -> Duration {
         self.retry_timeout
+    }
+
+    pub fn coordinator_id(&self) -> &PlatformId {
+        &self.coordinator_id
     }
 
     /// Verify that the cluster membership and threshold sizes are within
@@ -456,6 +468,7 @@ mod tests {
                 members,
                 threshold: msg.threshold,
                 retry_timeout: msg.retry_timeout,
+                coordinator_id: platform_id.clone(),
             };
 
             (persistent_state, Some(last_reconfig_msg))
@@ -525,6 +538,7 @@ mod tests {
                 members,
                 threshold: msg.threshold,
                 retry_timeout: msg.retry_timeout,
+                coordinator_id: platform_id.clone(),
             };
 
             (persistent_state, Some(last_reconfig_msg))

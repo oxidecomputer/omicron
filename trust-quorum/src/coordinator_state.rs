@@ -26,9 +26,6 @@ use std::time::Instant;
 /// We allow some unused fields before we complete the coordination code
 #[allow(unused)]
 pub struct CoordinatorState {
-    /// A copy of the platform_id from [`crate::Node`] purely for ergonomics
-    platform_id: PlatformId,
-
     /// When the reconfiguration started
     start_time: Instant,
 
@@ -52,13 +49,11 @@ impl CoordinatorState {
     /// Return the newly constructed `CoordinatorState` along with this node's
     /// `PrepareMsg` so that it can be persisted.
     pub fn new_uninitialized(
-        my_platform_id: PlatformId,
         now: Instant,
         msg: ValidatedReconfigureMsg,
     ) -> Result<(CoordinatorState, PrepareMsg), ReconfigurationError> {
         // Create a configuration for this epoch
-        let (config, shares) =
-            Configuration::new(my_platform_id.clone(), &msg)?;
+        let (config, shares) = Configuration::new(&msg)?;
 
         let mut prepares = BTreeMap::new();
         // `my_prepare_msg` is optional only so that we can fill it in via
@@ -68,7 +63,7 @@ impl CoordinatorState {
         let mut my_prepare_msg: Option<PrepareMsg> = None;
         for (platform_id, share) in shares.into_iter() {
             let prepare_msg = PrepareMsg { config: config.clone(), share };
-            if platform_id == my_platform_id {
+            if platform_id == *msg.coordinator_id() {
                 // The prepare message to add to our `PersistentState`
                 my_prepare_msg = Some(prepare_msg);
             } else {
@@ -81,7 +76,7 @@ impl CoordinatorState {
             prepare_acks: BTreeSet::new(),
         };
 
-        let state = CoordinatorState::new(my_platform_id, now, msg, config, op);
+        let state = CoordinatorState::new(now, msg, config, op);
 
         // Safety: Construction of a `ValidatedReconfigureMsg` ensures that
         // `my_platform_id` is part of the new configuration and has a share.
@@ -91,13 +86,11 @@ impl CoordinatorState {
 
     /// A reconfiguration from one group to another
     pub fn new_reconfiguration(
-        my_platform_id: PlatformId,
         now: Instant,
         msg: ValidatedReconfigureMsg,
         last_committed_config: &Configuration,
     ) -> Result<CoordinatorState, ReconfigurationError> {
-        let (config, new_shares) =
-            Configuration::new(my_platform_id.clone(), &msg)?;
+        let (config, new_shares) = Configuration::new(&msg)?;
 
         // We must collect shares from the last configuration
         // so we can recompute the old rack secret.
@@ -108,12 +101,11 @@ impl CoordinatorState {
             new_shares,
         };
 
-        Ok(CoordinatorState::new(my_platform_id, now, msg, config, op))
+        Ok(CoordinatorState::new(now, msg, config, op))
     }
 
     // Intentionallly private!
     fn new(
-        platform_id: PlatformId,
         now: Instant,
         reconfigure_msg: ValidatedReconfigureMsg,
         configuration: Configuration,
@@ -121,7 +113,6 @@ impl CoordinatorState {
     ) -> CoordinatorState {
         let retry_deadline = now + reconfigure_msg.retry_timeout();
         CoordinatorState {
-            platform_id,
             start_time: now,
             reconfigure_msg,
             configuration,
@@ -158,7 +149,7 @@ impl CoordinatorState {
                 for (platform_id, prepare) in prepares.clone().into_iter() {
                     outbox.push(Envelope {
                         to: platform_id,
-                        from: self.platform_id.clone(),
+                        from: self.reconfigure_msg.coordinator_id().clone(),
                         msg: PeerMsg::Prepare(prepare),
                     });
                 }

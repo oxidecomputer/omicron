@@ -57,10 +57,10 @@ impl Configuration {
     /// coordinator will fill this in as necessary after retrieving shares for
     /// the last committed epoch.
     pub fn new(
-        coordinator: PlatformId,
         reconfigure_msg: &ValidatedReconfigureMsg,
     ) -> Result<(Configuration, BTreeMap<PlatformId, Share>), ConfigurationError>
     {
+        let coordinator = reconfigure_msg.coordinator_id().clone();
         let rack_secret = RackSecret::new();
         let shares = rack_secret.split(
             reconfigure_msg.threshold(),

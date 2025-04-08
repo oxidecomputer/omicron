@@ -104,11 +104,7 @@ impl Node {
         // We have no committed configuration or lrtq ledger
         if self.persistent_state.is_uninitialized() {
             let (coordinator_state, my_prepare_msg) =
-                CoordinatorState::new_uninitialized(
-                    self.platform_id.clone(),
-                    now,
-                    msg,
-                )?;
+                CoordinatorState::new_uninitialized(now, msg)?;
             self.coordinator_state = Some(coordinator_state);
             // Add the prepare to our `PersistentState`
             self.persistent_state
@@ -122,12 +118,8 @@ impl Node {
         let config =
             self.persistent_state.last_committed_configuration().unwrap();
 
-        self.coordinator_state = Some(CoordinatorState::new_reconfiguration(
-            self.platform_id.clone(),
-            now,
-            msg,
-            &config,
-        )?);
+        self.coordinator_state =
+            Some(CoordinatorState::new_reconfiguration(now, msg, &config)?);
 
         Ok(None)
     }
