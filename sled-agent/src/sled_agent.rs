@@ -80,11 +80,9 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use illumos_utils::running_zone::ZoneBuilderFactory;
-#[cfg(not(test))]
-use illumos_utils::{dladm::Dladm, zone::Zones};
-#[cfg(test)]
-use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
+use illumos_utils::dladm::Dladm;
+use illumos_utils::zone::Api;
+use illumos_utils::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -515,14 +513,18 @@ impl SledAgent {
         let vmm_reservoir_manager =
             VmmReservoirManager::spawn(&log, memory_sizes, reservoir_mode);
 
+        let instance_vnic_allocator = illumos_utils::link::VnicAllocator::new(
+            "Instance",
+            etherstub.clone(),
+            Arc::new(illumos_utils::dladm::Dladm::real_api()),
+        );
         let instances = InstanceManager::new(
             parent_log.clone(),
             nexus_client.clone(),
-            etherstub.clone(),
+            instance_vnic_allocator,
             port_manager.clone(),
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
-            ZoneBuilderFactory::default(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
         )?;
@@ -585,7 +587,7 @@ impl SledAgent {
             .await?;
 
         let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
-            .await?
+            .await
             .start(sled_address, &config.dropshot)
             .await?;
 
@@ -806,7 +808,8 @@ impl SledAgent {
 
     /// List the zones that the sled agent is currently managing.
     pub async fn zones_list(&self) -> Result<Vec<String>, Error> {
-        Zones::get()
+        Zones::real_api()
+            .get()
             .await
             .map(|zones| {
                 let mut zn: Vec<_> = zones
@@ -1030,7 +1033,7 @@ impl SledAgent {
 
         self.inner
             .services
-            .ensure_all_omicron_zones_persistent(requested_zones, None)
+            .ensure_all_omicron_zones_persistent(requested_zones)
             .await?;
         Ok(())
     }

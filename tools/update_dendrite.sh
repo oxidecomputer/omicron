@@ -25,23 +25,6 @@ REPO="oxidecomputer/dendrite"
 
 . "$SOURCE_DIR/update_helpers.sh"
 
-function update_openapi {
-    TARGET_COMMIT="$1"
-    DRY_RUN="$2"
-    SHA=$(get_sha "$REPO" "$TARGET_COMMIT" "dpd.json" "openapi")
-    OUTPUT=$(printf "COMMIT=\"%s\"\nSHA2=\"%s\"\n" "$TARGET_COMMIT" "$SHA")
-
-    if [ -n "$DRY_RUN" ]; then
-        OPENAPI_PATH="/dev/null"
-    else
-        OPENAPI_PATH="$SOURCE_DIR/dendrite_openapi_version"
-    fi
-    echo "Updating Dendrite OpenAPI from: $TARGET_COMMIT"
-    set -x
-    echo "$OUTPUT" > "$OPENAPI_PATH"
-    set +x
-}
-
 function update_dendrite_stub_shas {
     TARGET_COMMIT="$1"
     DRY_RUN="$2"
@@ -90,8 +73,8 @@ function main {
     fi
     install_toml2json
     do_update_packages "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${PACKAGES[@]}"
-    update_openapi "$TARGET_COMMIT" "$DRY_RUN"
     update_dendrite_stub_shas "$TARGET_COMMIT" "$DRY_RUN"
+    echo COMMIT=\""$TARGET_COMMIT"\" > tools/dendrite_version
 }
 
 main "$@"

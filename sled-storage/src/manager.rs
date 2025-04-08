@@ -1573,7 +1573,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_control_plane_disks_requires_keymanager() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx =
             test_setup_log("add_control_plane_disks_requires_keymanager");
 
@@ -1665,7 +1664,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_raw_u2_does_not_create_zpool() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("add_raw_u2_does_not_create_zpool");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
         harness.handle().key_manager_ready().await;
@@ -1687,7 +1685,6 @@ mod tests {
     #[tokio::test]
     async fn update_rawdisk_firmware() {
         const FW_REV: &str = "firmware-2.0";
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("update_u2_firmware");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
         harness.handle().key_manager_ready().await;
@@ -1737,7 +1734,6 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_boot_disk() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("wait_for_boot_disk");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
         let _raw_disks = harness.add_vdevs(&["u2_under_test.vdev"]).await;
@@ -1780,7 +1776,6 @@ mod tests {
 
     #[tokio::test]
     async fn disks_automatically_managed_after_key_manager_ready() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log(
             "disks_automatically_managed_after_key_manager_ready",
         );
@@ -1827,7 +1822,6 @@ mod tests {
 
     #[tokio::test]
     async fn queued_disks_get_requeued_on_secret_retriever_error() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log(
             "queued_disks_get_requeued_on_secret_retriever_error",
         );
@@ -1883,7 +1877,6 @@ mod tests {
 
     #[tokio::test]
     async fn detected_raw_disk_removal_triggers_notification() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx =
             test_setup_log("detected_raw_disk_removal_triggers_notification");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
@@ -1910,7 +1903,6 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_using_exactly_these_disks() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("ensure_using_exactly_these_disks");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -1997,7 +1989,6 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_filesystem() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("upsert_filesystem");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -2054,7 +2045,6 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_filesystem_no_uuid() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("upsert_filesystem");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -2107,7 +2097,6 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_datasets() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("ensure_datasets");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -2206,7 +2195,6 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_datasets_get_mounted() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("ensure_datasets_get_mounted");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -2265,7 +2253,6 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_datasets_get_mounted_even_with_data() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx =
             test_setup_log("ensure_datasets_get_mounted_even_with_data");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
@@ -2359,7 +2346,6 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_many_datasets() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("ensure_many_datasets");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -2464,7 +2450,6 @@ mod tests {
 
     #[tokio::test]
     async fn nested_dataset() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("nested_dataset");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
