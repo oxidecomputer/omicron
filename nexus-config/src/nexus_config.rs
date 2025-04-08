@@ -180,6 +180,9 @@ pub struct DeploymentConfig {
     pub database: Database,
     /// External DNS servers Nexus can use to resolve external hosts.
     pub external_dns_servers: Vec<IpAddr>,
+    /// Configuration for HTTP clients to external services.
+    #[serde(default)]
+    pub external_http_clients: ExternalHttpClientConfig,
 }
 
 fn default_techport_external_server_port() -> u16 {
@@ -272,6 +275,17 @@ pub struct MgdConfig {
 struct UnvalidatedTunables {
     max_vpc_ipv4_subnet_prefix: u8,
     load_timeout: Option<std::time::Duration>,
+}
+
+/// Configuration for HTTP clients to external services.
+#[derive(
+    Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema,
+)]
+pub struct ExternalHttpClientConfig {
+    /// If present, bind all TCP connections for external HTTP clients on the
+    /// specified interface name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interface: Option<String>,
 }
 
 /// Tunable configuration parameters, intended for use in test environments or
@@ -1004,6 +1018,8 @@ mod test {
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+            [deployment.external_http_clients]
+            interface = "opte0"
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             default_request_body_max_bytes = 1024
@@ -1110,6 +1126,9 @@ mod test {
                         "1.1.1.1".parse().unwrap(),
                         "9.9.9.9".parse().unwrap(),
                     ],
+                    external_http_clients: ExternalHttpClientConfig {
+                        interface: Some("opte0".to_string()),
+                    },
                 },
                 pkg: PackageConfig {
                     console: ConsoleConfig {

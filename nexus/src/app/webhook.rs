@@ -131,7 +131,6 @@
 //!     delete this footnote.
 
 use crate::Nexus;
-use crate::app::external_dns;
 use anyhow::Context;
 use chrono::DateTime;
 use chrono::TimeDelta;
@@ -176,7 +175,6 @@ use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 use omicron_uuid_kinds::WebhookSecretUuid;
 use sha2::Sha256;
-use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -378,8 +376,6 @@ impl Nexus {
         opctx: &OpContext,
         params: params::WebhookCreate,
     ) -> CreateResult<WebhookReceiverConfig> {
-        // TODO(eliza): validate endpoint URI; reject underlay network IPs for
-        // SSRF prevention...
         self.datastore().webhook_rx_create(&opctx, params).await
     }
 
@@ -704,9 +700,9 @@ impl Nexus {
 
 /// Construct a [`reqwest::Client`] configured for webhook delivery requests.
 pub(super) fn delivery_client(
-    external_dns: &Arc<external_dns::Resolver>,
+    builder: reqwest::ClientBuilder,
 ) -> Result<reqwest::Client, reqwest::Error> {
-    reqwest::Client::builder()
+    builder
         // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
         // redirects.
         //
@@ -723,7 +719,6 @@ pub(super) fn delivery_client(
         //
         // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
         .timeout(Duration::from_secs(30))
-        .dns_resolver(external_dns.clone())
         .build()
 }
 

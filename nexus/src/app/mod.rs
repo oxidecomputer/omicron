@@ -370,10 +370,18 @@ impl Nexus {
             ))
         };
 
-        let webhook_delivery_client =
-            webhook::delivery_client(&external_resolver).map_err(|e| {
+        let webhook_delivery_client = {
+            // The webhook delivery HTTP client will send requests to endpoints
+            // external to the rack, so apply the configuration for external
+            // HTTP clients.
+            let builder = external_http_client_builder(
+                &config.deployment.external_http_clients,
+                &external_resolver,
+            );
+            webhook::delivery_client(builder).map_err(|e| {
                 format!("failed to build webhook delivery client: {e}")
-            })?;
+            })?
+        };
 
         let nexus = Nexus {
             id: config.deployment.id,
@@ -1142,4 +1150,29 @@ async fn map_switch_zone_addrs(
         "mappings" => #?switch_zone_addrs
     );
     Ok(switch_zone_addrs)
+}
+
+/// Begin configuring an external HTTP client, returning a
+/// `reqwest::ClientBuilder`.
+pub(crate) fn external_http_client_builder(
+    config: &nexus_config::ExternalHttpClientConfig,
+    resolver: &Arc<external_dns::Resolver>,
+) -> reqwest::ClientBuilder {
+    let mut builder = reqwest::ClientBuilder::new();
+
+    builder = builder.dns_resolver(resolver.clone());
+
+    // If we are configured to only bind external TCP connections on a specific interface, do so.
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "illumos",
+    ))]
+    {
+        if let Some(ref interface) = config.interface {
+            builder = builder.interface(interface);
+        }
+    }
+
+    builder
 }
