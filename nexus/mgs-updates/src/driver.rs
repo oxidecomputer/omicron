@@ -18,6 +18,7 @@ use futures::stream::FuturesUnordered;
 use gateway_client::SpComponent;
 use gateway_client::types::{SpType, SpUpdateStatus};
 use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::inventory::BaseboardId;
 use qorb::resolver::AllBackends;
 use slog::{debug, error, info, o, warn};
@@ -71,9 +72,9 @@ const RESET_DELAY_INTERVAL: Duration = Duration::from_secs(10);
 pub struct MgsUpdateDriver {
     log: slog::Logger,
     artifacts: Arc<ArtifactCache>,
-    requests: watch::Receiver<BTreeMap<BaseboardId, PendingMgsUpdate>>,
+    requests: watch::Receiver<PendingMgsUpdates>,
     // XXX-dap fill in status here
-    in_progress: BTreeMap<BaseboardId, InProgressUpdate>,
+    in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdate>,
     futures: FuturesUnordered<BoxFuture<'static, UpdateAttemptResult>>,
     mgs_rx: watch::Receiver<AllBackends>,
     status_tx: watch::Sender<DriverStatus>,
@@ -84,7 +85,7 @@ impl MgsUpdateDriver {
     pub fn new(
         log: slog::Logger,
         artifacts: Arc<ArtifactCache>,
-        rx: watch::Receiver<BTreeMap<BaseboardId, PendingMgsUpdate>>,
+        rx: watch::Receiver<PendingMgsUpdates>,
         mgs_rx: watch::Receiver<AllBackends>,
     ) -> MgsUpdateDriver {
         let (status_tx, status_rx) = watch::channel(DriverStatus {
@@ -233,7 +234,7 @@ impl MgsUpdateDriver {
         // completes, we'll stop working on them.
         let new_requests = self.requests.borrow_and_update();
         let mut work_items = Vec::new();
-        for (baseboard_id, request) in new_requests.iter() {
+        for (baseboard_id, request) in &*new_requests {
             match self.in_progress.entry(baseboard_id.clone()) {
                 Entry::Occupied(_) => {
                     info!(
@@ -266,7 +267,7 @@ impl MgsUpdateDriver {
 
     fn do_dispatch(
         &mut self,
-        baseboard_id: BaseboardId,
+        baseboard_id: Arc<BaseboardId>,
         what: Option<(
             InProgressUpdate,
             BoxFuture<'static, UpdateAttemptResult>,
@@ -283,7 +284,7 @@ impl MgsUpdateDriver {
                 );
             });
 
-            self.in_progress.insert(baseboard_id.clone(), in_progress);
+            self.in_progress.insert(baseboard_id, in_progress);
             self.futures.push(future);
         }
     }
@@ -431,7 +432,7 @@ struct UpdateAttemptResult {
 
 pub struct DriverStatus {
     pub recent: Vec<CompletedAttempt>,
-    pub in_progress: BTreeMap<BaseboardId, InProgressUpdateStatus>,
+    pub in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdateStatus>,
 }
 
 /// Parameters describing a request to update one SP-managed component

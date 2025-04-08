@@ -83,6 +83,7 @@ use thiserror::Error;
 
 use super::ClickhouseZonesThatShouldBeRunning;
 use super::clickhouse::ClickhouseAllocator;
+use nexus_types::deployment::PendingMgsUpdates;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
@@ -454,7 +455,7 @@ impl<'a> BlueprintBuilder<'a> {
         Blueprint {
             id: rng.next_blueprint(),
             sleds,
-            pending_mgs_updates: BTreeMap::new(),
+            pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

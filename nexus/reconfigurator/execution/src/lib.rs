@@ -11,7 +11,7 @@ use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution::StepSkipped;
 use nexus_types::deployment::execution::overridables;
@@ -21,7 +21,6 @@ use nexus_types::deployment::execution::{
     StepHandle, StepResult, UpdateEngine,
 };
 use nexus_types::identity::Asset;
-use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -59,7 +58,7 @@ pub struct RealizeArgs<'a> {
     pub creator: OmicronZoneUuid,
     pub sender: mpsc::Sender<Event>,
     pub overrides: Option<&'a Overridables>,
-    pub mgs_updates: watch::Sender<BTreeMap<BaseboardId, PendingMgsUpdate>>,
+    pub mgs_updates: watch::Sender<PendingMgsUpdates>,
 }
 
 impl<'a> RealizeArgs<'a> {
@@ -106,8 +105,7 @@ pub struct RequiredRealizeArgs<'a> {
     pub creator: OmicronZoneUuid,
     pub blueprint: &'a Blueprint,
     pub sender: mpsc::Sender<Event>,
-    // XXX-dap all these BaseboardIds in maps ought to be Arcs
-    pub mgs_updates: watch::Sender<BTreeMap<BaseboardId, PendingMgsUpdate>>,
+    pub mgs_updates: watch::Sender<PendingMgsUpdates>,
 }
 
 impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
@@ -656,7 +654,7 @@ fn register_cockroachdb_settings_step<'a>(
 fn register_mgs_update_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     blueprint: &'a Blueprint,
-    sender: watch::Sender<BTreeMap<BaseboardId, PendingMgsUpdate>>,
+    sender: watch::Sender<PendingMgsUpdates>,
 ) {
     registrar
         .new_step(

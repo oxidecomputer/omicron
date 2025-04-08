@@ -98,6 +98,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
+use nexus_types::deployment::PendingMgsUpdates;
 pub use sim::TEST_HARDWARE_THREADS;
 pub use sim::TEST_RESERVOIR_RAM;
 
@@ -925,7 +926,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             Blueprint {
                 id: BlueprintUuid::new_v4(),
                 sleds: blueprint_sleds,
-                pending_mgs_updates: BTreeMap::new(),
+                pending_mgs_updates: PendingMgsUpdates::new(),
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config.generation,
                 external_dns_version: Generation::new(),

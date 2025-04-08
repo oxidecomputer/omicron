@@ -4,12 +4,12 @@
 
 //! Test utilities for reconfigurator execution.
 
-use std::{collections::BTreeMap, net::Ipv6Addr};
+use std::net::Ipv6Addr;
 
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_types::deployment::{
-    Blueprint,
+    Blueprint, PendingMgsUpdates,
     execution::{EventBuffer, Overridables},
 };
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -35,8 +35,8 @@ pub(crate) async fn realize_blueprint_and_expect(
         buffer
     });
 
-    // XXX-dap
-    let (mgs_updates, _rx) = watch::channel(BTreeMap::new());
+    // This helper function does not support MGS-managed updates.
+    let (mgs_updates, _rx) = watch::channel(PendingMgsUpdates::new());
     let nexus_id = OmicronZoneUuid::new_v4();
     let output = crate::realize_blueprint(
         RequiredRealizeArgs {

@@ -107,6 +107,7 @@ pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
 use gateway_client::types::SpType;
 use omicron_common::update::ArtifactHashId;
+use std::sync::Arc;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -157,7 +158,7 @@ pub struct Blueprint {
     pub sleds: BTreeMap<SledUuid, BlueprintSledConfig>,
 
     /// List of pending MGS-mediated updates
-    pub pending_mgs_updates: BTreeMap<BaseboardId, PendingMgsUpdate>,
+    pub pending_mgs_updates: PendingMgsUpdates,
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<BlueprintUuid>,
@@ -1006,10 +1007,66 @@ impl fmt::Display for BlueprintZoneImageSource {
 #[derive(
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
+pub struct PendingMgsUpdates {
+    // Only one outstanding MGS-managed update is allowed for a given baseboard.
+    by_baseboard: BTreeMap<Arc<BaseboardId>, PendingMgsUpdate>,
+}
+
+impl PendingMgsUpdates {
+    pub fn new() -> PendingMgsUpdates {
+        PendingMgsUpdates { by_baseboard: BTreeMap::new() }
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_baseboard.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_baseboard.is_empty()
+    }
+
+    pub fn get(&self, baseboard_id: &BaseboardId) -> Option<&PendingMgsUpdate> {
+        self.by_baseboard.get(baseboard_id)
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &PendingMgsUpdate> {
+        self.by_baseboard.values()
+    }
+
+    pub fn remove(
+        &mut self,
+        baseboard_id: &BaseboardId,
+    ) -> Option<PendingMgsUpdate> {
+        self.by_baseboard.remove(baseboard_id)
+    }
+
+    pub fn add_or_replace(
+        &mut self,
+        update: PendingMgsUpdate,
+    ) -> Option<PendingMgsUpdate> {
+        self.by_baseboard.insert(update.baseboard_id.clone(), update)
+    }
+}
+
+impl<'a> IntoIterator for &'a PendingMgsUpdates {
+    type Item = (&'a Arc<BaseboardId>, &'a PendingMgsUpdate);
+    type IntoIter = std::collections::btree_map::Iter<
+        'a,
+        Arc<BaseboardId>,
+        PendingMgsUpdate,
+    >;
+    fn into_iter(self) -> Self::IntoIter {
+        self.by_baseboard.iter()
+    }
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
 pub struct PendingMgsUpdate {
-    // identify of the baseboard
+    // identity of the baseboard
     /// id of the baseboard that we're going to update
-    pub baseboard_id: BaseboardId,
+    pub baseboard_id: Arc<BaseboardId>,
 
     // location of the baseboard (that we'd pass to MGS)
     /// what type of baseboard this is
@@ -1033,7 +1090,6 @@ impl slog::KV for PendingMgsUpdate {
         record: &slog::Record,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        // XXX-dap nesting would be nice here
         slog::KV::serialize(&self.baseboard_id, record, serializer)?;
         serializer
             .emit_str(Key::from("sp_type"), &format!("{:?}", self.sp_type))?;

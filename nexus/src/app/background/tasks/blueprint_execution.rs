@@ -14,11 +14,11 @@ use nexus_reconfigurator_execution::{
     RealizeBlueprintOutput, RequiredRealizeArgs,
 };
 use nexus_types::deployment::{
-    Blueprint, BlueprintTarget, execution::EventBuffer,
+    Blueprint, BlueprintTarget, PendingMgsUpdates, execution::EventBuffer,
 };
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::watch;
 use update_engine::NestedError;
 
@@ -102,7 +102,7 @@ impl BlueprintExecutor {
         });
 
         // XXX-dap
-        let (mgs_updates, _rx) = watch::channel(BTreeMap::new());
+        let (mgs_updates, _rx) = watch::channel(PendingMgsUpdates::new());
         let result = nexus_reconfigurator_execution::realize_blueprint(
             RequiredRealizeArgs {
                 opctx,
@@ -193,7 +193,7 @@ mod test {
     use nexus_types::deployment::{
         Blueprint, BlueprintSledConfig, BlueprintTarget, BlueprintZoneConfig,
         BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
-        CockroachDbPreserveDowngrade, blueprint_zone_type,
+        CockroachDbPreserveDowngrade, PendingMgsUpdates, blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
@@ -255,7 +255,7 @@ mod test {
         let blueprint = Blueprint {
             id,
             sleds: blueprint_sleds,
-            pending_mgs_updates: BTreeMap::new(),
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: Some(current_target.target_id),

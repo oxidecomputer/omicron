@@ -24,16 +24,17 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::DriverStatus;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::inventory::BaseboardId;
 use omicron_common::update::ArtifactHash;
 use omicron_common::update::ArtifactHashId;
 use reedline::{Reedline, Signal};
 use slog::{info, o, warn};
 use std::collections::BTreeMap;
-use std::collections::btree_map::Entry;
 use std::fmt::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
@@ -138,7 +139,8 @@ impl ReconfiguratorSpUpdater {
         );
         let artifact_cache = Arc::new(ArtifactCache::new(repo_depot_client));
 
-        let (requests_tx, requests_rx) = watch::channel(BTreeMap::new());
+        let (requests_tx, requests_rx) =
+            watch::channel(PendingMgsUpdates::new());
 
         let driver = MgsUpdateDriver::new(
             log.clone(),
@@ -180,14 +182,14 @@ impl ReconfiguratorSpUpdater {
         info!(&log, "waiting for qorb to shut down");
         mgs_resolver.terminate().await;
         info!(&log, "waiting for driver task to stop");
-        driver_task.await.context("waiting for driver task");
+        driver_task.await.context("waiting for driver task")?;
 
         Ok(())
     }
 }
 
 struct UpdaterState {
-    requests_tx: watch::Sender<BTreeMap<BaseboardId, PendingMgsUpdate>>,
+    requests_tx: watch::Sender<PendingMgsUpdates>,
     status_rx: watch::Receiver<DriverStatus>,
     inventory: Inventory,
 }
@@ -205,7 +207,7 @@ impl Inventory {
 }
 
 struct SpInfo {
-    baseboard_id: BaseboardId,
+    baseboard_id: Arc<BaseboardId>,
     sp_type: SpType,
     sp_slot_id: u32,
 }
@@ -256,10 +258,10 @@ impl Inventory {
         let sps_by_serial = sp_infos
             .into_iter()
             .map(|(sp_id, sp_state)| {
-                let baseboard_id = BaseboardId {
+                let baseboard_id = Arc::new(BaseboardId {
                     serial_number: sp_state.serial_number,
                     part_number: sp_state.model,
-                };
+                });
                 let serial_number = baseboard_id.serial_number.clone();
                 let sp_info = SpInfo {
                     baseboard_id,
@@ -378,12 +380,17 @@ fn cmd_status(
     let mut s = String::new();
     writeln!(&mut s, "recent completed attempts:")?;
     for r in &status.recent {
+        // Ignore units smaller than a millisecond.
+        let elapsed = Duration::from_millis(
+            u64::try_from(r.elapsed.as_millis())
+                .context("elapsed time too large")?,
+        );
         writeln!(
             &mut s,
             "    {} to {} (took {}): serial {}",
             r.time_started.to_rfc3339_opts(SecondsFormat::Millis, true),
             r.time_done.to_rfc3339_opts(SecondsFormat::Millis, true),
-            humantime::format_duration(r.elapsed.into()),
+            humantime::format_duration(elapsed.into()),
             r.request.baseboard_id.serial_number,
         )?;
         writeln!(&mut s, "        hash: {}", r.request.artifact_hash_id.hash)?;
@@ -392,12 +399,17 @@ fn cmd_status(
 
     writeln!(&mut s, "\ncurrently in progress:")?;
     for (baseboard_id, status) in &status.in_progress {
+        // Ignore units smaller than a millisecond.
+        let elapsed = Duration::from_millis(
+            u64::try_from(status.instant_started.elapsed().as_millis())
+                .context("total runtime was too large")?,
+        );
         writeln!(
             &mut s,
             "    {}: serial {} (running {})",
             status.time_started.to_rfc3339_opts(SecondsFormat::Millis, true),
             baseboard_id.serial_number,
-            humantime::format_duration(status.instant_started.elapsed().into()),
+            humantime::format_duration(elapsed),
         )?;
     }
 
@@ -456,29 +468,11 @@ fn cmd_set(
             .context("parsing artifact version")?,
     };
 
-    let changed = updater_state.requests_tx.send_if_modified(|requests| {
-        match requests.entry(request.baseboard_id.clone()) {
-            Entry::Vacant(vacant) => {
-                vacant.insert(request);
-                true
-            }
-            Entry::Occupied(mut occupied) => {
-                let current = occupied.get_mut();
-                if *current == request {
-                    false
-                } else {
-                    *current = request;
-                    true
-                }
-            }
-        }
+    updater_state.requests_tx.send_modify(|requests| {
+        requests.add_or_replace(request);
     });
 
-    if changed {
-        Ok(Some(format!("updated configuration for {serial}")))
-    } else {
-        Ok(Some(format!("requested configuration for {serial} is unchanged")))
-    }
+    Ok(Some(format!("updated configuration for {serial}")))
 }
 
 #[derive(Debug, Args)]

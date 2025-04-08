@@ -14,10 +14,10 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_execution::{RequiredRealizeArgs, realize_blueprint};
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::PendingMgsUpdates;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::info;
-use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -166,7 +166,7 @@ impl ReconfiguratorExec {
         //                         "oxide"  "rcfg"         "reconfig[urator]"
         info!(&log, "beginning execution");
         // XXX-dap-blocks-test
-        let (mgs_updates, _rx) = watch::channel(BTreeMap::new());
+        let (mgs_updates, _rx) = watch::channel(PendingMgsUpdates::new());
         let rv = realize_blueprint(
             RequiredRealizeArgs {
                 opctx: &opctx,
