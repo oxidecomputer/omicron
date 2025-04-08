@@ -13,16 +13,16 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use async_trait::async_trait;
 use bytes::Bytes;
-use installinator_artifact_client::{ClientError, ResponseValue};
+use installinator_client::{ClientError, ResponseValue};
 use installinator_common::EventReport;
-use omicron_common::update::ArtifactHashId;
 use proptest::prelude::*;
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
 use tokio::sync::mpsc;
+use tufaceous_artifact::ArtifactHashId;
 use uuid::Uuid;
 
 use crate::{
@@ -342,7 +342,7 @@ impl MockPeer {
                 tokio::time::sleep(after).await;
                 _ = sender
                     .send(Err(ClientError::ErrorResponse(ResponseValue::new(
-                        installinator_artifact_client::types::Error {
+                        installinator_client::types::Error {
                             error_code: None,
                             message: format!("not-found error after {after:?}"),
                             request_id: "mock-request-id".to_owned(),
@@ -356,7 +356,7 @@ impl MockPeer {
                 tokio::time::sleep(after).await;
                 _ = sender
                     .send(Err(ClientError::ErrorResponse(ResponseValue::new(
-                        installinator_artifact_client::types::Error {
+                        installinator_client::types::Error {
                             error_code: None,
                             message: format!("forbidden error after {after:?}"),
                             request_id: "mock-request-id".to_owned(),
@@ -526,7 +526,7 @@ impl PeersImpl for MockReportPeers {
             Ok(())
         } else if peer == Self::invalid_peer() {
             Err(ClientError::ErrorResponse(ResponseValue::new(
-                installinator_artifact_client::types::Error {
+                installinator_client::types::Error {
                     error_code: None,
                     message: "invalid peer => HTTP 422".to_owned(),
                     request_id: "mock-request-id".to_owned(),
@@ -554,16 +554,16 @@ mod tests {
     };
 
     use bytes::Buf;
-    use futures::{future, StreamExt};
+    use futures::{StreamExt, future};
     use installinator_common::{
         InstallinatorCompletionMetadata, InstallinatorComponent,
         InstallinatorProgressMetadata, InstallinatorStepId, StepContext,
         StepEvent, StepEventKind, StepOutcome, StepSuccess, UpdateEngine,
     };
-    use omicron_common::api::internal::nexus::KnownArtifactKind;
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
     use tokio_stream::wrappers::ReceiverStream;
+    use tufaceous_artifact::KnownArtifactKind;
 
     // The #[proptest] macro doesn't currently with with #[tokio::test] sadly.
     #[proptest]
@@ -575,7 +575,7 @@ mod tests {
         #[strategy(any::<[u8; 16]>().prop_map(Uuid::from_bytes))]
         update_id: Uuid,
     ) {
-        with_test_runtime(move || async move {
+        with_test_runtime(async move {
             let logctx = test_setup_log("proptest_fetch_artifact");
             let expected_result = universe.expected_result(timeout);
             let expected_artifact = universe.artifact.clone();
@@ -616,7 +616,7 @@ mod tests {
                     InstallinatorComponent::HostPhase2,
                     InstallinatorStepId::Download,
                     "Downloading artifact",
-                    |cx| async move {
+                    async move |cx| {
                         let artifact =
                             fetch_artifact(&cx, &log, attempts, timeout)
                                 .await?;
@@ -671,10 +671,14 @@ mod tests {
                 }
                 (Err(_), Err(_)) => {}
                 (Err(_), Ok(fetched_artifact)) => {
-                    panic!("expected failure to fetch but found success: {fetched_artifact:?}");
+                    panic!(
+                        "expected failure to fetch but found success: {fetched_artifact:?}"
+                    );
                 }
                 (Ok((attempt, addr)), Err(err)) => {
-                    panic!("expected success at attempt `{attempt}` from `{addr}`, but found failure: {err}");
+                    panic!(
+                        "expected success at attempt `{attempt}` from `{addr}`, but found failure: {err}"
+                    );
                 }
             }
 
@@ -754,7 +758,9 @@ mod tests {
                                 );
                             }
                             other => {
-                                panic!("expected download metadata, found {other:?}");
+                                panic!(
+                                    "expected download metadata, found {other:?}"
+                                );
                             }
                         };
                     }

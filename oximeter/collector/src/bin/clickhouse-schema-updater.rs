@@ -6,14 +6,14 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use anyhow::anyhow;
 use anyhow::Context;
+use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use clap::Subcommand;
-use omicron_common::address::CLICKHOUSE_PORT;
-use oximeter_db::model::OXIMETER_VERSION;
+use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use oximeter_db::Client;
+use oximeter_db::OXIMETER_VERSION;
 use slog::Drain;
 use slog::Level;
 use slog::LevelFilter;
@@ -24,7 +24,7 @@ use std::net::SocketAddrV6;
 
 const DEFAULT_HOST: SocketAddr = SocketAddr::V6(SocketAddrV6::new(
     Ipv6Addr::LOCALHOST,
-    CLICKHOUSE_PORT,
+    CLICKHOUSE_TCP_PORT,
     0,
     0,
 ));
@@ -36,7 +36,8 @@ fn parse_log_level(s: &str) -> anyhow::Result<Level> {
 /// Tool to apply offline updates to ClickHouse schema.
 #[derive(Clone, Debug, Parser)]
 struct Args {
-    /// IP address and port at which to access ClickHouse.
+    /// IP address and port at which to access ClickHouse via the native TCP
+    /// protocol.
     #[arg(long, default_value_t = DEFAULT_HOST, env = "CLICKHOUSE_HOST")]
     host: SocketAddr,
 

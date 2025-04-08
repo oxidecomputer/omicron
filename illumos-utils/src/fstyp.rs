@@ -5,7 +5,7 @@
 //! Helper for calling fstyp.
 
 use crate::zpool::ZpoolName;
-use crate::{execute, PFEXEC};
+use crate::{PFEXEC, execute};
 use camino::Utf8Path;
 use std::str::FromStr;
 
@@ -29,7 +29,6 @@ pub enum Error {
 /// Wraps 'fstyp' command.
 pub struct Fstyp {}
 
-#[cfg_attr(test, mockall::automock)]
 impl Fstyp {
     /// Executes the 'fstyp' command and parses the name of a zpool from it, if
     /// one exists.

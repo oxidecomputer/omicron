@@ -4,9 +4,9 @@
 
 //! Small CLI to view and inspect zone bundles from the sled agent.
 
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
-use anyhow::Context;
 use bytes::Buf;
 use bytes::BufMut;
 use bytes::BytesMut;
@@ -17,11 +17,11 @@ use clap::Parser;
 use clap::Subcommand;
 use futures::stream::StreamExt;
 use omicron_common::address::SLED_AGENT_PORT;
+use sled_agent_client::Client;
 use sled_agent_client::types::CleanupContextUpdate;
 use sled_agent_client::types::Duration;
 use sled_agent_client::types::PriorityDimension;
 use sled_agent_client::types::PriorityOrder;
-use sled_agent_client::Client;
 use slog::Drain;
 use slog::Level;
 use slog::LevelFilter;
@@ -246,54 +246,25 @@ async fn fetch_underlay_address() -> anyhow::Result<Ipv6Addr> {
     return Ok(Ipv6Addr::LOCALHOST);
     #[cfg(target_os = "illumos")]
     {
+        use illumos_utils::ipadm::Ipadm;
+        use std::net::IpAddr;
         const EXPECTED_ADDR_OBJ: &str = "underlay0/sled6";
-        let output = Command::new("ipadm")
-            .arg("show-addr")
-            .arg("-p")
-            .arg("-o")
-            .arg("addr")
-            .arg(EXPECTED_ADDR_OBJ)
-            .output()
-            .await?;
-        // If we failed because there was no such interface, then fall back to
-        // localhost.
-        if !output.status.success() {
-            match std::str::from_utf8(&output.stderr) {
-                Err(_) => bail!(
-                    "ipadm command failed unexpectedly, stderr:\n{}",
-                    String::from_utf8_lossy(&output.stderr)
+        match Ipadm::addrobj_addr(EXPECTED_ADDR_OBJ) {
+            // If we failed because there was no such interface, then fall back
+            // to localhost.
+            Ok(None) => Ok(Ipv6Addr::LOCALHOST),
+            Ok(Some(addr)) => match addr.addr() {
+                IpAddr::V6(ipv6) => Ok(ipv6),
+                IpAddr::V4(ipv4) => bail!(
+                    "Unexpectedly got IPv4 address for {}: {}",
+                    EXPECTED_ADDR_OBJ,
+                    ipv4
                 ),
-                Ok(out) => {
-                    if out.contains("Address object not found") {
-                        eprintln!(
-                            "Expected addrobj '{}' not found, using localhost",
-                            EXPECTED_ADDR_OBJ,
-                        );
-                        return Ok(Ipv6Addr::LOCALHOST);
-                    } else {
-                        bail!(
-                            "ipadm subcommand failed unexpectedly, stderr:\n{}",
-                            String::from_utf8_lossy(&output.stderr),
-                        );
-                    }
-                }
-            }
+            },
+            Err(e) => bail!(
+                "failed to get address for addrobj {EXPECTED_ADDR_OBJ}: {e}",
+            ),
         }
-        let out = std::str::from_utf8(&output.stdout)
-            .context("non-UTF8 output in ipadm")?;
-        let lines: Vec<_> = out.trim().lines().collect();
-        anyhow::ensure!(
-            lines.len() == 1,
-            "No addresses or more than one address on expected interface '{}'",
-            EXPECTED_ADDR_OBJ
-        );
-        lines[0]
-            .trim()
-            .split_once('/')
-            .context("expected a /64 subnet")?
-            .0
-            .parse()
-            .context("invalid IPv6 address")
     }
 }
 
@@ -449,11 +420,7 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .context("failed to get zone bundle")?
                 .into_inner();
-            let mut f = tokio::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(&output)
+            let mut f = tokio::fs::File::create(&output)
                 .await
                 .context("failed to open output file")?;
             let mut stream = bundle.into_inner();
@@ -488,7 +455,9 @@ async fn main() -> anyhow::Result<()> {
                         [PriorityDimension; EXPECTED_DIMENSIONS],
                         _,
                     > = pri.try_into() else {
-                        bail!("must provide {EXPECTED_DIMENSIONS} priority dimensions");
+                        bail!(
+                            "must provide {EXPECTED_DIMENSIONS} priority dimensions"
+                        );
                     };
                     Some(PriorityOrder::from(arr))
                 }
@@ -654,11 +623,7 @@ async fn main() -> anyhow::Result<()> {
             }
 
             // Open megabundle output file.
-            let f = tokio::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(&output)
+            let f = tokio::fs::File::create(&output)
                 .await
                 .context("failed to open output file")?
                 .into_std()

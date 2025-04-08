@@ -4,19 +4,16 @@
 
 //! Server API for bootstrap-related functionality.
 
-use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
-use super::http_entrypoints;
-use super::params::RackInitializeRequest;
-use super::params::StartSledAgentRequest;
-use super::rack_ops::RackInitId;
-use super::views::SledAgentResponse;
 use super::BootstrapError;
 use super::RssAccessError;
+use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
+use super::http_entrypoints;
+use super::views::SledAgentResponse;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
-use crate::bootstrap::http_entrypoints::api as http_api;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
+use crate::bootstrap::pumpkind;
 use crate::bootstrap::rack_ops::RssAccess;
 use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use crate::bootstrap::sprockets_server::SprocketsServer;
@@ -26,20 +23,24 @@ use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::server::Server as SledAgentServer;
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
-use crate::storage_monitor::UnderlayAccess;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
-use ddm_admin_client::Client as DdmAdminClient;
-use ddm_admin_client::DdmError;
 use dropshot::HttpServer;
 use futures::StreamExt;
 use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
+use illumos_utils::zone::Api;
 use illumos_utils::zone::Zones;
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
+use omicron_ddm_admin_client::DdmError;
+use omicron_ddm_admin_client::types::EnableStatsRequest;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackInitUuid;
+use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
@@ -61,8 +62,8 @@ pub enum StartError {
     #[error("Failed to initialize logger")]
     InitLogger(#[source] io::Error),
 
-    #[error("Failed to register DTrace probes")]
-    RegisterDTraceProbes(#[source] usdt::Error),
+    #[error("Failed to register DTrace probes: {0}")]
+    RegisterDTraceProbes(String),
 
     #[error("Failed to find address objects for maghemite")]
     FindMaghemiteAddrObjs(#[source] underlay::Error),
@@ -72,6 +73,9 @@ pub enum StartError {
 
     #[error("Failed to enable mg-ddm")]
     EnableMgDdm(#[from] maghemite::Error),
+
+    #[error("Failed to enable pumpkind")]
+    EnablePumpkind(#[from] pumpkind::Error),
 
     #[error("Failed to create zfs key directory {dir:?}")]
     CreateZfsKeyDirectory {
@@ -110,7 +114,7 @@ pub enum StartError {
     CreateDdmAdminLocalhostClient(#[source] DdmError),
 
     #[error("Failed to create ZFS ramdisk dataset")]
-    EnsureZfsRamdiskDataset(#[source] zfs::EnsureFilesystemError),
+    EnsureZfsRamdiskDataset(#[source] zfs::EnsureDatasetError),
 
     #[error("Failed to list zones")]
     ListZones(#[source] zone::AdmError),
@@ -171,13 +175,11 @@ impl Server {
         let BootstrapAgentStartup {
             config,
             global_zone_bootstrap_ip,
-            ddm_admin_localhost_client,
             base_log,
             startup_log,
             service_manager,
             long_running_task_handles,
             sled_agent_started_tx,
-            underlay_available_tx,
         } = BootstrapAgentStartup::run(config).await?;
 
         // Do we have a StartSledAgentRequest stored in the ledger?
@@ -208,6 +210,7 @@ impl Server {
             rss_access,
             updates: config.updates.clone(),
             sled_reset_tx,
+            sprockets: config.sprockets.clone(),
         };
         let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
 
@@ -227,6 +230,7 @@ impl Server {
                 0,
             ),
             sled_init_tx,
+            config.sprockets.clone(),
             &base_log,
         )
         .await
@@ -240,9 +244,7 @@ impl Server {
                 &config,
                 start_sled_agent_request,
                 long_running_task_handles.clone(),
-                underlay_available_tx,
                 service_manager.clone(),
-                &ddm_admin_localhost_client,
                 &base_log,
                 &startup_log,
             )
@@ -259,13 +261,10 @@ impl Server {
             // we're responsible for, while continuing to handle hardware
             // notifications. This cannot fail: we retry indefinitely until
             // we're done loading services.
-            sled_agent.cold_boot_load_services().await;
+            sled_agent.load_services().await;
             SledAgentState::ServerStarted(sled_agent_server)
         } else {
-            SledAgentState::Bootstrapping(
-                Some(sled_agent_started_tx),
-                Some(underlay_available_tx),
-            )
+            SledAgentState::Bootstrapping(Some(sled_agent_started_tx))
         };
 
         // Spawn our inner task that handles any future hardware updates and any
@@ -276,7 +275,6 @@ impl Server {
             state,
             sled_init_rx,
             sled_reset_rx,
-            ddm_admin_localhost_client,
             long_running_task_handles,
             service_manager,
             _sprockets_server_handle: sprockets_server_handle,
@@ -290,7 +288,7 @@ impl Server {
     pub fn start_rack_initialize(
         &self,
         request: RackInitializeRequest,
-    ) -> Result<RackInitId, RssAccessError> {
+    ) -> Result<RackInitUuid, RssAccessError> {
         self.bootstrap_http_server.app_private().start_rack_initialize(request)
     }
 
@@ -308,10 +306,7 @@ impl Server {
 // bootstrap server).
 enum SledAgentState {
     // We're still in the bootstrapping phase, waiting for a sled-agent request.
-    Bootstrapping(
-        Option<oneshot::Sender<SledAgent>>,
-        Option<oneshot::Sender<UnderlayAccess>>,
-    ),
+    Bootstrapping(Option<oneshot::Sender<SledAgent>>),
     // ... or the sled agent server is running.
     ServerStarted(SledAgentServer),
 }
@@ -355,9 +350,7 @@ async fn start_sled_agent(
     config: &SledConfig,
     request: StartSledAgentRequest,
     long_running_task_handles: LongRunningTaskHandles,
-    underlay_available_tx: oneshot::Sender<UnderlayAccess>,
     service_manager: ServiceManager,
-    ddmd_client: &DdmAdminClient,
     base_log: &Logger,
     log: &Logger,
 ) -> Result<SledAgentServer, SledAgentServerStartError> {
@@ -396,18 +389,14 @@ async fn start_sled_agent(
     // Inform the storage service that the key manager is available
     long_running_task_handles.storage_manager.key_manager_ready().await;
 
-    // Start trying to notify ddmd of our sled prefix so it can
-    // advertise it to other sleds.
-    //
-    // TODO-security This ddmd_client is used to advertise both this
-    // (underlay) address and our bootstrap address. Bootstrap addresses are
-    // unauthenticated (connections made on them are auth'd via sprockets),
-    // but underlay addresses should be exchanged via authenticated channels
-    // between ddmd instances. It's TBD how that will work, but presumably
-    // we'll need to do something different here for underlay vs bootstrap
-    // addrs (either talk to a differently-configured ddmd, or include info
-    // indicating which kind of address we're advertising).
-    ddmd_client.advertise_prefix(request.body.subnet);
+    // Inform our DDM reconciler of our underlay subnet and the information it
+    // needs for maghemite to enable Oximeter stats.
+    let ddm_reconciler = service_manager.ddm_reconciler();
+    ddm_reconciler.set_underlay_subnet(request.body.subnet);
+    ddm_reconciler.enable_stats(EnableStatsRequest {
+        rack_id: request.body.rack_id,
+        sled_id: request.body.id.into_untyped_uuid(),
+    });
 
     // Server does not exist, initialize it.
     let server = SledAgentServer::start(
@@ -416,7 +405,6 @@ async fn start_sled_agent(
         request.clone(),
         long_running_task_handles.clone(),
         service_manager,
-        underlay_available_tx,
     )
     .await
     .map_err(SledAgentServerStartError::FailedStartingServer)?;
@@ -442,7 +430,7 @@ fn start_dropshot_server(
     context: BootstrapServerContext,
 ) -> Result<HttpServer<BootstrapServerContext>, StartError> {
     let mut dropshot_config = dropshot::ConfigDropshot::default();
-    dropshot_config.request_body_max_bytes = 1024 * 1024;
+    dropshot_config.default_request_body_max_bytes = 1024 * 1024;
     dropshot_config.bind_address = SocketAddr::V6(SocketAddrV6::new(
         context.global_zone_bootstrap_ip,
         BOOTSTRAP_AGENT_HTTP_PORT,
@@ -451,16 +439,16 @@ fn start_dropshot_server(
     ));
     let dropshot_log =
         context.base_log.new(o!("component" => "dropshot (BootstrapAgent)"));
-    let http_server = dropshot::HttpServerStarter::new(
-        &dropshot_config,
+    let http_server = dropshot::ServerBuilder::new(
         http_entrypoints::api(),
         context,
-        &dropshot_log,
+        dropshot_log,
     )
+    .config(dropshot_config)
+    .start()
     .map_err(|error| {
         StartError::InitBootstrapDropshotServer(error.to_string())
-    })?
-    .start();
+    })?;
 
     Ok(http_server)
 }
@@ -482,7 +470,7 @@ impl From<MissingM2Paths> for SledAgentServerStartError {
 async fn sled_config_paths(
     storage: &StorageHandle,
 ) -> Result<Vec<Utf8PathBuf>, MissingM2Paths> {
-    let resources = storage.get_latest_resources().await;
+    let resources = storage.get_latest_disks().await;
     let paths: Vec<_> = resources
         .all_m2_mountpoints(CONFIG_DATASET)
         .into_iter()
@@ -495,17 +483,6 @@ async fn sled_config_paths(
     Ok(paths)
 }
 
-/// Runs the OpenAPI generator, emitting the spec to stdout.
-pub fn run_openapi() -> Result<(), String> {
-    http_api()
-        .openapi("Oxide Bootstrap Agent API", "0.0.1")
-        .description("API for interacting with individual sleds")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
-}
-
 struct Inner {
     config: SledConfig,
     state: SledAgentState,
@@ -514,7 +491,6 @@ struct Inner {
         oneshot::Sender<Result<SledAgentResponse, String>>,
     )>,
     sled_reset_rx: mpsc::Receiver<oneshot::Sender<Result<(), BootstrapError>>>,
-    ddm_admin_localhost_client: DdmAdminClient,
     long_running_task_handles: LongRunningTaskHandles,
     service_manager: ServiceManager,
     _sprockets_server_handle: JoinHandle<()>,
@@ -560,11 +536,8 @@ impl Inner {
         log: &Logger,
     ) {
         match &mut self.state {
-            SledAgentState::Bootstrapping(
-                sled_agent_started_tx,
-                underlay_available_tx,
-            ) => {
-                let request_id = request.body.id;
+            SledAgentState::Bootstrapping(sled_agent_started_tx) => {
+                let request_id = request.body.id.into_untyped_uuid();
 
                 // Extract from options to satisfy the borrow checker.
                 // It is not possible for `start_sled_agent` to be cancelled
@@ -574,16 +547,12 @@ impl Inner {
                 // See https://github.com/oxidecomputer/omicron/issues/4494
                 let sled_agent_started_tx =
                     sled_agent_started_tx.take().unwrap();
-                let underlay_available_tx =
-                    underlay_available_tx.take().unwrap();
 
                 let response = match start_sled_agent(
                     &self.config,
                     request,
                     self.long_running_task_handles.clone(),
-                    underlay_available_tx,
                     self.service_manager.clone(),
-                    &self.ddm_admin_localhost_client,
                     &self.base_log,
                     &log,
                 )
@@ -604,7 +573,7 @@ impl Inner {
                         // This error is unrecoverable, and if returned we'd
                         // end up in maintenance mode anyway.
                         error!(log, "Failed to start sled agent: {err:#}");
-                        panic!("Failed to start sled agent");
+                        panic!("Failed to start sled agent: {err:#}");
                     }
                 };
                 _ = response_tx.send(response);
@@ -620,7 +589,10 @@ impl Inner {
                         initial, request
                     ))
                 } else {
-                    Ok(SledAgentResponse { id: server.id() })
+                    Ok(SledAgentResponse {
+                        // TODO-cleanup use typed UUIDs everywhere
+                        id: server.id().into_untyped_uuid(),
+                    })
                 };
 
                 _ = response_tx.send(response);
@@ -631,14 +603,14 @@ impl Inner {
     // Uninstall all oxide zones (except the switch zone)
     async fn uninstall_zones(&self) -> Result<(), BootstrapError> {
         const CONCURRENCY_CAP: usize = 32;
-        futures::stream::iter(Zones::get().await?)
+        futures::stream::iter(Zones::real_api().get().await?)
             .map(Ok::<_, anyhow::Error>)
             // Use for_each_concurrent_then_try to delete as much as possible.
             // We only return one error though -- hopefully that's enough to
             // signal to the caller that this failed.
             .for_each_concurrent_then_try(CONCURRENCY_CAP, |zone| async move {
                 if zone.name() != "oxz_switch" {
-                    Zones::halt_and_remove(zone.name()).await?;
+                    Zones::real_api().halt_and_remove(zone.name()).await?;
                 }
                 Ok(())
             })
@@ -651,7 +623,7 @@ impl Inner {
         let config_dirs = self
             .long_running_task_handles
             .storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter();
@@ -726,11 +698,11 @@ impl Inner {
 
 #[cfg(test)]
 mod tests {
-    use crate::bootstrap::params::StartSledAgentRequestBody;
-
     use super::*;
     use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::SledUuid;
+    use sled_agent_types::sled::StartSledAgentRequestBody;
     use std::net::Ipv6Addr;
     use uuid::Uuid;
 
@@ -744,7 +716,7 @@ mod tests {
             generation: 0,
             schema_version: 1,
             body: StartSledAgentRequestBody {
-                id: Uuid::new_v4(),
+                id: SledUuid::new_v4(),
                 rack_id: Uuid::new_v4(),
                 use_trust_quorum: false,
                 is_lrtq_learner: false,

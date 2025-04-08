@@ -6,6 +6,9 @@
 
 use std::time::Duration;
 
+pub mod example;
+pub mod inventory;
+pub mod preflight_check;
 pub mod rack_setup;
 pub mod rack_update;
 pub mod update_events;

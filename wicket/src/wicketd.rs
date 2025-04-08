@@ -4,20 +4,22 @@
 
 //! Code for talking to wicketd
 
-use slog::{o, warn, Logger};
+use slog::{Logger, o, warn};
 use std::convert::From;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
-use tokio::time::{interval, Duration, MissedTickBehavior};
-use wicket_common::rack_update::{SpIdentifier, SpType};
+use tokio::time::{Duration, MissedTickBehavior, interval};
 use wicket_common::WICKETD_TIMEOUT;
+use wicket_common::inventory::{SpIdentifier, SpType};
+use wicket_common::rack_update::{
+    AbortUpdateOptions, ClearUpdateStateOptions, StartUpdateOptions,
+};
 use wicketd_client::types::{
-    AbortUpdateOptions, ClearUpdateStateOptions, ClearUpdateStateParams,
-    GetInventoryParams, GetInventoryResponse, GetLocationResponse,
-    IgnitionCommand, StartUpdateOptions, StartUpdateParams,
+    ClearUpdateStateParams, GetInventoryParams, GetInventoryResponse,
+    GetLocationResponse, IgnitionCommand, StartUpdateParams,
 };
 
-use crate::events::EventReportMap;
+use crate::events::{ArtifactData, EventReportMap};
 use crate::keymap::ShowPopupCmd;
 use crate::state::ComponentId;
 use crate::{Cmd, Event};
@@ -26,13 +28,13 @@ impl From<ComponentId> for SpIdentifier {
     fn from(id: ComponentId) -> Self {
         match id {
             ComponentId::Sled(i) => {
-                SpIdentifier { type_: SpType::Sled, slot: i as u32 }
+                SpIdentifier { type_: SpType::Sled, slot: u32::from(i) }
             }
             ComponentId::Psc(i) => {
-                SpIdentifier { type_: SpType::Power, slot: i as u32 }
+                SpIdentifier { type_: SpType::Power, slot: u32::from(i) }
             }
             ComponentId::Switch(i) => {
-                SpIdentifier { type_: SpType::Switch, slot: i as u32 }
+                SpIdentifier { type_: SpType::Switch, slot: u32::from(i) }
             }
         }
     }
@@ -449,7 +451,10 @@ impl WicketdManager {
                         let artifacts = rsp
                             .artifacts
                             .into_iter()
-                            .map(|artifact| artifact.artifact_id)
+                            .map(|artifact| ArtifactData {
+                                id: artifact.artifact_id,
+                                sign: artifact.sign,
+                            })
                             .collect();
                         let system_version = rsp.system_version;
                         let event_reports: EventReportMap = rsp.event_reports;
@@ -491,14 +496,8 @@ impl WicketdManager {
                 // TODO: We should really be using ETAGs here
                 match client.get_inventory(&params).await {
                     Ok(val) => match val.into_inner() {
-                        GetInventoryResponse::Response {
-                            inventory,
-                            mgs_last_seen,
-                        } => {
-                            let _ = tx.send(Event::Inventory {
-                                inventory,
-                                mgs_last_seen,
-                            });
+                        GetInventoryResponse::Response { inventory } => {
+                            let _ = tx.send(Event::Inventory { inventory });
                         }
                         GetInventoryResponse::Unavailable => {
                             // Nothing to do here. We keep a running total from

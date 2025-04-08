@@ -11,11 +11,14 @@
 //! * [`LineDisplay`]: a line-oriented display suitable for the command line.
 //! * [`GroupDisplay`]: manages state and shows the results of several
 //!   [`LineDisplay`]s at once.
+//! * Some utility displayers which can be used to build custom displayers.
 
 mod group_display;
 mod line_display;
 mod line_display_shared;
+mod utils;
 
 pub use group_display::GroupDisplay;
 pub use line_display::{LineDisplay, LineDisplayStyles};
 use line_display_shared::*;
+pub use utils::*;

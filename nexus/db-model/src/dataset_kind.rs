@@ -3,16 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use nexus_types::internal_api;
+use omicron_common::api::external::Error;
+use omicron_common::api::internal;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "dataset_kind"))]
-    pub struct DatasetKindEnum;
+    DatasetKindEnum:
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = DatasetKindEnum)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     pub enum DatasetKind;
 
     // Enum values
@@ -20,31 +18,79 @@ impl_enum_type!(
     Cockroach => b"cockroach"
     Clickhouse => b"clickhouse"
     ClickhouseKeeper => b"clickhouse_keeper"
+    ClickhouseServer => b"clickhouse_server"
     ExternalDns => b"external_dns"
     InternalDns => b"internal_dns"
+    TransientZoneRoot => b"zone_root"
+    TransientZone => b"zone"
+    Debug => b"debug"
+    Update => b"update"
 );
 
-impl From<internal_api::params::DatasetKind> for DatasetKind {
-    fn from(k: internal_api::params::DatasetKind) -> Self {
+impl DatasetKind {
+    pub fn try_into_api(
+        self,
+        zone_name: Option<String>,
+    ) -> Result<internal::shared::DatasetKind, Error> {
+        use internal::shared::DatasetKind as ApiKind;
+        let k = match (self, zone_name) {
+            (Self::Crucible, None) => ApiKind::Crucible,
+            (Self::Cockroach, None) => ApiKind::Cockroach,
+            (Self::Clickhouse, None) => ApiKind::Clickhouse,
+            (Self::ClickhouseKeeper, None) => ApiKind::ClickhouseKeeper,
+            (Self::ClickhouseServer, None) => ApiKind::ClickhouseServer,
+            (Self::ExternalDns, None) => ApiKind::ExternalDns,
+            (Self::InternalDns, None) => ApiKind::InternalDns,
+            (Self::TransientZoneRoot, None) => ApiKind::TransientZoneRoot,
+            (Self::TransientZone, Some(name)) => {
+                ApiKind::TransientZone { name }
+            }
+            (Self::Debug, None) => ApiKind::Debug,
+            (Self::Update, None) => ApiKind::Update,
+            (Self::TransientZone, None) => {
+                return Err(Error::internal_error("Zone kind needs name"));
+            }
+            (_, Some(_)) => {
+                return Err(Error::internal_error("Only zone kind needs name"));
+            }
+        };
+
+        Ok(k)
+    }
+}
+
+impl From<&internal::shared::DatasetKind> for DatasetKind {
+    fn from(k: &internal::shared::DatasetKind) -> Self {
         match k {
-            internal_api::params::DatasetKind::Crucible => {
-                DatasetKind::Crucible
-            }
-            internal_api::params::DatasetKind::Cockroach => {
-                DatasetKind::Cockroach
-            }
-            internal_api::params::DatasetKind::Clickhouse => {
+            internal::shared::DatasetKind::Crucible => DatasetKind::Crucible,
+            internal::shared::DatasetKind::Cockroach => DatasetKind::Cockroach,
+            internal::shared::DatasetKind::Clickhouse => {
                 DatasetKind::Clickhouse
             }
-            internal_api::params::DatasetKind::ClickhouseKeeper => {
+            internal::shared::DatasetKind::ClickhouseKeeper => {
                 DatasetKind::ClickhouseKeeper
             }
-            internal_api::params::DatasetKind::ExternalDns => {
+            internal::shared::DatasetKind::ClickhouseServer => {
+                DatasetKind::ClickhouseServer
+            }
+            internal::shared::DatasetKind::ExternalDns => {
                 DatasetKind::ExternalDns
             }
-            internal_api::params::DatasetKind::InternalDns => {
+            internal::shared::DatasetKind::InternalDns => {
                 DatasetKind::InternalDns
             }
+            internal::shared::DatasetKind::TransientZoneRoot => {
+                DatasetKind::TransientZoneRoot
+            }
+            // Enums in the database do not have associated data, so this drops
+            // the "name" of the zone and only considers the type.
+            //
+            // The zone name, if it exists, is stored in a separate column.
+            internal::shared::DatasetKind::TransientZone { .. } => {
+                DatasetKind::TransientZone
+            }
+            internal::shared::DatasetKind::Debug => DatasetKind::Debug,
+            internal::shared::DatasetKind::Update => DatasetKind::Update,
         }
     }
 }

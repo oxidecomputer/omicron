@@ -26,30 +26,11 @@ pub mod backoff;
 pub mod cmd;
 pub mod disk;
 pub mod ledger;
-pub mod nexus_config;
-pub mod postgres_config;
+pub mod policy;
+pub mod progenitor_operation_retry;
 pub mod update;
 pub mod vlan;
-
-#[macro_export]
-macro_rules! generate_logging_api {
-    ($path:literal) => {
-        progenitor::generate_api!(
-            spec = $path,
-            inner_type = slog::Logger,
-            pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-                slog::debug!(log, "client request";
-                    "method" => %request.method(),
-                    "uri" => %request.url(),
-                    "body" => ?&request.body(),
-                );
-            }),
-            post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-                slog::debug!(log, "client response"; "result" => ?result);
-            }),
-        );
-    };
-}
+pub mod zpool_name;
 
 /// A type that allows adding file and line numbers to log messages
 /// automatically. It should be instantiated at the root logger of each
@@ -77,3 +58,38 @@ impl slog::KV for FileKv {
 }
 
 pub const OMICRON_DPD_TAG: &str = "omicron";
+
+/// A wrapper struct that does nothing other than elide the inner value from
+/// [`std::fmt::Debug`] output.
+///
+/// We define this within Omicron instead of using one of the many available
+/// crates that do the same thing because it's trivial to do so, and we want the
+/// flexibility to add traits to this type without needing to wait on upstream
+/// to add an optional dependency.
+///
+/// If you want to use this for secrets, consider that it might not do
+/// everything you expect (it does not zeroize memory on drop, nor get in the
+/// way of you removing the inner value from this wrapper struct).
+#[derive(
+    Clone, Copy, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct NoDebug<T>(pub T);
+
+impl<T> std::fmt::Debug for NoDebug<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "..")
+    }
+}
+
+pub fn hex_schema<const N: usize>(
+    gen: &mut schemars::SchemaGenerator,
+) -> schemars::schema::Schema {
+    use schemars::JsonSchema;
+
+    let mut schema: schemars::schema::SchemaObject =
+        <String>::json_schema(gen).into();
+    schema.format = Some(format!("hex string ({N} bytes)"));
+    schema.into()
+}

@@ -2,12 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Disk, Generation, Instance, Name, Snapshot, Vpc};
-use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{disk, image, instance, project, snapshot, vpc};
+use super::{
+    AffinityGroup, AntiAffinityGroup, Disk, Generation, Instance, Name,
+    Snapshot, Vpc,
+};
 use crate::Image;
+use crate::collection::DatastoreCollectionConfig;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_db_schema::schema::{
+    affinity_group, anti_affinity_group, disk, image, instance, project,
+    snapshot, vpc,
+};
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
@@ -67,6 +73,20 @@ impl DatastoreCollectionConfig<Instance> for Project {
     type GenerationNumberColumn = project::dsl::rcgen;
     type CollectionTimeDeletedColumn = project::dsl::time_deleted;
     type CollectionIdColumn = instance::dsl::project_id;
+}
+
+impl DatastoreCollectionConfig<AffinityGroup> for Project {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = affinity_group::dsl::project_id;
+}
+
+impl DatastoreCollectionConfig<AntiAffinityGroup> for Project {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = anti_affinity_group::dsl::project_id;
 }
 
 impl DatastoreCollectionConfig<Disk> for Project {

@@ -4,6 +4,11 @@
 
 //! Utility allowing Diesel to EXPLAIN queries.
 
+// These utilities can be useful during development, so we don't want to
+// `#[cfg(test)]` the module, but it's likely they won't be used outside of
+// tests.
+#![cfg_attr(not(test), allow(dead_code))]
+
 use super::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_trait::async_trait;
@@ -17,33 +22,6 @@ use diesel::result::Error as DieselError;
 /// Q: The Query we're explaining.
 ///
 /// EXPLAIN: <https://www.cockroachlabs.com/docs/stable/explain.html>
-pub trait Explainable<Q> {
-    /// Syncronously issues an explain statement.
-    fn explain(
-        self,
-        conn: &mut DbConnection,
-    ) -> Result<String, diesel::result::Error>;
-}
-
-impl<Q> Explainable<Q> for Q
-where
-    Q: QueryFragment<Pg>
-        + QueryId
-        + RunQueryDsl<DbConnection>
-        + Sized
-        + 'static,
-{
-    fn explain(
-        self,
-        conn: &mut DbConnection,
-    ) -> Result<String, diesel::result::Error> {
-        Ok(ExplainStatement { query: self }
-            .get_results::<String>(conn)?
-            .join("\n"))
-    }
-}
-
-/// An async variant of [`Explainable`].
 #[async_trait]
 pub trait ExplainableAsync<Q> {
     /// Asynchronously issues an explain statement.
@@ -116,10 +94,10 @@ mod test {
     use super::*;
 
     use crate::db;
+    use crate::db::pub_test_utils::TestDatabase;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::SelectableHelper;
     use expectorate::assert_contents;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
     use uuid::Uuid;
 
@@ -146,8 +124,7 @@ mod test {
     }
 
     async fn create_schema(pool: &db::Pool) {
-        pool.pool()
-            .get()
+        pool.claim()
             .await
             .unwrap()
             .batch_execute_async(
@@ -165,10 +142,9 @@ mod test {
     #[tokio::test]
     async fn test_explain_async() {
         let logctx = dev::test_setup_log("test_explain_async");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-        let conn = pool.pool().get().await.unwrap();
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
 
         create_schema(&pool).await;
 
@@ -181,18 +157,18 @@ mod test {
             .unwrap();
 
         assert_contents("tests/output/test-explain-output", &explanation);
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
-    // Tests that ".explain()" can tell us when we're doing full table scans.
+    // Tests that ".explain_async()" can tell us when we're doing full table
+    // scans.
     #[tokio::test]
     async fn test_explain_full_table_scan() {
         let logctx = dev::test_setup_log("test_explain_full_table_scan");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-        let conn = pool.pool().get().await.unwrap();
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
 
         create_schema(&pool).await;
 
@@ -209,7 +185,7 @@ mod test {
             "Expected [{}] to contain 'FULL SCAN'",
             explanation
         );
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

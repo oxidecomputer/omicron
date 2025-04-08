@@ -12,15 +12,14 @@ mod update;
 
 pub use force_update::ForceUpdateState;
 pub use inventory::{
-    Component, ComponentId, Inventory, ParsableComponentId, PowerState, Sp,
-    ALL_COMPONENT_IDS,
+    ALL_COMPONENT_IDS, Component, ComponentId, Inventory, ParsableComponentId,
 };
 pub use rack::{KnightRiderMode, RackState};
-pub use status::{Liveness, ServiceStatus};
+pub use status::ServiceStatus;
 pub use update::{
-    parse_event_report_map, update_component_title,
-    CreateClearUpdateStateOptions, CreateStartUpdateOptions, RackUpdateState,
-    UpdateItemState, UpdateRunningState,
+    ArtifactVersions, CreateClearUpdateStateOptions, CreateStartUpdateOptions,
+    RackUpdateState, UpdateItemState, parse_event_report_map,
+    update_component_title,
 };
 
 use serde::{Deserialize, Serialize};

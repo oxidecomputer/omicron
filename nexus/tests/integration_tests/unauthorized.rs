@@ -7,23 +7,28 @@
 
 use super::endpoints::*;
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
+use dropshot::test_util::ClientTestContext;
 use headers::authorization::Credentials;
-use http::method::Method;
 use http::StatusCode;
-use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
-use lazy_static::lazy_static;
+use http::method::Method;
+use httptest::{Expectation, ServerBuilder, matchers::*, responders::*};
 use nexus_db_queries::authn::external::spoof;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
-use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::resource_helpers::TestDataset;
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::disk::DatasetKind;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use std::sync::LazyLock;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+type DiskTest<'a> =
+    nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
 
 // This test hits a list Nexus API endpoints using both unauthenticated and
 // unauthorized requests to make sure we get the expected behavior (generally:
@@ -54,7 +59,28 @@ type ControlPlaneTestContext =
 //   403).
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
-    DiskTest::new(cptestctx).await;
+    let mut disk_test = DiskTest::new(cptestctx).await;
+    let sled_id = cptestctx.first_sled_id();
+    disk_test
+        .add_zpool_with_dataset_ext(
+            sled_id,
+            nexus_test_utils::PHYSICAL_DISK_UUID.parse().unwrap(),
+            ZpoolUuid::new_v4(),
+            vec![
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::Crucible,
+                },
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::Debug,
+                },
+            ],
+            DiskTest::DEFAULT_ZPOOL_SIZE_GIB,
+        )
+        .await;
+    disk_test.propagate_datasets_to_sleds().await;
+
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
     let mut setup_results = std::collections::BTreeMap::new();
@@ -69,9 +95,8 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap_or_else(|_| {
-                        panic!("Failed to GET from URL: {url}")
-                    }),
+                    .map_err(|e| panic!("Failed to GET from URL: {url}, {e}"))
+                    .unwrap(),
                 id_routes,
             ),
             SetupReq::Post { url, body, id_routes } => (
@@ -80,7 +105,8 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
-                    .unwrap_or_else(|_| panic!("Failed to POST to URL: {url}")),
+                    .map_err(|e| panic!("Failed to POST to URL: {url}, {e}"))
+                    .unwrap(),
                 id_routes,
             ),
         };
@@ -145,7 +171,6 @@ G GET  PUT  POST DEL  TRCE G  URL
 /// associated to the results of the setup request with any `{id}` params in the
 /// URL replaced with the result's URL. This is used to later verify ID
 /// endpoints without first having to know the ID.
-
 enum SetupReq {
     Get {
         url: &'static str,
@@ -158,8 +183,8 @@ enum SetupReq {
     },
 }
 
-lazy_static! {
-    pub static ref HTTP_SERVER: httptest::Server = {
+pub static HTTP_SERVER: LazyLock<httptest::Server> =
+    LazyLock::new(|| {
         // Run a httptest server
         let server = ServerBuilder::new().run().unwrap();
 
@@ -167,12 +192,10 @@ lazy_static! {
         server.expect(
             Expectation::matching(request::method_path("HEAD", "/image.raw"))
                 .times(1..)
-                .respond_with(
-                    status_code(200).append_header(
-                        "Content-Length",
-                        format!("{}", 4096 * 1000),
-                    ),
-                ),
+                .respond_with(status_code(200).append_header(
+                    "Content-Length",
+                    format!("{}", 4096 * 1000),
+                )),
         );
 
         server.expect(
@@ -182,10 +205,11 @@ lazy_static! {
         );
 
         server
-    };
+    });
 
-    /// List of requests to execute at setup time
-    static ref SETUP_REQUESTS: Vec<SetupReq> = vec![
+/// List of requests to execute at setup time
+static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
+    vec![
         // Create a separate Silo
         SetupReq::Post {
             url: "/v1/system/silos",
@@ -202,15 +226,22 @@ lazy_static! {
                 &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
             ],
         },
-        // Get the default IP pool
-        SetupReq::Get {
-            url: &DEMO_IP_POOL_URL,
-            id_routes: vec![],
+        // Create the default IP pool
+        SetupReq::Post {
+            url: &DEMO_IP_POOLS_URL,
+            body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
+            id_routes: vec!["/v1/ip-pools/{id}"],
         },
         // Create an IP pool range
         SetupReq::Post {
             url: &DEMO_IP_POOL_RANGES_ADD_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
+            id_routes: vec![],
+        },
+        // Link default pool to default silo
+        SetupReq::Post {
+            url: &DEMO_IP_POOL_SILOS_URL,
+            body: serde_json::to_value(&*DEMO_IP_POOL_SILOS_BODY).unwrap(),
             id_routes: vec![],
         },
         // Create a Project in the Organization
@@ -261,6 +292,37 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
             id_routes: vec!["/v1/instances/{id}"],
         },
+        // Create a stopped Instance in the Project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_URL_INSTANCES,
+            body: serde_json::to_value(&*DEMO_STOPPED_INSTANCE_CREATE).unwrap(),
+            id_routes: vec!["/v1/instances/{id}"],
+        },
+        // Create an affinity group in the Project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_URL_AFFINITY_GROUPS,
+            body: serde_json::to_value(&*DEMO_AFFINITY_GROUP_CREATE).unwrap(),
+            id_routes: vec!["/v1/affinity-groups/{id}"],
+        },
+        // Add an instance to the affinity group
+        SetupReq::Post {
+            url: &DEMO_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
+            body: serde_json::Value::Null,
+            id_routes: vec![],
+        },
+        // Create an anti-affinity group in the Project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_URL_ANTI_AFFINITY_GROUPS,
+            body: serde_json::to_value(&*DEMO_ANTI_AFFINITY_GROUP_CREATE)
+                .unwrap(),
+            id_routes: vec!["/v1/anti-affinity-groups/{id}"],
+        },
+        // Add an instance to the anti-affinity group
+        SetupReq::Post {
+            url: &DEMO_ANTI_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
+            body: serde_json::Value::Null,
+            id_routes: vec![],
+        },
         // Lookup the previously created NIC
         SetupReq::Get {
             url: &DEMO_INSTANCE_NIC_URL,
@@ -277,6 +339,12 @@ lazy_static! {
             url: &DEMO_PROJECT_IMAGES_URL,
             body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
             id_routes: vec!["/v1/images/{id}"],
+        },
+        // Create a Floating IP in the project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_URL_FIPS,
+            body: serde_json::to_value(&*DEMO_FLOAT_IP_CREATE).unwrap(),
+            id_routes: vec!["/v1/floating-ips/{id}"],
         },
         // Create a SAML identity provider
         SetupReq::Post {
@@ -296,8 +364,14 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
             id_routes: vec![],
         },
-    ];
-}
+        // Create a Support Bundle
+        SetupReq::Post {
+            url: &SUPPORT_BUNDLES_URL,
+            body: serde_json::to_value(()).unwrap(),
+            id_routes: vec!["/experimental/v1/system/support-bundles/{id}"],
+        },
+    ]
+});
 
 /// Contents returned from an endpoint that creates a resource that has an id
 ///
@@ -403,6 +477,7 @@ async fn verify_endpoint(
             allowed,
             AllowedMethod::Get
                 | AllowedMethod::GetUnimplemented
+                | AllowedMethod::GetVolatile
                 | AllowedMethod::GetWebsocket
         )
     });
@@ -436,6 +511,22 @@ async fn verify_endpoint(
             .execute()
             .await
             .unwrap();
+            None
+        }
+        Some(AllowedMethod::GetVolatile) => {
+            // Same thing as `Get`, but avoid returning the output to prevent
+            // the resource change detection ahead.
+            info!(log, "test: privileged GET (volatile output)");
+            record_operation(WhichTest::PrivilegedGet(Some(
+                &http::StatusCode::OK,
+            )));
+            NexusRequest::object_get(client, uri.as_str())
+                .authn_as(AuthnMode::PrivilegedUser)
+                .execute()
+                .await
+                .unwrap_or_else(|e| panic!("Failed to GET: {uri}: {e}"))
+                .parsed_body::<serde_json::Value>()
+                .unwrap();
             None
         }
         Some(AllowedMethod::GetWebsocket) => {

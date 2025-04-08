@@ -7,11 +7,11 @@
 //! [device_auth.rs](nexus/src/app/device_auth.rs) for an overview of how these are
 //! used.
 
-use crate::schema::{device_access_token, device_auth_request};
+use nexus_db_schema::schema::{device_access_token, device_auth_request};
 
 use chrono::{DateTime, Duration, Utc};
 use nexus_types::external_api::views;
-use rand::{distributions::Slice, rngs::StdRng, Rng, RngCore, SeedableRng};
+use rand::{Rng, RngCore, SeedableRng, distributions::Slice, rngs::StdRng};
 use uuid::Uuid;
 
 /// Default timeout in seconds for client to authenticate for a token request.
@@ -179,10 +179,12 @@ mod test {
             assert!(
                 user_code.chars().nth(USER_CODE_WORD_LENGTH).unwrap() == '-'
             );
-            assert!(user_code
-                .chars()
-                .filter(|x| *x != '-')
-                .all(|x| { USER_CODE_ALPHABET.iter().any(|y| *y == x) }));
+            assert!(
+                user_code
+                    .chars()
+                    .filter(|x| *x != '-')
+                    .all(|x| { USER_CODE_ALPHABET.iter().any(|y| *y == x) })
+            );
             assert!(!codes_seen.contains(&user_code));
             codes_seen.insert(user_code);
         }

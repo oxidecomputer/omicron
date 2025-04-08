@@ -4,24 +4,30 @@
 <service_bundle type='manifest' name='clickhouse_keeper'>
 
   <service name='oxide/clickhouse_keeper' type='service' version='1'>
-  <create_default_instance enabled='true' />
+  <create_default_instance enabled='false' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
     type='service'>
   <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
+  <dependency name='zone_network_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/zone-network-setup:default' />
+  </dependency>
+
+  <dependency name='clickhouse-admin-keeper' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/clickhouse-admin-keeper:default' />
+  </dependency>
+
   <exec_method type='method' name='start'
-    exec='/opt/oxide/lib/svc/manifest/clickhouse_keeper.sh'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/clickhouse_keeper/clickhouse keeper --config %{config/config_path} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
-    <propval name='datalink' type='astring' value='unknown' />
-    <propval name='gateway' type='astring' value='unknown' />
-    <propval name='listen_addr' type='astring' value='unknown' />
-    <propval name='listen_port' type='astring' value='unknown' />
-    <propval name='store' type='astring' value='unknown' />
+    <propval name='config_path' type='astring' value='unknown' />
   </property_group>
 
   <property_group name='startd' type='framework'>

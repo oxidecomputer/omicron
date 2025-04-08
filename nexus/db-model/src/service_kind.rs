@@ -9,17 +9,15 @@ use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "service_kind"))]
-    pub struct ServiceKindEnum;
+    ServiceKindEnum:
 
     #[derive(Clone, Copy, Debug, Eq, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, EnumIter)]
-    #[diesel(sql_type = ServiceKindEnum)]
     pub enum ServiceKind;
 
     // Enum values
     Clickhouse => b"clickhouse"
     ClickhouseKeeper => b"clickhouse_keeper"
+    ClickhouseServer => b"clickhouse_server"
     Cockroach => b"cockroach"
     Crucible => b"crucible"
     CruciblePantry => b"crucible_pantry"

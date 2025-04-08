@@ -6,24 +6,24 @@
 
 // TODO see the TODO for nexus.
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
 use clap::Parser;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use dropshot::HandlerTaskMode;
-use nexus_client::types as NexusTypes;
-use omicron_common::cmd::fatal;
+use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::cmd::CmdError;
+use omicron_common::cmd::fatal;
 use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
-    run_standalone_server, Config, ConfigHardware, ConfigStorage,
-    ConfigUpdates, ConfigZpool, SimMode,
+    Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode, ZpoolConfig,
+    run_standalone_server,
 };
+use omicron_uuid_kinds::SledUuid;
+use sled_hardware_types::Baseboard;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use uuid::Uuid;
 
 fn parse_sim_mode(src: &str) -> Result<SimMode, String> {
     match src {
@@ -45,7 +45,7 @@ struct Args {
     sim_mode: SimMode,
 
     #[clap(name = "SA_UUID", action)]
-    uuid: Uuid,
+    uuid: SledUuid,
 
     #[clap(name = "SA_IP:PORT", action)]
     sled_agent_addr: SocketAddrV6,
@@ -98,26 +98,32 @@ async fn do_run() -> Result<(), CmdError> {
     let tmp = camino_tempfile::tempdir()
         .map_err(|e| CmdError::Failure(anyhow!(e)))?;
     let config = Config {
-        id: args.uuid,
-        sim_mode: args.sim_mode,
-        nexus_address: args.nexus_addr,
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr.into(),
-            request_body_max_bytes: 1024 * 1024,
-            default_handler_task_mode: HandlerTaskMode::Detached,
+            ..Default::default()
         },
-        log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
         storage: ConfigStorage {
             // Create 10 "virtual" U.2s, with 1 TB of storage.
             zpools: vec![ConfigZpool { size: 1 << 40 }; 10],
             ip: (*args.sled_agent_addr.ip()).into(),
         },
-        updates: ConfigUpdates { zone_artifact_path: tmp.path().to_path_buf() },
         hardware: ConfigHardware {
             hardware_threads: 32,
             physical_ram: 64 * (1 << 30),
             reservoir_ram: 32 * (1 << 30),
+            baseboard: Baseboard::Gimlet {
+                identifier: format!("sim-{}", args.uuid),
+                model: String::from("sim-gimlet"),
+                revision: 3,
+            },
         },
+        ..Config::for_testing(
+            args.uuid,
+            args.sim_mode,
+            Some(args.nexus_addr),
+            Some(tmp.path()),
+            ZpoolConfig::TenVirtualU2s,
+        )
     };
 
     let tls_certificate = match (args.rss_tls_cert, args.rss_tls_key) {
@@ -129,12 +135,12 @@ async fn do_run() -> Result<(), CmdError> {
             let key_bytes = std::fs::read_to_string(&key_path)
                 .with_context(|| format!("read {:?}", &key_path))
                 .map_err(CmdError::Failure)?;
-            Some(NexusTypes::Certificate { cert: cert_bytes, key: key_bytes })
+            Some(Certificate { cert: cert_bytes, key: key_bytes })
         }
         _ => {
             return Err(CmdError::Usage(String::from(
                 "--rss-tls-key and --rss-tls-cert must be specified together",
-            )))
+            )));
         }
     };
 
@@ -145,5 +151,9 @@ async fn do_run() -> Result<(), CmdError> {
         tls_certificate,
     };
 
-    run_standalone_server(&config, &rss_args).await.map_err(CmdError::Failure)
+    let config_logging =
+        ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info };
+    run_standalone_server(&config, &config_logging, &rss_args)
+        .await
+        .map_err(CmdError::Failure)
 }

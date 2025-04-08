@@ -8,14 +8,13 @@ use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::DiskSelector;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 
 use super::sagas;
 
@@ -45,15 +44,15 @@ impl super::Nexus {
                     .snapshot_name_owned(name.into());
                 Ok(snapshot)
             }
-            params::SnapshotSelector {
-                snapshot: NameOrId::Id(_),
-                ..
-            } => Err(Error::invalid_request(
-              "when providing snpashot as an ID, prject should not be specified"
-            )),
+            params::SnapshotSelector { snapshot: NameOrId::Id(_), .. } => {
+                Err(Error::invalid_request(
+                    "when providing snapshot as an ID, project should not \
+              be specified",
+                ))
+            }
             _ => Err(Error::invalid_request(
-              "snapshot should either be an ID or project should be specified"
-            ))
+                "snapshot should either be an ID or project should be specified",
+            )),
         }
     }
 
@@ -93,7 +92,7 @@ impl super::Nexus {
 
         // If there isn't a running propolis, Nexus needs to use the Crucible
         // Pantry to make this snapshot
-        let instance_and_sled = if let Some(attach_instance_id) =
+        let use_the_pantry = if let Some(attach_instance_id) =
             &db_disk.runtime_state.attach_instance_id
         {
             let (.., authz_instance) =
@@ -107,29 +106,12 @@ impl super::Nexus {
                 .instance_fetch_with_vmm(&opctx, &authz_instance)
                 .await?;
 
-            match instance_state.vmm().as_ref() {
-                None => None,
-                Some(vmm) => match vmm.runtime.state.0 {
-                    // If the VM might be running, or it's rebooting (which
-                    // doesn't deactivate the volume), send the snapshot request
-                    // to the relevant VMM. Otherwise, there's no way to know if
-                    // the instance has attached the volume or is in the process
-                    // of detaching it, so bail.
-                    InstanceState::Running | InstanceState::Rebooting => {
-                        Some((*attach_instance_id, vmm.sled_id))
-                    }
-                    _ => {
-                        return Err(Error::invalid_request(&format!(
-                            "cannot snapshot attached disk for instance in \
-                            state {}",
-                            vmm.runtime.state.0
-                        )));
-                    }
-                },
-            }
+            // If a Propolis _may_ exist, send the snapshot request there,
+            // otherwise use the pantry.
+            instance_state.vmm().is_none()
         } else {
             // This disk is not attached to an instance, use the pantry.
-            None
+            true
         };
 
         let saga_params = sagas::snapshot_create::Params {
@@ -137,12 +119,14 @@ impl super::Nexus {
             silo_id: authz_silo.id(),
             project_id: authz_project.id(),
             disk_id: authz_disk.id(),
-            attached_instance_and_sled: instance_and_sled,
+            attach_instance_id: db_disk.runtime_state.attach_instance_id,
+            use_the_pantry,
             create_params: params.clone(),
         };
 
         let saga_outputs = self
-            .execute_saga::<sagas::snapshot_create::SagaSnapshotCreate>(
+            .sagas
+            .saga_execute::<sagas::snapshot_create::SagaSnapshotCreate>(
                 saga_params,
             )
             .await?;
@@ -182,10 +166,11 @@ impl super::Nexus {
             snapshot: db_snapshot,
         };
 
-        self.execute_saga::<sagas::snapshot_delete::SagaSnapshotDelete>(
-            saga_params,
-        )
-        .await?;
+        self.sagas
+            .saga_execute::<sagas::snapshot_delete::SagaSnapshotDelete>(
+                saga_params,
+            )
+            .await?;
 
         Ok(())
     }

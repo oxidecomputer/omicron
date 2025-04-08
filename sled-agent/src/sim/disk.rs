@@ -5,10 +5,8 @@
 //! Simulated sled agent implementation
 
 use crate::nexus::NexusClient;
-use crate::params::DiskStateRequested;
 use crate::sim::simulatable::Simulatable;
 use async_trait::async_trait;
-use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::api::external::DiskState;
@@ -20,7 +18,7 @@ use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use propolis_client::types::DiskAttachmentState as PropolisDiskState;
+use sled_agent_types::disk::DiskStateRequested;
 use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,8 +32,8 @@ use crate::common::disk::{Action as DiskAction, DiskStates};
 mod producers {
     use super::*;
     use oximeter::{
-        types::{Cumulative, Sample},
         Metric, Target,
+        types::{Cumulative, Sample},
     };
 
     #[derive(Debug, Clone, Target)]
@@ -146,7 +144,7 @@ mod producers {
 /// See `Simulatable` for how this works.
 pub struct SimDisk {
     state: DiskStates,
-    producer: Option<oximeter_producer::Server>,
+    producer: Option<ProducerServer>,
 }
 
 // "producer" doesn't implement Debug, so we can't derive it on SimDisk.
@@ -169,25 +167,20 @@ impl SimDisk {
         let producer_address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
         let server_info = ProducerEndpoint {
             id,
-            kind: Some(ProducerKind::SledAgent),
+            kind: ProducerKind::SledAgent,
             address: producer_address,
-            base_route: "/collect".to_string(),
             interval: Duration::from_millis(200),
         };
         let config = oximeter_producer::Config {
             server_info,
-            registration_address: nexus_address,
-            dropshot: ConfigDropshot {
-                bind_address: producer_address,
-                ..Default::default()
-            },
+            registration_address: Some(nexus_address),
+            default_request_body_max_bytes: 2048,
             log: LogConfig::Config(ConfigLogging::StderrTerminal {
                 level: ConfigLoggingLevel::Error,
             }),
         };
         let server =
-            ProducerServer::start(&config).await.map_err(|e| e.to_string())?;
-
+            ProducerServer::start(&config).map_err(|e| e.to_string())?;
         let producer = producers::DiskProducer::new(id);
         server
             .registry()
@@ -228,18 +221,13 @@ impl Simulatable for SimDisk {
 
     fn execute_desired_transition(&mut self) -> Option<DiskAction> {
         if let Some(desired) = self.state.desired() {
-            // These operations would typically be triggered via responses from
-            // Propolis, but for a simulated sled agent, this does not exist.
-            //
-            // Instead, we make transitions to new states based entirely on the
-            // value of "desired".
             let observed = match desired {
                 DiskStateRequested::Attached(uuid) => {
-                    PropolisDiskState::Attached(*uuid)
+                    DiskState::Attached(*uuid)
                 }
-                DiskStateRequested::Detached => PropolisDiskState::Detached,
-                DiskStateRequested::Destroyed => PropolisDiskState::Destroyed,
-                DiskStateRequested::Faulted => PropolisDiskState::Faulted,
+                DiskStateRequested::Detached => DiskState::Detached,
+                DiskStateRequested::Destroyed => DiskState::Destroyed,
+                DiskStateRequested::Faulted => DiskState::Faulted,
             };
             self.state.observe_transition(&observed)
         } else {

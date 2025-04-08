@@ -4,9 +4,14 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 chrono.workspace = true
+expectorate.workspace = true
 http.workspace = true
+internal-dns-types.workspace = true
 progenitor.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
 schemars.workspace = true

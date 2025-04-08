@@ -6,9 +6,14 @@ use chrono::DateTime;
 use chrono::Utc;
 use futures::future::ready;
 use futures::stream::StreamExt;
+use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ObjectStream;
+use omicron_common::api::external::Vni;
+use omicron_uuid_kinds::DemoSagaUuid;
 use schemars::JsonSchema;
 use serde::Serialize;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::time::Duration;
 use std::time::Instant;
 use steno::SagaResultErr;
@@ -141,11 +146,18 @@ impl From<steno::SagaStateView> for SagaState {
                     },
                 ..
             } => SagaState::Failed {
-                error_node_name: error_node_name,
+                error_node_name,
                 error_info: SagaErrorInfo::from(error_source),
             },
         }
     }
+}
+
+/// Identifies an instance of the demo saga
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct DemoSaga {
+    pub saga_id: Uuid,
+    pub demo_saga_id: DemoSagaUuid,
 }
 
 /// Background tasks
@@ -295,4 +307,17 @@ pub struct LastResultCompleted {
     pub elapsed: Duration,
     /// arbitrary datum emitted by the background task
     pub details: serde_json::Value,
+}
+
+/// NAT Record
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct Ipv4NatEntryView {
+    pub external_address: Ipv4Addr,
+    pub first_port: u16,
+    pub last_port: u16,
+    pub sled_address: Ipv6Addr,
+    pub vni: Vni,
+    pub mac: MacAddr,
+    pub gen: i64,
+    pub deleted: bool,
 }

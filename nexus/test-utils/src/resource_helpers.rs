@@ -2,38 +2,77 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::http_testing::RequestBuilder;
 use crate::ControlPlaneTestContext;
+use crate::http_testing::RequestBuilder;
 
 use super::http_testing::AuthnMode;
 use super::http_testing::NexusRequest;
 use crucible_agent_client::types::State as RegionState;
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
+use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::params;
-use nexus_types::external_api::params::PhysicalDiskKind;
-use nexus_types::external_api::params::UserId;
 use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
+use nexus_types::external_api::views::AffinityGroup;
+use nexus_types::external_api::views::AntiAffinityGroup;
 use nexus_types::external_api::views::Certificate;
+use nexus_types::external_api::views::FloatingIp;
+use nexus_types::external_api::views::InternetGateway;
+use nexus_types::external_api::views::InternetGatewayIpAddress;
+use nexus_types::external_api::views::InternetGatewayIpPool;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
+use nexus_types::external_api::views::VpcSubnet;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
+use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
-use nexus_types::internal_api::params::Baseboard;
+use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
+use omicron_common::api::external::Error;
+use omicron_common::api::external::FailureDomain;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::RouteDestination;
+use omicron_common::api::external::RouteTarget;
+use omicron_common::api::external::RouterRoute;
+use omicron_common::api::external::UserId;
+use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetKind;
+use omicron_common::disk::DatasetName;
+use omicron_common::disk::DatasetsConfig;
+use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::SharedDatasetConfig;
+use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim::SledAgent;
+use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
+use slog::debug;
+use std::collections::BTreeMap;
+use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 pub async fn objects_list_page_authz<ItemType>(
@@ -52,6 +91,41 @@ where
         .unwrap()
 }
 
+pub async fn object_get<OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+) -> OutputType
+where
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::object_get(client, path)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"GET\" request to {path}: {e}")
+        })
+        .parsed_body()
+        .unwrap()
+}
+
+pub async fn object_get_error(
+    client: &ClientTestContext,
+    path: &str,
+    status: StatusCode,
+) -> HttpErrorResponseBody {
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, path)
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
+}
+
 pub async fn object_create<InputType, OutputType>(
     client: &ClientTestContext,
     path: &str,
@@ -65,11 +139,34 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .unwrap_or_else(|_| {
-            panic!("failed to make \"create\" request to {path}")
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"POST\" request to {path}: {e}")
         })
         .parsed_body()
         .unwrap()
+}
+
+/// Make a POST, assert status code, return error response body
+pub async fn object_create_error<InputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+    status: StatusCode,
+) -> HttpErrorResponseBody
+where
+    InputType: serde::Serialize,
+{
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, path)
+            .body(Some(&input))
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
 }
 
 pub async fn object_put<InputType, OutputType>(
@@ -85,9 +182,33 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .unwrap_or_else(|_| panic!("failed to make \"PUT\" request to {path}"))
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"PUT\" request to {path}: {e}")
+        })
         .parsed_body()
         .unwrap()
+}
+
+pub async fn object_put_error<InputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+    status: StatusCode,
+) -> HttpErrorResponseBody
+where
+    InputType: serde::Serialize,
+{
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, path)
+            .body(Some(&input))
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
 }
 
 pub async fn object_delete(client: &ClientTestContext, path: &str) {
@@ -95,31 +216,26 @@ pub async fn object_delete(client: &ClientTestContext, path: &str) {
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .unwrap_or_else(|_| {
-            panic!("failed to make \"delete\" request to {path}")
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"DELETE\" request to {path}: {e}")
         });
 }
 
-pub async fn populate_ip_pool(
+pub async fn object_delete_error(
     client: &ClientTestContext,
-    pool_name: &str,
-    ip_range: Option<IpRange>,
-) -> IpPoolRange {
-    let ip_range = ip_range.unwrap_or_else(|| {
-        use std::net::Ipv4Addr;
-        IpRange::try_from((
-            Ipv4Addr::new(10, 0, 0, 0),
-            Ipv4Addr::new(10, 0, 255, 255),
-        ))
-        .unwrap()
-    });
-    let range = object_create(
-        client,
-        format!("/v1/system/ip-pools/{}/ranges/add", pool_name).as_str(),
-        &ip_range,
+    path: &str,
+    status: StatusCode,
+) -> HttpErrorResponseBody {
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, path)
+            .expect_status(Some(status)),
     )
-    .await;
-    range
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
 }
 
 /// Create an IP pool with a single range for testing.
@@ -140,13 +256,67 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
-            silo: None,
-            is_default: false,
         },
     )
     .await;
-    let range = populate_ip_pool(client, pool_name, ip_range).await;
+
+    let ip_range = ip_range.unwrap_or_else(|| {
+        use std::net::Ipv4Addr;
+        IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 0),
+            Ipv4Addr::new(10, 0, 255, 255),
+        ))
+        .unwrap()
+    });
+    let url = format!("/v1/system/ip-pools/{}/ranges/add", pool_name);
+    let range = object_create(client, &url, &ip_range).await;
     (pool, range)
+}
+
+pub async fn link_ip_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    silo_id: &Uuid,
+    is_default: bool,
+) {
+    let link =
+        params::IpPoolLinkSilo { silo: NameOrId::Id(*silo_id), is_default };
+    let url = format!("/v1/system/ip-pools/{pool_name}/silos");
+    object_create::<params::IpPoolLinkSilo, views::IpPoolSiloLink>(
+        client, &url, &link,
+    )
+    .await;
+}
+
+/// What you want for any test that is not testing IP logic specifically
+pub async fn create_default_ip_pool(
+    client: &ClientTestContext,
+) -> views::IpPool {
+    let (pool, ..) = create_ip_pool(&client, "default", None).await;
+    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
+    pool
+}
+
+pub async fn create_floating_ip(
+    client: &ClientTestContext,
+    fip_name: &str,
+    project: &str,
+    ip: Option<IpAddr>,
+    parent_pool_name: Option<&str>,
+) -> FloatingIp {
+    object_create(
+        client,
+        &format!("/v1/floating-ips?project={project}"),
+        &params::FloatingIpCreate {
+            identity: IdentityMetadataCreateParams {
+                name: fip_name.parse().unwrap(),
+                description: String::from("a floating ip"),
+            },
+            ip,
+            pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
+        },
+    )
+    .await
 }
 
 pub async fn create_certificate(
@@ -181,7 +351,7 @@ pub async fn create_switch(
     client: &ClientTestContext,
     serial: &str,
     part: &str,
-    revision: i64,
+    revision: u32,
     rack_id: Uuid,
 ) -> views::Switch {
     object_put(
@@ -189,63 +359,14 @@ pub async fn create_switch(
         "/switches",
         &internal_params::SwitchPutRequest {
             baseboard: Baseboard {
-                serial_number: serial.to_string(),
-                part_number: part.to_string(),
+                serial: serial.to_string(),
+                part: part.to_string(),
                 revision,
             },
             rack_id,
         },
     )
     .await
-}
-
-pub async fn create_physical_disk(
-    client: &ClientTestContext,
-    vendor: &str,
-    serial: &str,
-    model: &str,
-    variant: PhysicalDiskKind,
-    sled_id: Uuid,
-) -> internal_params::PhysicalDiskPutResponse {
-    object_put(
-        client,
-        "/physical-disk",
-        &internal_params::PhysicalDiskPutRequest {
-            vendor: vendor.to_string(),
-            serial: serial.to_string(),
-            model: model.to_string(),
-            variant,
-            sled_id,
-        },
-    )
-    .await
-}
-
-pub async fn delete_physical_disk(
-    client: &ClientTestContext,
-    vendor: &str,
-    serial: &str,
-    model: &str,
-    sled_id: Uuid,
-) {
-    let body = internal_params::PhysicalDiskDeleteRequest {
-        vendor: vendor.to_string(),
-        serial: serial.to_string(),
-        model: model.to_string(),
-        sled_id,
-    };
-
-    NexusRequest::new(
-        RequestBuilder::new(client, http::Method::DELETE, "/physical-disk")
-            .body(Some(&body))
-            .expect_status(Some(http::StatusCode::NO_CONTENT)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap_or_else(|_| {
-        panic!("failed to make \"delete\" request of physical disk")
-    });
 }
 
 pub async fn create_silo(
@@ -262,6 +383,7 @@ pub async fn create_silo(
                 name: silo_name.parse().unwrap(),
                 description: "a silo".to_string(),
             },
+            quotas: params::SiloQuotasCreate::arbitrarily_high_default(),
             discoverable,
             identity_mode,
             admin_group_name: None,
@@ -329,6 +451,50 @@ pub async fn create_disk(
     .await
 }
 
+pub async fn create_disk_from_snapshot(
+    client: &ClientTestContext,
+    project_name: &str,
+    disk_name: &str,
+    snapshot_id: Uuid,
+) -> Disk {
+    let url = format!("/v1/disks?project={}", project_name);
+    object_create(
+        client,
+        &url,
+        &params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: disk_name.parse().unwrap(),
+                description: String::from("sells rainsticks"),
+            },
+            disk_source: params::DiskSource::Snapshot { snapshot_id },
+            size: ByteCount::from_gibibytes_u32(1),
+        },
+    )
+    .await
+}
+
+pub async fn create_snapshot(
+    client: &ClientTestContext,
+    project_name: &str,
+    disk_name: &str,
+    snapshot_name: &str,
+) -> views::Snapshot {
+    let snapshots_url = format!("/v1/snapshots?project={}", project_name);
+
+    object_create(
+        client,
+        &snapshots_url,
+        &params::SnapshotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: snapshot_name.parse().unwrap(),
+                description: format!("snapshot {:?}", snapshot_name),
+            },
+            disk: disk_name.to_string().try_into().unwrap(),
+        },
+    )
+    .await
+}
+
 pub async fn delete_disk(
     client: &ClientTestContext,
     project_name: &str,
@@ -355,11 +521,15 @@ pub async fn create_instance(
         Vec::<params::InstanceDiskAttachment>::new(),
         // External IPs=
         Vec::<params::ExternalIpCreate>::new(),
+        true,
+        Default::default(),
     )
     .await
 }
 
 /// Creates an instance with attached resources.
+// I know, Clippy. I don't like it either...
+#[allow(clippy::too_many_arguments)]
 pub async fn create_instance_with(
     client: &ClientTestContext,
     project_name: &str,
@@ -367,8 +537,11 @@ pub async fn create_instance_with(
     nics: &params::InstanceNetworkInterfaceAttachment,
     disks: Vec<params::InstanceDiskAttachment>,
     external_ips: Vec<params::ExternalIpCreate>,
+    start: bool,
+    auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
+
     object_create(
         client,
         &url,
@@ -379,14 +552,75 @@ pub async fn create_instance_with(
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: String::from("the_host"),
+            hostname: "the-host".parse().unwrap(),
             user_data:
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
+            ssh_public_keys: Some(Vec::new()),
             network_interfaces: nics.clone(),
             external_ips,
             disks,
-            start: true,
+            boot_disk: None,
+            start,
+            auto_restart_policy,
+            anti_affinity_groups: Vec::new(),
+        },
+    )
+    .await
+}
+
+/// Creates an instance, asserting a status code and returning the error.
+///
+/// Note that this accepts any serializable body, which allows users to create
+/// invalid inputs to test our parameter validation.
+pub async fn create_instance_with_error<T>(
+    client: &ClientTestContext,
+    project_name: &str,
+    body: &T,
+    status: StatusCode,
+) -> HttpErrorResponseBody
+where
+    T: serde::Serialize,
+{
+    let url = format!("/v1/instances?project={project_name}");
+    object_create_error(client, &url, body, status).await
+}
+
+pub async fn create_affinity_group(
+    client: &ClientTestContext,
+    project_name: &str,
+    group_name: &str,
+) -> AffinityGroup {
+    object_create(
+        &client,
+        format!("/v1/affinity-groups?project={}", &project_name).as_str(),
+        &params::AffinityGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: group_name.parse().unwrap(),
+                description: String::from("affinity group description"),
+            },
+            policy: AffinityPolicy::Fail,
+            failure_domain: FailureDomain::Sled,
+        },
+    )
+    .await
+}
+
+pub async fn create_anti_affinity_group(
+    client: &ClientTestContext,
+    project_name: &str,
+    group_name: &str,
+) -> AntiAffinityGroup {
+    object_create(
+        &client,
+        format!("/v1/anti-affinity-groups?project={}", &project_name).as_str(),
+        &params::AntiAffinityGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: group_name.parse().unwrap(),
+                description: String::from("anti-affinity group description"),
+            },
+            policy: AffinityPolicy::Fail,
+            failure_domain: FailureDomain::Sled,
         },
     )
     .await
@@ -444,6 +678,32 @@ pub async fn create_vpc_with_error(
     .unwrap()
 }
 
+pub async fn create_vpc_subnet(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    subnet_name: &str,
+    ipv4_block: Ipv4Net,
+    ipv6_block: Option<Ipv6Net>,
+    custom_router: Option<&str>,
+) -> VpcSubnet {
+    object_create(
+        &client,
+        &format!("/v1/vpc-subnets?project={project_name}&vpc={vpc_name}"),
+        &params::VpcSubnetCreate {
+            identity: IdentityMetadataCreateParams {
+                name: subnet_name.parse().unwrap(),
+                description: "vpc description".to_string(),
+            },
+            ipv4_block,
+            ipv6_block,
+            custom_router: custom_router
+                .map(|n| NameOrId::Name(n.parse().unwrap())),
+        },
+    )
+    .await
+}
+
 pub async fn create_router(
     client: &ClientTestContext,
     project_name: &str,
@@ -467,6 +727,264 @@ pub async fn create_router(
     .unwrap()
     .parsed_body()
     .unwrap()
+}
+
+pub async fn create_route(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    router_name: &str,
+    route_name: &str,
+    destination: RouteDestination,
+    target: RouteTarget,
+) -> RouterRoute {
+    NexusRequest::objects_post(
+        &client,
+        format!(
+            "/v1/vpc-router-routes?project={}&vpc={}&router={}",
+            &project_name, &vpc_name, &router_name
+        )
+        .as_str(),
+        &params::RouterRouteCreate {
+            identity: IdentityMetadataCreateParams {
+                name: route_name.parse().unwrap(),
+                description: String::from("route description"),
+            },
+            target,
+            destination,
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn create_route_with_error(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    router_name: &str,
+    route_name: &str,
+    destination: RouteDestination,
+    target: RouteTarget,
+    status: StatusCode,
+) -> HttpErrorResponseBody {
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            format!(
+                "/v1/vpc-router-routes?project={}&vpc={}&router={}",
+                &project_name, &vpc_name, &router_name
+            )
+            .as_str(),
+        )
+        .body(Some(&params::RouterRouteCreate {
+            identity: IdentityMetadataCreateParams {
+                name: route_name.parse().unwrap(),
+                description: String::from("route description"),
+            },
+            target,
+            destination,
+        }))
+        .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+pub async fn create_internet_gateway(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    internet_gateway_name: &str,
+) -> InternetGateway {
+    NexusRequest::objects_post(
+        &client,
+        format!(
+            "/v1/internet-gateways?project={}&vpc={}",
+            &project_name, &vpc_name
+        )
+        .as_str(),
+        &params::VpcRouterCreate {
+            identity: IdentityMetadataCreateParams {
+                name: internet_gateway_name.parse().unwrap(),
+                description: String::from("internet gateway description"),
+            },
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+pub async fn delete_internet_gateway(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    internet_gateway_name: &str,
+    cascade: bool,
+) {
+    NexusRequest::object_delete(
+        &client,
+        format!(
+            "/v1/internet-gateways/{}?project={}&vpc={}&cascade={}",
+            &internet_gateway_name, &project_name, &vpc_name, cascade
+        )
+        .as_str(),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+pub async fn attach_ip_pool_to_igw(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    igw_name: &str,
+    ip_pool_name: &str,
+    attachment_name: &str,
+) -> InternetGatewayIpPool {
+    let url = format!(
+        "/v1/internet-gateway-ip-pools?project={}&vpc={}&gateway={}",
+        project_name, vpc_name, igw_name,
+    );
+
+    let ip_pool: Name = ip_pool_name.parse().unwrap();
+    NexusRequest::objects_post(
+        &client,
+        url.as_str(),
+        &params::InternetGatewayIpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: attachment_name.parse().unwrap(),
+                description: String::from("attached pool descriptoion"),
+            },
+            ip_pool: NameOrId::Name(ip_pool),
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+pub async fn detach_ip_pool_from_igw(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    igw_name: &str,
+    ip_pool_name: &str,
+    cascade: bool,
+) {
+    let url = format!(
+        "/v1/internet-gateway-ip-pools/{}?project={}&vpc={}&gateway={}&cascade={}",
+        ip_pool_name, project_name, vpc_name, igw_name, cascade,
+    );
+
+    NexusRequest::object_delete(&client, url.as_str())
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+}
+
+pub async fn attach_ip_address_to_igw(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    igw_name: &str,
+    address: IpAddr,
+    attachment_name: &str,
+) -> InternetGatewayIpAddress {
+    let url = format!(
+        "/v1/internet-gateway-ip-addresses?project={}&vpc={}&gateway={}",
+        project_name, vpc_name, igw_name,
+    );
+
+    NexusRequest::objects_post(
+        &client,
+        url.as_str(),
+        &params::InternetGatewayIpAddressCreate {
+            identity: IdentityMetadataCreateParams {
+                name: attachment_name.parse().unwrap(),
+                description: String::from("attached pool descriptoion"),
+            },
+            address,
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+pub async fn detach_ip_address_from_igw(
+    client: &ClientTestContext,
+    project_name: &str,
+    vpc_name: &str,
+    igw_name: &str,
+    attachment_name: &str,
+    cascade: bool,
+) {
+    let url = format!(
+        "/v1/internet-gateway-ip-addresses/{}?project={}&vpc={}&gateway={}&cascade={}",
+        attachment_name, project_name, vpc_name, igw_name, cascade
+    );
+
+    NexusRequest::object_delete(&client, url.as_str())
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+}
+
+pub async fn assert_ip_pool_utilization(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ipv4_allocated: u32,
+    ipv4_capacity: u32,
+    ipv6_allocated: u128,
+    ipv6_capacity: u128,
+) {
+    let url = format!("/v1/system/ip-pools/{}/utilization", pool_name);
+    let utilization: views::IpPoolUtilization = object_get(client, &url).await;
+    assert_eq!(
+        utilization.ipv4.allocated, ipv4_allocated,
+        "IP pool '{}': expected {} IPv4 allocated, got {:?}",
+        pool_name, ipv4_allocated, utilization.ipv4.allocated
+    );
+    assert_eq!(
+        utilization.ipv4.capacity, ipv4_capacity,
+        "IP pool '{}': expected {} IPv4 capacity, got {:?}",
+        pool_name, ipv4_capacity, utilization.ipv4.capacity
+    );
+    assert_eq!(
+        utilization.ipv6.allocated, ipv6_allocated,
+        "IP pool '{}': expected {} IPv6 allocated, got {:?}",
+        pool_name, ipv6_allocated, utilization.ipv6.allocated
+    );
+    assert_eq!(
+        utilization.ipv6.capacity, ipv6_capacity,
+        "IP pool '{}': expected {} IPv6 capacity, got {:?}",
+        pool_name, ipv6_capacity, utilization.ipv6.capacity
+    );
 }
 
 /// Grant a role on a resource to a user
@@ -546,109 +1064,459 @@ pub async fn projects_list(
     .collect()
 }
 
+#[derive(Debug)]
 pub struct TestDataset {
-    pub id: Uuid,
+    pub id: DatasetUuid,
+    pub kind: DatasetKind,
 }
 
 pub struct TestZpool {
-    pub id: Uuid,
+    pub id: ZpoolUuid,
     pub size: ByteCount,
     pub datasets: Vec<TestDataset>,
 }
 
-pub struct DiskTest {
-    pub sled_agent: Arc<SledAgent>,
-    pub zpools: Vec<TestZpool>,
+enum WhichSledAgents {
+    Specific(SledUuid),
+    List(Vec<SledUuid>),
+    All,
 }
 
-impl DiskTest {
-    pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
+/// A test utility to add zpools to some sleds.
+///
+/// This builder helps initialize a set of zpools on sled agents with
+/// minimal overhead, though additional disks can be added via the [DiskTest]
+/// API after initialization.
+pub struct DiskTestBuilder<'a, N: NexusServer> {
+    cptestctx: &'a ControlPlaneTestContext<N>,
+    sled_agents: WhichSledAgents,
+    zpool_count: u32,
+}
 
-    // Creates fake physical storage, an organization, and a project.
-    pub async fn new<N: NexusServer>(
-        cptestctx: &ControlPlaneTestContext<N>,
+impl<'a, N: NexusServer> DiskTestBuilder<'a, N> {
+    /// Creates a new [DiskTestBuilder] with default configuration options.
+    pub fn new(cptestctx: &'a ControlPlaneTestContext<N>) -> Self {
+        Self {
+            cptestctx,
+            sled_agents: WhichSledAgents::Specific(cptestctx.first_sled_id()),
+            zpool_count: DiskTest::<'a, N>::DEFAULT_ZPOOL_COUNT,
+        }
+    }
+
+    /// Specifies that zpools should be added on all sleds
+    pub fn on_all_sleds(mut self) -> Self {
+        self.sled_agents = WhichSledAgents::All;
+        self
+    }
+
+    /// Chooses a specific sled where zpools should be added
+    pub fn on_specific_sled(mut self, sled_id: SledUuid) -> Self {
+        self.sled_agents = WhichSledAgents::Specific(sled_id);
+        self
+    }
+
+    /// Supply a list of sleds where zpools should be added
+    pub fn on_these_sleds(mut self, sled_ids: Vec<SledUuid>) -> Self {
+        self.sled_agents = WhichSledAgents::List(sled_ids);
+        self
+    }
+
+    /// Selects a specific number of zpools to be created
+    pub fn with_zpool_count(mut self, count: u32) -> Self {
+        self.zpool_count = count;
+        self
+    }
+
+    /// Creates a DiskTest, actually creating the requested zpools.
+    pub async fn build(self) -> DiskTest<'a, N> {
+        DiskTest::new_from_builder(
+            self.cptestctx,
+            self.sled_agents,
+            self.zpool_count,
+        )
+        .await
+    }
+}
+
+struct PerSledDiskState {
+    zpools: Vec<TestZpool>,
+}
+
+pub struct ZpoolIterator<'a> {
+    sleds: &'a BTreeMap<SledUuid, PerSledDiskState>,
+    sled: Option<SledUuid>,
+    index: usize,
+}
+
+impl<'a> Iterator for ZpoolIterator<'a> {
+    type Item = &'a TestZpool;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let Some(sled_id) = self.sled else {
+                return None;
+            };
+
+            let Some(pools) = self.sleds.get(&sled_id) else {
+                return None;
+            };
+
+            if let Some(pool) = pools.zpools.get(self.index) {
+                self.index += 1;
+                return Some(pool);
+            }
+
+            self.sled = self
+                .sleds
+                .range((
+                    std::ops::Bound::Excluded(&sled_id),
+                    std::ops::Bound::Unbounded,
+                ))
+                .map(|(id, _)| *id)
+                .next();
+            self.index = 0;
+        }
+    }
+}
+
+pub struct DiskTest<'a, N: NexusServer> {
+    cptestctx: &'a ControlPlaneTestContext<N>,
+    sleds: BTreeMap<SledUuid, PerSledDiskState>,
+}
+
+impl<'a, N: NexusServer> DiskTest<'a, N> {
+    pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 16;
+    pub const DEFAULT_ZPOOL_COUNT: u32 = 3;
+
+    /// Creates a new [DiskTest] with default configuration.
+    ///
+    /// This is the same as calling [DiskTestBuilder::new] and
+    /// [DiskTestBuilder::build].
+    pub async fn new(cptestctx: &'a ControlPlaneTestContext<N>) -> Self {
+        DiskTestBuilder::new(cptestctx).build().await
+    }
+
+    async fn new_from_builder(
+        cptestctx: &'a ControlPlaneTestContext<N>,
+        sled_agents: WhichSledAgents,
+        zpool_count: u32,
     ) -> Self {
-        let sled_agent = cptestctx.sled_agent.sled_agent.clone();
+        let input_sleds = match sled_agents {
+            WhichSledAgents::Specific(id) => {
+                vec![id]
+            }
 
-        let mut disk_test = Self { sled_agent, zpools: vec![] };
+            WhichSledAgents::List(ids) => ids.clone(),
 
-        // Create three Zpools, each 10 GiB, each with one Crucible dataset.
-        for _ in 0..3 {
-            disk_test
-                .add_zpool_with_dataset(cptestctx, Self::DEFAULT_ZPOOL_SIZE_GIB)
-                .await;
+            WhichSledAgents::All => cptestctx
+                .all_sled_agents()
+                .map(|agent| agent.sled_agent.id)
+                .collect(),
+        };
+
+        let mut sleds = BTreeMap::new();
+        for sled_id in input_sleds {
+            sleds.insert(sled_id, PerSledDiskState { zpools: vec![] });
+        }
+
+        let mut disk_test = Self { cptestctx, sleds };
+
+        for sled_id in
+            disk_test.sleds.keys().cloned().collect::<Vec<SledUuid>>()
+        {
+            for _ in 0..zpool_count {
+                disk_test.add_zpool_with_dataset(sled_id).await;
+            }
         }
 
         disk_test
     }
 
-    pub async fn add_zpool_with_dataset<N: NexusServer>(
+    pub async fn add_blueprint_disks(&mut self, blueprint: &Blueprint) {
+        for (sled_id, sled_config) in blueprint.sleds.iter() {
+            for disk in &sled_config.disks {
+                self.add_zpool_with_dataset_ext(
+                    *sled_id,
+                    disk.id,
+                    disk.pool_id,
+                    vec![TestDataset {
+                        id: DatasetUuid::new_v4(),
+                        kind: DatasetKind::Crucible,
+                    }],
+                    Self::DEFAULT_ZPOOL_SIZE_GIB,
+                )
+                .await;
+            }
+        }
+    }
+
+    pub async fn add_zpool_with_dataset(&mut self, sled_id: SledUuid) {
+        self.add_zpool_with_dataset_ext(
+            sled_id,
+            PhysicalDiskUuid::new_v4(),
+            ZpoolUuid::new_v4(),
+            vec![TestDataset {
+                id: DatasetUuid::new_v4(),
+                kind: DatasetKind::Crucible,
+            }],
+            Self::DEFAULT_ZPOOL_SIZE_GIB,
+        )
+        .await
+    }
+
+    // Propagate the dataset configuration to all Sled Agents.
+    //
+    // # Panics
+    //
+    // This function will panic if any of the Sled Agents have already
+    // applied dataset configuration.
+    //
+    // TODO: Ideally, we should do the following:
+    // 1. Also call a similar method to invoke the "omicron_physical_disks_ensure" API. Right now,
+    //    we aren't calling this at all for the simulated sled agent, which only works because
+    //    the simulated sled agent simply treats this as a stored config, rather than processing it
+    //    to actually provide a different view of storage.
+    // 2. Re-work the DiskTestBuilder API to automatically deploy the "disks + datasets" config
+    //    to sled agents exactly once. Adding new zpools / datasets after the DiskTest has been
+    //    started will need to also make a decision about re-deploying this configuration.
+    pub async fn propagate_datasets_to_sleds(&mut self) {
+        let cptestctx = self.cptestctx;
+
+        for (sled_id, PerSledDiskState { zpools }) in &self.sleds {
+            // Grab the "SledAgent" object -- we'll be contacting it shortly.
+            let sleds = cptestctx.all_sled_agents();
+            let sled_agent = sleds
+                .into_iter()
+                .find_map(|server| {
+                    if server.sled_agent.id == *sled_id {
+                        Some(server.sled_agent.clone())
+                    } else {
+                        None
+                    }
+                })
+                .expect("Cannot find sled");
+
+            // Configure the Sled to use all datasets we created
+            let datasets = zpools
+                .iter()
+                .flat_map(|zpool| zpool.datasets.iter().map(|d| (zpool.id, d)))
+                .map(|(zpool_id, TestDataset { id, kind })| {
+                    (
+                        *id,
+                        DatasetConfig {
+                            id: *id,
+                            name: DatasetName::new(
+                                ZpoolName::new_external(zpool_id),
+                                kind.clone(),
+                            ),
+                            inner: SharedDatasetConfig::default(),
+                        },
+                    )
+                })
+                .collect();
+
+            let generation = Generation::new().next();
+            let dataset_config = DatasetsConfig { generation, datasets };
+            let res = sled_agent.datasets_ensure(dataset_config).expect(
+                "Should have been able to ensure datasets, but could not.
+                     Did someone else already attempt to ensure datasets?",
+            );
+            assert!(!res.has_error());
+        }
+    }
+
+    fn get_sled(&self, sled_id: SledUuid) -> Arc<SledAgent> {
+        let sleds = self.cptestctx.all_sled_agents();
+        sleds
+            .into_iter()
+            .find_map(|server| {
+                if server.sled_agent.id == sled_id {
+                    Some(server.sled_agent.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("Cannot find sled")
+    }
+
+    pub fn zpools(&self) -> ZpoolIterator {
+        ZpoolIterator {
+            sleds: &self.sleds,
+            sled: self.sleds.keys().next().copied(),
+            index: 0,
+        }
+    }
+
+    pub async fn add_zpool_with_dataset_ext(
         &mut self,
-        cptestctx: &ControlPlaneTestContext<N>,
+        sled_id: SledUuid,
+        physical_disk_id: PhysicalDiskUuid,
+        zpool_id: ZpoolUuid,
+        datasets: Vec<TestDataset>,
         gibibytes: u32,
     ) {
+        let cptestctx = self.cptestctx;
+
+        // To get a dataset, we actually need to create a new simulated physical
+        // disk, zpool, and dataset, all contained within one another.
         let zpool = TestZpool {
-            id: Uuid::new_v4(),
+            id: zpool_id,
             size: ByteCount::from_gibibytes_u32(gibibytes),
-            datasets: vec![TestDataset { id: Uuid::new_v4() }],
+            datasets,
         };
 
-        self.sled_agent
-            .create_external_physical_disk(
-                "test-vendor".into(),
-                "test-serial".into(),
-                "test-model".into(),
-            )
-            .await;
-        self.sled_agent
-            .create_zpool(
-                zpool.id,
-                "test-vendor".into(),
-                "test-serial".into(),
-                "test-model".into(),
-                zpool.size.to_bytes(),
-            )
-            .await;
+        let disk_identity = DiskIdentity {
+            vendor: "test-vendor".into(),
+            serial: format!("totally-unique-serial: {}", physical_disk_id),
+            model: "test-model".into(),
+        };
+
+        let physical_disk_request =
+            nexus_types::internal_api::params::PhysicalDiskPutRequest {
+                id: physical_disk_id,
+                vendor: disk_identity.vendor.clone(),
+                serial: disk_identity.serial.clone(),
+                model: disk_identity.model.clone(),
+                variant:
+                    nexus_types::external_api::params::PhysicalDiskKind::U2,
+                sled_id: sled_id.into_untyped_uuid(),
+            };
+
+        let zpool_request =
+            nexus_types::internal_api::params::ZpoolPutRequest {
+                id: zpool.id.into_untyped_uuid(),
+                physical_disk_id,
+                sled_id: sled_id.into_untyped_uuid(),
+            };
+
+        // Find the sled on which we're adding a zpool
+        let sleds = cptestctx.all_sled_agents();
+        let sled_agent = sleds
+            .into_iter()
+            .find_map(|server| {
+                if server.sled_agent.id == sled_id {
+                    Some(server.sled_agent.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("Cannot find sled");
+
+        let zpools = &mut self
+            .sleds
+            .entry(sled_id)
+            .or_insert_with(|| PerSledDiskState { zpools: Vec::new() })
+            .zpools;
+
+        // Tell the simulated sled agent to create the disk and zpool containing
+        // these datasets.
+
+        sled_agent.create_external_physical_disk(
+            physical_disk_id,
+            disk_identity.clone(),
+        );
+        sled_agent.create_zpool(
+            zpool.id,
+            physical_disk_id,
+            zpool.size.to_bytes(),
+        );
 
         for dataset in &zpool.datasets {
-            let address = self
-                .sled_agent
-                .create_crucible_dataset(zpool.id, dataset.id)
-                .await;
+            let address = if matches!(dataset.kind, DatasetKind::Crucible) {
+                // Sled Agent side: Create the Dataset, make sure regions can be
+                // created immediately if Nexus requests anything.
+                let address =
+                    sled_agent.create_crucible_dataset(zpool.id, dataset.id);
+                let crucible =
+                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+                crucible
+                    .set_create_callback(Box::new(|_| RegionState::Created));
 
-            // By default, regions are created immediately.
-            let crucible = self
-                .sled_agent
-                .get_crucible_dataset(zpool.id, dataset.id)
-                .await;
-            crucible
-                .set_create_callback(Box::new(|_| RegionState::Created))
-                .await;
+                // Nexus side: Notify Nexus of the physical disk/zpool/dataset
+                // combination that exists.
 
-            let address = match address {
-                std::net::SocketAddr::V6(addr) => addr,
-                _ => panic!("Unsupported address type: {address} "),
+                match address {
+                    std::net::SocketAddr::V6(addr) => Some(addr),
+                    _ => panic!("Unsupported address type: {address} "),
+                }
+            } else {
+                None
             };
 
             cptestctx
                 .server
-                .upsert_crucible_dataset(dataset.id, zpool.id, address)
+                .upsert_test_dataset(
+                    physical_disk_request.clone(),
+                    zpool_request.clone(),
+                    dataset.id,
+                    dataset.kind.clone(),
+                    address,
+                )
                 .await;
         }
 
-        self.zpools.push(zpool);
+        let log = &cptestctx.logctx.log;
+
+        // Wait until Nexus has successfully completed an inventory collection
+        // which includes this zpool
+        wait_for_condition(
+            || async {
+                let result = cptestctx
+                    .server
+                    .inventory_collect_and_get_latest_collection()
+                    .await;
+                let log_result = match &result {
+                    Ok(Some(_)) => Ok("found"),
+                    Ok(None) => Ok("not found"),
+                    Err(error) => Err(error),
+                };
+                debug!(
+                    log,
+                    "attempt to fetch latest inventory collection";
+                    "result" => ?log_result,
+                );
+
+                match result {
+                    Ok(None) => Err(CondCheckError::NotYet),
+                    Ok(Some(c)) => {
+                        let all_zpools = c
+                            .sled_agents
+                            .values()
+                            .flat_map(|sled_agent| {
+                                sled_agent.zpools.iter().map(|z| z.id)
+                            })
+                            .collect::<std::collections::HashSet<ZpoolUuid>>();
+
+                        if all_zpools.contains(&zpool.id) {
+                            Ok(())
+                        } else {
+                            Err(CondCheckError::NotYet)
+                        }
+                    }
+                    Err(Error::ServiceUnavailable { .. }) => {
+                        Err(CondCheckError::NotYet)
+                    }
+                    Err(error) => Err(CondCheckError::Failed(error)),
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(30),
+        )
+        .await
+        .expect("expected to find inventory collection");
+
+        zpools.push(zpool);
     }
 
     pub async fn set_requested_then_created_callback(&self) {
-        for zpool in &self.zpools {
-            for dataset in &zpool.datasets {
-                let crucible = self
-                    .sled_agent
-                    .get_crucible_dataset(zpool.id, dataset.id)
-                    .await;
-                let called = std::sync::atomic::AtomicBool::new(false);
-                crucible
-                    .set_create_callback(Box::new(move |_| {
+        for (sled_id, state) in &self.sleds {
+            for zpool in &state.zpools {
+                for dataset in &zpool.datasets {
+                    let crucible = self
+                        .get_sled(*sled_id)
+                        .get_crucible_dataset(zpool.id, dataset.id);
+                    let called = std::sync::atomic::AtomicBool::new(false);
+                    crucible.set_create_callback(Box::new(move |_| {
                         if !called.load(std::sync::atomic::Ordering::SeqCst) {
                             called.store(
                                 true,
@@ -658,40 +1526,58 @@ impl DiskTest {
                         } else {
                             RegionState::Created
                         }
-                    }))
-                    .await;
+                    }));
+                }
             }
         }
     }
 
     pub async fn set_always_fail_callback(&self) {
-        for zpool in &self.zpools {
-            for dataset in &zpool.datasets {
-                let crucible = self
-                    .sled_agent
-                    .get_crucible_dataset(zpool.id, dataset.id)
-                    .await;
-                crucible
-                    .set_create_callback(Box::new(|_| RegionState::Failed))
-                    .await;
+        for (sled_id, state) in &self.sleds {
+            for zpool in &state.zpools {
+                for dataset in &zpool.datasets {
+                    let crucible = self
+                        .get_sled(*sled_id)
+                        .get_crucible_dataset(zpool.id, dataset.id);
+                    crucible
+                        .set_create_callback(Box::new(|_| RegionState::Failed));
+                }
             }
         }
     }
 
     /// Returns true if all Crucible resources were cleaned up, false otherwise.
+    ///
+    /// Note: be careful performing this test when also peforming physical disk
+    /// expungement, as Nexus will consider resources on those physical disks
+    /// gone and will not attempt to clean them up!
     pub async fn crucible_resources_deleted(&self) -> bool {
-        for zpool in &self.zpools {
-            for dataset in &zpool.datasets {
-                let crucible = self
-                    .sled_agent
-                    .get_crucible_dataset(zpool.id, dataset.id)
-                    .await;
-                if !crucible.is_empty().await {
-                    return false;
+        for (sled_id, state) in &self.sleds {
+            for zpool in &state.zpools {
+                for dataset in &zpool.datasets {
+                    let crucible = self
+                        .get_sled(*sled_id)
+                        .get_crucible_dataset(zpool.id, dataset.id);
+                    if !crucible.is_empty() {
+                        return false;
+                    }
                 }
             }
         }
 
         true
+    }
+
+    /// Drop all of a zpool's resources
+    ///
+    /// Call this before checking `crucible_resources_deleted` if the test has
+    /// also performed a physical disk policy change to "expunged". Nexus will
+    /// _not_ clean up crucible resources on an expunged disk (due to the "gone"
+    /// check that it performs), but it's useful for tests to be able to assert
+    /// all crucible resources are cleaned up.
+    pub async fn remove_zpool(&mut self, zpool_id: Uuid) {
+        for sled in self.sleds.values_mut() {
+            sled.zpools.retain(|zpool| *zpool.id.as_untyped_uuid() != zpool_id);
+        }
     }
 }

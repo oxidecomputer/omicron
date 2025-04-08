@@ -1,0 +1,20 @@
+[package]
+name = "mgs-dev"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+gateway-messages.workspace = true
+gateway-test-utils.workspace = true
+libc.workspace = true
+omicron-gateway.workspace = true
+omicron-workspace-hack.workspace = true
+signal-hook-tokio.workspace = true
+tokio.workspace = true

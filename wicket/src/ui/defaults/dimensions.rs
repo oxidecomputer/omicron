@@ -18,14 +18,6 @@ pub trait RectExt {
     ///
     /// Panics if `height > self.height`.
     fn center_vertically(self, height: u16) -> Self;
-
-    /// Create a new maximally sized `Rect` that is bounded by `self`, and
-    /// shifted down by `y` columns. In order to maintain the bounding, the
-    /// new `Rect` is originally sized to `self` and then shrunk by the same
-    /// amount it is shifted downwards: namely `y` columns.
-    ///
-    /// Panics if `y > self.height`.
-    fn move_down_within_bounds(self, y: u16) -> Self;
 }
 
 impl RectExt for Rect {
@@ -40,12 +32,6 @@ impl RectExt for Rect {
         let center = (self.height - height) / 2;
         self.y += center;
         self.height = height;
-        self
-    }
-
-    fn move_down_within_bounds(mut self, y: u16) -> Self {
-        self.y = self.y + y;
-        self.height -= y;
         self
     }
 }

@@ -1,0 +1,30 @@
+[package]
+name = "db-dev"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+camino.workspace = true
+clap.workspace = true
+futures.workspace = true
+libc.workspace = true
+omicron-test-utils.workspace = true
+omicron-workspace-hack.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+signal-hook-tokio.workspace = true
+tokio.workspace = true
+tokio-postgres.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true
+omicron-dev-lib.workspace = true
+subprocess.workspace = true

@@ -8,33 +8,22 @@
 #![allow(clippy::needless_lifetimes)]
 #![allow(clippy::match_single_binding)]
 #![allow(clippy::clone_on_copy)]
+pub use ddm_admin_client::Error;
+pub use ddm_admin_client::types;
 
-#[allow(dead_code)]
-mod inner {
-    include!(concat!(env!("OUT_DIR"), "/ddm-admin-client.rs"));
-
-    impl Copy for types::Ipv6Prefix {}
-}
-
-pub use inner::types;
-pub use inner::Error;
-
+use ddm_admin_client::Client as InnerClient;
 use either::Either;
-use inner::types::Ipv6Prefix;
-use inner::Client as InnerClient;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
-use omicron_common::backoff::retry_notify;
-use omicron_common::backoff::retry_policy_internal_service_aggressive;
-use sled_hardware::underlay::BootstrapInterface;
-use sled_hardware::underlay::BOOTSTRAP_MASK;
-use sled_hardware::underlay::BOOTSTRAP_PREFIX;
-use slog::info;
+use oxnet::Ipv6Net;
+use sled_hardware_types::underlay::BOOTSTRAP_MASK;
+use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
+use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
+
+use crate::types::EnableStatsRequest;
 
 // TODO-cleanup Is it okay to hardcode this port number here?
 const DDMD_PORT: u16 = 8000;
@@ -80,32 +69,41 @@ impl Client {
         Ok(Self { inner, log })
     }
 
-    /// Spawns a background task to instruct ddmd to advertise the given prefix
-    /// to peer sleds.
-    pub fn advertise_prefix(&self, address: Ipv6Subnet<SLED_PREFIX>) {
-        let me = self.clone();
-        tokio::spawn(async move {
-            let prefix =
-                Ipv6Prefix { addr: address.net().network(), len: SLED_PREFIX };
-            retry_notify(retry_policy_internal_service_aggressive(), || async {
-                info!(
-                    me.log, "Sending prefix to ddmd for advertisement";
-                    "prefix" => ?prefix,
-                );
+    pub fn log(&self) -> &Logger {
+        &self.log
+    }
 
-                // TODO-cleanup Why does the generated openapi client require a
-                // `&Vec` instead of a `&[]`?
-                let prefixes = vec![prefix];
-                me.inner.advertise_prefixes(&prefixes).await?;
-                Ok(())
-            }, |err, duration| {
-                info!(
-                    me.log,
-                    "Failed to notify ddmd of our address (will retry after {duration:?}";
-                    "err" => %err,
-                );
-            }).await.unwrap();
-        });
+    pub async fn advertise_prefixes(
+        &self,
+        prefixes: &Vec<Ipv6Net>,
+    ) -> Result<(), Error<types::Error>> {
+        self.inner
+            .advertise_prefixes(prefixes)
+            .await
+            .map(|resp| resp.into_inner())
+    }
+
+    pub async fn withdraw_prefixes(
+        &self,
+        prefixes: &Vec<Ipv6Net>,
+    ) -> Result<(), Error<types::Error>> {
+        self.inner
+            .withdraw_prefixes(prefixes)
+            .await
+            .map(|resp| resp.into_inner())
+    }
+
+    pub async fn get_originated(
+        &self,
+    ) -> Result<Vec<Ipv6Net>, Error<types::Error>> {
+        self.inner.get_originated().await.map(|resp| resp.into_inner())
+    }
+
+    pub async fn enable_stats(
+        &self,
+        request: &EnableStatsRequest,
+    ) -> Result<(), Error<types::Error>> {
+        self.inner.enable_stats(request).await.map(|resp| resp.into_inner())
     }
 
     /// Returns the addresses of connected sleds.
@@ -116,11 +114,10 @@ impl Client {
         interfaces: &'a [BootstrapInterface],
     ) -> Result<impl Iterator<Item = Ipv6Addr> + 'a, DdmError> {
         let prefixes = self.inner.get_prefixes().await?.into_inner();
-        info!(self.log, "Received prefixes from ddmd"; "prefixes" => ?prefixes);
         Ok(prefixes.into_iter().flat_map(|(_, prefixes)| {
             prefixes.into_iter().flat_map(|prefix| {
-                let mut segments = prefix.destination.addr.segments();
-                if prefix.destination.len == BOOTSTRAP_MASK
+                let mut segments = prefix.destination.addr().segments();
+                if prefix.destination.width() == BOOTSTRAP_MASK
                     && segments[0] == BOOTSTRAP_PREFIX
                 {
                     Either::Left(interfaces.iter().map(move |interface| {

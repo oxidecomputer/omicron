@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Ensure a buildomat artifact is downloaded and available locally.
 

@@ -27,7 +27,7 @@ impl Pool {
     }
 
     /// Return a Pool consisting of fake info
-    #[cfg(feature = "testing")]
+    #[cfg(all(test, feature = "testing"))]
     pub fn new_with_fake_info(name: ZpoolName, parent: DiskIdentity) -> Pool {
         let info = ZpoolInfo::new_hardcoded(name.to_string());
         Pool { name, info, parent }

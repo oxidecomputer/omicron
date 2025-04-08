@@ -18,32 +18,63 @@ sidecar_revision.soft_zone = { front_port_count = 1, rear_port_count = 1 }
 # in-sync, rather than querying its NTP zone.
 skip_timesync = false
 
-# For testing purposes, A file-backed zpool can be manually created with the
-# following:
+# For testing purposes, a file-backed virtual disk can be manually created with
+# the following:
 #
-# # truncate -s 10GB testpool.vdev
-# # zpool create oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b "$PWD/testpool.vdev"
+# # truncate -s 10GB <name>.vdev
 #
-# Note that you'll need to create one such zpool for each below, with a
-# different vdev for each.  The `create_virtual_hardware.sh` script does this
-# for you.
-zpools = [
-  "oxi_a462a7f7-b628-40fe-80ff-4e4189e2d62b",
-  "oxi_b462a7f7-b628-40fe-80ff-4e4189e2d62b",
-  "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
-  "oxp_e4b4dc87-ab46-49fb-a4b4-d361ae214c03",
-  "oxp_f4b4dc87-ab46-49fb-a4b4-d361ae214c03",
-  "oxp_14b4dc87-ab46-49fb-a4b4-d361ae214c03",
-  "oxp_24b4dc87-ab46-49fb-a4b4-d361ae214c03",
-  "oxp_cd70d7f6-2354-4bf2-8012-55bf9eaf7930",
-  "oxp_ceb4461c-cf56-4719-ad3c-14430bfdfb60",
-  "oxp_31bd71cd-4736-4a12-a387-9b74b050396f",
-  "oxp_616b26df-e62a-4c68-b506-f4a923d8aaf7",
+# Note that you'll need to create one such file for each disk below.
+# `cargo xtask virtual-hardware create` does this for you.
+#
+# These paths have the prefix of either "u2" or "m2", followed by an underscore,
+# followed by a string that is embedded into their fake serial values.
+vdevs = [
+  "m2_0.vdev",
+  "m2_1.vdev",
+
+  "u2_0.vdev",
+  "u2_1.vdev",
+  "u2_2.vdev",
+  "u2_3.vdev",
+  "u2_4.vdev",
+  "u2_5.vdev",
+  "u2_6.vdev",
+  "u2_7.vdev",
+  "u2_8.vdev",
 ]
 
-# Percentage of usable physical DRAM to use for the VMM reservoir, which
-# guest memory is pulled from.
-vmm_reservoir_percentage = 50
+# The amount of memory held back for services which exist between zero and one
+# times on this system. As this is a non-Gimlet target, it is likely that
+# services will all cohabitate here, so this is perhaps less overallocation than
+# it would be for a Gimlet. This currently includes some additional terms
+# reflecting OS memory use under load.
+#
+# These values are inspired by Gimlet configs but scaled to expected test
+# system size - 10gbit network links, 64-128gb of DRAM. Even so, this is likely
+# an overestimate:
+# * Network buffer slush: 2 GiB
+# * Other kernel heap: 2 GiB
+# * ZFS ARC minimum: 1 GiB
+# * Sled agent: 0.5 GiB
+# * Maghemite: 0.25 GiB
+# * NTP: 0.25 GiB
+control_plane_memory_earmark_mb = 6144
+
+# Percentage of otherwise-unbudgeted physical DRAM to use for the VMM reservoir,
+# which guest memory is pulled from.
+#
+# Unlike the Gimlet configurations, this number is not described by an RFD, but
+# has been chosen to not affect development workflows on expected test hardware..
+# The example BOMs describe workstations with 128 GiB of memory, where the
+# initial strategy had sized the VMM reservoir at 64 GiB. A smaller 64 GiB
+# workstation had its VMM reservoir sized to 32 GiB. Taking the next
+# multiple of 10 percentage is an arbitrary choice that, for these two shapes of
+# system, gives the following reservoir sizes:
+# * 128 - 6 (earmark) - 3.75 (`page_t`s)) * 0.6 == 70.95 GiB VMM reservoir
+# * 64 - 6 (earmark) - 1.875 (`page_t`s)) * 0.6 == 33.675 GiB VMM reservoir
+#
+# or reservoirs just a bit larger than their previous 64 and 32 GiB values.
+vmm_reservoir_percentage = 60
 
 # Optionally you can specify the size of the VMM reservoir in MiB.
 # Note vmm_reservoir_percentage and vmm_reservoir_size_mb cannot be specified
@@ -76,8 +107,18 @@ switch_zone_maghemite_links = ["tfportrear0_0"]
 
 data_links = ["net0", "net1"]
 
+[dropshot]
+default_request_body_max_bytes = 1048576
+
 [log]
 level = "info"
 mode = "file"
 path = "/dev/stdout"
 if_exists = "append"
+
+# These are pre-generated keys and roots designed to be used for testing.
+# Create your own if you need to test a multi-node system
+# See the .kdl file for use with pki-playground for generating
+[sprockets]
+resolve = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/sprockets-auth.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/sprockets-chain.pem" }
+roots = ["/opt/oxide/sled-agent/pkg/root.cert.pem"]

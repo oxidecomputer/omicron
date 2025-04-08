@@ -4,7 +4,7 @@
 
 use std::io::{BufWriter, Write};
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
 use filetime::FileTime;
 use slog::Logger;
@@ -176,7 +176,7 @@ pub async fn test_setup_database_seed(
     )
     .await
     .context("failed to setup database")?;
-    db.cleanup().await.context("failed to cleanup database")?;
+    db.cleanup_gracefully().await.context("failed to cleanup database")?;
 
     // See https://github.com/cockroachdb/cockroach/issues/74231 for context on
     // this. We use this assertion to check that our seed directory won't point

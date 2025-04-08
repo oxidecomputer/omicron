@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+# only set this if you want to override the version of opte/xde installed by the
+# install_opte.sh script
+OPTE_COMMIT=""

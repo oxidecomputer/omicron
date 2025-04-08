@@ -3,17 +3,18 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Generation, Ipv6Net, Name, VpcFirewallRule, VpcSubnet};
-use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{vpc, vpc_firewall_rule, vpc_subnet};
 use crate::Vni;
+use crate::collection::DatastoreCollectionConfig;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::{vpc, vpc_firewall_rule, vpc_subnet};
 use nexus_defaults as defaults;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_common::api::external::Ipv6NetExt;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -83,22 +84,20 @@ impl IncompleteVpc {
         params: params::VpcCreate,
     ) -> Result<Self, external::Error> {
         let identity = VpcIdentity::new(vpc_id, params.identity);
-        let ipv6_prefix = IpNetwork::from(
-            match params.ipv6_prefix {
-                None => defaults::random_vpc_ipv6_prefix(),
-                Some(prefix) => {
-                    if prefix.is_vpc_prefix() {
-                        Ok(prefix)
-                    } else {
-                        Err(external::Error::invalid_request(
-                            "VPC IPv6 address prefixes must be in the \
+        let ipv6_prefix = oxnet::IpNet::from(match params.ipv6_prefix {
+            None => defaults::random_vpc_ipv6_prefix(),
+            Some(prefix) => {
+                if prefix.is_vpc_prefix() {
+                    Ok(prefix)
+                } else {
+                    Err(external::Error::invalid_request(
+                        "VPC IPv6 address prefixes must be in the \
                             Unique Local Address range `fd00::/48` (RFD 4193)",
-                        ))
-                    }
+                    ))
                 }
-            }?
-            .0,
-        );
+            }
+        }?)
+        .into();
         Ok(Self {
             identity,
             project_id,

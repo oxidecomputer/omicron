@@ -12,6 +12,7 @@ mod http_entrypoints;
 mod maghemite;
 pub(crate) mod params;
 mod pre_server;
+mod pumpkind;
 mod rack_ops;
 pub(crate) mod rss_handle;
 pub mod secret_retriever;

@@ -55,9 +55,9 @@ fn target_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
             vec![]
         } else {
             return Err(Error::new(
-                    item.span(),
-                    "Can only be derived for structs with named fields or unit structs",
-                ));
+                item.span(),
+                "Can only be derived for structs with named fields or unit structs",
+            ));
         };
         return Ok(build_target_trait_impl(&name, &fields[..]));
     }
@@ -151,6 +151,10 @@ fn build_shared_methods(item_name: &Ident, fields: &[&Field]) -> TokenStream {
     quote! {
         fn name(&self) -> &'static str {
             #name
+        }
+
+        fn version(&self) -> ::std::num::NonZeroU8 {
+            unsafe { ::std::num::NonZeroU8::new_unchecked(1) }
         }
 
         fn field_names(&self) -> &'static [&'static str] {

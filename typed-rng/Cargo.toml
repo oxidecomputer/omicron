@@ -1,0 +1,15 @@
+[package]
+name = "typed-rng"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+newtype-uuid.workspace = true
+omicron-workspace-hack.workspace = true
+rand.workspace = true
+rand_core.workspace = true
+rand_seeder.workspace = true
+uuid.workspace = true

@@ -8,12 +8,9 @@ use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "block_size"))]
-    pub struct BlockSizeEnum;
+    BlockSizeEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = BlockSizeEnum)]
     pub enum BlockSize;
 
     // Enum values

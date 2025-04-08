@@ -4,13 +4,15 @@
 
 use super::{Generation, Region};
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{region, volume};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_db_schema::schema::{region, volume};
+use omicron_uuid_kinds::VolumeUuid;
 use uuid::Uuid;
 
 #[derive(Asset, Queryable, Insertable, Debug, Selectable, Clone)]
 #[diesel(table_name = volume)]
+#[asset(uuid_kind = VolumeKind)]
 pub struct Volume {
     #[diesel(embed)]
     identity: VolumeIdentity,
@@ -24,7 +26,7 @@ pub struct Volume {
 }
 
 impl Volume {
-    pub fn new(id: Uuid, data: String) -> Self {
+    pub fn new(id: VolumeUuid, data: String) -> Self {
         Self {
             identity: VolumeIdentity::new(id),
             time_deleted: None,

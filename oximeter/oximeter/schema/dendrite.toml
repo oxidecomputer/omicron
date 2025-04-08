@@ -1,0 +1,82 @@
+format_version = 1
+
+[target]
+name = "dendrite"
+description = "Oxide switch management daemon"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial" ] },
+]
+
+[[metrics]]
+name = "sample_collection_duration"
+description = "Duration spent collecting all timeseries samples"
+units = "seconds"
+datum_type = "f64"
+versions = [
+    # Note: The sample collection time includes the time spent querying the
+    # switch for its statistics, which is why these fields are included.
+    # Dendrite may eventually report statistics about itself, or other aspects
+    # not related to the switch, so they belong here, not the target.
+    { added_in = 1, fields = [ "switch_id", "switch_model", "switch_revision", "switch_serial", "switch_slot", "asic_fab", "asic_lot", "asic_wafer", "asic_wafer_loc_x", "asic_wafer_loc_y" ] }
+]
+
+[fields.rack_id]
+type = "uuid"
+description = "ID of the rack containing the switch"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID of the sled managing the switch"
+
+[fields.sled_model]
+type = "string"
+description = "The model of the sled managing the switch"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled managing the switch"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled managing the switch"
+
+[fields.switch_id]
+type = "uuid"
+description = "ID of the switch being managed"
+
+[fields.switch_model]
+type = "string"
+description = "The model number of the switch being managed"
+
+[fields.switch_revision]
+type = "u32"
+description = "Revision number of the switch being managed"
+
+[fields.switch_serial]
+type = "string"
+description = "Serial number of the switch being managed"
+
+[fields.switch_slot]
+type = "u16"
+description = "Slot number of the switch being managed"
+
+[fields.asic_fab]
+type = "string"
+description = "Fabrication plant identifier of the switch ASIC being managed"
+
+[fields.asic_lot]
+type = "string"
+description = "Lot identifier of the switch ASIC being managed"
+
+[fields.asic_wafer]
+type = "u8"
+description = "Wafer identifier of the switch ASIC being managed"
+
+[fields.asic_wafer_loc_x]
+type = "i16"
+description = "X-coordinate wafer location of the switch ASIC being managed"
+
+[fields.asic_wafer_loc_y]
+type = "i16"
+description = "Y-coordinate wafer location of the switch ASIC being managed"

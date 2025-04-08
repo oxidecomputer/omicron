@@ -4,16 +4,26 @@
 
 //! Types that are used as both views and params
 
+use std::net::IpAddr;
+
+use super::params::RelativeUri;
+use anyhow::Context;
+use chrono::DateTime;
+use chrono::Utc;
+use omicron_common::api::external::Name;
+use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_uuid_kinds::SupportBundleUuid;
 use parse_display::FromStr;
 use schemars::JsonSchema;
-use serde::de::Error as _;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
+use serde::de::Error as _;
 use strum::EnumIter;
 use uuid::Uuid;
 
 pub use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
+pub use omicron_common::api::external::BfdMode;
 
 /// Maximum number of role assignments allowed on any one resource
 // Today's implementation assumes a relatively small number of role assignments
@@ -221,7 +231,9 @@ pub enum ServiceUsingCertificate {
 }
 
 /// The kind of an external IP address for an instance
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(
+    Debug, Clone, Copy, Deserialize, Eq, Serialize, JsonSchema, PartialEq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum IpKind {
     Ephemeral,
@@ -245,10 +257,127 @@ pub enum UpdateableComponentType {
     HostOmicron,
 }
 
+/// Properties that uniquely identify an Oxide hardware component
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct Baseboard {
+    pub serial: String,
+    pub part: String,
+    pub revision: u32,
+}
+
+/// A sled that has not been added to an initialized rack yet
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct UninitializedSled {
+    pub baseboard: Baseboard,
+    pub rack_id: Uuid,
+    pub cubby: u16,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BfdState {
+    /// A stable down state. Non-responsive to incoming messages.
+    AdminDown = 0,
+
+    /// The initial state.
+    Down = 1,
+
+    /// The peer has detected a remote peer in the down state.
+    Init = 2,
+
+    /// The peer has detected a remote peer in the up or init state while in the
+    /// init state.
+    Up = 3,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct BfdStatus {
+    pub peer: IpAddr,
+    pub state: BfdState,
+    pub switch: Name,
+    pub local: Option<IpAddr>,
+    pub detection_threshold: u8,
+    pub required_rx: u64,
+    pub mode: BfdMode,
+}
+
+/// Opaque object representing link state. The contents of this object are not
+/// yet stable.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SwitchLinkState {
+    link: serde_json::Value,
+    monitors: Option<serde_json::Value>,
+}
+
+impl SwitchLinkState {
+    pub fn new(
+        link: serde_json::Value,
+        monitors: Option<serde_json::Value>,
+    ) -> Self {
+        Self { link, monitors }
+    }
+}
+
+impl JsonSchema for SwitchLinkState {
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        let obj = schemars::schema::Schema::Object(
+            schemars::schema::SchemaObject::default(),
+        );
+        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        obj
+    }
+
+    fn schema_name() -> String {
+        "SwitchLinkState".to_owned()
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use super::Policy;
     use super::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
+    use super::Policy;
     use serde::Deserialize;
 
     #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -287,5 +416,97 @@ mod test {
             error.to_string(),
             "invalid length 65, expected a list of at most 64 role assignments"
         );
+    }
+}
+
+#[derive(
+    Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SupportBundleState {
+    /// Support Bundle still actively being collected.
+    ///
+    /// This is the initial state for a Support Bundle, and it will
+    /// automatically transition to either "Failing" or "Active".
+    ///
+    /// If a user no longer wants to access a Support Bundle, they can
+    /// request cancellation, which will transition to the "Destroying" state.
+    Collecting,
+
+    /// Support Bundle is being destroyed.
+    ///
+    /// Once backing storage has been freed, this bundle is destroyed.
+    Destroying,
+
+    /// Support Bundle was not created successfully, or was created and has lost
+    /// backing storage.
+    ///
+    /// The record of the bundle still exists for readability, but the only
+    /// valid operation on these bundles is to destroy them.
+    Failed,
+
+    /// Support Bundle has been processed, and is ready for usage.
+    Active,
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct SupportBundleInfo {
+    pub id: SupportBundleUuid,
+    pub time_created: DateTime<Utc>,
+    pub reason_for_creation: String,
+    pub reason_for_failure: Option<String>,
+    pub state: SupportBundleState,
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProbeInfo {
+    pub id: Uuid,
+    pub name: Name,
+    pub sled: Uuid,
+    pub external_ips: Vec<ProbeExternalIp>,
+    pub interface: NetworkInterface,
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct ProbeExternalIp {
+    pub ip: IpAddr,
+    pub first_port: u16,
+    pub last_port: u16,
+    pub kind: ProbeExternalIpKind,
+}
+
+#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeExternalIpKind {
+    Snat,
+    Floating,
+    Ephemeral,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RelayState {
+    pub redirect_uri: Option<RelativeUri>,
+}
+
+impl RelayState {
+    pub fn to_encoded(&self) -> Result<String, anyhow::Error> {
+        Ok(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            serde_json::to_string(&self).context("encoding relay state")?,
+        ))
+    }
+
+    pub fn from_encoded(encoded: String) -> Result<Self, anyhow::Error> {
+        serde_json::from_str(
+            &String::from_utf8(
+                base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    encoded,
+                )
+                .context("base64 decoding relay state")?,
+            )
+            .context("creating relay state string")?,
+        )
+        .context("json from relay state string")
     }
 }

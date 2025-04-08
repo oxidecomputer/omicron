@@ -1,9 +1,8 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Asset;
 use crate::db::model::Switch;
 use crate::db::pagination::paginated;
@@ -19,7 +18,7 @@ use uuid::Uuid;
 impl DataStore {
     /// Stores a new switch in the database.
     pub async fn switch_upsert(&self, switch: Switch) -> CreateResult<Switch> {
-        use db::schema::switch::dsl;
+        use nexus_db_schema::schema::switch::dsl;
 
         let conn = self.pool_connection_unauthorized().await?;
         diesel::insert_into(dsl::switch)
@@ -50,7 +49,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Switch> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use db::schema::switch::dsl;
+        use nexus_db_schema::schema::switch::dsl;
         paginated(dsl::switch, dsl::id, pagparams)
             .select(Switch::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)

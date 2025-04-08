@@ -12,18 +12,18 @@
 
 use super::request_manager::ShareAcks;
 use super::{
-    create_pkgs, Envelope, FsmConfig, LearnedSharePkg, Msg, MsgError, RackUuid,
-    Request, RequestManager, RequestType, Response, ResponseType, Share,
-    SharePkg, Shares, TrackableRequest,
+    Envelope, FsmConfig, LearnedSharePkg, Msg, MsgError, RackUuid, Request,
+    RequestManager, RequestType, Response, ResponseType, Share, SharePkg,
+    Shares, TrackableRequest, create_pkgs,
 };
+use crate::Sha3_256Digest;
 use crate::schemes::v0::share_pkg::SharePkgCommon;
 use crate::trust_quorum::{RackSecret, TrustQuorumError};
-use crate::Sha3_256Digest;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use sha3::{Digest, Sha3_256};
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::time::Instant;
@@ -131,7 +131,9 @@ pub enum ApiError {
     #[error("critical: failed to decrypt extra shares")]
     FailedToDecryptExtraShares,
 
-    #[error("unexpected response ({msg}) from ({from}) in state ({state}) with request_id ({request_id})")]
+    #[error(
+        "unexpected response ({msg}) from ({from}) in state ({state}) with request_id ({request_id})"
+    )]
     UnexpectedResponse {
         from: Baseboard,
         state: &'static str,
@@ -139,7 +141,9 @@ pub enum ApiError {
         msg: &'static str,
     },
 
-    #[error("error response received from ({from}) in state ({state}) with request_id ({request_id}): {error:?}")]
+    #[error(
+        "error response received from ({from}) in state ({state}) with request_id ({request_id}): {error:?}"
+    )]
     ErrorResponseReceived {
         from: Baseboard,
         state: &'static str,
@@ -360,11 +364,7 @@ impl Fsm {
                 }
             }
         }
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 
     /// A peer has been connected.

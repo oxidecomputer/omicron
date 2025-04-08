@@ -12,10 +12,10 @@ mod popup;
 mod rack;
 mod status_view;
 
-pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
+pub use animated_logo::{LOGO_HEIGHT, LOGO_WIDTH, Logo, LogoState};
 pub use box_connector::{BoxConnector, BoxConnectorKind};
 pub use fade::Fade;
 pub use ignition::IgnitionPopup;
-pub use popup::{ButtonText, Popup, PopupBuilder, PopupScrollOffset};
+pub use popup::{ButtonText, PopupBuilder, PopupScrollOffset};
 pub use rack::Rack;
 pub use status_view::StatusView;

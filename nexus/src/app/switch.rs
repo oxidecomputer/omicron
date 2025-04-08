@@ -32,8 +32,8 @@ impl super::Nexus {
     ) -> Result<Switch, Error> {
         let switch = db::model::Switch::new(
             id,
-            request.baseboard.serial_number,
-            request.baseboard.part_number,
+            request.baseboard.serial,
+            request.baseboard.part,
             request.baseboard.revision,
             request.rack_id,
         );

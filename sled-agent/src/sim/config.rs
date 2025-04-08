@@ -5,12 +5,21 @@
 //! Interfaces for working with sled agent configuration
 
 use crate::updates::ConfigUpdates;
+use camino::Utf8Path;
 use dropshot::ConfigDropshot;
-use dropshot::ConfigLogging;
+use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
+pub use sled_hardware_types::Baseboard;
+use std::net::Ipv6Addr;
 use std::net::{IpAddr, SocketAddr};
-use uuid::Uuid;
+
+/// The reported amount of hardware threads for an emulated sled agent.
+pub const TEST_HARDWARE_THREADS: u32 = 16;
+/// The reported amount of physical RAM for an emulated sled agent.
+pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
+/// The reported amount of VMM reservoir RAM for an emulated sled agent.
+pub const TEST_RESERVOIR_RAM: u64 = 16 * (1 << 30);
 
 /// How a [`SledAgent`](`super::sled_agent::SledAgent`) simulates object states and
 /// transitions
@@ -47,25 +56,89 @@ pub struct ConfigHardware {
     pub hardware_threads: u32,
     pub physical_ram: u64,
     pub reservoir_ram: u64,
+    pub baseboard: Baseboard,
 }
 
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
     /// unique id for the sled
-    pub id: Uuid,
+    pub id: SledUuid,
     /// how to simulate asynchronous Instance and Disk transitions
     pub sim_mode: SimMode,
     /// IP address and TCP port for Nexus instance to register with
     pub nexus_address: SocketAddr,
     /// configuration for the sled agent dropshot server
     pub dropshot: ConfigDropshot,
-    /// configuration for the sled agent debug log
-    pub log: ConfigLogging,
     /// configuration for the sled agent's storage
     pub storage: ConfigStorage,
     /// configuration for the sled agent's updates
     pub updates: ConfigUpdates,
     /// configuration to emulate the sled agent's hardware
     pub hardware: ConfigHardware,
+}
+
+pub enum ZpoolConfig {
+    /// Don't create anything by default.
+    None,
+
+    /// Create 10 virtual U.2s, each with 1 TB of storage.
+    TenVirtualU2s,
+}
+
+impl Config {
+    pub fn for_testing(
+        id: SledUuid,
+        sim_mode: SimMode,
+        nexus_address: Option<SocketAddr>,
+        update_directory: Option<&Utf8Path>,
+        zpool_config: ZpoolConfig,
+    ) -> Config {
+        // This IP range is guaranteed by RFC 6666 to discard traffic.
+        // For tests that don't use a Nexus, we use this address to simulate a
+        // non-functioning Nexus.
+        let nexus_address =
+            nexus_address.unwrap_or_else(|| "[100::1]:12345".parse().unwrap());
+
+        // If the caller doesn't care to provide a directory in which to put
+        // updates, make up a path that doesn't exist.
+        let update_directory =
+            update_directory.unwrap_or_else(|| "/nonexistent".into());
+
+        let zpools = match zpool_config {
+            ZpoolConfig::None => vec![],
+
+            ZpoolConfig::TenVirtualU2s => {
+                vec![ConfigZpool { size: 1 << 40 }; 10]
+            }
+        };
+
+        Config {
+            id,
+            sim_mode,
+            nexus_address,
+            dropshot: ConfigDropshot {
+                bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
+                default_request_body_max_bytes: 1024 * 1024,
+                ..Default::default()
+            },
+            storage: ConfigStorage {
+                zpools,
+                ip: IpAddr::from(Ipv6Addr::LOCALHOST),
+            },
+            updates: ConfigUpdates {
+                zone_artifact_path: update_directory.to_path_buf(),
+            },
+            hardware: ConfigHardware {
+                hardware_threads: TEST_HARDWARE_THREADS,
+                physical_ram: TEST_PHYSICAL_RAM,
+                reservoir_ram: TEST_RESERVOIR_RAM,
+                baseboard: Baseboard::Gimlet {
+                    identifier: format!("sim-{}", id),
+                    model: String::from("sim-gimlet"),
+                    revision: 3,
+                },
+            },
+        }
+    }
 }

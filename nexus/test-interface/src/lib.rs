@@ -32,33 +32,57 @@
 //! - integration tests -> nexus-test-utils
 
 use async_trait::async_trait;
-use omicron_common::nexus_config::Config;
+use nexus_config::NexusConfig;
+use nexus_types::deployment::Blueprint;
+use nexus_types::internal_api::params::{
+    PhysicalDiskPutRequest, ZpoolPutRequest,
+};
+use nexus_types::inventory::Collection;
+use omicron_common::api::external::Error;
+use omicron_common::disk::DatasetKind;
+use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
-use uuid::Uuid;
 
 #[async_trait]
-pub trait NexusServer {
-    type InternalServer;
+pub trait NexusServer: Send + Sync + 'static {
+    type InternalServer: Send + Sync + 'static;
 
     async fn start_internal(
-        config: &Config,
+        config: &NexusConfig,
         log: &Logger,
-    ) -> (Self::InternalServer, SocketAddr);
+    ) -> Result<(Self::InternalServer, SocketAddr), String>;
+
+    /// Stops the execution of a `Self::InternalServer`.
+    ///
+    /// This is used to terminate a server which has been
+    /// partially created with `Self::start_internal`, but which
+    /// has not yet been passed to `Self::start`.
+    ///
+    /// Once `Self::start` has been called, the internal server
+    /// may be closed by invoking `Self::close`.
+    async fn stop_internal(internal_server: Self::InternalServer);
 
     #[allow(clippy::too_many_arguments)]
     async fn start(
         internal_server: Self::InternalServer,
-        config: &Config,
-        services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
-        datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
+        config: &NexusConfig,
+        blueprint: Blueprint,
+        physical_disks: Vec<PhysicalDiskPutRequest>,
+        zpools: Vec<nexus_types::internal_api::params::ZpoolPutRequest>,
+        datasets: Vec<
+            nexus_types::internal_api::params::CrucibleDatasetCreateRequest,
+        >,
         internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
-        recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
-        tls_certificates: Vec<nexus_types::internal_api::params::Certificate>,
+        recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
+        tls_certificates: Vec<
+            omicron_common::api::internal::nexus::Certificate,
+        >,
     ) -> Self;
 
     async fn get_http_server_external_address(&self) -> SocketAddr;
+    async fn get_http_server_techport_address(&self) -> SocketAddr;
     async fn get_http_server_internal_address(&self) -> SocketAddr;
 
     // Previously, as a dataset was created (within the sled agent),
@@ -70,6 +94,10 @@ pub trait NexusServer {
     // control over dataset provisioning is shifting to Nexus. There is
     // a short window where RSS controls dataset provisioning, but afterwards,
     // Nexus should be calling the shots on "when to provision datasets".
+    // Furthermore, with https://github.com/oxidecomputer/omicron/pull/5172,
+    // physical disk and zpool provisioning has already moved into Nexus. This
+    // provides a "back-door" for tests to control the set of control plane
+    // disks that are considered active.
     //
     // For test purposes, we have many situations where we want to carve up
     // zpools and datasets precisely for disk-based tests. As a result, we
@@ -81,12 +109,18 @@ pub trait NexusServer {
     // use the "RackInitializationRequest" handoff, but this would require
     // creating all our Zpools and Datasets before performing handoff to Nexus.
     // However, doing so would let us remove this test-only API.
-    async fn upsert_crucible_dataset(
+    async fn upsert_test_dataset(
         &self,
-        id: Uuid,
-        zpool_id: Uuid,
-        address: SocketAddrV6,
+        physical_disk: PhysicalDiskPutRequest,
+        zpool: ZpoolPutRequest,
+        dataset_id: DatasetUuid,
+        kind: DatasetKind,
+        address: Option<SocketAddrV6>,
     );
+
+    async fn inventory_collect_and_get_latest_collection(
+        &self,
+    ) -> Result<Option<Collection>, Error>;
 
     async fn close(self);
 }

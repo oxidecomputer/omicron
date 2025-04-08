@@ -9,23 +9,20 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::lookup::LookupPath;
-use omicron_common::api::external;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
-use std::str::FromStr;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use std::sync::Arc;
-use uuid::Uuid;
 
 use super::sagas;
 
@@ -41,14 +38,18 @@ impl super::Nexus {
                 project: None,
             } => {
                 let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
-                    .image_id(id).fetch().await?;
+                    .image_id(id)
+                    .fetch()
+                    .await?;
                 let lookup = match db_image.project_id {
-                    Some(_) => ImageLookup::ProjectImage(LookupPath::new(opctx, &self.db_datastore)
-                        .project_image_id(id)),
-                    None => {
-                        ImageLookup::SiloImage(LookupPath::new(opctx, &self.db_datastore)
-                            .silo_image_id(id))
-                    },
+                    Some(_) => ImageLookup::ProjectImage(
+                        LookupPath::new(opctx, &self.db_datastore)
+                            .project_image_id(id),
+                    ),
+                    None => ImageLookup::SiloImage(
+                        LookupPath::new(opctx, &self.db_datastore)
+                            .silo_image_id(id),
+                    ),
                 };
                 Ok(lookup)
             }
@@ -56,24 +57,26 @@ impl super::Nexus {
                 image: NameOrId::Name(name),
                 project: Some(project),
             } => {
-                let image =
-                    self.project_lookup(opctx, params::ProjectSelector { project })?.project_image_name_owned(name.into());
+                let image = self
+                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .project_image_name_owned(name.into());
                 Ok(ImageLookup::ProjectImage(image))
             }
             params::ImageSelector {
                 image: NameOrId::Name(name),
                 project: None,
             } => {
-                let image = self.current_silo_lookup(opctx)?.silo_image_name_owned(name.into());
+                let image = self
+                    .current_silo_lookup(opctx)?
+                    .silo_image_name_owned(name.into());
                 Ok(ImageLookup::SiloImage(image))
             }
-            params::ImageSelector {
-                image: NameOrId::Id(_),
-                ..
-            } => Err(Error::invalid_request(
-                "when providing image as an ID, project should not be specified",
-            )),
+            params::ImageSelector { image: NameOrId::Id(_), .. } => {
+                Err(Error::invalid_request(
+                    "when providing image as an ID, project should not be specified",
+                ))
             }
+        }
     }
 
     /// Creates an image
@@ -83,255 +86,42 @@ impl super::Nexus {
         lookup_parent: &ImageParentLookup<'_>,
         params: &params::ImageCreate,
     ) -> CreateResult<db::model::Image> {
-        let (authz_silo, maybe_authz_project) = match lookup_parent {
+        let image_type = match lookup_parent {
             ImageParentLookup::Project(project) => {
                 let (authz_silo, authz_project) =
                     project.lookup_for(authz::Action::CreateChild).await?;
-                (authz_silo, Some(authz_project))
+
+                sagas::image_create::ImageType::Project {
+                    authz_silo,
+                    authz_project,
+                }
             }
+
             ImageParentLookup::Silo(silo) => {
                 let (.., authz_silo) =
                     silo.lookup_for(authz::Action::CreateChild).await?;
-                (authz_silo, None)
-            }
-        };
-        let new_image = match &params.source {
-            params::ImageSource::Url { url, block_size } => {
-                let db_block_size = db::model::BlockSize::try_from(*block_size)
-                    .map_err(|e| Error::InvalidValue {
-                        label: String::from("block_size"),
-                        message: format!("block_size is invalid: {}", e),
-                    })?;
 
-                let image_id = Uuid::new_v4();
-
-                let volume_construction_request =
-                    sled_agent_client::types::VolumeConstructionRequest::Url {
-                        id: image_id,
-                        block_size: db_block_size.to_bytes().into(),
-                        url: url.clone(),
-                    };
-
-                let volume_data =
-                    serde_json::to_string(&volume_construction_request)?;
-
-                // use reqwest to query url for size
-                let dur = std::time::Duration::from_secs(5);
-                let client = reqwest::ClientBuilder::new()
-                    .connect_timeout(dur)
-                    .timeout(dur)
-                    .build()
-                    .map_err(|e| {
-                        Error::internal_error(&format!(
-                            "failed to build reqwest client: {}",
-                            e
-                        ))
-                    })?;
-
-                let response = client.head(url).send().await.map_err(|e| {
-                    Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!("error querying url: {}", e),
-                    }
-                })?;
-
-                if !response.status().is_success() {
-                    return Err(Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!(
-                            "querying url returned: {}",
-                            response.status()
-                        ),
-                    });
-                }
-
-                // grab total size from content length
-                let content_length = response
-                    .headers()
-                    .get(reqwest::header::CONTENT_LENGTH)
-                    .ok_or("no content length!")
-                    .map_err(|e| Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!("error querying url: {}", e),
-                    })?;
-
-                let total_size =
-                    u64::from_str(content_length.to_str().map_err(|e| {
-                        Error::InvalidValue {
-                            label: String::from("url"),
-                            message: format!("content length invalid: {}", e),
-                        }
-                    })?)
-                    .map_err(|e| {
-                        Error::InvalidValue {
-                            label: String::from("url"),
-                            message: format!("content length invalid: {}", e),
-                        }
-                    })?;
-
-                let size: external::ByteCount = total_size.try_into().map_err(
-                    |e: external::ByteCountRangeError| Error::InvalidValue {
-                        label: String::from("size"),
-                        message: format!("total size is invalid: {}", e),
-                    },
-                )?;
-
-                // validate total size is divisible by block size
-                let block_size: u64 = (*block_size).into();
-                if (size.to_bytes() % block_size) != 0 {
-                    return Err(Error::InvalidValue {
-                        label: String::from("size"),
-                        message: format!(
-                            "total size {} must be divisible by block size {}",
-                            size.to_bytes(),
-                            block_size
-                        ),
-                    });
-                }
-
-                let new_image_volume =
-                    db::model::Volume::new(Uuid::new_v4(), volume_data);
-                let volume =
-                    self.db_datastore.volume_create(new_image_volume).await?;
-
-                db::model::Image {
-                    identity: db::model::ImageIdentity::new(
-                        image_id,
-                        params.identity.clone(),
-                    ),
-                    silo_id: authz_silo.id(),
-                    project_id: maybe_authz_project.clone().map(|p| p.id()),
-                    volume_id: volume.id(),
-                    url: Some(url.clone()),
-                    os: params.os.clone(),
-                    version: params.version.clone(),
-                    digest: None, // not computed for URL type
-                    block_size: db_block_size,
-                    size: size.into(),
-                }
-            }
-
-            params::ImageSource::Snapshot { id } => {
-                let image_id = Uuid::new_v4();
-
-                // Grab the snapshot to get block size
-                let (.., db_snapshot) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .snapshot_id(*id)
-                        .fetch()
-                        .await?;
-
-                if let Some(authz_project) = &maybe_authz_project {
-                    if db_snapshot.project_id != authz_project.id() {
-                        return Err(Error::invalid_request(
-                            "snapshot does not belong to this project",
-                        ));
-                    }
-                }
-
-                // Copy the Volume data for this snapshot with randomized ids -
-                // this is safe because the snapshot is read-only, and even
-                // though volume_checkout will bump the gen numbers multiple
-                // Upstairs can connect to read-only downstairs without kicking
-                // each other out.
-
-                let image_volume = self
-                    .db_datastore
-                    .volume_checkout_randomize_ids(db_snapshot.volume_id)
-                    .await?;
-
-                db::model::Image {
-                    identity: db::model::ImageIdentity::new(
-                        image_id,
-                        params.identity.clone(),
-                    ),
-                    silo_id: authz_silo.id(),
-                    project_id: maybe_authz_project.clone().map(|p| p.id()),
-                    volume_id: image_volume.id(),
-                    url: None,
-                    os: params.os.clone(),
-                    version: params.version.clone(),
-                    digest: None, // TODO
-                    block_size: db_snapshot.block_size,
-                    size: db_snapshot.size,
-                }
-            }
-
-            params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
-                // Each Propolis zone ships with an alpine.iso (it's part of the
-                // package-manifest.toml blobs), and for development purposes
-                // allow users to boot that. This should go away when that blob
-                // does.
-                let db_block_size = db::model::BlockSize::Traditional;
-                let block_size: u64 = db_block_size.to_bytes() as u64;
-
-                let image_id = Uuid::new_v4();
-
-                let volume_construction_request =
-                    sled_agent_client::types::VolumeConstructionRequest::File {
-                        id: image_id,
-                        block_size,
-                        path: "/opt/oxide/propolis-server/blob/alpine.iso"
-                            .into(),
-                    };
-
-                let volume_data =
-                    serde_json::to_string(&volume_construction_request)?;
-
-                // Nexus runs in its own zone so we can't ask the propolis zone
-                // image tar file for size of alpine.iso. Conservatively set the
-                // size to 100M (at the time of this comment, it's 41M). Any
-                // disk created from this image has to be larger than it.
-                let size: u64 = 100 * 1024 * 1024;
-                let size: external::ByteCount =
-                    size.try_into().map_err(|e| Error::InvalidValue {
-                        label: String::from("size"),
-                        message: format!("size is invalid: {}", e),
-                    })?;
-
-                let new_image_volume =
-                    db::model::Volume::new(Uuid::new_v4(), volume_data);
-                let volume =
-                    self.db_datastore.volume_create(new_image_volume).await?;
-
-                db::model::Image {
-                    identity: db::model::ImageIdentity::new(
-                        image_id,
-                        params.identity.clone(),
-                    ),
-                    silo_id: authz_silo.id(),
-                    project_id: maybe_authz_project.clone().map(|p| p.id()),
-                    volume_id: volume.id(),
-                    url: None,
-                    os: "alpine".into(),
-                    version: "propolis-blob".into(),
-                    digest: None,
-                    block_size: db_block_size,
-                    size: size.into(),
-                }
+                sagas::image_create::ImageType::Silo { authz_silo }
             }
         };
 
-        match maybe_authz_project {
-            Some(authz_project) => {
-                self.db_datastore
-                    .project_image_create(
-                        opctx,
-                        &authz_project,
-                        new_image.try_into()?,
-                    )
-                    .await
-            }
-            None => {
-                self.db_datastore
-                    .silo_image_create(
-                        opctx,
-                        &authz_silo,
-                        new_image.try_into()?,
-                    )
-                    .await
-            }
-        }
+        let saga_params = sagas::image_create::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            image_type,
+            create_params: params.clone(),
+        };
+
+        let saga_outputs = self
+            .sagas
+            .saga_execute::<sagas::image_create::SagaImageCreate>(saga_params)
+            .await?;
+
+        let created_image = saga_outputs
+            .lookup_node_output::<db::model::Image>("created_image")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from image create saga")?;
+
+        Ok(created_image)
     }
 
     pub(crate) async fn image_list(
@@ -381,7 +171,8 @@ impl super::Nexus {
             image_param,
         };
 
-        self.execute_saga::<sagas::image_delete::SagaImageDelete>(saga_params)
+        self.sagas
+            .saga_execute::<sagas::image_delete::SagaImageDelete>(saga_params)
             .await?;
 
         Ok(())
@@ -409,9 +200,9 @@ impl super::Nexus {
                     )
                     .await
             }
-            ImageLookup::SiloImage(_) => Err(Error::InvalidRequest {
-                message: "Cannot promote a silo image".to_string(),
-            }),
+            ImageLookup::SiloImage(_) => {
+                Err(Error::invalid_request("Cannot promote a silo image"))
+            }
         }
     }
 
@@ -437,9 +228,9 @@ impl super::Nexus {
                     )
                     .await
             }
-            ImageLookup::ProjectImage(_) => Err(Error::InvalidRequest {
-                message: "Cannot demote a project image".to_string(),
-            }),
+            ImageLookup::ProjectImage(_) => {
+                Err(Error::invalid_request("Cannot demote a project image"))
+            }
         }
     }
 }

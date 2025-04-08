@@ -1,0 +1,20 @@
+[package]
+name = "nexus-networking"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+futures.workspace = true
+ipnetwork.workspace = true
+nexus-db-queries.workspace = true
+omicron-common.workspace = true
+oxnet.workspace = true
+reqwest.workspace = true
+sled-agent-client.workspace = true
+slog.workspace = true
+uuid.workspace = true
+omicron-workspace-hack.workspace = true

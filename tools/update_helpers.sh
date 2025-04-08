@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -o pipefail
 set -o errexit
@@ -31,12 +31,13 @@ function get_sha {
 
 function get_latest_commit_from_gh {
     REPO="$1"
-    TARGET_COMMIT="$2"
-    if [[ -z "$TARGET_COMMIT" ]]; then
-        curl -fsS "https://buildomat.eng.oxide.computer/public/branch/$REPO/main"
+    if [[ -z "$2" ]]; then
+	    TARGET_BRANCH=main
     else
-        echo "$TARGET_COMMIT"
+	    TARGET_BRANCH="$2"
     fi
+
+    curl -fsS "https://buildomat.eng.oxide.computer/public/branch/$REPO/$TARGET_BRANCH"
 }
 
 function install_toml2json {

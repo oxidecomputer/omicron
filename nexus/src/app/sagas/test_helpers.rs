@@ -5,28 +5,32 @@
 //! Helper functions for writing saga undo tests and working with instances in
 //! saga tests.
 
-use super::NexusSaga;
-use crate::{
-    app::{saga::create_saga_dag, test_interfaces::TestInterfaces as _},
-    Nexus,
+use super::{NexusSaga, instance_common::VmmAndSledIds, instance_start};
+use crate::{Nexus, app::saga::create_saga_dag};
+use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
+use diesel::{
+    BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
 };
-use async_bb8_diesel::{
-    AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-};
-use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use futures::future::BoxFuture;
+use nexus_db_model::InstanceState;
 use nexus_db_queries::{
     authz,
     context::OpContext,
-    db::{datastore::InstanceAndActiveVmm, lookup::LookupPath, DataStore},
+    db::{
+        DataStore,
+        datastore::{InstanceAndActiveVmm, InstanceGestalt},
+        lookup::LookupPath,
+    },
 };
 use nexus_types::identity::Resource;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::NameOrId;
+use omicron_test_utils::dev::poll;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use sled_agent_client::TestInterfaces as _;
-use slog::{info, warn, Logger};
-use std::{num::NonZeroU32, sync::Arc};
+use slog::{Logger, info, warn};
+use std::{num::NonZeroU32, sync::Arc, time::Duration};
 use steno::SagaDag;
-use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -34,40 +38,40 @@ type ControlPlaneTestContext =
 pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
     OpContext::for_tests(
         cptestctx.logctx.log.new(o!()),
-        cptestctx.server.apictx().nexus.datastore().clone(),
+        cptestctx.server.server_context().nexus.datastore().clone(),
     )
 }
 
 pub(crate) async fn instance_start(
     cptestctx: &ControlPlaneTestContext,
-    id: &Uuid,
+    id: &InstanceUuid,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: None,
-            instance: NameOrId::from(*id),
+            instance: NameOrId::from(id.into_untyped_uuid()),
         };
 
     let instance_lookup =
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     nexus
-        .instance_start(&opctx, &instance_lookup)
+        .instance_start(&opctx, &instance_lookup, instance_start::Reason::User)
         .await
         .expect("Failed to start instance");
 }
 
 pub(crate) async fn instance_stop(
     cptestctx: &ControlPlaneTestContext,
-    id: &Uuid,
+    id: &InstanceUuid,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: None,
-            instance: NameOrId::from(*id),
+            instance: NameOrId::from(id.into_untyped_uuid()),
         };
 
     let instance_lookup =
@@ -83,7 +87,7 @@ pub(crate) async fn instance_stop_by_name(
     name: &str,
     project_name: &str,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
@@ -104,7 +108,7 @@ pub(crate) async fn instance_delete_by_name(
     name: &str,
     project_name: &str,
 ) {
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
@@ -122,18 +126,41 @@ pub(crate) async fn instance_delete_by_name(
 
 pub(crate) async fn instance_simulate(
     cptestctx: &ControlPlaneTestContext,
-    instance_id: &Uuid,
+    instance_id: &InstanceUuid,
 ) {
     info!(&cptestctx.logctx.log, "Poking simulated instance";
           "instance_id" => %instance_id);
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let VmmAndSledIds { vmm_id, sled_id } =
+        instance_fetch_vmm_and_sled_ids(cptestctx, instance_id).await;
     let sa = nexus
-        .instance_sled_by_id(instance_id)
+        .sled_client(&sled_id)
         .await
-        .unwrap()
         .expect("instance must be on a sled to simulate a state change");
 
-    sa.instance_finish_transition(*instance_id).await;
+    sa.vmm_finish_transition(vmm_id).await;
+}
+
+pub(crate) async fn instance_single_step_on_sled(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: &InstanceUuid,
+    sled_id: &SledUuid,
+) {
+    info!(
+        &cptestctx.logctx.log,
+        "Single-stepping simulated instance on sled";
+        "instance_id" => %instance_id,
+        "sled_id" => %sled_id,
+    );
+    let nexus = &cptestctx.server.server_context().nexus;
+    let VmmAndSledIds { vmm_id, sled_id } =
+        instance_fetch_vmm_and_sled_ids(cptestctx, instance_id).await;
+    let sa = nexus
+        .sled_client(&sled_id)
+        .await
+        .expect("instance must be on a sled to simulate a state change");
+
+    sa.vmm_single_step(vmm_id).await;
 }
 
 pub(crate) async fn instance_simulate_by_name(
@@ -145,7 +172,7 @@ pub(crate) async fn instance_simulate_by_name(
           "instance_name" => %name,
           "project_name" => %project_name);
 
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let opctx = test_opctx(&cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
@@ -156,22 +183,24 @@ pub(crate) async fn instance_simulate_by_name(
     let instance_lookup =
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     let (.., instance) = instance_lookup.fetch().await.unwrap();
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+    let VmmAndSledIds { vmm_id, sled_id } =
+        instance_fetch_vmm_and_sled_ids(cptestctx, &instance_id).await;
     let sa = nexus
-        .instance_sled_by_id(&instance.id())
+        .sled_client(&sled_id)
         .await
-        .unwrap()
         .expect("instance must be on a sled to simulate a state change");
-    sa.instance_finish_transition(instance.id()).await;
+    sa.vmm_finish_transition(vmm_id).await;
 }
 
 pub async fn instance_fetch(
     cptestctx: &ControlPlaneTestContext,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
 ) -> InstanceAndActiveVmm {
-    let datastore = cptestctx.server.apictx().nexus.datastore().clone();
+    let datastore = cptestctx.server.server_context().nexus.datastore().clone();
     let opctx = test_opctx(&cptestctx);
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Read)
         .await
         .expect("test instance should be present in datastore");
@@ -188,6 +217,305 @@ pub async fn instance_fetch(
     db_state
 }
 
+pub(super) async fn instance_fetch_vmm_and_sled_ids(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: &InstanceUuid,
+) -> VmmAndSledIds {
+    let instance_and_vmm = instance_fetch(cptestctx, *instance_id).await;
+    let vmm = instance_and_vmm
+        .vmm()
+        .as_ref()
+        .expect("can only fetch VMM and sled IDs for an active instance");
+
+    let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
+    let sled_id = SledUuid::from_untyped_uuid(vmm.sled_id);
+    VmmAndSledIds { vmm_id, sled_id }
+}
+
+pub async fn instance_fetch_all(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: InstanceUuid,
+) -> InstanceGestalt {
+    let datastore = cptestctx.server.server_context().nexus.datastore().clone();
+    let opctx = test_opctx(&cptestctx);
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(authz::Action::Read)
+        .await
+        .expect("test instance should be present in datastore");
+
+    let db_state = datastore
+        .instance_fetch_all(&opctx, &authz_instance)
+        .await
+        .expect("test instance's info should be fetchable");
+
+    info!(&cptestctx.logctx.log, "refetched all instance info from db";
+        "instance_id" => %instance_id,
+        "instance" => ?db_state.instance,
+        "active_vmm" => ?db_state.active_vmm,
+        "target_vmm" => ?db_state.target_vmm,
+        "migration" => ?db_state.migration,
+    );
+
+    db_state
+}
+pub async fn instance_fetch_by_name(
+    cptestctx: &ControlPlaneTestContext,
+    name: &str,
+    project_name: &str,
+) -> InstanceAndActiveVmm {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx = test_opctx(&cptestctx);
+    let instance_selector =
+        nexus_types::external_api::params::InstanceSelector {
+            project: Some(project_name.to_string().try_into().unwrap()),
+            instance: name.to_string().try_into().unwrap(),
+        };
+
+    let instance_lookup =
+        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+    let (_, _, authz_instance, ..) = instance_lookup.fetch().await.unwrap();
+
+    let db_state = datastore
+        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .await
+        .expect("test instance's info should be fetchable");
+
+    info!(&cptestctx.logctx.log, "refetched instance info from db";
+        "instance_name" => name,
+        "project_name" => project_name,
+        "instance_id" => %authz_instance.id(),
+        "instance_and_vmm" => ?db_state,
+    );
+
+    db_state
+}
+
+pub(crate) async fn instance_wait_for_state(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: InstanceUuid,
+    desired_state: InstanceState,
+) -> InstanceAndActiveVmm {
+    let opctx = test_opctx(&cptestctx);
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(authz::Action::Read)
+        .await
+        .expect("test instance should be present in datastore");
+    instance_poll_state(cptestctx, &opctx, authz_instance, desired_state).await
+}
+
+pub async fn instance_wait_for_state_by_name(
+    cptestctx: &ControlPlaneTestContext,
+    name: &str,
+    project_name: &str,
+    desired_state: InstanceState,
+) -> InstanceAndActiveVmm {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let opctx = test_opctx(&cptestctx);
+    let instance_selector =
+        nexus_types::external_api::params::InstanceSelector {
+            project: Some(project_name.to_string().try_into().unwrap()),
+            instance: name.to_string().try_into().unwrap(),
+        };
+
+    let instance_lookup =
+        nexus.instance_lookup(&opctx, instance_selector).unwrap();
+    let (_, _, authz_instance, ..) = instance_lookup.fetch().await.unwrap();
+
+    instance_poll_state(cptestctx, &opctx, authz_instance, desired_state).await
+}
+
+async fn instance_poll_state(
+    cptestctx: &ControlPlaneTestContext,
+    opctx: &OpContext,
+    authz_instance: authz::Instance,
+    desired_state: InstanceState,
+) -> InstanceAndActiveVmm {
+    const MAX_WAIT: Duration = Duration::from_secs(120);
+
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let log = &cptestctx.logctx.log;
+    let instance_id = authz_instance.id();
+
+    info!(
+        log,
+        "waiting for instance {instance_id} to transition to {desired_state}...";
+        "instance_id" => %instance_id,
+    );
+    let result = poll::wait_for_condition(
+        || async {
+            let db_state = datastore
+                .instance_fetch_with_vmm(&opctx, &authz_instance)
+                .await
+                .map_err(poll::CondCheckError::<Error>::Failed)?;
+
+            if db_state.instance.runtime().nexus_state == desired_state {
+                info!(
+                    log,
+                    "instance {instance_id} transitioned to {desired_state}";
+                    "instance_id" => %instance_id,
+                    "instance" => ?db_state.instance(),
+                    "active_vmm" => ?db_state.vmm(),
+                );
+                Ok(db_state)
+            } else {
+                info!(
+                    log,
+                    "instance {instance_id} has not yet transitioned to {desired_state}";
+                    "instance_id" => %instance_id,
+                    "instance" => ?db_state.instance(),
+                    "active_vmm" => ?db_state.vmm(),
+                );
+                Err(poll::CondCheckError::<Error>::NotYet)
+            }
+        },
+        &Duration::from_secs(1),
+        &MAX_WAIT,
+    )
+    .await;
+
+    match result {
+        Ok(i) => i,
+        Err(e) => panic!(
+            "instance {instance_id} did not transition to {desired_state} \
+             after {MAX_WAIT:?}: {e}"
+        ),
+    }
+}
+
+pub async fn no_virtual_provisioning_resource_records_exist(
+    cptestctx: &ControlPlaneTestContext,
+) -> bool {
+    count_virtual_provisioning_resource_records(cptestctx).await == 0
+}
+
+pub async fn count_virtual_provisioning_resource_records(
+    cptestctx: &ControlPlaneTestContext,
+) -> usize {
+    use nexus_db_queries::db::model::VirtualProvisioningResource;
+    use nexus_db_schema::schema::virtual_provisioning_resource::dsl;
+
+    let datastore = cptestctx.server.server_context().nexus.datastore().clone();
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    datastore
+        .transaction_retry_wrapper("count_virtual_provisioning_resource_records")
+        .transaction(&conn, |conn| async move {
+            conn
+                .batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                .await
+                .unwrap();
+
+            Ok(
+                dsl::virtual_provisioning_resource
+                    .filter(dsl::resource_type.eq(nexus_db_queries::db::model::ResourceTypeProvisioned::Instance.to_string()))
+                    .select(VirtualProvisioningResource::as_select())
+                    .get_results_async::<VirtualProvisioningResource>(&conn)
+                    .await
+                    .unwrap()
+                    .len()
+            )
+        }).await.unwrap()
+}
+
+pub async fn no_virtual_provisioning_collection_records_using_instances(
+    cptestctx: &ControlPlaneTestContext,
+) -> bool {
+    count_virtual_provisioning_collection_records_using_instances(cptestctx)
+        .await
+        == 0
+}
+
+pub async fn count_virtual_provisioning_collection_records_using_instances(
+    cptestctx: &ControlPlaneTestContext,
+) -> usize {
+    use nexus_db_queries::db::model::VirtualProvisioningCollection;
+    use nexus_db_schema::schema::virtual_provisioning_collection::dsl;
+
+    let datastore = cptestctx.server.server_context().nexus.datastore().clone();
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    datastore
+        .transaction_retry_wrapper(
+            "count_virtual_provisioning_collection_records_using_instances",
+        )
+        .transaction(&conn, |conn| async move {
+            conn.batch_execute_async(
+                nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+            )
+            .await
+            .unwrap();
+            Ok(dsl::virtual_provisioning_collection
+                .filter(
+                    dsl::cpus_provisioned.ne(0).or(dsl::ram_provisioned.ne(0)),
+                )
+                .select(VirtualProvisioningCollection::as_select())
+                .get_results_async::<VirtualProvisioningCollection>(&conn)
+                .await
+                .unwrap()
+                .len())
+        })
+        .await
+        .unwrap()
+}
+
+pub async fn no_sled_resource_vmm_records_exist(
+    cptestctx: &ControlPlaneTestContext,
+) -> bool {
+    use nexus_db_queries::db::model::SledResourceVmm;
+    use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    datastore
+        .transaction_retry_wrapper("no_sled_resource_vmm_records_exist")
+        .transaction(&conn, |conn| async move {
+            conn.batch_execute_async(
+                nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+            )
+            .await
+            .unwrap();
+
+            Ok(dsl::sled_resource_vmm
+                .select(SledResourceVmm::as_select())
+                .get_results_async::<SledResourceVmm>(&conn)
+                .await
+                .unwrap()
+                .is_empty())
+        })
+        .await
+        .unwrap()
+}
+
+pub async fn sled_resource_vmms_exist_for_vmm(
+    cptestctx: &ControlPlaneTestContext,
+    vmm_id: PropolisUuid,
+) -> bool {
+    use nexus_db_queries::db::model::SledResourceVmm;
+    use nexus_db_schema::schema::sled_resource_vmm::dsl;
+
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    let results = dsl::sled_resource_vmm
+        .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
+        .select(SledResourceVmm::as_select())
+        .load_async(&*conn)
+        .await
+        .unwrap();
+    info!(
+        cptestctx.logctx.log,
+        "queried sled reservation records for VMM";
+        "vmm_id" => %vmm_id,
+        "results" => ?results,
+    );
+    !results.is_empty()
+}
+
 /// Tests that the saga described by `dag` succeeds if each of its nodes is
 /// repeated.
 ///
@@ -199,7 +527,7 @@ pub(crate) async fn actions_succeed_idempotently(
     nexus: &Arc<Nexus>,
     dag: SagaDag,
 ) {
-    let runnable_saga = nexus.create_runnable_saga(dag.clone()).await.unwrap();
+    let runnable_saga = nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
     for node in dag.get_nodes() {
         nexus
             .sec()
@@ -215,7 +543,12 @@ pub(crate) async fn actions_succeed_idempotently(
             .unwrap();
     }
 
-    nexus.run_saga(runnable_saga).await.expect("Saga should have succeeded");
+    runnable_saga
+        .run_to_completion()
+        .await
+        .expect("Saga should have started")
+        .into_omicron_result()
+        .expect("Saga should have succeeded");
 }
 
 /// Tests that a saga `S` functions properly when any of its nodes fails and
@@ -284,7 +617,7 @@ pub(crate) async fn action_failure_can_unwind<'a, S, B, A>(
         );
 
         let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
+            nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
 
         nexus
             .sec()
@@ -292,12 +625,14 @@ pub(crate) async fn action_failure_can_unwind<'a, S, B, A>(
             .await
             .unwrap();
 
-        let saga_error = nexus
-            .run_saga_raw_result(runnable_saga)
+        let saga_result = runnable_saga
+            .run_to_completion()
             .await
             .expect("saga should have started successfully")
-            .kind
-            .expect_err("saga execution should have failed");
+            .into_raw_result();
+
+        let saga_error =
+            saga_result.kind.expect_err("saga execution should have failed");
 
         assert_eq!(saga_error.error_node_name, *node.name());
 
@@ -385,7 +720,7 @@ pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
         );
 
         let runnable_saga =
-            nexus.create_runnable_saga(dag.clone()).await.unwrap();
+            nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
 
         nexus
             .sec()
@@ -406,10 +741,11 @@ pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
             .await
             .unwrap();
 
-        let saga_error = nexus
-            .run_saga_raw_result(runnable_saga)
+        let saga_error = runnable_saga
+            .run_to_completion()
             .await
             .expect("saga should have started successfully")
+            .into_raw_result()
             .kind
             .expect_err("saga execution should have failed");
 
@@ -434,12 +770,11 @@ pub(crate) async fn assert_no_failed_undo_steps(
 ) {
     use nexus_db_queries::db::model::saga_types::SagaNodeEvent;
 
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
     let saga_node_events: Vec<SagaNodeEvent> = datastore
-        .pool_connection_for_tests()
-        .await
-        .unwrap()
-        .transaction_async(|conn| async move {
-            use nexus_db_queries::db::schema::saga_node_event::dsl;
+        .transaction_retry_wrapper("assert_no_failed_undo_steps")
+        .transaction(&conn, |conn| async move {
+            use nexus_db_schema::schema::saga_node_event::dsl;
 
             conn.batch_execute_async(
                 nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
@@ -447,14 +782,12 @@ pub(crate) async fn assert_no_failed_undo_steps(
             .await
             .unwrap();
 
-            Ok::<_, nexus_db_queries::db::TransactionError<()>>(
-                dsl::saga_node_event
-                    .filter(dsl::event_type.eq(String::from("undo_failed")))
-                    .select(SagaNodeEvent::as_select())
-                    .load_async::<SagaNodeEvent>(&conn)
-                    .await
-                    .unwrap(),
-            )
+            Ok(dsl::saga_node_event
+                .filter(dsl::event_type.eq(String::from("undo_failed")))
+                .select(SagaNodeEvent::as_select())
+                .load_async::<SagaNodeEvent>(&conn)
+                .await
+                .unwrap())
         })
         .await
         .unwrap();

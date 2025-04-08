@@ -11,11 +11,8 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
-use crate::db::fixed_data::project::SERVICES_PROJECT;
-use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
@@ -24,10 +21,12 @@ use crate::db::model::ProjectUpdate;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
+use crate::transaction_retry::OptionalError;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use omicron_common::api::external::http_pagination::PaginatedBy;
+use nexus_db_fixed_data::project::SERVICES_PROJECT;
+use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -36,6 +35,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 
 // Generates internal functions used for validation during project deletion.
@@ -57,7 +57,7 @@ macro_rules! generate_fn_to_ensure_none_in_project {
                 opctx: &OpContext,
                 authz_project: &authz::Project,
             ) -> DeleteResult {
-                use db::schema::$i;
+                use nexus_db_schema::schema::$i;
 
                 let maybe_label = $i::dsl::$i
                     .filter($i::dsl::project_id.eq(authz_project.id()))
@@ -78,9 +78,9 @@ macro_rules! generate_fn_to_ensure_none_in_project {
                         "a"
                     };
 
-                    return Err(Error::InvalidRequest {
-                        message: format!("project to be deleted contains {article} {object}: {label}"),
-                    });
+                    return Err(Error::invalid_request(
+                        format!("project to be deleted contains {article} {object}: {label}")
+                    ));
                 }
 
                 Ok(())
@@ -103,7 +103,7 @@ impl DataStore {
         debug!(opctx.log, "attempting to create built-in projects");
 
         let (authz_silo,) = db::lookup::LookupPath::new(&opctx, self)
-            .silo_id(*INTERNAL_SILO_ID)
+            .silo_id(INTERNAL_SILO_ID)
             .lookup_for(authz::Action::CreateChild)
             .await?;
 
@@ -149,51 +149,64 @@ impl DataStore {
         let silo_id = authz_silo.id();
         let authz_silo_inner = authz_silo.clone();
 
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
 
+        let err = OptionalError::new();
         let name = project.name().as_str().to_string();
-        let db_project = self
-            .pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                let project: Project = Silo::insert_resource(
-                    silo_id,
-                    diesel::insert_into(dsl::project).values(project),
-                )
-                .insert_and_get_result_async(&conn)
-                .await
-                .map_err(|e| match e {
-                    AsyncInsertError::CollectionNotFound => {
-                        authz_silo_inner.not_found()
-                    }
-                    AsyncInsertError::DatabaseError(e) => {
-                        public_error_from_diesel(
-                            e,
-                            ErrorHandler::Conflict(
-                                ResourceType::Project,
-                                &name,
-                            ),
-                        )
-                    }
-                })?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-                // Create resource provisioning for the project.
-                self.virtual_provisioning_collection_create_on_connection(
-                    &conn,
-                    VirtualProvisioningCollection::new(
-                        project.id(),
-                        CollectionTypeProvisioned::Project,
-                    ),
-                )
-                .await?;
-                Ok(project)
+        let db_project = self
+            .transaction_retry_wrapper("project_create_in_silo")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+
+                let authz_silo_inner = authz_silo_inner.clone();
+                let name = name.clone();
+                let project = project.clone();
+                async move {
+                    let project: Project = Silo::insert_resource(
+                        silo_id,
+                        diesel::insert_into(dsl::project).values(project),
+                    )
+                    .insert_and_get_result_async(&conn)
+                    .await
+                    .map_err(|e| match e {
+                        AsyncInsertError::CollectionNotFound => {
+                            err.bail(authz_silo_inner.not_found())
+                        }
+                        AsyncInsertError::DatabaseError(diesel_error) => err
+                            .bail_retryable_or_else(
+                                diesel_error,
+                                |diesel_error| {
+                                    public_error_from_diesel(
+                                        diesel_error,
+                                        ErrorHandler::Conflict(
+                                            ResourceType::Project,
+                                            &name,
+                                        ),
+                                    )
+                                },
+                            ),
+                    })?;
+
+                    // Create resource provisioning for the project.
+                    self.virtual_provisioning_collection_create_on_connection(
+                        &conn,
+                        VirtualProvisioningCollection::new(
+                            project.id(),
+                            CollectionTypeProvisioned::Project,
+                        ),
+                    )
+                    .await?;
+                    Ok(project)
+                }
             })
             .await
-            .map_err(|e| match e {
-                TransactionError::CustomError(e) => e,
-                TransactionError::Database(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
                 }
+                public_error_from_diesel(e, ErrorHandler::Server)
             })?;
 
         Ok((
@@ -208,9 +221,12 @@ impl DataStore {
 
     generate_fn_to_ensure_none_in_project!(instance, name, String);
     generate_fn_to_ensure_none_in_project!(disk, name, String);
+    generate_fn_to_ensure_none_in_project!(floating_ip, name, String);
     generate_fn_to_ensure_none_in_project!(project_image, name, String);
     generate_fn_to_ensure_none_in_project!(snapshot, name, String);
     generate_fn_to_ensure_none_in_project!(vpc, name, String);
+    generate_fn_to_ensure_none_in_project!(affinity_group, name, String);
+    generate_fn_to_ensure_none_in_project!(anti_affinity_group, name, String);
 
     /// Delete a project
     pub async fn project_delete(
@@ -224,53 +240,64 @@ impl DataStore {
         // Verify that child resources do not exist.
         self.ensure_no_instances_in_project(opctx, authz_project).await?;
         self.ensure_no_disks_in_project(opctx, authz_project).await?;
+        self.ensure_no_floating_ips_in_project(opctx, authz_project).await?;
         self.ensure_no_project_images_in_project(opctx, authz_project).await?;
         self.ensure_no_snapshots_in_project(opctx, authz_project).await?;
         self.ensure_no_vpcs_in_project(opctx, authz_project).await?;
+        self.ensure_no_affinity_groups_in_project(opctx, authz_project).await?;
+        self.ensure_no_anti_affinity_groups_in_project(opctx, authz_project)
+            .await?;
 
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
 
-        type TxnError = TransactionError<Error>;
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                let now = Utc::now();
-                let updated_rows = diesel::update(dsl::project)
-                    .filter(dsl::time_deleted.is_null())
-                    .filter(dsl::id.eq(authz_project.id()))
-                    .filter(dsl::rcgen.eq(db_project.rcgen))
-                    .set(dsl::time_deleted.eq(now))
-                    .returning(Project::as_returning())
-                    .execute_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(
-                            e,
-                            ErrorHandler::NotFoundByResource(authz_project),
-                        )
-                    })?;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-                if updated_rows == 0 {
-                    return Err(TxnError::CustomError(Error::InvalidRequest {
-                        message:
-                            "deletion failed due to concurrent modification"
-                                .to_string(),
-                    }));
+        self.transaction_retry_wrapper("project_delete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    let now = Utc::now();
+                    let updated_rows = diesel::update(dsl::project)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_project.id()))
+                        .filter(dsl::rcgen.eq(db_project.rcgen))
+                        .set(dsl::time_deleted.eq(now))
+                        .returning(Project::as_returning())
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::NotFoundByResource(
+                                        authz_project,
+                                    ),
+                                )
+                            })
+                        })?;
+
+                    if updated_rows == 0 {
+                        return Err(err.bail(Error::invalid_request(
+                            "deletion failed due to concurrent modification",
+                        )));
+                    }
+
+                    self.virtual_provisioning_collection_delete_on_connection(
+                        &opctx.log,
+                        &conn,
+                        db_project.id(),
+                    )
+                    .await?;
+                    Ok(())
                 }
-
-                self.virtual_provisioning_collection_delete_on_connection(
-                    &conn,
-                    db_project.id(),
-                )
-                .await?;
-                Ok(())
             })
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(e) => e,
-                TxnError::Database(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
                 }
+                public_error_from_diesel(e, ErrorHandler::Server)
             })?;
         Ok(())
     }
@@ -284,7 +311,7 @@ impl DataStore {
             opctx.authn.silo_required().internal_context("listing Projects")?;
         opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
 
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::project, dsl::id, &pagparams)
@@ -312,7 +339,7 @@ impl DataStore {
     ) -> UpdateResult<Project> {
         opctx.authorize(authz::Action::Modify, authz_project).await?;
 
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_project.id()))
@@ -326,35 +353,5 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_project),
                 )
             })
-    }
-
-    /// List IP Pools accessible to a project
-    pub async fn project_ip_pools_list(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-        pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::IpPool> {
-        use db::schema::ip_pool::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
-        match pagparams {
-            PaginatedBy::Id(pagparams) => {
-                paginated(dsl::ip_pool, dsl::id, pagparams)
-            }
-            PaginatedBy::Name(pagparams) => paginated(
-                dsl::ip_pool,
-                dsl::name,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
-            ),
-        }
-        // TODO(2148, 2056): filter only pools accessible by the given
-        // project, once specific projects for pools are implemented
-        // != excludes nulls so we explicitly include them
-        .filter(dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()))
-        .filter(dsl::time_deleted.is_null())
-        .select(db::model::IpPool::as_select())
-        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

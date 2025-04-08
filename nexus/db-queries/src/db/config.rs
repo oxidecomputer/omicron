@@ -4,11 +4,11 @@
 
 //! Nexus database configuration
 
-use omicron_common::postgres_config::PostgresConfigWithUrl;
+use nexus_config::PostgresConfigWithUrl;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_with::serde_as;
 use serde_with::DisplayFromStr;
+use serde_with::serde_as;
 
 /// Nexus database configuration
 #[serde_as]

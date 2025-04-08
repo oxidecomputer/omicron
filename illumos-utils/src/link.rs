@@ -6,19 +6,14 @@
 
 use crate::destructor::{Deletable, Destructor};
 use crate::dladm::{
-    CreateVnicError, DeleteVnicError, VnicSource, VNIC_PREFIX,
-    VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
+    CreateVnicError, DeleteVnicError, VNIC_PREFIX, VNIC_PREFIX_BOOTSTRAP,
+    VNIC_PREFIX_CONTROL, VnicSource,
 };
 use omicron_common::api::external::MacAddr;
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicU64, Ordering},
 };
-
-#[cfg(not(any(test, feature = "testing")))]
-use crate::dladm::Dladm;
-#[cfg(any(test, feature = "testing"))]
-use crate::dladm::MockDladm as Dladm;
 
 /// A shareable wrapper around an atomic counter.
 /// May be used to allocate runtime-unique IDs for objects
@@ -28,6 +23,7 @@ pub struct VnicAllocator<DL: VnicSource + 'static> {
     value: Arc<AtomicU64>,
     scope: String,
     data_link: DL,
+    dladm: Arc<dyn crate::dladm::Api>,
     // Manages dropped Vnics, and repeatedly attempts to delete them.
     destructor: Destructor<VnicDestruction>,
 }
@@ -44,11 +40,16 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
     ///
     /// VnicAllocator::new("Storage") produces
     /// - oxControlStorage0
-    pub fn new<S: AsRef<str>>(scope: S, data_link: DL) -> Self {
+    pub fn new<S: AsRef<str>>(
+        scope: S,
+        data_link: DL,
+        dladm: Arc<dyn crate::dladm::Api>,
+    ) -> Self {
         Self {
             value: Arc::new(AtomicU64::new(0)),
             scope: scope.as_ref().to_string(),
             data_link,
+            dladm,
             destructor: Destructor::new(),
         }
     }
@@ -63,11 +64,12 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
         debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
-        Dladm::create_vnic(&self.data_link, &name, mac, None, 9000)?;
+        self.dladm.create_vnic(&self.data_link, &name, mac, None, 9000)?;
         Ok(Link {
             name,
             deleted: false,
             kind: LinkKind::OxideControlVnic,
+            api: Some(self.dladm.clone()),
             destructor: Some(self.destructor.clone()),
         })
     }
@@ -82,6 +84,7 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
                 name: name.as_ref().to_owned(),
                 deleted: false,
                 kind,
+                api: Some(self.dladm.clone()),
                 destructor: Some(self.destructor.clone()),
             }),
             None => Err(InvalidLinkKind(name.as_ref().to_owned())),
@@ -93,17 +96,19 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
             value: self.value.clone(),
             scope: format!("{}{}", scope.as_ref(), self.scope),
             data_link: self.data_link.clone(),
+            dladm: self.dladm.clone(),
             destructor: self.destructor.clone(),
         }
     }
 
     pub fn new_bootstrap(&self) -> Result<Link, CreateVnicError> {
         let name = self.next();
-        Dladm::create_vnic(&self.data_link, &name, None, None, 1500)?;
+        self.dladm.create_vnic(&self.data_link, &name, None, None, 1500)?;
         Ok(Link {
             name,
             deleted: false,
             kind: LinkKind::OxideBootstrapVnic,
+            api: Some(self.dladm.clone()),
             destructor: Some(self.destructor.clone()),
         })
     }
@@ -125,7 +130,6 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
 pub enum LinkKind {
     Physical,
     OxideControlVnic,
-    GuestVnic,
     OxideBootstrapVnic,
 }
 
@@ -135,12 +139,18 @@ impl LinkKind {
     pub fn from_name(name: &str) -> Option<Self> {
         if name.starts_with(VNIC_PREFIX) {
             Some(LinkKind::OxideControlVnic)
-        } else if name.starts_with(VNIC_PREFIX_GUEST) {
-            Some(LinkKind::GuestVnic)
         } else if name.starts_with(VNIC_PREFIX_BOOTSTRAP) {
             Some(LinkKind::OxideBootstrapVnic)
         } else {
             None
+        }
+    }
+
+    /// Return `true` if this link is a VNIC.
+    pub const fn is_vnic(&self) -> bool {
+        match self {
+            LinkKind::Physical => false,
+            LinkKind::OxideControlVnic | LinkKind::OxideBootstrapVnic => true,
         }
     }
 }
@@ -159,6 +169,7 @@ pub struct Link {
     name: String,
     deleted: bool,
     kind: LinkKind,
+    api: Option<Arc<dyn crate::dladm::Api>>,
     destructor: Option<Destructor<VnicDestruction>>,
 }
 
@@ -181,6 +192,7 @@ impl Link {
             name: name.as_ref().to_owned(),
             deleted: false,
             kind: LinkKind::Physical,
+            api: None,
             destructor: None,
         }
     }
@@ -190,7 +202,7 @@ impl Link {
         if self.deleted || self.kind == LinkKind::Physical {
             Ok(())
         } else {
-            Dladm::delete_vnic(&self.name)?;
+            self.api.as_ref().unwrap().delete_vnic(&self.name)?;
             self.deleted = true;
             Ok(())
         }
@@ -203,13 +215,20 @@ impl Link {
     pub fn kind(&self) -> LinkKind {
         self.kind
     }
+
+    /// Return true if this is a VNIC.
+    pub fn is_vnic(&self) -> bool {
+        self.kind.is_vnic()
+    }
 }
 
 impl Drop for Link {
     fn drop(&mut self) {
         if let Some(destructor) = self.destructor.take() {
-            destructor
-                .enqueue_destroy(VnicDestruction { name: self.name.clone() });
+            destructor.enqueue_destroy(VnicDestruction {
+                name: self.name.clone(),
+                api: self.api.take(),
+            });
         }
     }
 }
@@ -217,12 +236,15 @@ impl Drop for Link {
 // Represents the request to destroy a VNIC
 struct VnicDestruction {
     name: String,
+    api: Option<Arc<dyn crate::dladm::Api>>,
 }
 
 #[async_trait::async_trait]
 impl Deletable for VnicDestruction {
     async fn delete(&self) -> Result<(), anyhow::Error> {
-        Dladm::delete_vnic(&self.name)?;
+        if let Some(api) = self.api.as_ref() {
+            api.delete_vnic(&self.name)?;
+        }
         Ok(())
     }
 }
@@ -234,8 +256,11 @@ mod test {
 
     #[tokio::test]
     async fn test_allocate() {
-        let allocator =
-            VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
+        let allocator = VnicAllocator::new(
+            "Foo",
+            Etherstub("mystub".to_string()),
+            crate::fakes::dladm::Dladm::new(),
+        );
         assert_eq!("oxFoo0", allocator.next());
         assert_eq!("oxFoo1", allocator.next());
         assert_eq!("oxFoo2", allocator.next());
@@ -243,8 +268,11 @@ mod test {
 
     #[tokio::test]
     async fn test_allocate_within_scopes() {
-        let allocator =
-            VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
+        let allocator = VnicAllocator::new(
+            "Foo",
+            Etherstub("mystub".to_string()),
+            crate::fakes::dladm::Dladm::new(),
+        );
         assert_eq!("oxFoo0", allocator.next());
         let allocator = allocator.new_superscope("Baz");
         assert_eq!("oxBazFoo1", allocator.next());

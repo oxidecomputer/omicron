@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
@@ -14,17 +14,21 @@ pub struct WicketdTestContext {
     pub wicketd_client: wicketd_client::Client,
     // This is not currently used but is kept here because it's easier to debug
     // this way.
+    #[allow(dead_code)]
     pub wicketd_raw_client: ClientTestContext,
     pub artifact_addr: SocketAddrV6,
-    pub artifact_client: installinator_artifact_client::Client,
+    // This is not currently used but is kept here because it's easier to debug
+    // this way.
+    #[allow(dead_code)]
+    pub artifact_client: installinator_client::Client,
     pub server: wicketd::Server,
     pub gateway: GatewayTestContext,
 }
 
 impl WicketdTestContext {
     pub async fn setup(gateway: GatewayTestContext) -> Self {
-        // Can't be `const` because `SocketAddrV6::new()` isn't const yet
-        let localhost_port_0 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        const LOCALHOST_PORT_0: SocketAddrV6 =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
 
         // Reuse the log from the gateway context.
         let log = &gateway.logctx.log;
@@ -32,15 +36,16 @@ impl WicketdTestContext {
         let mgs_address = assert_ipv6(
             gateway
                 .server
-                .dropshot_server_for_address(localhost_port_0)
+                .dropshot_server_for_address(LOCALHOST_PORT_0)
                 .unwrap()
                 .local_addr(),
         );
+
         let args = wicketd::Args {
-            address: localhost_port_0,
-            artifact_address: localhost_port_0,
+            address: LOCALHOST_PORT_0,
+            artifact_address: LOCALHOST_PORT_0,
             mgs_address,
-            nexus_proxy_address: localhost_port_0,
+            nexus_proxy_address: LOCALHOST_PORT_0,
             baseboard: None,
             rack_subnet: None,
         };
@@ -62,14 +67,15 @@ impl WicketdTestContext {
             )
         };
 
-        let artifact_addr = assert_ipv6(server.artifact_server.local_addr());
+        let artifact_addr =
+            assert_ipv6(server.installinator_server.local_addr());
         let artifact_client = {
             let endpoint = format!(
                 "http://[{}]:{}",
                 artifact_addr.ip(),
                 artifact_addr.port()
             );
-            installinator_artifact_client::Client::new(
+            installinator_client::Client::new(
                 &endpoint,
                 log.new(slog::o!("component" => "artifact test client")),
             )

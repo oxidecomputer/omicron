@@ -23,8 +23,11 @@
 
 use camino::Utf8PathBuf;
 use illumos_utils::zfs::{
-    EnsureFilesystemError, GetValueError, Mountpoint, SizeDetails, Zfs,
+    CanMount, DatasetEnsureArgs, EnsureDatasetError, GetValueError, Mountpoint,
+    SizeDetails, Zfs,
 };
+use omicron_common::api::external::ByteCount;
+use omicron_common::disk::CompressionAlgorithm;
 use std::io;
 
 #[derive(Debug, thiserror::Error)]
@@ -36,7 +39,7 @@ pub enum BackingFsError {
     DatasetProperty(#[from] GetValueError),
 
     #[error("Error initializing dataset: {0}")]
-    Mount(#[from] EnsureFilesystemError),
+    Mount(#[from] EnsureDatasetError),
 
     #[error("Failed to ensure subdirectory {0}")]
     EnsureSubdir(#[from] io::Error),
@@ -48,9 +51,9 @@ struct BackingFs<'a> {
     // Mountpoint
     mountpoint: &'static str,
     // Optional quota, in _bytes_
-    quota: Option<usize>,
+    quota: Option<ByteCount>,
     // Optional compression mode
-    compression: Option<&'static str>,
+    compression: CompressionAlgorithm,
     // Linked service
     service: Option<&'static str>,
     // Subdirectories to ensure
@@ -63,7 +66,7 @@ impl<'a> BackingFs<'a> {
             name,
             mountpoint: "legacy",
             quota: None,
-            compression: None,
+            compression: CompressionAlgorithm::Off,
             service: None,
             subdirs: None,
         }
@@ -74,13 +77,13 @@ impl<'a> BackingFs<'a> {
         self
     }
 
-    const fn quota(mut self, quota: usize) -> Self {
+    const fn quota(mut self, quota: ByteCount) -> Self {
         self.quota = Some(quota);
         self
     }
 
-    const fn compression(mut self, compression: &'static str) -> Self {
-        self.compression = Some(compression);
+    const fn compression(mut self, compression: CompressionAlgorithm) -> Self {
+        self.compression = compression;
         self
     }
 
@@ -99,12 +102,12 @@ const BACKING_FMD_DATASET: &'static str = "fmd";
 const BACKING_FMD_MOUNTPOINT: &'static str = "/var/fm/fmd";
 const BACKING_FMD_SUBDIRS: [&'static str; 3] = ["rsrc", "ckpt", "xprt"];
 const BACKING_FMD_SERVICE: &'static str = "svc:/system/fmd:default";
-const BACKING_FMD_QUOTA: usize = 500 * (1 << 20); // 500 MiB
+const BACKING_FMD_QUOTA: ByteCount = ByteCount::from_mebibytes_u32(500);
 
-const BACKING_COMPRESSION: &'static str = "on";
+const BACKING_COMPRESSION: CompressionAlgorithm = CompressionAlgorithm::On;
 
 const BACKINGFS_COUNT: usize = 1;
-static BACKINGFS: [BackingFs; BACKINGFS_COUNT] =
+const BACKINGFS: [BackingFs; BACKINGFS_COUNT] =
     [BackingFs::new(BACKING_FMD_DATASET)
         .mountpoint(BACKING_FMD_MOUNTPOINT)
         .subdirs(&BACKING_FMD_SUBDIRS)
@@ -137,18 +140,20 @@ pub(crate) fn ensure_backing_fs(
 
         let size_details = Some(SizeDetails {
             quota: bfs.quota,
+            reservation: None,
             compression: bfs.compression,
         });
 
-        Zfs::ensure_filesystem(
-            &dataset,
-            mountpoint.clone(),
-            false, // zoned
-            true,  // do_format
-            None,  // encryption_details,
+        Zfs::ensure_dataset(DatasetEnsureArgs {
+            name: &dataset,
+            mountpoint: mountpoint.clone(),
+            can_mount: CanMount::NoAuto,
+            zoned: false,
+            encryption_details: None,
             size_details,
-            Some(vec!["canmount=noauto".to_string()]), // options
-        )?;
+            id: None,
+            additional_options: None,
+        })?;
 
         // Check if a ZFS filesystem is already mounted on bfs.mountpoint by
         // retrieving the ZFS `mountpoint` property and comparing it. This
@@ -177,7 +182,7 @@ pub(crate) fn ensure_backing_fs(
 
         info!(log, "Mounting {} on {}", dataset, mountpoint);
 
-        Zfs::mount_overlay_dataset(&dataset, &mountpoint)?;
+        Zfs::mount_overlay_dataset(&dataset)?;
 
         if let Some(subdirs) = bfs.subdirs {
             for dir in subdirs {

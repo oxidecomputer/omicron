@@ -1,0 +1,30 @@
+disallowed-methods = [
+    # `ON CONFLICT ... WHERE ... DO UPDATE` is easy to misuse.
+    #
+    # If you mean a conditional upsert, import
+    # diesel::query_dsl::methods::FilterDsl, then use
+    # `do_update().set(...).filter(...)`. (This is not part of the
+    # documentation as of Diesel 2.1.4, but it works.)
+    #
+    # If you mean to specify a bound on a partial index, use the
+    # `IncompleteOnConflictExt::as_partial_index` in `nexus-db-queries`.
+    # See the documentation of that method for more.
+    "diesel::upsert::DecoratableTarget::filter_target",
+
+    # This form of transaction is susceptible to serialization failures,
+    # and can fail spuriously.
+    # Instead, the "transaction_retry_wrapper" should be preferred, as it
+    # automatically retries transactions experiencing contention.
+    { path = "async_bb8_diesel::AsyncConnection::transaction_async", reason = "Prefer to use transaction_retry_wrapper, if possible. For tests and nested transactions, use transaction_non_retry_wrapper to at least get dtrace probes" },
+
+    # We use disallowed-methods for these rather than disallowed-types, because
+    # there's still one legitimate use for `once_cell`'s types:
+    # `get_or_try_init`, which isn't stablet yet.
+    # https://github.com/rust-lang/rust/issues/109737
+    { path = "once_cell::unsync::OnceCell::get_or_init", reason = "use `std::cell::OnceCell` instead, unless you need get_or_try_init in which case #[expect] this lint" },
+    { path = "once_cell::sync::OnceCell::get_or_init", reason = "use `std::sync::OnceLock` instead, unless you need get_or_try_init in which case #[expect] this lint" },
+]
+disallowed-types = [
+    { path = "once_cell::unsync::Lazy", reason = "use `std::cell::LazyCell` instead" },
+    { path = "once_cell::unsync::LazyCell", reason = "use `std::cell::LazyCell` instead" },
+]

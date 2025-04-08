@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bool
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt8
+    datum Nullable(Bool)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i8
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Int8
+    datum Nullable(Int8)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u8
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt8
+    datum Nullable(UInt8)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i16
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Int16
+    datum Nullable(Int16)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u16
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt16
+    datum Nullable(UInt16)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i32
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Int32
+    datum Nullable(Int32)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u32
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt32
+    datum Nullable(UInt32)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i64
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Int64
+    datum Nullable(Int64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u64
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt64
+    datum Nullable(UInt64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f32
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Float32
+    datum Nullable(Float32)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -134,7 +134,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f64
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Float64
+    datum Nullable(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_string
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum String
+    datum Nullable(String)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -156,6 +156,13 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bytes
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
+    /*
+     * NOTE: Right now we can't unambiguously record a nullable byte array.
+     * Arrays cannot be nested in `Nullable()` types, and encoding the array as
+     * a string isn't palatable for a few reasons.
+     * See: https://github.com/oxidecomputer/omicron/issues/4551 for more
+     * details.
+     */
     datum Array(UInt8)
 )
 ENGINE = MergeTree()
@@ -168,7 +175,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
-    datum Int64
+    datum Nullable(Int64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -180,7 +187,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativeu64
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
-    datum UInt64
+    datum Nullable(UInt64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -192,7 +199,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef32
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
-    datum Float32
+    datum Nullable(Float32)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -205,7 +212,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
-    datum Float64
+    datum Nullable(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -217,8 +224,31 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami8
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
+    /*
+     * NOTE: Array types cannot be Nullable, see
+     * https://clickhouse.com/docs/en/sql-reference/data-types/nullable
+     * for more details.
+     *
+     * This means we need to use empty arrays to indicate a missing value. This
+     * is unfortunate, and at this point relies on the fact that an
+     * `oximeter::Histogram` cannot have zero bins. If that changes, we'll need
+     * to figure out another way to represent missing samples here.
+     */
     bins Array(Int8),
-    counts Array(UInt64)
+    counts Array(UInt64),
+    min Int8,
+    max Int8,
+    sum_of_samples Int64,
+    squared_mean Float64,
+    p50_marker_heights Array(Float64),
+    p50_marker_positions Array(UInt64),
+    p50_desired_marker_positions Array(Float64),
+    p90_marker_heights Array(Float64),
+    p90_marker_positions Array(UInt64),
+    p90_desired_marker_positions Array(Float64),
+    p99_marker_heights Array(Float64),
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -231,7 +261,20 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu8
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     bins Array(UInt8),
-    counts Array(UInt64)
+    counts Array(UInt64),
+    min UInt8,
+    max UInt8,
+    sum_of_samples Int64,
+    squared_mean Float64,
+    p50_marker_heights Array(Float64),
+    p50_marker_positions Array(UInt64),
+    p50_desired_marker_positions Array(Float64),
+    p90_marker_heights Array(Float64),
+    p90_marker_positions Array(UInt64),
+    p90_desired_marker_positions Array(Float64),
+    p99_marker_heights Array(Float64),
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -244,7 +287,20 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami16
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     bins Array(Int16),
-    counts Array(UInt64)
+    counts Array(UInt64),
+    min Int16,
+    max Int16,
+    sum_of_samples Int64,
+    squared_mean Float64,
+    p50_marker_heights Array(Float64),
+    p50_marker_positions Array(UInt64),
+    p50_desired_marker_positions Array(Float64),
+    p90_marker_heights Array(Float64),
+    p90_marker_positions Array(UInt64),
+    p90_desired_marker_positions Array(Float64),
+    p99_marker_heights Array(Float64),
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -257,7 +313,20 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu16
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     bins Array(UInt16),
-    counts Array(UInt64)
+    counts Array(UInt64),
+    min UInt16,
+    max UInt16,
+    sum_of_samples Int64,
+    squared_mean Float64,
+    p50_marker_heights Array(Float64),
+    p50_marker_positions Array(UInt64),
+    p50_desired_marker_positions Array(Float64),
+    p90_marker_heights Array(Float64),
+    p90_marker_positions Array(UInt64),
+    p90_desired_marker_positions Array(Float64),
+    p99_marker_heights Array(Float64),
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -270,7 +339,20 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami32
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     bins Array(Int32),
-    counts Array(UInt64)
+    counts Array(UInt64),
+    min Int32,
+    max Int32,
+    sum_of_samples Int64,
+    squared_mean Float64,
+    p50_marker_heights Array(Float64),
+    p50_marker_positions Array(UInt64),
+    p50_desired_marker_positions Array(Float64),
+    p90_marker_heights Array(Float64),
+    p90_marker_positions Array(UInt64),
+    p90_desired_marker_positions Array(Float64),
+    p99_marker_heights Array(Float64),
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -283,7 +365,20 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu32
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     bins Array(UInt32),
-    counts Array(UInt64)
+    counts Array(UInt64),
+    min UInt32,
+    max UInt32,
+    sum_of_samples Int64,
+    squared_mean Float64,
+    p50_marker_heights Array(Float64),
+    p50_marker_positions Array(UInt64),
+    p50_desired_marker_positions Array(Float64),
+    p90_marker_heights Array(Float64),
+    p90_marker_positions Array(UInt64),
+    p90_desired_marker_positions Array(Float64),
+    p99_marker_heights Array(Float64),
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -296,7 +391,20 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogrami64
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     bins Array(Int64),
-    counts Array(UInt64)
+    counts Array(UInt64),
+    min Int64,
+    max Int64,
+    sum_of_samples Int64,
+    squared_mean Float64,
+    p50_marker_heights Array(Float64),
+    p50_marker_positions Array(UInt64),
+    p50_desired_marker_positions Array(Float64),
+    p90_marker_heights Array(Float64),
+    p90_marker_positions Array(UInt64),
+    p90_desired_marker_positions Array(Float64),
+    p99_marker_heights Array(Float64),
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -309,7 +417,20 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramu64
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     bins Array(UInt64),
-    counts Array(UInt64)
+    counts Array(UInt64),
+    min UInt64,
+    max UInt64,
+    sum_of_samples Int64,
+    squared_mean Float64,
+    p50_marker_heights Array(Float64),
+    p50_marker_positions Array(UInt64),
+    p50_desired_marker_positions Array(Float64),
+    p90_marker_heights Array(Float64),
+    p90_marker_positions Array(UInt64),
+    p90_desired_marker_positions Array(Float64),
+    p99_marker_heights Array(Float64),
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -322,7 +443,20 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf32
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     bins Array(Float32),
-    counts Array(UInt64)
+    counts Array(UInt64),
+    min Float32,
+    max Float32,
+    sum_of_samples Float64,
+    squared_mean Float64,
+    p50_marker_heights Array(Float64),
+    p50_marker_positions Array(UInt64),
+    p50_desired_marker_positions Array(Float64),
+    p90_marker_heights Array(Float64),
+    p90_marker_positions Array(UInt64),
+    p90_desired_marker_positions Array(Float64),
+    p99_marker_heights Array(Float64),
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -335,7 +469,20 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_histogramf64
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
     bins Array(Float64),
-    counts Array(UInt64)
+    counts Array(UInt64),
+    min Float64,
+    max Float64,
+    sum_of_samples Float64,
+    squared_mean Float64,
+    p50_marker_heights Array(Float64),
+    p50_marker_positions Array(UInt64),
+    p50_desired_marker_positions Array(Float64),
+    p90_marker_heights Array(Float64),
+    p90_marker_positions Array(UInt64),
+    p90_desired_marker_positions Array(Float64),
+    p99_marker_heights Array(Float64),
+    p99_marker_positions Array(UInt64),
+    p99_desired_marker_positions Array(Float64)
 )
 ENGINE = MergeTree()
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -357,126 +504,158 @@ TTL toDateTime(timestamp) + INTERVAL 30 DAY;
  * timeseries name and then key, since it would improve lookups where one
  * already has the key. Realistically though, these tables are quite small and
  * so performance benefits will be low in absolute terms.
+ *
+ * TTL: We use a materialized column to expire old field table records. This
+ * column is generated automatically by the database whenever a new row is
+ * inserted. It cannot be inserted directly, nor is it returned in a `SELECT *`
+ * query. Since these tables are `ReplacingMergeTree`s, that means the last
+ * record will remain during a deduplication, which will have the last
+ * timestamp. ClickHouse will then expire old data for us, similar to the
+ * measurement tables.
  */
 CREATE TABLE IF NOT EXISTS oximeter.fields_bool
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UInt8
+    field_value Bool,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_i8
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value Int8
+    field_value Int8,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_u8
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UInt8
+    field_value UInt8,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_i16
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value Int16
+    field_value Int16,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_u16
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UInt16
+    field_value UInt16,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_i32
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value Int32
+    field_value Int32,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_u32
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UInt32
+    field_value UInt32,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_i64
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value Int64
+    field_value Int64,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_u64
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UInt64
+    field_value UInt64,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_ipaddr
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value IPv6
+    field_value IPv6,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_string
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value String
+    field_value String,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 CREATE TABLE IF NOT EXISTS oximeter.fields_uuid
 (
     timeseries_name String,
     timeseries_key UInt64,
     field_name String,
-    field_value UUID
+    field_value UUID,
+    last_updated_at DateTime MATERIALIZED now()
 )
 ENGINE = ReplacingMergeTree()
-ORDER BY (timeseries_name, field_name, field_value, timeseries_key);
+ORDER BY (timeseries_name, field_name, field_value, timeseries_key)
+TTL last_updated_at + INTERVAL 30 DAY;
 
 /* The timeseries schema table stores the extracted schema for the samples
  * oximeter collects.

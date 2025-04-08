@@ -1,0 +1,23 @@
+load-example --seed test-basic
+load-example --seed test-basic
+
+show
+
+sled-list
+inventory-list
+blueprint-list
+
+sled-show 2eb69596-f081-4e2d-9425-9994926e0832
+blueprint-show ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+
+inventory-generate
+
+wipe system
+load-example --seed test-basic --nsleds 1 --ndisks-per-sled 4 --no-zones
+
+sled-list
+inventory-list
+blueprint-list
+
+sled-show 89d02b1b-478c-401a-8e28-7a26f74fa41b
+blueprint-show ade5749d-bdf3-4fab-a8ae-00bea01b3a5a

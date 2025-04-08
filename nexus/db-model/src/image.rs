@@ -9,11 +9,14 @@
 //! silo_id and an optional project_id to cover both possibilities.
 
 use super::{BlockSize, ByteCount, Digest};
-use crate::schema::{image, project_image, silo_image};
+use crate::typed_uuid::DbTypedUuid;
 use db_macros::Resource;
+use nexus_db_schema::schema::{image, project_image, silo_image};
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::VolumeKind;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -36,7 +39,7 @@ pub struct Image {
     pub silo_id: Uuid,
     pub project_id: Option<Uuid>,
 
-    pub volume_id: Uuid,
+    pub volume_id: DbTypedUuid<VolumeKind>,
     pub url: Option<String>,
     pub os: String,
     pub version: String,
@@ -45,6 +48,12 @@ pub struct Image {
 
     #[diesel(column_name = size_bytes)]
     pub size: ByteCount,
+}
+
+impl Image {
+    pub fn volume_id(&self) -> VolumeUuid {
+        self.volume_id.into()
+    }
 }
 
 #[derive(
@@ -57,7 +66,7 @@ pub struct ProjectImage {
 
     pub silo_id: Uuid,
     pub project_id: Uuid,
-    pub volume_id: Uuid,
+    pub volume_id: DbTypedUuid<VolumeKind>,
     pub url: Option<String>,
     pub os: String,
     pub version: String,
@@ -66,6 +75,12 @@ pub struct ProjectImage {
 
     #[diesel(column_name = size_bytes)]
     pub size: ByteCount,
+}
+
+impl ProjectImage {
+    pub fn volume_id(&self) -> VolumeUuid {
+        self.volume_id.into()
+    }
 }
 
 #[derive(
@@ -77,7 +92,7 @@ pub struct SiloImage {
     pub identity: SiloImageIdentity,
 
     pub silo_id: Uuid,
-    pub volume_id: Uuid,
+    pub volume_id: DbTypedUuid<VolumeKind>,
     pub url: Option<String>,
     pub os: String,
     pub version: String,
@@ -86,6 +101,12 @@ pub struct SiloImage {
 
     #[diesel(column_name = size_bytes)]
     pub size: ByteCount,
+}
+
+impl SiloImage {
+    pub fn volume_id(&self) -> VolumeUuid {
+        self.volume_id.into()
+    }
 }
 
 impl TryFrom<Image> for ProjectImage {
@@ -202,7 +223,6 @@ impl From<Image> for views::Image {
         Self {
             identity: image.identity(),
             project_id: image.project_id,
-            url: image.url,
             os: image.os,
             version: image.version,
             digest: image.digest.map(|x| x.into()),

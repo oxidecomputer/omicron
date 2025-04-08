@@ -34,16 +34,27 @@
 //!    much as they can!)
 
 use anyhow::Context;
+use anyhow::anyhow;
+use anyhow::ensure;
+use clap::Args;
+use clap::ColorChoice;
 use clap::Parser;
 use clap::Subcommand;
+use futures::StreamExt;
+use internal_dns_types::names::ServiceName;
 use omicron_common::address::Ipv6Subnet;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use tokio::net::TcpSocket;
 
+mod crucible_agent;
 mod db;
+mod helpers;
 mod mgs;
 mod nexus;
 mod oximeter;
+mod oxql;
+mod reconfigurator;
 mod sled_agent;
 
 #[tokio::main]
@@ -60,8 +71,13 @@ async fn main() -> Result<(), anyhow::Error> {
         OmdbCommands::Db(db) => db.run_cmd(&args, &log).await,
         OmdbCommands::Mgs(mgs) => mgs.run_cmd(&args, &log).await,
         OmdbCommands::Nexus(nexus) => nexus.run_cmd(&args, &log).await,
-        OmdbCommands::Oximeter(oximeter) => oximeter.run_cmd(&log).await,
+        OmdbCommands::Oximeter(oximeter) => oximeter.run_cmd(&args, &log).await,
+        OmdbCommands::Oxql(oxql) => oxql.run_cmd(&args, &log).await,
+        OmdbCommands::Reconfigurator(reconfig) => {
+            reconfig.run_cmd(&args, &log).await
+        }
         OmdbCommands::SledAgent(sled) => sled.run_cmd(&args, &log).await,
+        OmdbCommands::CrucibleAgent(crucible) => crucible.run_cmd(&args).await,
     }
 }
 
@@ -78,21 +94,69 @@ struct Omdb {
         long,
         value_parser = parse_dropshot_log_level,
         default_value = "warn",
+        global = true,
     )]
     log_level: dropshot::ConfigLoggingLevel,
 
-    #[arg(env = "OMDB_DNS_SERVER", long)]
+    #[arg(
+        long,
+        env = "OMDB_DNS_SERVER",
+        global = true,
+        help_heading = helpers::CONNECTION_OPTIONS_HEADING,
+    )]
     dns_server: Option<SocketAddr>,
+
+    /// Allow potentially-destructive subcommands.
+    #[arg(
+        short = 'w',
+        long = "destructive",
+        global = true,
+        help_heading = helpers::SAFETY_OPTIONS_HEADING,
+    )]
+    allow_destructive: bool,
+
+    #[command(flatten)]
+    output: OutputOpts,
 
     #[command(subcommand)]
     command: OmdbCommands,
 }
 
+#[derive(Debug, Args)]
+struct OutputOpts {
+    /// Color output
+    #[arg(long, global = true, value_enum, default_value_t)]
+    color: ColorChoice,
+}
+
+mod check_allow_destructive {
+    /// Zero-size type that potentially-destructive functions can accept to
+    /// ensure `Omdb::check_allow_destructive` has been called.
+    // This is tucked away inside a module to prevent it from being constructed
+    // by anything other than `Omdb::check_allow_destructive`.
+    #[must_use]
+    pub(crate) struct DestructiveOperationToken(());
+
+    impl super::Omdb {
+        pub(crate) fn check_allow_destructive(
+            &self,
+        ) -> anyhow::Result<DestructiveOperationToken> {
+            anyhow::ensure!(
+                self.allow_destructive,
+                "This command is potentially destructive. \
+                 Pass the `-w` / `--destructive` flag to allow it."
+            );
+            Ok(DestructiveOperationToken(()))
+        }
+    }
+}
+
 impl Omdb {
+    /// Return the socket addresses of all instances of a service in DNS
     async fn dns_lookup_all(
         &self,
         log: slog::Logger,
-        service_name: internal_dns::ServiceName,
+        service_name: ServiceName,
     ) -> Result<Vec<SocketAddrV6>, anyhow::Error> {
         let resolver = self.dns_resolver(log).await?;
         resolver
@@ -101,13 +165,72 @@ impl Omdb {
             .with_context(|| format!("looking up {:?} in DNS", service_name))
     }
 
+    /// Return the socket address of one instance of a service that we can at
+    /// least successfully connect to
+    async fn dns_lookup_one(
+        &self,
+        log: slog::Logger,
+        service_name: ServiceName,
+    ) -> Result<SocketAddrV6, anyhow::Error> {
+        let addrs = self.dns_lookup_all(log, service_name).await?;
+        ensure!(
+            !addrs.is_empty(),
+            "expected at least one address from successful DNS lookup for {:?}",
+            service_name
+        );
+
+        // The caller is going to pick one of these addresses to connect to.
+        // Let's try to pick one that's at least not obviously broken by
+        // attempting to connect to whatever we found and returning any that we
+        // successfully connected to.  It'd be nice if we could return the
+        // socket directly, but our callers are creating reqwest clients that
+        // cannot easily consume a socket directly.
+        //
+        // This approach scales poorly and there are many failure modes that
+        // this does not cover.  But in the absence of better connection
+        // management, and with the risks in `omdb` being pretty low, and the
+        // value of it working pretty high, here we are.  This approach should
+        // not be replicated elsewhere.
+        async fn try_connect(
+            sockaddr_v6: SocketAddrV6,
+        ) -> Result<(), anyhow::Error> {
+            let _ = TcpSocket::new_v6()
+                .context("creating socket")?
+                .connect(SocketAddr::from(sockaddr_v6))
+                .await
+                .with_context(|| format!("connect \"{}\"", sockaddr_v6))?;
+            Ok(())
+        }
+
+        let mut socket_stream = futures::stream::iter(addrs)
+            .map(async move |sockaddr_v6| {
+                (sockaddr_v6, try_connect(sockaddr_v6).await)
+            })
+            .buffer_unordered(3);
+
+        while let Some((sockaddr, connect_result)) = socket_stream.next().await
+        {
+            match connect_result {
+                Ok(()) => return Ok(sockaddr),
+                Err(error) => {
+                    eprintln!(
+                        "warning: failed to connect to {:?} at {}: {:#}",
+                        service_name, sockaddr, error
+                    );
+                }
+            }
+        }
+
+        Err(anyhow!("failed to connect to any instances of {:?}", service_name))
+    }
+
     async fn dns_resolver(
         &self,
         log: slog::Logger,
-    ) -> Result<internal_dns::resolver::Resolver, anyhow::Error> {
+    ) -> Result<internal_dns_resolver::Resolver, anyhow::Error> {
         match &self.dns_server {
             Some(dns_server) => {
-                internal_dns::resolver::Resolver::new_from_addrs(
+                internal_dns_resolver::Resolver::new_from_addrs(
                     log,
                     &[*dns_server],
                 )
@@ -140,7 +263,7 @@ impl Omdb {
                     "note: (if this is not right, use --dns-server \
                     to specify an alternate DNS server)",
                 );
-                internal_dns::resolver::Resolver::new_from_subnet(log, subnet)
+                internal_dns_resolver::Resolver::new_from_subnet(log, subnet)
                     .with_context(|| {
                         format!(
                             "creating DNS resolver for subnet {}",
@@ -155,6 +278,8 @@ impl Omdb {
 #[derive(Debug, Subcommand)]
 #[allow(clippy::large_enum_variant)]
 enum OmdbCommands {
+    /// Debug a specific crucible-agent
+    CrucibleAgent(crucible_agent::CrucibleAgentArgs),
     /// Query the control plane database (CockroachDB)
     Db(db::DbArgs),
     /// Debug a specific Management Gateway Service instance
@@ -163,6 +288,10 @@ enum OmdbCommands {
     Nexus(nexus::NexusArgs),
     /// Query oximeter collector state
     Oximeter(oximeter::OximeterArgs),
+    /// Enter the Oximeter Query Language shell for interactive querying.
+    Oxql(oxql::OxqlArgs),
+    /// Interact with the Reconfigurator system
+    Reconfigurator(reconfigurator::ReconfiguratorArgs),
     /// Debug a specific Sled
     SledAgent(sled_agent::SledAgentArgs),
 }

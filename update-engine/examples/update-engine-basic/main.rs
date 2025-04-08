@@ -6,7 +6,7 @@
 
 use std::{io::IsTerminal, time::Duration};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use buf_list::BufList;
 use bytes::Buf;
 use camino::Utf8PathBuf;
@@ -22,8 +22,8 @@ use spec::{
 };
 use tokio::{io::AsyncWriteExt, sync::mpsc};
 use update_engine::{
-    events::{Event, ProgressUnits},
     StepContext, StepSuccess,
+    events::{Event, ProgressUnits},
 };
 
 mod display;
@@ -160,7 +160,7 @@ impl ExampleContext {
             .new_step(
                 ExampleStepId::Download,
                 format!("Downloading component: {url}"),
-                move |cx| async move {
+                async move |cx| {
                     // Simulate a download for the artifact, with some retries.
                     slog::debug!(
                         &self.log,
@@ -254,7 +254,7 @@ impl ExampleContext {
             .new_step(
                 ExampleStepId::CreateTempDir,
                 format!("Creating {total_count} temporary directories"),
-                move |cx| async move {
+                async move |cx| {
                     // Simulate a creation of a number of temporary directories.
                     let mut dirs = Vec::with_capacity(total_count);
                     let mut paths = Vec::with_capacity(total_count);
@@ -304,7 +304,7 @@ impl ExampleContext {
             .new_step(
                 ExampleStepId::Write,
                 "Writing artifact to temporary directories",
-                move |cx| async move {
+                async move |cx| {
                     let buf_list = download_handle.into_value(cx.token()).await;
                     let temp_dirs =
                         temp_dirs_handle.into_value(cx.token()).await;
@@ -334,7 +334,7 @@ impl ExampleContext {
                     StepWarning::new((), "Example warning").into()
                 },
             )
-            .with_metadata_fn(move |cx| async move {
+            .with_metadata_fn(async move |cx| {
                 let buf_list = download_handle_2.into_value(cx.token()).await;
                 ExampleStepMetadata::Write {
                     num_bytes: buf_list.num_bytes() as u64,
@@ -351,7 +351,7 @@ impl ExampleContext {
             .new_step(
                 ExampleStepId::Skipped,
                 "This step does nothing",
-                |_cx| async move { StepSkipped::new((), "Step skipped").into() },
+                async |_cx| StepSkipped::new((), "Step skipped").into(),
             )
             .register();
     }
@@ -375,7 +375,7 @@ fn register_nested_write_steps<'a>(
                     destination: destination.to_owned(),
                 },
                 format!("Writing to {destination}"),
-                move |cx| async move {
+                async move |cx| {
                     parent_cx
                         .send_progress(StepProgress::with_current_and_total(
                             index as u64,
@@ -469,7 +469,7 @@ fn create_remote_engine(
         .new_step(
             ExampleWriteStepId::Write { destination: destination.clone() },
             format!("Writing to {destination} (remote, fake)"),
-            move |cx| async move {
+            async move |cx| {
                 let num_bytes = buf_list.num_bytes();
                 let mut total_written = 0;
 

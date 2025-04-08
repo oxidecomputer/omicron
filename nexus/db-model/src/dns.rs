@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{impl_enum_type, Generation};
-use crate::schema::{dns_name, dns_version, dns_zone};
+use super::{Generation, impl_enum_type};
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::{dns_name, dns_version, dns_zone};
 use nexus_types::internal_api::params;
 use omicron_common::api::external::Error;
 use serde::Deserialize;
@@ -15,12 +15,9 @@ use std::{fmt, net::Ipv6Addr};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "dns_group"))]
-    pub struct DnsGroupEnum;
+    DnsGroupEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = DnsGroupEnum)]
     pub enum DnsGroup;
 
     // Enum values
@@ -35,11 +32,6 @@ impl fmt::Display for DnsGroup {
             DnsGroup::External => "external",
         })
     }
-}
-
-impl diesel::query_builder::QueryId for DnsGroupEnum {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]

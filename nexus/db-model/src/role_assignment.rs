@@ -2,18 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{impl_enum_type, DatabaseString};
-use crate::schema::role_assignment;
+use super::{DatabaseString, impl_enum_type};
 use anyhow::anyhow;
+use nexus_db_schema::schema::role_assignment;
 use nexus_types::external_api::shared;
 use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "identity_type"))]
-    pub struct IdentityTypeEnum;
+    IdentityTypeEnum:
 
     #[derive(
         Clone,
@@ -24,7 +22,6 @@ impl_enum_type!(
         Deserialize,
         PartialEq
     )]
-    #[diesel(sql_type = IdentityTypeEnum)]
     pub enum IdentityType;
 
     // Enum values

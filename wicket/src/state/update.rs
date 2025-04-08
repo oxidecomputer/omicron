@@ -4,30 +4,42 @@
 
 use anyhow::Result;
 use ratatui::style::Style;
+use wicket_common::rack_update::{ClearUpdateStateOptions, StartUpdateOptions};
 use wicket_common::update_events::{
     EventReport, ProgressEventKind, StepEventKind, UpdateComponent,
     UpdateStepId,
 };
 
 use crate::helpers::{get_update_simulated_result, get_update_test_error};
-use crate::{events::EventReportMap, ui::defaults::style};
+use crate::{
+    events::{ArtifactData, EventReportMap},
+    ui::defaults::style,
+};
 
-use super::{ComponentId, ParsableComponentId, ALL_COMPONENT_IDS};
-use omicron_common::api::internal::nexus::KnownArtifactKind;
+use super::{ALL_COMPONENT_IDS, ComponentId, ParsableComponentId};
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use wicketd_client::types::{
-    ArtifactId, ClearUpdateStateOptions, SemverVersion, StartUpdateOptions,
-};
+use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
+
+// Represents a version and the signature (optional) associated
+// with a particular artifact. This allows for multiple versions
+// with different versions to be present in the repo. Note
+// sign is currently only used for RoT artifacts
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactVersions {
+    pub version: ArtifactVersion,
+    pub sign: Option<Vec<u8>>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {
     pub items: BTreeMap<ComponentId, UpdateItem>,
-    pub system_version: Option<SemverVersion>,
-    pub artifacts: Vec<ArtifactId>,
-    pub artifact_versions: BTreeMap<KnownArtifactKind, SemverVersion>,
+    pub system_version: Option<Version>,
+    pub artifacts: Vec<ArtifactData>,
+    pub artifact_versions: BTreeMap<KnownArtifactKind, Vec<ArtifactVersions>>,
     // The update item currently selected is recorded in
     // state.rack_state.selected.
     pub status_view_displayed: bool,
@@ -46,6 +58,7 @@ impl RackUpdateState {
                             *id,
                             vec![
                                 UpdateComponent::Rot,
+                                UpdateComponent::RotBootloader,
                                 UpdateComponent::Sp,
                                 UpdateComponent::Host,
                             ],
@@ -55,14 +68,22 @@ impl RackUpdateState {
                         *id,
                         UpdateItem::new(
                             *id,
-                            vec![UpdateComponent::Rot, UpdateComponent::Sp],
+                            vec![
+                                UpdateComponent::Rot,
+                                UpdateComponent::RotBootloader,
+                                UpdateComponent::Sp,
+                            ],
                         ),
                     ),
                     ComponentId::Psc(_) => (
                         *id,
                         UpdateItem::new(
                             *id,
-                            vec![UpdateComponent::Rot, UpdateComponent::Sp],
+                            vec![
+                                UpdateComponent::Rot,
+                                UpdateComponent::RotBootloader,
+                                UpdateComponent::Sp,
+                            ],
                         ),
                     ),
                 })
@@ -93,16 +114,21 @@ impl RackUpdateState {
     pub fn update_artifacts_and_reports(
         &mut self,
         logger: &Logger,
-        system_version: Option<SemverVersion>,
-        artifacts: Vec<ArtifactId>,
+        system_version: Option<Version>,
+        artifacts: Vec<ArtifactData>,
         reports: EventReportMap,
     ) {
         self.system_version = system_version;
         self.artifacts = artifacts;
         self.artifact_versions.clear();
-        for id in &mut self.artifacts {
-            if let Ok(known) = id.kind.parse() {
-                self.artifact_versions.insert(known, id.version.clone());
+        for a in &mut self.artifacts {
+            if let Some(known) = a.id.kind.to_known() {
+                self.artifact_versions.entry(known).or_default().push(
+                    ArtifactVersions {
+                        version: a.id.version.clone(),
+                        sign: a.sign.clone(),
+                    },
+                );
             }
         }
 
@@ -250,12 +276,15 @@ impl UpdateItem {
                 }
                 | StepEventKind::StepCompleted { step, outcome, .. } => {
                     if step.info.is_last_step_in_component() {
-                        // The RoT and SP components each have two steps in
-                        // them. If the second step ("Updating RoT/SP") is
+                        // The RoT (and bootloader) and SP components each
+                        // have two steps in them. If the second step
+                        // ("Updating RoT Bootloader/RoT/SP") is
                         // skipped, then treat the component as skipped.
                         if matches!(
                             step.info.component,
-                            UpdateComponent::Sp | UpdateComponent::Rot
+                            UpdateComponent::Sp
+                                | UpdateComponent::Rot
+                                | UpdateComponent::RotBootloader
                         ) {
                             assert_eq!(
                                 step.info.id,
@@ -333,6 +362,7 @@ impl UpdateItem {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum UpdateState {
     NotStarted,
     Starting,
@@ -428,6 +458,7 @@ fn update_component_state(
 #[allow(unused)]
 pub fn update_component_title(component: UpdateComponent) -> &'static str {
     match component {
+        UpdateComponent::RotBootloader => "ROT_BOOTLOADER",
         UpdateComponent::Rot => "ROT",
         UpdateComponent::Sp => "SP",
         UpdateComponent::Host => "HOST",
@@ -435,6 +466,7 @@ pub fn update_component_title(component: UpdateComponent) -> &'static str {
 }
 
 pub struct CreateStartUpdateOptions {
+    pub(crate) force_update_rot_bootloader: bool,
     pub(crate) force_update_rot: bool,
     pub(crate) force_update_sp: bool,
 }
@@ -453,7 +485,9 @@ impl CreateStartUpdateOptions {
                             as a u64",
                 )
             });
-
+        let test_simulate_rot_bootloader_result = get_update_simulated_result(
+            "WICKET_UPDATE_TEST_SIMULATE_ROT_BOOTLOADER_RESULT",
+        )?;
         let test_simulate_rot_result = get_update_simulated_result(
             "WICKET_UPDATE_TEST_SIMULATE_ROT_RESULT",
         )?;
@@ -464,8 +498,10 @@ impl CreateStartUpdateOptions {
         Ok(StartUpdateOptions {
             test_error,
             test_step_seconds,
+            test_simulate_rot_bootloader_result,
             test_simulate_rot_result,
             test_simulate_sp_result,
+            skip_rot_bootloader_version_check: self.force_update_rot_bootloader,
             skip_rot_version_check: self.force_update_rot,
             skip_sp_version_check: self.force_update_sp,
         })

@@ -7,47 +7,22 @@
 // Copyright 2023 Oxide Computer Company
 
 use crate::ProducerEndpoint;
-use oximeter::types::Cumulative;
-use oximeter::types::ProducerResultsItem;
-use oximeter::Metric;
 use oximeter::MetricsError;
 use oximeter::Sample;
-use oximeter::Target;
+use oximeter::types::Cumulative;
+use oximeter::types::ProducerResultsItem;
 use reqwest::StatusCode;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::net::IpAddr;
 use std::time::Duration;
-use uuid::Uuid;
+
+oximeter::use_timeseries!("oximeter-collector.toml");
+pub use self::oximeter_collector::Collections;
+pub use self::oximeter_collector::FailedCollections;
+pub use self::oximeter_collector::OximeterCollector;
 
 /// The interval on which we report self statistics
 pub const COLLECTION_INTERVAL: Duration = Duration::from_secs(60);
-
-/// A target representing a single oximeter collector.
-#[derive(Clone, Copy, Debug, Target)]
-pub struct OximeterCollector {
-    /// The collector's ID.
-    pub collector_id: Uuid,
-    /// The collector server's IP address.
-    pub collector_ip: IpAddr,
-    /// The collector server's port.
-    pub collector_port: u16,
-}
-
-/// The number of successful collections from a single producer.
-#[derive(Clone, Debug, Metric)]
-pub struct Collections {
-    /// The producer's ID.
-    pub producer_id: Uuid,
-    /// The producer's IP address.
-    pub producer_ip: IpAddr,
-    /// The producer's port.
-    pub producer_port: u16,
-    /// The base route in the producer server used to collect metrics.
-    ///
-    /// The full route is `{base_route}/{producer_id}`.
-    pub base_route: String,
-    pub datum: Cumulative<u64>,
-}
 
 /// Small enum to help understand why oximeter failed to collect from a
 /// producer.
@@ -58,6 +33,12 @@ pub enum FailureReason {
     Unreachable,
     /// Error during deserialization.
     Deserialization,
+    /// The collection interval has expired while an outstanding collection is
+    /// already in progress.
+    ///
+    /// This may indicate that the producer's collection interval is too short
+    /// for the amount of data it generates, and the collector cannot keep up.
+    CollectionsInProgress,
     /// Some other reason, which includes the status code.
     Other(StatusCode),
 }
@@ -65,31 +46,31 @@ pub enum FailureReason {
 impl std::fmt::Display for FailureReason {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Self::Unreachable => write!(f, "unreachable"),
-            Self::Deserialization => write!(f, "deserialization"),
+            Self::Unreachable => f.write_str(Self::UNREACHABLE),
+            Self::Deserialization => f.write_str(Self::DESERIALIZATION),
+            Self::CollectionsInProgress => {
+                f.write_str(Self::COLLECTIONS_IN_PROGRESS)
+            }
             Self::Other(c) => write!(f, "{}", c.as_u16()),
         }
     }
 }
 
-/// The number of failed collections from a single producer.
-#[derive(Clone, Debug, Metric)]
-pub struct FailedCollections {
-    /// The producer's ID.
-    pub producer_id: Uuid,
-    /// The producer's IP address.
-    pub producer_ip: IpAddr,
-    /// The producer's port.
-    pub producer_port: u16,
-    /// The base route in the producer server used to collect metrics.
-    ///
-    /// The full route is `{base_route}/{producer_id}`.
-    pub base_route: String,
-    /// The reason we could not collect.
-    //
-    // NOTE: This should always be generated through a `FailureReason`.
-    pub reason: String,
-    pub datum: Cumulative<u64>,
+impl FailureReason {
+    const UNREACHABLE: &'static str = "unreachable";
+    const DESERIALIZATION: &'static str = "deserialization";
+    const COLLECTIONS_IN_PROGRESS: &'static str = "collections in progress";
+
+    fn as_string(&self) -> Cow<'static, str> {
+        match self {
+            Self::Unreachable => Cow::Borrowed(Self::UNREACHABLE),
+            Self::Deserialization => Cow::Borrowed(Self::DESERIALIZATION),
+            Self::CollectionsInProgress => {
+                Cow::Borrowed(Self::COLLECTIONS_IN_PROGRESS)
+            }
+            Self::Other(c) => Cow::Owned(c.as_u16().to_string()),
+        }
+    }
 }
 
 /// Oximeter collection statistics maintained by each collection task.
@@ -111,10 +92,36 @@ impl CollectionTaskStats {
                 producer_id: producer.id,
                 producer_ip: producer.address.ip(),
                 producer_port: producer.address.port(),
-                base_route: producer.base_route.clone(),
+                base_route: "".into(),
                 datum: Cumulative::new(0),
             },
             failed_collections: BTreeMap::new(),
+        }
+    }
+
+    /// Update this information with a new producer endpoint.
+    ///
+    /// # Panics
+    ///
+    /// This panics if `new_info` refers to a different ID.
+    pub fn update(&mut self, new_info: &ProducerEndpoint) {
+        assert_eq!(self.collections.producer_id, new_info.id);
+
+        // Only reset the counters if the new information is actually different.
+        let new_ip = new_info.address.ip();
+        let new_port = new_info.address.port();
+        if self.collections.producer_ip == new_ip
+            && self.collections.producer_port == new_port
+        {
+            return;
+        }
+        self.collections.producer_ip = new_ip;
+        self.collections.producer_port = new_port;
+        self.collections.datum = Cumulative::new(0);
+        for each in self.failed_collections.values_mut() {
+            each.producer_ip = new_ip;
+            each.producer_port = new_port;
+            each.datum = Cumulative::new(0);
         }
     }
 
@@ -128,7 +135,7 @@ impl CollectionTaskStats {
                 producer_ip: self.collections.producer_ip,
                 producer_port: self.collections.producer_port,
                 base_route: self.collections.base_route.clone(),
-                reason: reason.to_string(),
+                reason: reason.as_string(),
                 datum: Cumulative::new(0),
             }
         })
@@ -154,18 +161,64 @@ impl CollectionTaskStats {
 
 #[cfg(test)]
 mod tests {
+    use super::CollectionTaskStats;
     use super::FailureReason;
+    use super::OximeterCollector;
     use super::StatusCode;
+    use omicron_common::api::internal::nexus::ProducerEndpoint;
+    use omicron_common::api::internal::nexus::ProducerKind;
+    use std::time::Duration;
+    use uuid::Uuid;
 
     #[test]
     fn test_failure_reason_serialization() {
         let data = &[
-            (FailureReason::Deserialization, "deserialization"),
-            (FailureReason::Unreachable, "unreachable"),
+            (FailureReason::Deserialization, FailureReason::DESERIALIZATION),
+            (FailureReason::Unreachable, FailureReason::UNREACHABLE),
+            (
+                FailureReason::CollectionsInProgress,
+                FailureReason::COLLECTIONS_IN_PROGRESS,
+            ),
             (FailureReason::Other(StatusCode::INTERNAL_SERVER_ERROR), "500"),
         ];
         for (variant, as_str) in data.iter() {
             assert_eq!(variant.to_string(), *as_str);
         }
+    }
+
+    #[test]
+    fn only_reset_counters_if_info_is_different() {
+        let info = ProducerEndpoint {
+            id: Uuid::new_v4(),
+            kind: ProducerKind::Service,
+            address: "[::1]:12345".parse().unwrap(),
+            interval: Duration::from_secs(1),
+        };
+        let collector = OximeterCollector {
+            collector_id: Uuid::new_v4(),
+            collector_ip: "::1".parse().unwrap(),
+            collector_port: 12345,
+        };
+        let mut stats = CollectionTaskStats::new(collector, &info);
+        stats.collections.datum.increment();
+
+        stats.update(&info);
+        assert_eq!(
+            stats.collections.datum.value(),
+            1,
+            "Should not have reset the counter when updating \
+            with the same producer endpoint information"
+        );
+        let info = ProducerEndpoint {
+            address: "[::1]:11111".parse().unwrap(),
+            ..info
+        };
+        stats.update(&info);
+        assert_eq!(
+            stats.collections.datum.value(),
+            0,
+            "Should have reset the counter when updating \
+            with different producer endpoint information"
+        );
     }
 }

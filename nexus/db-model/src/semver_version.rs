@@ -11,9 +11,6 @@ use omicron_common::api::external;
 use parse_display::Display;
 use serde::{Deserialize, Serialize};
 
-// We wrap semver::Version in external to impl JsonSchema, and we wrap it again
-// here to impl ToSql/FromSql
-
 /// Semver version with zero-padded numbers in `ToSql`/`FromSql` to allow
 /// lexicographic DB sorting
 #[derive(
@@ -24,14 +21,16 @@ use serde::{Deserialize, Serialize};
     Serialize,
     Deserialize,
     PartialEq,
+    Eq,
+    Hash,
     Display,
 )]
 #[diesel(sql_type = sql_types::Text)]
 #[display("{0}")]
-pub struct SemverVersion(pub external::SemverVersion);
+pub struct SemverVersion(pub semver::Version);
 
-NewtypeFrom! { () pub struct SemverVersion(external::SemverVersion); }
-NewtypeDeref! { () pub struct SemverVersion(external::SemverVersion); }
+NewtypeFrom! { () pub struct SemverVersion(semver::Version); }
+NewtypeDeref! { () pub struct SemverVersion(semver::Version); }
 
 /// Width of version numbers after zero-padding. `u8` because you can always
 /// convert to both `u32` and `usize`. Everything having to do with ser/de on
@@ -42,7 +41,7 @@ const PADDED_WIDTH: u8 = 8;
 
 impl SemverVersion {
     pub fn new(major: u64, minor: u64, patch: u64) -> Self {
-        Self(external::SemverVersion(semver::Version::new(major, minor, patch)))
+        Self(semver::Version::new(major, minor, patch))
     }
 }
 
@@ -63,17 +62,15 @@ impl SemverVersion {
 ///
 /// Compare to the `Display` implementation on `Semver::Version`
 /// <https://github.com/dtolnay/semver/blob/7fd09f7/src/display.rs>
-fn to_sortable_string(v: semver::Version) -> Result<String, external::Error> {
+fn to_sortable_string(v: &semver::Version) -> Result<String, external::Error> {
     // the largest N-digit number is 10^N - 1
     let max = u64::pow(10, u32::from(PADDED_WIDTH)) - 1;
 
     if v.major > max || v.minor > max || v.patch > max {
-        return Err(external::Error::InvalidValue {
-            label: "version".to_string(),
-            message: format!(
-                "Major, minor, and patch version must be less than {max}"
-            ),
-        });
+        return Err(external::Error::invalid_value(
+            "version",
+            format!("Major, minor, and patch version must be less than {max}"),
+        ));
     }
 
     let mut result = format!(
@@ -130,8 +127,7 @@ where
         &'b self,
         out: &mut serialize::Output<'b, '_, DB>,
     ) -> serialize::Result {
-        let v = (self.0).0.to_owned();
-        to_sortable_string(v)?.to_sql(&mut out.reborrow())
+        to_sortable_string(&self.0)?.to_sql(&mut out.reborrow())
     }
 }
 
@@ -145,7 +141,7 @@ where
     fn from_sql(raw: DB::RawValue<'_>) -> deserialize::Result<Self> {
         from_sortable_string(String::from_sql(raw)?)
             .parse()
-            .map(|s| SemverVersion(external::SemverVersion(s)))
+            .map(SemverVersion)
             .map_err(|e| e.into())
     }
 }
@@ -169,7 +165,7 @@ mod test {
         ];
         for (orig, padded) in pairs {
             let v = orig.parse::<semver::Version>().unwrap();
-            assert_eq!(&to_sortable_string(v).unwrap(), padded);
+            assert_eq!(&to_sortable_string(&v).unwrap(), padded);
             assert_eq!(&from_sortable_string(padded.to_string()), orig);
         }
     }

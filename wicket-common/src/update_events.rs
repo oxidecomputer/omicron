@@ -12,8 +12,8 @@ use serde::Serialize;
 use std::fmt;
 use std::sync::Arc;
 use thiserror::Error;
-use update_engine::errors::NestedEngineError;
 use update_engine::StepSpec;
+use update_engine::errors::NestedEngineError;
 
 #[derive(JsonSchema)]
 pub enum WicketdEngineSpec {}
@@ -32,6 +32,7 @@ pub enum WicketdEngineSpec {}
 )]
 #[serde(tag = "component", rename_all = "snake_case")]
 pub enum UpdateComponent {
+    RotBootloader,
     Rot,
     Sp,
     Host,
@@ -42,6 +43,7 @@ pub enum UpdateComponent {
 pub enum UpdateStepId {
     TestStep,
     SetHostPowerState { state: PowerState },
+    InterrogateRotBootloader,
     InterrogateRot,
     InterrogateSp,
     SpComponentUpdate,
@@ -203,7 +205,9 @@ pub enum UpdateTerminalError {
         #[source]
         error: Arc<anyhow::Error>,
     },
-    #[error("uploading trampoline phase 2 to MGS cancelled (was a new TUF repo uploaded?)")]
+    #[error(
+        "uploading trampoline phase 2 to MGS cancelled (was a new TUF repo uploaded?)"
+    )]
     TrampolinePhase2UploadCancelled,
     #[error("downloading installinator failed")]
     DownloadingInstallinatorFailed {
@@ -257,6 +261,21 @@ pub enum SpComponentUpdateTerminalError {
     },
     #[error("RoT booted into unexpected slot {active_slot}")]
     RotUnexpectedActiveSlot { active_slot: u16 },
+    #[error("Getting RoT boot info failed")]
+    GetRotBootInfoFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("Unexpected error returned from RoT bootloader update")]
+    RotBootloaderError {
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("setting currently-active RoT bootloader slot failed")]
+    SetRotBootloaderActiveSlotFailed {
+        #[source]
+        error: anyhow::Error,
+    },
 }
 
 impl update_engine::AsError for SpComponentUpdateTerminalError {

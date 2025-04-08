@@ -4,33 +4,36 @@
 
 //! [`DataStore`] methods related to [`Silo`]s.
 
-use super::dns::DnsVersionUpdateBuilder;
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
+use super::dns::DnsVersionUpdateBuilder;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::RunnableQuery;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
-use crate::db::fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};
+use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
+use crate::db::model::IpPoolResourceType;
 use crate::db::model::Name;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};
 use nexus_db_model::Certificate;
 use nexus_db_model::ServiceKind;
+use nexus_db_model::SiloQuotas;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::SiloRole;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -38,10 +41,12 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
 /// Filter a "silo_list" query based on silos' discoverability
+#[derive(Debug, Clone, Copy)]
 pub enum Discoverability {
     /// Show all Silos
     All,
@@ -59,14 +64,32 @@ impl DataStore {
 
         debug!(opctx.log, "attempting to create built-in silos");
 
-        use db::schema::silo::dsl;
-        let count = diesel::insert_into(dsl::silo)
-            .values([&*DEFAULT_SILO, &*INTERNAL_SILO])
-            .on_conflict(dsl::id)
-            .do_nothing()
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        use nexus_db_schema::schema::silo::dsl;
+        use nexus_db_schema::schema::silo_quotas::dsl as quotas_dsl;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let count = self
+            .transaction_retry_wrapper("load_builtin_silos")
+            .transaction(&conn, |conn| async move {
+                diesel::insert_into(quotas_dsl::silo_quotas)
+                    .values(SiloQuotas::arbitrarily_high_default(
+                        DEFAULT_SILO.id(),
+                    ))
+                    .on_conflict(quotas_dsl::silo_id)
+                    .do_nothing()
+                    .execute_async(&conn)
+                    .await?;
+                let count = diesel::insert_into(dsl::silo)
+                    .values([&*DEFAULT_SILO, &*INTERNAL_SILO])
+                    .on_conflict(dsl::id)
+                    .do_nothing()
+                    .execute_async(&conn)
+                    .await?;
+                Ok(count)
+            })
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         info!(opctx.log, "created {} built-in silos", count);
 
         self.virtual_provisioning_collection_create(
@@ -93,7 +116,7 @@ impl DataStore {
             opctx.authorize(authz::Action::ModifyPolicy, &authz::FLEET).await?;
         }
 
-        use db::schema::silo::dsl;
+        use nexus_db_schema::schema::silo::dsl;
         Ok(diesel::insert_into(dsl::silo)
             .values(silo)
             .returning(Silo::as_returning()))
@@ -123,15 +146,17 @@ impl DataStore {
         dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.silo_create_conn(
-            &conn,
-            opctx,
-            nexus_opctx,
-            new_silo_params,
-            new_silo_dns_names,
-            dns_update,
-        )
-        .await
+        let silo = self
+            .silo_create_conn(
+                &conn,
+                opctx,
+                nexus_opctx,
+                new_silo_params,
+                new_silo_dns_names,
+                dns_update,
+            )
+            .await?;
+        Ok(silo)
     }
 
     pub async fn silo_create_conn(
@@ -142,7 +167,7 @@ impl DataStore {
         new_silo_params: params::SiloCreate,
         new_silo_dns_names: &[String],
         dns_update: DnsVersionUpdateBuilder,
-    ) -> CreateResult<Silo> {
+    ) -> Result<Silo, TransactionError<Error>> {
         let silo_id = Uuid::new_v4();
         let silo_group_id = Uuid::new_v4();
 
@@ -199,71 +224,87 @@ impl DataStore {
                 None
             };
 
-        conn.transaction_async(|conn| async move {
-            let silo = silo_create_query
-                .get_result_async(&conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::Silo,
-                            new_silo_params.identity.name.as_str(),
-                        ),
-                    )
-                })?;
-            self.virtual_provisioning_collection_create_on_connection(
-                &conn,
-                VirtualProvisioningCollection::new(
-                    silo.id(),
-                    CollectionTypeProvisioned::Silo,
-                ),
-            )
-            .await?;
-
-            if let Some(query) = silo_admin_group_ensure_query {
-                query.get_result_async(&conn).await?;
-            }
-
-            if let Some(queries) = silo_admin_group_role_assignment_queries {
-                let (delete_old_query, insert_new_query) = queries;
-                delete_old_query.execute_async(&conn).await?;
-                insert_new_query.execute_async(&conn).await?;
-            }
-
-            let certificates = new_silo_params
-                .tls_certificates
-                .into_iter()
-                .map(|c| {
-                    Certificate::new(
+        // This method uses nested transactions, which are not supported
+        // with retryable transactions.
+        let silo = self
+            .transaction_non_retry_wrapper("silo_create")
+            .transaction(&conn, |conn| async move {
+                let silo = silo_create_query
+                    .get_result_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        if retryable(&e) {
+                            return TransactionError::Database(e);
+                        }
+                        TransactionError::CustomError(public_error_from_diesel(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::Silo,
+                                new_silo_params.identity.name.as_str(),
+                            ),
+                        ))
+                    })?;
+                self.virtual_provisioning_collection_create_on_connection(
+                    &conn,
+                    VirtualProvisioningCollection::new(
                         silo.id(),
-                        Uuid::new_v4(),
-                        ServiceKind::Nexus,
-                        c,
-                        new_silo_dns_names,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(Error::from)?;
-            {
-                use db::schema::certificate::dsl;
-                diesel::insert_into(dsl::certificate)
-                    .values(certificates)
-                    .execute_async(&conn)
+                        CollectionTypeProvisioned::Silo,
+                    ),
+                )
+                .await?;
+
+                if let Some(query) = silo_admin_group_ensure_query {
+                    query.execute_async(&conn).await?;
+                }
+
+                if let Some(queries) = silo_admin_group_role_assignment_queries
+                {
+                    let (delete_old_query, insert_new_query) = queries;
+                    delete_old_query.execute_async(&conn).await?;
+                    insert_new_query.execute_async(&conn).await?;
+                }
+
+                let certificates = new_silo_params
+                    .tls_certificates
+                    .into_iter()
+                    .map(|c| {
+                        Certificate::new(
+                            silo.id(),
+                            Uuid::new_v4(),
+                            ServiceKind::Nexus,
+                            c,
+                            new_silo_dns_names,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(Error::from)?;
+                {
+                    use nexus_db_schema::schema::certificate::dsl;
+                    diesel::insert_into(dsl::certificate)
+                        .values(certificates)
+                        .execute_async(&conn)
+                        .await?;
+                }
+
+                self.dns_update_incremental(nexus_opctx, &conn, dns_update)
                     .await?;
-            }
 
-            self.dns_update(nexus_opctx, &conn, dns_update).await?;
+                self.silo_quotas_create(
+                    &conn,
+                    &authz_silo,
+                    SiloQuotas::new(
+                        authz_silo.id(),
+                        new_silo_params.quotas.cpus,
+                        new_silo_params.quotas.memory.into(),
+                        new_silo_params.quotas.storage.into(),
+                    ),
+                )
+                .await?;
 
-            Ok(silo)
-        })
-        .await
-        .map_err(|e| match e {
-            TransactionError::CustomError(e) => e,
-            TransactionError::Database(e) => {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
-        })
+                Ok::<Silo, TransactionError<Error>>(silo)
+            })
+            .await?;
+        Ok(silo)
     }
 
     pub async fn silos_list_by_id(
@@ -273,7 +314,7 @@ impl DataStore {
     ) -> ListResultVec<Silo> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        use db::schema::silo::dsl;
+        use nexus_db_schema::schema::silo::dsl;
         paginated(dsl::silo, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::discoverable.eq(true))
@@ -291,7 +332,7 @@ impl DataStore {
     ) -> ListResultVec<Silo> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        use db::schema::silo::dsl;
+        use nexus_db_schema::schema::silo::dsl;
         let mut query = match pagparams {
             PaginatedBy::Id(params) => paginated(dsl::silo, dsl::id, &params),
             PaginatedBy::Name(params) => paginated(
@@ -314,6 +355,34 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// List all Silos, making as many queries as needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn silo_list_all_batched(
+        &self,
+        opctx: &OpContext,
+        discoverability: Discoverability,
+    ) -> ListResultVec<Silo> {
+        opctx.check_complex_operations_allowed()?;
+        let mut all_silos = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .silos_list(
+                    opctx,
+                    &PaginatedBy::Id(p.current_pagparams()),
+                    discoverability,
+                )
+                .await?;
+            paginator =
+                p.found_batch(&batch, &|s: &nexus_db_model::Silo| s.id());
+            all_silos.extend(batch);
+        }
+        Ok(all_silos)
+    }
+
     pub async fn silo_delete(
         &self,
         opctx: &OpContext,
@@ -325,12 +394,12 @@ impl DataStore {
         assert_eq!(authz_silo.id(), db_silo.id());
         opctx.authorize(authz::Action::Delete, authz_silo).await?;
 
-        use db::schema::project;
-        use db::schema::silo;
-        use db::schema::silo_group;
-        use db::schema::silo_group_membership;
-        use db::schema::silo_user;
-        use db::schema::silo_user_password_hash;
+        use nexus_db_schema::schema::project;
+        use nexus_db_schema::schema::silo;
+        use nexus_db_schema::schema::silo_group;
+        use nexus_db_schema::schema::silo_group_membership;
+        use nexus_db_schema::schema::silo_user;
+        use nexus_db_schema::schema::silo_user_password_hash;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -348,55 +417,60 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if project_found.is_some() {
-            return Err(Error::InvalidRequest {
-                message: "silo to be deleted contains a project".to_string(),
-            });
+            return Err(Error::invalid_request(
+                "silo to be deleted contains a project",
+            ));
         }
 
         let now = Utc::now();
 
         type TxnError = TransactionError<Error>;
-        conn.transaction_async(|conn| async move {
-            let updated_rows = diesel::update(silo::dsl::silo)
-                .filter(silo::dsl::time_deleted.is_null())
-                .filter(silo::dsl::id.eq(id))
-                .filter(silo::dsl::rcgen.eq(rcgen))
-                .set(silo::dsl::time_deleted.eq(now))
-                .execute_async(&conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByResource(authz_silo),
-                    )
-                })?;
 
-            if updated_rows == 0 {
-                return Err(TxnError::CustomError(Error::InvalidRequest {
-                    message:
-                        "silo deletion failed due to concurrent modification"
-                            .to_string(),
-                }));
-            }
+        // This method uses nested transactions, which are not supported
+        // with retryable transactions.
+        self.transaction_non_retry_wrapper("silo_delete")
+            .transaction(&conn, |conn| async move {
+                let updated_rows = diesel::update(silo::dsl::silo)
+                    .filter(silo::dsl::time_deleted.is_null())
+                    .filter(silo::dsl::id.eq(id))
+                    .filter(silo::dsl::rcgen.eq(rcgen))
+                    .set(silo::dsl::time_deleted.eq(now))
+                    .execute_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(
+                            e,
+                            ErrorHandler::NotFoundByResource(authz_silo),
+                        )
+                    })?;
 
-            self.virtual_provisioning_collection_delete_on_connection(
-                &conn, id,
-            )
-            .await?;
+                if updated_rows == 0 {
+                    return Err(TxnError::CustomError(Error::invalid_request(
+                        "silo deletion failed due to concurrent modification",
+                    )));
+                }
 
-            self.dns_update(dns_opctx, &conn, dns_update).await?;
+                self.silo_quotas_delete(opctx, &conn, &authz_silo).await?;
 
-            info!(opctx.log, "deleted silo {}", id);
+                self.virtual_provisioning_collection_delete_on_connection(
+                    &opctx.log, &conn, id,
+                )
+                .await?;
 
-            Ok(())
-        })
-        .await
-        .map_err(|e| match e {
-            TxnError::CustomError(e) => e,
-            TxnError::Database(e) => {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
-        })?;
+                self.dns_update_incremental(dns_opctx, &conn, dns_update)
+                    .await?;
+
+                info!(opctx.log, "deleted silo {}", id);
+
+                Ok(())
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(e) => e,
+                TxnError::Database(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })?;
 
         // TODO-correctness This needs to happen in a saga or some other
         // mechanism that ensures it happens even if we crash at this point.
@@ -472,7 +546,7 @@ impl DataStore {
         );
 
         // delete all silo identity providers
-        use db::schema::identity_provider::dsl as idp_dsl;
+        use nexus_db_schema::schema::identity_provider::dsl as idp_dsl;
 
         let updated_rows = diesel::update(idp_dsl::identity_provider)
             .filter(idp_dsl::silo_id.eq(id))
@@ -484,7 +558,7 @@ impl DataStore {
 
         debug!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
 
-        use db::schema::saml_identity_provider::dsl as saml_idp_dsl;
+        use nexus_db_schema::schema::saml_identity_provider::dsl as saml_idp_dsl;
 
         let updated_rows = diesel::update(saml_idp_dsl::saml_identity_provider)
             .filter(saml_idp_dsl::silo_id.eq(id))
@@ -500,7 +574,7 @@ impl DataStore {
         );
 
         // delete certificates
-        use db::schema::certificate::dsl as cert_dsl;
+        use nexus_db_schema::schema::certificate::dsl as cert_dsl;
 
         let updated_rows = diesel::update(cert_dsl::certificate)
             .filter(cert_dsl::silo_id.eq(id))
@@ -511,6 +585,23 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         debug!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
+
+        // delete IP pool links (not IP pools, just the links)
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let updated_rows = diesel::delete(ip_pool_resource::table)
+            .filter(ip_pool_resource::resource_id.eq(id))
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        debug!(
+            opctx.log,
+            "deleted {} IP pool links for silo {}", updated_rows, id
+        );
 
         Ok(())
     }

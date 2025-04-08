@@ -13,22 +13,19 @@ use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
-use omicron_common::{
-    api::internal::nexus::KnownArtifactKind,
-    update::{ArtifactHashId, ArtifactKind},
-};
-use tokio::sync::watch;
+use tokio::sync::oneshot;
+use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
 use update_engine::NestedError;
 use uuid::Uuid;
 use wicket::OutputKind;
 use wicket_common::{
-    rack_update::{ClearUpdateStateResponse, SpIdentifier, SpType},
+    inventory::{SpIdentifier, SpType},
+    rack_update::{ClearUpdateStateResponse, StartUpdateOptions},
     update_events::{StepEventKind, UpdateComponent},
 };
 use wicketd::{RunningUpdateState, StartUpdateError};
 use wicketd_client::types::{
-    GetInventoryParams, GetInventoryResponse, StartUpdateOptions,
-    StartUpdateParams,
+    GetInventoryParams, GetInventoryResponse, StartUpdateParams,
 };
 
 // See documentation for extract_nested_artifact_pair in update_plan.rs for why
@@ -45,7 +42,7 @@ async fn test_updates() {
     let args = tufaceous::Args::try_parse_from([
         "tufaceous",
         "assemble",
-        "../tufaceous/manifests/fake.toml",
+        "../update-common/manifests/fake.toml",
         archive_path.as_str(),
     ])
     .expect("args parsed correctly");
@@ -69,9 +66,12 @@ async fn test_updates() {
         .expect("get_artifacts_and_event_reports succeeded")
         .into_inner();
 
-    // We should have an artifact for every known artifact kind...
-    let expected_kinds: BTreeSet<_> =
-        KnownArtifactKind::iter().map(ArtifactKind::from).collect();
+    // We should have an artifact for every known artifact kind (except
+    // `Zone`)...
+    let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
+        .filter(|k| !matches!(k, KnownArtifactKind::Zone))
+        .map(ArtifactKind::from)
+        .collect();
 
     // ... and installable artifacts that replace the top level host,
     // trampoline, and RoT with their inner parts (phase1/phase2 for OS images
@@ -105,7 +105,7 @@ async fn test_updates() {
     let mut kinds = BTreeSet::new();
     let mut installable_kinds = BTreeSet::new();
     for artifact in response.artifacts {
-        kinds.insert(artifact.artifact_id.kind.parse().unwrap());
+        kinds.insert(artifact.artifact_id.kind);
         for installable in artifact.installable {
             installable_kinds.insert(installable.kind.parse().unwrap());
         }
@@ -128,7 +128,13 @@ async fn test_updates() {
     match resp.into_inner() {
         GetInventoryResponse::Response { inventory, .. } => {
             let mut found = false;
-            for sp in &inventory.sps {
+            for sp in &inventory
+                .mgs
+                .as_ref()
+                .expect("Should have MGS inventory")
+                .inventory
+                .sps
+            {
                 if sp.id == target_sp {
                     assert!(sp.state.is_some(), "no state for target SP");
                     found = true;
@@ -271,10 +277,16 @@ async fn test_installinator_fetch() {
     let temp_dir = Utf8TempDir::new().expect("temp dir created");
     let archive_path = temp_dir.path().join("archive.zip");
 
+    // Test ingestion of an artifact with non-semver versions. This ensures that
+    // wicketd for v14 and above can handle non-semver versions.
+    //
+    // --allow-non-semver can be removed once customer systems are updated to
+    // v14 and above.
     let args = tufaceous::Args::try_parse_from([
         "tufaceous",
         "assemble",
-        "../tufaceous/manifests/fake.toml",
+        "../update-common/manifests/fake-non-semver.toml",
+        "--allow-non-semver",
         archive_path.as_str(),
     ])
     .expect("args parsed correctly");
@@ -413,7 +425,7 @@ async fn test_update_races() {
     let args = tufaceous::Args::try_parse_from([
         "tufaceous",
         "assemble",
-        "../tufaceous/manifests/fake.toml",
+        "../update-common/manifests/fake.toml",
         archive_path.as_str(),
     ])
     .expect("args parsed correctly");
@@ -430,13 +442,10 @@ async fn test_update_races() {
         .expect("bytes read and archived");
 
     // Now start an update.
-    let sp = gateway_client::types::SpIdentifier {
-        slot: 0,
-        type_: gateway_client::types::SpType::Sled,
-    };
+    let sp = SpIdentifier { slot: 0, type_: SpType::Sled };
     let sps: BTreeSet<_> = vec![sp].into_iter().collect();
 
-    let (sender, receiver) = watch::channel(());
+    let (sender, receiver) = oneshot::channel();
     wicketd_testctx
         .server
         .update_tracker
@@ -455,7 +464,7 @@ async fn test_update_races() {
     // Also try starting another fake update, which should fail -- we don't let updates be started
     // if there's current update state.
     {
-        let (_, receiver) = watch::channel(());
+        let (_, receiver) = oneshot::channel();
         let err = wicketd_testctx
             .server
             .update_tracker
@@ -470,9 +479,10 @@ async fn test_update_races() {
     }
 
     // Unblock the update, letting it run to completion.
-    sender.send(()).expect("receiver kept open by update engine");
+    let (final_sender, final_receiver) = oneshot::channel();
+    sender.send(final_sender).expect("receiver kept open by update engine");
+    final_receiver.await.expect("update engine completed successfully");
 
-    // Ensure that the event buffer indicates completion.
     let event_buffer = wicketd_testctx
         .wicketd_client
         .get_update_sp(&SpType::Sled, 0)

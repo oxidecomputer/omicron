@@ -8,8 +8,8 @@
 //! TODO-coverage add test for racks, sleds
 
 use dropshot::HttpErrorResponseBody;
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views::{self, Project};
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -50,7 +50,6 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
             expected_error: "Not Found",
             body: None,
         },
-
         // Error case: a possible value that does not exist inside a collection
         // that does exist) from an authorized user results in a 404.
         TestCase {
@@ -205,13 +204,13 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(initial_projects.len(), 3);
     assert_eq!(initial_projects[0].identity.id, new_project_ids[0]);
     assert_eq!(initial_projects[0].identity.name, "simproject1");
-    assert!(initial_projects[0].identity.description.len() > 0);
+    assert!(!initial_projects[0].identity.description.is_empty());
     assert_eq!(initial_projects[1].identity.id, new_project_ids[1]);
     assert_eq!(initial_projects[1].identity.name, "simproject2");
-    assert!(initial_projects[1].identity.description.len() > 0);
+    assert!(!initial_projects[1].identity.description.is_empty());
     assert_eq!(initial_projects[2].identity.id, new_project_ids[2]);
     assert_eq!(initial_projects[2].identity.name, "simproject3");
-    assert!(initial_projects[2].identity.description.len() > 0);
+    assert!(!initial_projects[2].identity.description.is_empty());
 
     // Basic test of out-of-the-box GET project
     let project = project_get(&client, "/v1/projects/simproject2").await;
@@ -219,7 +218,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project.identity.id, expected.identity.id);
     assert_eq!(project.identity.name, expected.identity.name);
     assert_eq!(project.identity.description, expected.identity.description);
-    assert!(project.identity.description.len() > 0);
+    assert!(!project.identity.description.is_empty());
 
     // Delete "simproject2", but first delete:
     // - The default subnet within the default VPC
@@ -440,7 +439,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(projects[1].identity.name, "lil-lightnin");
     assert_eq!(projects[1].identity.description, "little lightning");
     assert_eq!(projects[2].identity.name, "simproject1");
-    assert!(projects[2].identity.description.len() > 0);
+    assert!(!projects[2].identity.description.is_empty());
 }
 
 #[nexus_test]

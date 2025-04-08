@@ -3,7 +3,6 @@ See README.adoc for more information
 Usage: oximeter <COMMAND>
 
 Commands:
-  openapi             Print the external OpenAPI Spec document and exit
   run                 Start an Oximeter server
   standalone          Run `oximeter` in standalone mode for development
   standalone-openapi  Print the fake Nexus's standalone API

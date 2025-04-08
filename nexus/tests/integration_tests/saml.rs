@@ -9,17 +9,17 @@ use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{create_silo, object_create};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::shared::RelayState;
 use nexus_types::external_api::views::{self, Silo};
 use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_nexus::external_api::console_api;
 use omicron_nexus::TestInterfaces;
 
 use base64::Engine;
 use dropshot::ResultsPage;
-use http::method::Method;
 use http::StatusCode;
-use httptest::{matchers::*, responders::*, Expectation, Server};
+use http::method::Method;
+use httptest::{Expectation, Server, matchers::*, responders::*};
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -91,7 +91,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Assert external authenticator opctx can read it
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let (.., _retrieved_silo_nexus) = nexus
         .silo_lookup(
             &nexus.opctx_external_authn(),
@@ -106,20 +106,23 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    let (.., retrieved_silo_idp_from_nexus) = IdentityProviderType::lookup(
-        &nexus.datastore(),
-        &nexus.opctx_external_authn(),
-        &omicron_common::api::external::Name::try_from(SILO_NAME.to_string())
+    let (.., retrieved_silo_idp_from_nexus) = nexus
+        .datastore()
+        .identity_provider_lookup(
+            &nexus.opctx_external_authn(),
+            &omicron_common::api::external::Name::try_from(
+                SILO_NAME.to_string(),
+            )
             .unwrap()
             .into(),
-        &omicron_common::api::external::Name::try_from(
-            "some-totally-real-saml-provider".to_string(),
+            &omicron_common::api::external::Name::try_from(
+                "some-totally-real-saml-provider".to_string(),
+            )
+            .unwrap()
+            .into(),
         )
-        .unwrap()
-        .into(),
-    )
-    .await
-    .unwrap();
+        .await
+        .unwrap();
 
     match retrieved_silo_idp_from_nexus {
         IdentityProviderType::Saml(_) => {
@@ -143,13 +146,11 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("expected success");
 
-    assert!(result.headers["Location"]
-        .to_str()
-        .unwrap()
-        .to_string()
-        .starts_with(
+    assert!(
+        result.headers["Location"].to_str().unwrap().to_string().starts_with(
             "https://idp.example.org/SAML2/SSO/Redirect?SAMLRequest=",
-        ));
+        )
+    );
 }
 
 // Fail to create a SAML IdP out of an invalid descriptor
@@ -237,8 +238,10 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
             .join("\n")
     };
 
-    assert!(!saml_idp_descriptor
-        .contains("urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"));
+    assert!(
+        !saml_idp_descriptor
+            .contains("urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect")
+    );
 
     let server = Server::run();
     server.expect(
@@ -461,13 +464,11 @@ async fn test_create_a_hidden_silo_saml_idp(
     .await
     .expect("expected success");
 
-    assert!(result.headers["Location"]
-        .to_str()
-        .unwrap()
-        .to_string()
-        .starts_with(
+    assert!(
+        result.headers["Location"].to_str().unwrap().to_string().starts_with(
             "https://idp.example.org/SAML2/SSO/Redirect?SAMLRequest=",
-        ));
+        )
+    );
 }
 
 // Can't create a SAML IdP if the metadata URL returns something that's not 200
@@ -964,12 +965,33 @@ fn test_reject_unsigned_saml_response() {
     assert!(result.is_err());
 }
 
-// Test rejecting a correct SAML response that contains a XML comment in
-// saml:NameID.
+// Test accepting a correct SAML response that contains a XML comment in
+// saml:NameID, and ensuring that the full text node is extracted (and not a
+// substring).
 //
-// See: https://duo.com/blog/duo-finds-saml-vulnerabilities-affecting-multiple-implementations
+// This used to be a test that _rejected_ such responses, but a change to an
+// upstream dependency (quick-xml) caused the behavior around text nodes with
+// embedded comments to change. Specifically, consider:
+//
+// <saml:NameId>user@example.com<!--comment-->.evil.com</saml:NameId>
+//
+// What should the text node for this element be?
+//
+// * Some XML parsing libraries just return "user@example.com". That leads to a
+//   vulnerability, where an attacker can get a response signed with a
+//   different email address than intended.
+// * Some XML libraries return "user@example.com.evil.com". This is safe,
+//   because the text after the comment hasn't been dropped. This is the behavior
+//   with quick-xml 0.30, and the one that we're testing here.
+// * Some XML libraries are unable to deserialize the document. This is also
+//   safe (and not particularly problematic because typically SAML responses
+//   aren't going to contain comments), and was the behavior with quick-xml
+//   0.23.
+//
+// See:
+// https://duo.com/blog/duo-finds-saml-vulnerabilities-affecting-multiple-implementations
 #[test]
-fn test_reject_saml_response_with_xml_comment() {
+fn test_handle_saml_response_with_xml_comment() {
     let silo_saml_identity_provider = SamlIdentityProvider {
         idp_metadata_document_string: SAML_RESPONSE_IDP_DESCRIPTOR.to_string(),
 
@@ -1004,7 +1026,9 @@ fn test_reject_saml_response_with_xml_comment() {
         ),
     );
 
-    assert!(result.is_err());
+    let (authenticated_subject, _) =
+        result.expect("expected validation to succeed");
+    assert_eq!(authenticated_subject.external_id, "some@customer.com");
 }
 
 // Test receiving a correct SAML response that has group attributes
@@ -1144,7 +1168,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     nexus.set_samael_max_issue_delay(
         chrono::Utc::now()
             - "2022-05-04T15:36:12.631Z"
@@ -1275,7 +1299,7 @@ async fn test_post_saml_response_with_relay_state(
     )
     .await;
 
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     nexus.set_samael_max_issue_delay(
         chrono::Utc::now()
             - "2022-05-04T15:36:12.631Z"
@@ -1284,7 +1308,7 @@ async fn test_post_saml_response_with_relay_state(
             + chrono::Duration::seconds(60),
     );
 
-    let result = NexusRequest::new(
+    let result_with_relay_state = NexusRequest::new(
         RequestBuilder::new(
             client,
             Method::POST,
@@ -1298,7 +1322,7 @@ async fn test_post_saml_response_with_relay_state(
                 saml_response: base64::engine::general_purpose::STANDARD
                     .encode(SAML_RESPONSE),
                 relay_state: Some(
-                    console_api::RelayState {
+                    RelayState {
                         redirect_uri: Some(
                             "/some/actual/nexus/url".parse().unwrap(),
                         ),
@@ -1315,9 +1339,39 @@ async fn test_post_saml_response_with_relay_state(
     .await
     .expect("expected success");
 
-    assert!(result.headers["Location"]
-        .to_str()
-        .unwrap()
-        .to_string()
-        .ends_with("/some/actual/nexus/url"));
+    assert!(
+        result_with_relay_state.headers["Location"]
+            .to_str()
+            .unwrap()
+            .to_string()
+            .ends_with("/some/actual/nexus/url")
+    );
+
+    let result_with_invalid_relay_state = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!(
+                "/login/{}/saml/some-totally-real-saml-provider",
+                SILO_NAME
+            ),
+        )
+        .raw_body(Some(
+            serde_urlencoded::to_string(SamlLoginPost {
+                saml_response: base64::engine::general_purpose::STANDARD
+                    .encode(SAML_RESPONSE),
+                relay_state: Some("some-idp-set-value".to_string()),
+            })
+            .unwrap(),
+        ))
+        .expect_status(Some(StatusCode::SEE_OTHER)),
+    )
+    .execute()
+    .await
+    .expect("expected success");
+
+    assert_eq!(
+        result_with_invalid_relay_state.headers["Location"].to_str().unwrap(),
+        "/"
+    );
 }

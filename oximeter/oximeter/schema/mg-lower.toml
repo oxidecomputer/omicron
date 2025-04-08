@@ -1,0 +1,40 @@
+format_version = 1
+
+[target]
+name = "mg_lower"
+description = """\
+The lower-half of the Oxide Maghemite routing daemon, \
+which syncs routing information to an underlying routing platform, \
+such as a switch ASIC. The routing information may be programmed \
+directly from the control plane, or learned through routing protocols \
+exchanging information with peers.\
+"""
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "hostname", "rack_id", "sled_id" ] },
+]
+
+[[metrics]]
+name = "routes_blocked_by_link_state"
+description = """\
+The current number of routes that cannot be used \
+because the link through which they should be available \
+is not in a usable state\
+"""
+units = "count"
+datum_type = "u64"
+versions = [
+    { added_in = 1, fields = [ ] }
+]
+
+[fields.hostname]
+type = "string"
+description = "The hostname of the machine running the router"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID of the rack running the router"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID of the sled running the router"

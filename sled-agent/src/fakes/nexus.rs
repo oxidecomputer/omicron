@@ -8,13 +8,18 @@
 //! to operate correctly.
 
 use dropshot::{
-    endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk, Path,
-    RequestContext,
+    ApiDescription, HttpError, HttpResponseOk, HttpResponseUpdatedNoContent,
+    Path, RequestContext, TypedBody, endpoint,
 };
-use hyper::Body;
-use internal_dns::ServiceName;
+use internal_dns_types::config::DnsConfigBuilder;
+use internal_dns_types::names::ServiceName;
+use nexus_client::types::SledAgentInfo;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::api::internal::nexus::SledVmmState;
+use omicron_uuid_kinds::{OmicronZoneUuid, PropolisUuid, SledUuid};
+use schemars::JsonSchema;
+use serde::Deserialize;
+use sled_agent_api::VmmPathParam;
 
 /// Implements a fake Nexus.
 ///
@@ -22,10 +27,26 @@ use omicron_common::api::internal::nexus::UpdateArtifactId;
 /// - Not all methods should be called by all tests. By default,
 /// each method, representing an endpoint, should return an error.
 pub trait FakeNexusServer: Send + Sync {
-    fn cpapi_artifact_download(
+    fn sled_agent_get(
         &self,
-        _artifact_id: UpdateArtifactId,
-    ) -> Result<Vec<u8>, Error> {
+        _sled_id: SledUuid,
+    ) -> Result<SledAgentInfo, Error> {
+        Err(Error::internal_error("Not implemented"))
+    }
+
+    fn sled_agent_put(
+        &self,
+        _sled_id: SledUuid,
+        _info: SledAgentInfo,
+    ) -> Result<(), Error> {
+        Err(Error::internal_error("Not implemented"))
+    }
+
+    fn cpapi_instances_put(
+        &self,
+        _propolis_id: PropolisUuid,
+        _new_runtime_state: SledVmmState,
+    ) -> Result<(), Error> {
         Err(Error::internal_error("Not implemented"))
     }
 }
@@ -36,25 +57,67 @@ pub trait FakeNexusServer: Send + Sync {
 /// [`start_test_server`].
 pub type ServerContext = Box<dyn FakeNexusServer>;
 
+/// Path parameters for Sled Agent requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+struct SledAgentPathParam {
+    sled_id: SledUuid,
+}
+
+/// Return information about the given sled agent
 #[endpoint {
-    method = GET,
-    path = "/artifacts/{kind}/{name}/{version}",
-}]
-async fn cpapi_artifact_download(
+     method = GET,
+     path = "/sled-agents/{sled_id}",
+ }]
+async fn sled_agent_get(
     request_context: RequestContext<ServerContext>,
-    path_params: Path<UpdateArtifactId>,
-) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+    path_params: Path<SledAgentPathParam>,
+) -> Result<HttpResponseOk<SledAgentInfo>, HttpError> {
     let context = request_context.context();
 
     Ok(HttpResponseOk(
-        Body::from(context.cpapi_artifact_download(path_params.into_inner())?)
-            .into(),
+        context.sled_agent_get(path_params.into_inner().sled_id)?,
     ))
+}
+
+#[endpoint {
+     method = POST,
+     path = "/sled-agents/{sled_id}",
+ }]
+async fn sled_agent_put(
+    request_context: RequestContext<ServerContext>,
+    path_params: Path<SledAgentPathParam>,
+    sled_info: TypedBody<SledAgentInfo>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let context = request_context.context();
+    context.sled_agent_put(
+        path_params.into_inner().sled_id,
+        sled_info.into_inner(),
+    )?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/vmms/{propolis_id}",
+}]
+async fn cpapi_instances_put(
+    request_context: RequestContext<ServerContext>,
+    path_params: Path<VmmPathParam>,
+    new_runtime_state: TypedBody<SledVmmState>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let context = request_context.context();
+    context.cpapi_instances_put(
+        path_params.into_inner().propolis_id,
+        new_runtime_state.into_inner(),
+    )?;
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 fn api() -> ApiDescription<ServerContext> {
     let mut api = ApiDescription::new();
-    api.register(cpapi_artifact_download).unwrap();
+    api.register(sled_agent_get).unwrap();
+    api.register(sled_agent_put).unwrap();
+    api.register(cpapi_instances_put).unwrap();
     api
 }
 
@@ -69,9 +132,10 @@ pub fn start_test_server(
         bind_address: "[::1]:0".parse().unwrap(),
         ..Default::default()
     };
-    dropshot::HttpServerStarter::new(&config_dropshot, api(), label, &log)
-        .unwrap()
+    dropshot::ServerBuilder::new(api(), label, log)
+        .config(config_dropshot)
         .start()
+        .unwrap()
 }
 
 /// Creates a transient DNS server pointing to a fake Nexus dropshot server.
@@ -81,7 +145,7 @@ pub async fn start_dns_server(
     nexus: &dropshot::HttpServer<ServerContext>,
 ) -> dns_server::TransientServer {
     let dns = dns_server::TransientServer::new(log).await.unwrap();
-    let mut dns_config_builder = internal_dns::DnsConfigBuilder::new();
+    let mut dns_config_builder = DnsConfigBuilder::new();
 
     let nexus_addr = match nexus.local_addr() {
         std::net::SocketAddr::V6(addr) => addr,
@@ -89,7 +153,7 @@ pub async fn start_dns_server(
     };
 
     let nexus_zone = dns_config_builder
-        .host_zone(uuid::Uuid::new_v4(), *nexus_addr.ip())
+        .host_zone(OmicronZoneUuid::new_v4(), *nexus_addr.ip())
         .expect("failed to set up DNS");
     dns_config_builder
         .service_backend_zone(
@@ -98,7 +162,8 @@ pub async fn start_dns_server(
             nexus_addr.port(),
         )
         .expect("failed to set up DNS");
-    let dns_config = dns_config_builder.build();
+    let dns_config =
+        dns_config_builder.build_full_config_for_initial_generation();
     dns.initialize_with_config(log, &dns_config).await.unwrap();
     dns
 }

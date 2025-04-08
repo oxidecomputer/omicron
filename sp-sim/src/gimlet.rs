@@ -2,29 +2,32 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::Responsiveness;
+use crate::SIM_ROT_BOARD;
+use crate::SimulatedSp;
 use crate::config::GimletConfig;
 use crate::config::SpComponentConfig;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
-use crate::rot::RotSprocketExt;
+use crate::sensors::Sensors;
 use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::update::SimSpUpdate;
-use crate::Responsiveness;
-use crate::SimulatedSp;
-use crate::SIM_ROT_BOARD;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
-use futures::future;
 use futures::Future;
-use gateway_messages::ignition::{self, LinkEvents};
-use gateway_messages::sp_impl::SpHandler;
-use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
+use futures::future;
 use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
+use gateway_messages::ComponentActionResponse;
+use gateway_messages::DumpSegment;
+use gateway_messages::DumpTask;
 use gateway_messages::Header;
+use gateway_messages::MgsRequest;
+use gateway_messages::MgsResponse;
+use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
 use gateway_messages::RotResponse;
 use gateway_messages::RotSlotId;
@@ -33,13 +36,15 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
 use gateway_messages::SpStateV2;
-use gateway_messages::{version, MessageKind};
+use gateway_messages::ignition::{self, LinkEvents};
+use gateway_messages::sp_impl::Sender;
+use gateway_messages::sp_impl::SpHandler;
+use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
 use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
 use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
-use slog::{debug, error, info, warn, Logger};
-use sprockets_rot::common::msgs::{RotRequestV1, RotResponseV1};
-use sprockets_rot::common::Ed25519PublicKey;
-use sprockets_rot::{RotSprocket, RotSprocketError};
+use gateway_messages::{MessageKind, version};
+use gateway_types::component::SpState;
+use slog::{Logger, debug, error, info, warn};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::iter;
@@ -49,23 +54,55 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::select;
+use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::sync::watch;
-use tokio::sync::Mutex as TokioMutex;
 use tokio::task::{self, JoinHandle};
 
 pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
+const SP_GITC0: &[u8] = b"ffffffff";
+const SP_GITC1: &[u8] = b"fefefefe";
+const SP_BORD: &[u8] = SIM_GIMLET_BOARD.as_bytes();
+const SP_NAME: &[u8] = b"SimGimlet";
+const SP_VERS0: &[u8] = b"0.0.2";
+const SP_VERS1: &[u8] = b"0.0.1";
+
+const ROT_GITC0: &[u8] = b"eeeeeeee";
+const ROT_GITC1: &[u8] = b"edededed";
+const ROT_BORD: &[u8] = SIM_ROT_BOARD.as_bytes();
+const ROT_NAME: &[u8] = b"SimGimletRot";
+const ROT_VERS0: &[u8] = b"0.0.4";
+const ROT_VERS1: &[u8] = b"0.0.3";
+
+// Type alias for the remote end of an MGS serial console connection.
+type AttachedMgsSerialConsole =
+    Arc<Mutex<Option<(SpComponent, Sender<SpPort>)>>>;
+
+/// Type of request most recently handled by a simulated SP.
+///
+/// Many request types are not covered by this enum. This only exists to enable
+/// certain particular tests.
+// If you need an additional request type to be reported by this enum, feel free
+// to add it and update the appropriate `Handler` function below (see
+// `update_status()`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimSpHandledRequest {
+    /// The most recent request was for the update status of a component.
+    ComponentUpdateStatus(SpComponent),
+    /// The most recent request was some other type that is currently not
+    /// implemented in this tracker.
+    NotImplemented,
+}
 
 pub struct Gimlet {
-    rot: Mutex<RotSprocket>,
-    manufacturing_public_key: Ed25519PublicKey,
     local_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
     commands: mpsc::UnboundedSender<Command>,
     inner_tasks: Vec<JoinHandle<()>>,
     responses_sent_count: Option<watch::Receiver<usize>>,
+    last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
 }
 
 impl Drop for Gimlet {
@@ -79,14 +116,10 @@ impl Drop for Gimlet {
 
 #[async_trait]
 impl SimulatedSp for Gimlet {
-    async fn state(&self) -> omicron_gateway::http_entrypoints::SpState {
-        omicron_gateway::http_entrypoints::SpState::from(
+    async fn state(&self) -> SpState {
+        SpState::from(
             self.handler.as_ref().unwrap().lock().await.sp_state_impl(),
         )
-    }
-
-    fn manufacturing_public_key(&self) -> Ed25519PublicKey {
-        self.manufacturing_public_key
     }
 
     fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
@@ -104,13 +137,6 @@ impl SimulatedSp for Gimlet {
         }
     }
 
-    fn rot_request(
-        &self,
-        request: RotRequestV1,
-    ) -> Result<RotResponseV1, RotSprocketError> {
-        self.rot.lock().unwrap().handle_deserialized(request)
-    }
-
     async fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
         let handler = self.handler.as_ref()?;
         let handler = handler.lock().await;
@@ -121,6 +147,15 @@ impl SimulatedSp for Gimlet {
         let handler = self.handler.as_ref()?;
         let handler = handler.lock().await;
         handler.update_state.last_rot_update_data()
+    }
+
+    async fn last_host_phase1_update_data(
+        &self,
+        slot: u16,
+    ) -> Option<Box<[u8]>> {
+        let handler = self.handler.as_ref()?;
+        let handler = handler.lock().await;
+        handler.update_state.last_host_phase1_update_data(slot)
     }
 
     async fn current_update_status(&self) -> gateway_messages::UpdateStatus {
@@ -159,33 +194,32 @@ impl Gimlet {
         let mut serial_console_addrs = HashMap::new();
         let mut inner_tasks = Vec::new();
         let (commands, commands_rx) = mpsc::unbounded_channel();
+        let last_request_handled = Arc::default();
 
-        let (manufacturing_public_key, rot) =
-            RotSprocket::bootstrap_from_config(&gimlet.common);
-
-        // Weird case - if we don't have any bind addresses, we're only being
+        // Weird case - if we don't have any network config, we're only being
         // created to simulate an RoT, so go ahead and return without actually
         // starting a simulated SP.
-        let Some(bind_addrs) = gimlet.common.bind_addrs else {
+        let Some(network_config) = &gimlet.common.network_config else {
             return Ok(Self {
-                rot: Mutex::new(rot),
-                manufacturing_public_key,
                 local_addrs: None,
                 handler: None,
                 serial_console_addrs,
                 commands,
                 inner_tasks,
                 responses_sent_count: None,
+                last_request_handled,
             });
         };
 
         // bind to our two local "KSZ" ports
-        assert_eq!(bind_addrs.len(), 2); // gimlet SP always has 2 ports
+        assert_eq!(network_config.len(), 2); // gimlet SP always has 2 ports
+
         let servers = future::try_join(
-            UdpServer::new(bind_addrs[0], gimlet.common.multicast_addr, &log),
-            UdpServer::new(bind_addrs[1], gimlet.common.multicast_addr, &log),
+            UdpServer::new(&network_config[0], &log),
+            UdpServer::new(&network_config[1], &log),
         )
         .await?;
+
         let servers = [servers.0, servers.1];
 
         for component_config in &gimlet.common.components {
@@ -210,9 +244,9 @@ impl Gimlet {
                         .to_string(),
                     listener
                         .local_addr()
-                        .with_context(|| {
-                            "failed to get local address of bound socket"
-                        })
+                        .with_context(
+                            || "failed to get local address of bound socket",
+                        )
                         .and_then(|addr| match addr {
                             SocketAddr::V4(addr) => {
                                 bail!("bound IPv4 address {}", addr)
@@ -248,25 +282,31 @@ impl Gimlet {
             gimlet.common.serial_number.clone(),
             incoming_console_tx,
             commands_rx,
+            Arc::clone(&last_request_handled),
             log,
+            gimlet.common.old_rot_state,
+            gimlet.common.no_stage0_caboose,
         );
         inner_tasks
             .push(task::spawn(async move { inner.run().await.unwrap() }));
 
         Ok(Self {
-            rot: Mutex::new(rot),
-            manufacturing_public_key,
             local_addrs: Some(local_addrs),
             handler: Some(handler),
             serial_console_addrs,
             commands,
             inner_tasks,
             responses_sent_count: Some(responses_sent_count),
+            last_request_handled,
         })
     }
 
     pub fn serial_console_addr(&self, component: &str) -> Option<SocketAddrV6> {
         self.serial_console_addrs.get(component).copied()
+    }
+
+    pub fn last_request_handled(&self) -> Option<SimSpHandledRequest> {
+        *self.last_request_handled.lock().unwrap()
     }
 }
 
@@ -274,7 +314,7 @@ struct SerialConsoleTcpTask {
     listener: TcpListener,
     incoming_serial_console: UnboundedReceiver<Vec<u8>>,
     socks: [Arc<UdpSocket>; 2],
-    attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
+    attached_mgs: AttachedMgsSerialConsole,
     serial_console_tx_offset: u64,
     component: SpComponent,
     log: Logger,
@@ -287,7 +327,7 @@ impl SerialConsoleTcpTask {
         listener: TcpListener,
         incoming_serial_console: UnboundedReceiver<Vec<u8>>,
         socks: [Arc<UdpSocket>; 2],
-        attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
+        attached_mgs: AttachedMgsSerialConsole,
         log: Logger,
     ) -> Self {
         Self {
@@ -309,26 +349,27 @@ impl SerialConsoleTcpTask {
     }
 
     async fn send_serial_console(&mut self, data: &[u8]) -> Result<()> {
-        let (component, sp_port, mgs_addr) =
-            match *self.attached_mgs.lock().unwrap() {
-                Some((component, sp_port, mgs_addr)) => {
-                    (component, sp_port, mgs_addr)
-                }
-                None => {
-                    info!(
-                        self.log,
-                        "No attached MGS; discarding serial console data"
-                    );
-                    return Ok(());
-                }
-            };
+        let (component, sender) = match *self.attached_mgs.lock().unwrap() {
+            Some((component, sender)) => (component, sender),
+            None => {
+                info!(
+                    self.log,
+                    "No attached MGS; discarding serial console data"
+                );
+                return Ok(());
+            }
+        };
 
         if component != self.component {
-            info!(self.log, "MGS is attached to a different component; discarding serial console data");
+            info!(
+                self.log,
+                "MGS is attached to a different component; \
+                 discarding serial console data"
+            );
             return Ok(());
         }
 
-        let sock = match sp_port {
+        let sock = match sender.vid {
             SpPort::One => &self.socks[0],
             SpPort::Two => &self.socks[1],
         };
@@ -351,7 +392,7 @@ impl SerialConsoleTcpTask {
                 &message,
                 &[remaining],
             );
-            sock.send_to(&out[..n], mgs_addr).await?;
+            sock.send_to(&out[..n], sender.addr).await?;
             remaining = &remaining[written..];
             self.serial_console_tx_offset += written as u64;
         }
@@ -450,17 +491,22 @@ struct UdpTask {
     handler: Arc<TokioMutex<Handler>>,
     commands: mpsc::UnboundedReceiver<Command>,
     responses_sent_count: watch::Sender<usize>,
+    last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
 }
 
 impl UdpTask {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         servers: [UdpServer; 2],
         components: Vec<SpComponentConfig>,
-        attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
+        attached_mgs: AttachedMgsSerialConsole,
         serial_number: String,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         commands: mpsc::UnboundedReceiver<Command>,
+        last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
         log: Logger,
+        old_rot_state: bool,
+        no_stage0_caboose: bool,
     ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
@@ -469,6 +515,8 @@ impl UdpTask {
             attached_mgs,
             incoming_serial_console,
             log,
+            old_rot_state,
+            no_stage0_caboose,
         )));
         let responses_sent_count = watch::Sender::new(0);
         let responses_sent_count_rx = responses_sent_count.subscribe();
@@ -479,6 +527,7 @@ impl UdpTask {
                 handler: Arc::clone(&handler),
                 commands,
                 responses_sent_count,
+                last_request_handled,
             },
             handler,
             responses_sent_count_rx,
@@ -504,16 +553,27 @@ impl UdpTask {
                 }
 
                 recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
-                    if let Some((resp, addr)) = server::handle_request(
-                        &mut *self.handler.lock().await,
-                        recv0,
-                        &mut out_buf,
-                        responsiveness,
-                        SpPort::One,
-                    ).await? {
+                    let (result, handled_request) = {
+                        let mut handler = self.handler.lock().await;
+                        handler.last_request_handled = None;
+                        let result = server::handle_request(
+                            &mut *handler,
+                            recv0,
+                            &mut out_buf,
+                            responsiveness,
+                            SpPort::One,
+                        ).await?;
+                        (result,
+                         handler.last_request_handled.unwrap_or(
+                             SimSpHandledRequest::NotImplemented,
+                        ))
+                    };
+                    if let Some((resp, addr)) = result {
                         throttle_count -= 1;
                         self.udp0.send_to(resp, addr).await?;
                         self.responses_sent_count.send_modify(|n| *n += 1);
+                        *self.last_request_handled.lock().unwrap() =
+                            Some(handled_request);
                     }
                 }
 
@@ -577,13 +637,16 @@ struct Handler {
     leaked_component_device_strings: Vec<&'static str>,
     leaked_component_description_strings: Vec<&'static str>,
 
-    attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
+    attached_mgs: AttachedMgsSerialConsole,
     incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
     rot_active_slot: RotSlotId,
     power_state: PowerState,
     startup_options: StartupOptions,
     update_state: SimSpUpdate,
     reset_pending: Option<SpComponent>,
+    sensors: Sensors,
+
+    last_request_handled: Option<SimSpHandledRequest>,
 
     // To simulate an SP reset, we should (after doing whatever housekeeping we
     // need to track the reset) intentionally _fail_ to respond to the request,
@@ -591,15 +654,19 @@ struct Handler {
     // this, our caller will pass us a function to call if they should ignore
     // whatever result we return and fail to respond at all.
     should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
+    no_stage0_caboose: bool,
+    old_rot_state: bool,
 }
 
 impl Handler {
     fn new(
         serial_number: String,
         components: Vec<SpComponentConfig>,
-        attached_mgs: Arc<Mutex<Option<(SpComponent, SpPort, SocketAddrV6)>>>,
+        attached_mgs: AttachedMgsSerialConsole,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         log: Logger,
+        old_rot_state: bool,
+        no_stage0_caboose: bool,
     ) -> Self {
         let mut leaked_component_device_strings =
             Vec::with_capacity(components.len());
@@ -613,9 +680,12 @@ impl Handler {
                 .push(&*Box::leak(c.description.clone().into_boxed_str()));
         }
 
+        let sensors = Sensors::from_component_configs(&components);
+
         Self {
             log,
             components,
+            sensors,
             leaked_component_device_strings,
             leaked_component_description_strings,
             serial_number,
@@ -626,12 +696,16 @@ impl Handler {
             startup_options: StartupOptions::empty(),
             update_state: SimSpUpdate::default(),
             reset_pending: None,
+            last_request_handled: None,
             should_fail_to_respond_signal: None,
+            old_rot_state,
+            no_stage0_caboose,
         }
     }
 
     fn sp_state_impl(&self) -> SpStateV2 {
-        const FAKE_GIMLET_MODEL: &[u8] = b"FAKE_SIM_GIMLET";
+        // Make the Baseboard a PC so that our testbeds work as expected.
+        const FAKE_GIMLET_MODEL: &[u8] = b"i86pc";
 
         let mut model = [0; 32];
         model[..FAKE_GIMLET_MODEL.len()].copy_from_slice(FAKE_GIMLET_MODEL);
@@ -648,8 +722,8 @@ impl Handler {
                 persistent_boot_preference: RotSlotId::A,
                 pending_persistent_boot_preference: None,
                 transient_boot_preference: None,
-                slot_a_sha3_256_digest: None,
-                slot_b_sha3_256_digest: None,
+                slot_a_sha3_256_digest: Some([0x55; 32]),
+                slot_b_sha3_256_digest: Some([0x66; 32]),
             }),
         }
     }
@@ -658,19 +732,34 @@ impl Handler {
 impl SpHandler for Handler {
     type BulkIgnitionStateIter = iter::Empty<IgnitionState>;
     type BulkIgnitionLinkEventsIter = iter::Empty<LinkEvents>;
+    type VLanId = SpPort;
+
+    fn ensure_request_trusted(
+        &mut self,
+        kind: MgsRequest,
+        _sender: Sender<Self::VLanId>,
+    ) -> Result<MgsRequest, SpError> {
+        Ok(kind)
+    }
+
+    fn ensure_response_trusted(
+        &mut self,
+        kind: MgsResponse,
+        _sender: Sender<Self::VLanId>,
+    ) -> Option<MgsResponse> {
+        Some(kind)
+    }
 
     fn discover(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
     ) -> Result<DiscoverResponse, SpError> {
         debug!(
             &self.log,
             "received discover; sending response";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
         );
-        Ok(DiscoverResponse { sp_port: port })
+        Ok(DiscoverResponse { sp_port: sender.vid })
     }
 
     fn num_ignition_ports(&mut self) -> Result<u32, SpError> {
@@ -679,15 +768,11 @@ impl SpHandler for Handler {
 
     fn ignition_state(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         target: u8,
     ) -> Result<gateway_messages::IgnitionState, SpError> {
         warn!(
             &self.log,
             "received ignition state request; not supported by gimlet";
-            "sender" => %sender,
-            "port" => ?port,
             "target" => target,
         );
         Err(SpError::RequestUnsupportedForSp)
@@ -695,15 +780,11 @@ impl SpHandler for Handler {
 
     fn bulk_ignition_state(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         offset: u32,
     ) -> Result<Self::BulkIgnitionStateIter, SpError> {
         warn!(
             &self.log,
             "received bulk ignition state request; not supported by gimlet";
-            "sender" => %sender,
-            "port" => ?port,
             "offset" => offset,
         );
         Err(SpError::RequestUnsupportedForSp)
@@ -711,15 +792,11 @@ impl SpHandler for Handler {
 
     fn ignition_link_events(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         target: u8,
     ) -> Result<LinkEvents, SpError> {
         warn!(
             &self.log,
             "received ignition link events request; not supported by gimlet";
-            "sender" => %sender,
-            "port" => ?port,
             "target" => target,
         );
         Err(SpError::RequestUnsupportedForSp)
@@ -727,15 +804,11 @@ impl SpHandler for Handler {
 
     fn bulk_ignition_link_events(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         offset: u32,
     ) -> Result<Self::BulkIgnitionLinkEventsIter, SpError> {
         warn!(
             &self.log,
             "received bulk ignition link events request; not supported by gimlet";
-            "sender" => %sender,
-            "port" => ?port,
             "offset" => offset,
         );
         Err(SpError::RequestUnsupportedForSp)
@@ -744,16 +817,12 @@ impl SpHandler for Handler {
     /// If `target` is `None`, clear link events for all targets.
     fn clear_ignition_link_events(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         target: Option<u8>,
         transceiver_select: Option<ignition::TransceiverSelect>,
     ) -> Result<(), SpError> {
         warn!(
             &self.log,
             "received clear ignition link events request; not supported by gimlet";
-            "sender" => %sender,
-            "port" => ?port,
             "target" => ?target,
             "transceiver_select" => ?transceiver_select,
         );
@@ -762,16 +831,12 @@ impl SpHandler for Handler {
 
     fn ignition_command(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         target: u8,
         command: gateway_messages::IgnitionCommand,
     ) -> Result<(), SpError> {
         warn!(
             &self.log,
             "received ignition command; not supported by gimlet";
-            "sender" => %sender,
-            "port" => ?port,
             "target" => target,
             "command" => ?command,
         );
@@ -780,15 +845,13 @@ impl SpHandler for Handler {
 
     fn serial_console_attach(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
         component: SpComponent,
     ) -> Result<(), SpError> {
         debug!(
             &self.log,
             "received serial console attach request";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
             "component" => ?component,
         );
 
@@ -797,22 +860,20 @@ impl SpHandler for Handler {
             return Err(SpError::SerialConsoleAlreadyAttached);
         }
 
-        *attached_mgs = Some((component, port, sender));
+        *attached_mgs = Some((component, sender));
         Ok(())
     }
 
     fn serial_console_write(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
         offset: u64,
         data: &[u8],
     ) -> Result<u64, SpError> {
         debug!(
             &self.log,
             "received serial console packet";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
             "len" => data.len(),
             "offset" => offset,
         );
@@ -821,7 +882,7 @@ impl SpHandler for Handler {
             .attached_mgs
             .lock()
             .unwrap()
-            .map(|(component, _port, _addr)| component)
+            .map(|(component, _sender)| component)
             .ok_or(SpError::SerialConsoleNotAttached)?;
 
         let incoming_serial_console = self
@@ -841,21 +902,19 @@ impl SpHandler for Handler {
 
     fn serial_console_keepalive(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
     ) -> std::result::Result<(), SpError> {
         debug!(
             &self.log,
             "received serial console keepalive";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
         );
 
         let component = self
             .attached_mgs
             .lock()
             .unwrap()
-            .map(|(component, _port, _addr)| component)
+            .map(|(component, _sender)| component)
             .ok_or(SpError::SerialConsoleNotAttached)?;
 
         let _incoming_serial_console = self
@@ -868,14 +927,12 @@ impl SpHandler for Handler {
 
     fn serial_console_detach(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
     ) -> Result<(), SpError> {
         debug!(
             &self.log,
             "received serial console detach request";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
         );
         *self.attached_mgs.lock().unwrap() = None;
         Ok(())
@@ -883,20 +940,18 @@ impl SpHandler for Handler {
 
     fn serial_console_break(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
     ) -> Result<(), SpError> {
         debug!(
             &self.log,
             "received serial console break";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
         );
         let component = self
             .attached_mgs
             .lock()
             .unwrap()
-            .map(|(component, _port, _addr)| component)
+            .map(|(component, _sender)| component)
             .ok_or(SpError::SerialConsoleNotAttached)?;
 
         let incoming_serial_console = self
@@ -911,30 +966,18 @@ impl SpHandler for Handler {
         Ok(())
     }
 
-    fn send_host_nmi(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-    ) -> Result<(), SpError> {
+    fn send_host_nmi(&mut self) -> Result<(), SpError> {
         warn!(
             &self.log,
             "received host NMI request; not supported by simulated gimlet";
-            "sender" => %sender,
-            "port" => ?port,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
 
-    fn sp_state(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-    ) -> Result<SpStateV2, SpError> {
+    fn sp_state(&mut self) -> Result<SpStateV2, SpError> {
         let state = self.sp_state_impl();
         debug!(
             &self.log, "received state request";
-            "sender" => %sender,
-            "port" => ?port,
             "reply-state" => ?state,
         );
         Ok(state)
@@ -942,15 +985,11 @@ impl SpHandler for Handler {
 
     fn sp_update_prepare(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         update: gateway_messages::SpUpdatePrepare,
     ) -> Result<(), SpError> {
         debug!(
             &self.log,
             "received SP update prepare request";
-            "sender" => %sender,
-            "port" => ?port,
             "update" => ?update,
         );
         self.update_state.prepare(
@@ -962,15 +1001,11 @@ impl SpHandler for Handler {
 
     fn component_update_prepare(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         update: gateway_messages::ComponentUpdatePrepare,
     ) -> Result<(), SpError> {
         debug!(
             &self.log,
             "received component update prepare request";
-            "sender" => %sender,
-            "port" => ?port,
             "update" => ?update,
         );
 
@@ -983,32 +1018,26 @@ impl SpHandler for Handler {
 
     fn update_status(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
     ) -> Result<gateway_messages::UpdateStatus, SpError> {
         debug!(
             &self.log,
             "received update status request";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
         );
+        self.last_request_handled =
+            Some(SimSpHandledRequest::ComponentUpdateStatus(component));
         Ok(self.update_state.status())
     }
 
     fn update_chunk(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         chunk: gateway_messages::UpdateChunk,
         chunk_data: &[u8],
     ) -> Result<(), SpError> {
         debug!(
             &self.log,
             "received update chunk";
-            "sender" => %sender,
-            "port" => ?port,
             "offset" => chunk.offset,
             "length" => chunk_data.len(),
         );
@@ -1017,31 +1046,21 @@ impl SpHandler for Handler {
 
     fn update_abort(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         update_component: SpComponent,
         update_id: gateway_messages::UpdateId,
     ) -> Result<(), SpError> {
         debug!(
             &self.log,
             "received update abort";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?update_component,
             "id" => ?update_id,
         );
         self.update_state.abort(update_id)
     }
 
-    fn power_state(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-    ) -> Result<PowerState, SpError> {
+    fn power_state(&mut self) -> Result<PowerState, SpError> {
         debug!(
             &self.log, "received power state";
-            "sender" => %sender,
-            "port" => ?port,
             "power_state" => ?self.power_state,
         );
         Ok(self.power_state)
@@ -1049,14 +1068,12 @@ impl SpHandler for Handler {
 
     fn set_power_state(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
         power_state: PowerState,
     ) -> Result<(), SpError> {
         debug!(
             &self.log, "received set power state";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
             "power_state" => ?power_state,
         );
         self.power_state = power_state;
@@ -1065,14 +1082,10 @@ impl SpHandler for Handler {
 
     fn reset_component_prepare(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
         debug!(
             &self.log, "received reset prepare request";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
         );
         if component == SpComponent::SP_ITSELF || component == SpComponent::ROT
@@ -1086,14 +1099,10 @@ impl SpHandler for Handler {
 
     fn reset_component_trigger(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
         debug!(
             &self.log, "received reset trigger request";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
         );
         if component == SpComponent::SP_ITSELF {
@@ -1123,7 +1132,7 @@ impl SpHandler for Handler {
         }
     }
 
-    fn num_devices(&mut self, _: SocketAddrV6, _: SpPort) -> u32 {
+    fn num_devices(&mut self) -> u32 {
         self.components.len().try_into().unwrap()
     }
 
@@ -1144,17 +1153,16 @@ impl SpHandler for Handler {
 
     fn num_component_details(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
     ) -> Result<u32, SpError> {
+        let num_details =
+            self.sensors.num_component_details(&component).unwrap_or(0);
         debug!(
-            &self.log, "asked for component details (returning 0 details)";
-            "sender" => %sender,
-            "port" => ?port,
+            &self.log, "asked for number of component details";
             "component" => ?component,
+            "num_details" => num_details
         );
-        Ok(0)
+        Ok(num_details)
     }
 
     fn component_details(
@@ -1162,21 +1170,28 @@ impl SpHandler for Handler {
         component: SpComponent,
         index: BoundsChecked,
     ) -> ComponentDetails {
-        // We return 0 for all components, so we should never be called (`index`
-        // would have to have been bounds checked to live in 0..0).
-        unreachable!("asked for {component:?} details index {index:?}")
+        let Some(sensor_details) =
+            self.sensors.component_details(&component, index)
+        else {
+            unreachable!(
+                "this is a gimlet, so it should have no port status details"
+            );
+        };
+        debug!(
+            &self.log, "asked for component details for a sensor";
+            "component" => ?component,
+            "index" => index.0,
+            "details" => ?sensor_details
+        );
+        sensor_details
     }
 
     fn component_clear_status(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
     ) -> Result<(), SpError> {
         warn!(
             &self.log, "asked to clear status (not supported for sim components)";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
         );
         Err(SpError::RequestUnsupportedForComponent)
@@ -1184,75 +1199,76 @@ impl SpHandler for Handler {
 
     fn component_get_active_slot(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
     ) -> Result<u16, SpError> {
-        warn!(
+        debug!(
             &self.log, "asked for component active slot";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
         );
-        if component == SpComponent::ROT {
-            Ok(rot_slot_id_to_u16(self.rot_active_slot))
-        } else {
+        match component {
+            SpComponent::ROT => Ok(rot_slot_id_to_u16(self.rot_active_slot)),
+            // The only active component is stage0
+            SpComponent::STAGE0 => Ok(0),
             // The real SP returns `RequestUnsupportedForComponent` for anything
             // other than the RoT, including SP_ITSELF.
-            Err(SpError::RequestUnsupportedForComponent)
+            _ => Err(SpError::RequestUnsupportedForComponent),
         }
     }
 
     fn component_set_active_slot(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         component: SpComponent,
         slot: u16,
         persist: bool,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log, "asked to set component active slot";
-            "sender" => %sender,
-            "port" => ?port,
             "component" => ?component,
             "slot" => slot,
             "persist" => persist,
         );
-        if component == SpComponent::ROT {
-            self.rot_active_slot = rot_slot_id_from_u16(slot)?;
-            Ok(())
-        } else {
-            // The real SP returns `RequestUnsupportedForComponent` for anything
-            // other than the RoT, including SP_ITSELF.
-            Err(SpError::RequestUnsupportedForComponent)
+        match component {
+            SpComponent::ROT => {
+                self.rot_active_slot = rot_slot_id_from_u16(slot)?;
+                Ok(())
+            }
+            SpComponent::STAGE0 => {
+                if slot == 1 {
+                    return Ok(());
+                } else {
+                    Err(SpError::RequestUnsupportedForComponent)
+                }
+            }
+            SpComponent::HOST_CPU_BOOT_FLASH => {
+                self.update_state.set_active_host_slot(slot);
+                Ok(())
+            }
+            _ => {
+                // The real SP returns `RequestUnsupportedForComponent` for anything
+                // other than the RoT and host boot flash, including SP_ITSELF.
+                Err(SpError::RequestUnsupportedForComponent)
+            }
         }
     }
 
     fn component_action(
         &mut self,
-        sender: SocketAddrV6,
+        sender: Sender<Self::VLanId>,
         component: SpComponent,
         action: ComponentAction,
-    ) -> Result<(), SpError> {
+    ) -> Result<ComponentActionResponse, SpError> {
         warn!(
             &self.log, "asked to perform component action (not supported for sim components)";
-            "sender" => %sender,
+            "sender" => ?sender,
             "component" => ?component,
             "action" => ?action,
         );
         Err(SpError::RequestUnsupportedForComponent)
     }
 
-    fn get_startup_options(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-    ) -> Result<StartupOptions, SpError> {
+    fn get_startup_options(&mut self) -> Result<StartupOptions, SpError> {
         debug!(
             &self.log, "asked for startup options";
-            "sender" => %sender,
-            "port" => ?port,
             "options" => ?self.startup_options,
         );
         Ok(self.startup_options)
@@ -1260,31 +1276,19 @@ impl SpHandler for Handler {
 
     fn set_startup_options(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         startup_options: StartupOptions,
     ) -> Result<(), SpError> {
         debug!(
             &self.log, "setting for startup options";
-            "sender" => %sender,
-            "port" => ?port,
             "options" => ?startup_options,
         );
         self.startup_options = startup_options;
         Ok(())
     }
 
-    fn mgs_response_error(
-        &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
-        message_id: u32,
-        err: MgsError,
-    ) {
+    fn mgs_response_error(&mut self, message_id: u32, err: MgsError) {
         warn!(
             &self.log, "received MGS error response";
-            "sender" => %sender,
-            "port" => ?port,
             "message_id" => message_id,
             "err" => ?err,
         );
@@ -1292,8 +1296,7 @@ impl SpHandler for Handler {
 
     fn mgs_response_host_phase2_data(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
+        sender: Sender<Self::VLanId>,
         message_id: u32,
         hash: [u8; 32],
         offset: u64,
@@ -1301,8 +1304,7 @@ impl SpHandler for Handler {
     ) {
         debug!(
             &self.log, "received host phase 2 data from MGS";
-            "sender" => %sender,
-            "port" => ?port,
+            "sender" => ?sender,
             "message_id" => message_id,
             "hash" => ?hash,
             "offset" => offset,
@@ -1312,16 +1314,12 @@ impl SpHandler for Handler {
 
     fn set_ipcc_key_lookup_value(
         &mut self,
-        sender: SocketAddrV6,
-        port: SpPort,
         key: u8,
         value: &[u8],
     ) -> Result<(), SpError> {
         warn!(
             &self.log,
             "received IPCC key/value; not supported by simulated gimlet";
-            "sender" => %sender,
-            "port" => ?port,
             "key" => key,
             "value" => ?value,
         );
@@ -1331,29 +1329,42 @@ impl SpHandler for Handler {
     fn get_component_caboose_value(
         &mut self,
         component: SpComponent,
-        _slot: u16,
+        slot: u16,
         key: [u8; 4],
         buf: &mut [u8],
     ) -> std::result::Result<usize, SpError> {
-        static SP_GITC: &[u8] = b"ffffffff";
-        static SP_BORD: &[u8] = SIM_GIMLET_BOARD.as_bytes();
-        static SP_NAME: &[u8] = b"SimGimlet";
-        static SP_VERS: &[u8] = b"0.0.1";
+        use crate::SIM_ROT_STAGE0_BOARD;
 
-        static ROT_GITC: &[u8] = b"eeeeeeee";
-        static ROT_BORD: &[u8] = SIM_ROT_BOARD.as_bytes();
-        static ROT_NAME: &[u8] = b"SimGimlet";
-        static ROT_VERS: &[u8] = b"0.0.1";
+        const STAGE0_GITC0: &[u8] = b"ddddddddd";
+        const STAGE0_GITC1: &[u8] = b"dadadadad";
+        const STAGE0_BORD: &[u8] = SIM_ROT_STAGE0_BOARD.as_bytes();
+        const STAGE0_NAME: &[u8] = b"SimGimletRot";
+        const STAGE0_VERS0: &[u8] = b"0.0.200";
+        const STAGE0_VERS1: &[u8] = b"0.0.200";
 
-        let val = match (component, &key) {
-            (SpComponent::SP_ITSELF, b"GITC") => SP_GITC,
-            (SpComponent::SP_ITSELF, b"BORD") => SP_BORD,
-            (SpComponent::SP_ITSELF, b"NAME") => SP_NAME,
-            (SpComponent::SP_ITSELF, b"VERS") => SP_VERS,
-            (SpComponent::ROT, b"GITC") => ROT_GITC,
-            (SpComponent::ROT, b"BORD") => ROT_BORD,
-            (SpComponent::ROT, b"NAME") => ROT_NAME,
-            (SpComponent::ROT, b"VERS") => ROT_VERS,
+        let val = match (component, &key, slot, self.no_stage0_caboose) {
+            (SpComponent::SP_ITSELF, b"GITC", 0, _) => SP_GITC0,
+            (SpComponent::SP_ITSELF, b"GITC", 1, _) => SP_GITC1,
+            (SpComponent::SP_ITSELF, b"BORD", _, _) => SP_BORD,
+            (SpComponent::SP_ITSELF, b"NAME", _, _) => SP_NAME,
+            (SpComponent::SP_ITSELF, b"VERS", 0, _) => SP_VERS0,
+            (SpComponent::SP_ITSELF, b"VERS", 1, _) => SP_VERS1,
+            (SpComponent::ROT, b"GITC", 0, _) => ROT_GITC0,
+            (SpComponent::ROT, b"GITC", 1, _) => ROT_GITC1,
+            (SpComponent::ROT, b"BORD", _, _) => ROT_BORD,
+            (SpComponent::ROT, b"NAME", _, _) => ROT_NAME,
+            (SpComponent::ROT, b"VERS", 0, _) => ROT_VERS0,
+            (SpComponent::ROT, b"VERS", 1, _) => ROT_VERS1,
+            // gimlet staging/devel hash
+            (SpComponent::ROT, b"SIGN", _, _) => &"11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf".as_bytes(),
+            (SpComponent::STAGE0, b"GITC", 0, false) => STAGE0_GITC0,
+            (SpComponent::STAGE0, b"GITC", 1, false) => STAGE0_GITC1,
+            (SpComponent::STAGE0, b"BORD", _, false) => STAGE0_BORD,
+            (SpComponent::STAGE0, b"NAME", _, false) => STAGE0_NAME,
+            (SpComponent::STAGE0, b"VERS", 0, false) => STAGE0_VERS0,
+            (SpComponent::STAGE0, b"VERS", 1, false) => STAGE0_VERS1,
+            // gimlet staging/devel hash
+            (SpComponent::STAGE0, b"SIGN", _, false) => &"11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf".as_bytes(),
             _ => return Err(SpError::NoSuchCabooseKey(key)),
         };
 
@@ -1363,9 +1374,9 @@ impl SpHandler for Handler {
 
     fn read_sensor(
         &mut self,
-        _request: gateway_messages::SensorRequest,
+        request: gateway_messages::SensorRequest,
     ) -> std::result::Result<gateway_messages::SensorResponse, SpError> {
-        Err(SpError::RequestUnsupportedForSp)
+        self.sensors.read_sensor(request).map_err(SpError::Sensor)
     }
 
     fn current_time(&mut self) -> std::result::Result<u64, SpError> {
@@ -1386,6 +1397,136 @@ impl SpHandler for Handler {
         buf[..dummy_page.len()].copy_from_slice(dummy_page.as_bytes());
         buf[dummy_page.len()..].fill(0);
         Ok(RotResponse::Ok)
+    }
+
+    fn vpd_lock_status_all(
+        &mut self,
+        _buf: &mut [u8],
+    ) -> Result<usize, SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn reset_component_trigger_with_watchdog(
+        &mut self,
+        component: SpComponent,
+        _time_ms: u32,
+    ) -> Result<(), SpError> {
+        debug!(
+            &self.log, "received reset trigger with watchdog request";
+            "component" => ?component,
+        );
+        if component == SpComponent::SP_ITSELF {
+            if self.reset_pending == Some(SpComponent::SP_ITSELF) {
+                self.update_state.sp_reset();
+                self.reset_pending = None;
+                if let Some(signal) = self.should_fail_to_respond_signal.take()
+                {
+                    // Instruct `server::handle_request()` to _not_ respond to
+                    // this request at all, simulating an SP actually resetting.
+                    signal();
+                }
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else if component == SpComponent::ROT {
+            if self.reset_pending == Some(SpComponent::ROT) {
+                self.update_state.rot_reset();
+                self.reset_pending = None;
+                Ok(())
+            } else {
+                Err(SpError::ResetComponentTriggerWithoutPrepare)
+            }
+        } else {
+            Err(SpError::RequestUnsupportedForComponent)
+        }
+    }
+
+    fn disable_component_watchdog(
+        &mut self,
+        _component: SpComponent,
+    ) -> Result<(), SpError> {
+        Ok(())
+    }
+    fn component_watchdog_supported(
+        &mut self,
+        _component: SpComponent,
+    ) -> Result<(), SpError> {
+        Ok(())
+    }
+
+    fn versioned_rot_boot_info(
+        &mut self,
+        version: u8,
+    ) -> Result<RotBootInfo, SpError> {
+        if self.old_rot_state {
+            Err(SpError::RequestUnsupportedForSp)
+        } else {
+            const SLOT_A_DIGEST: [u8; 32] = [0xaa; 32];
+            const SLOT_B_DIGEST: [u8; 32] = [0xbb; 32];
+            const STAGE0_DIGEST: [u8; 32] = [0xcc; 32];
+            const STAGE0NEXT_DIGEST: [u8; 32] = [0xdd; 32];
+
+            match version {
+                0 => Err(SpError::Update(
+                    gateway_messages::UpdateError::VersionNotSupported,
+                )),
+                1 => Ok(RotBootInfo::V2(gateway_messages::RotStateV2 {
+                    active: RotSlotId::A,
+                    persistent_boot_preference: RotSlotId::A,
+                    pending_persistent_boot_preference: None,
+                    transient_boot_preference: None,
+                    slot_a_sha3_256_digest: Some(SLOT_A_DIGEST),
+                    slot_b_sha3_256_digest: Some(SLOT_B_DIGEST),
+                })),
+                _ => Ok(RotBootInfo::V3(gateway_messages::RotStateV3 {
+                    active: RotSlotId::A,
+                    persistent_boot_preference: RotSlotId::A,
+                    pending_persistent_boot_preference: None,
+                    transient_boot_preference: None,
+                    slot_a_fwid: gateway_messages::Fwid::Sha3_256(
+                        SLOT_A_DIGEST,
+                    ),
+                    slot_b_fwid: gateway_messages::Fwid::Sha3_256(
+                        SLOT_B_DIGEST,
+                    ),
+                    stage0_fwid: gateway_messages::Fwid::Sha3_256(
+                        STAGE0_DIGEST,
+                    ),
+                    stage0next_fwid: gateway_messages::Fwid::Sha3_256(
+                        STAGE0NEXT_DIGEST,
+                    ),
+                    slot_a_status: Ok(()),
+                    slot_b_status: Ok(()),
+                    stage0_status: Ok(()),
+                    stage0next_status: Ok(()),
+                })),
+            }
+        }
+    }
+
+    fn get_task_dump_count(&mut self) -> Result<u32, SpError> {
+        debug!(&self.log, "received get_task_dump_count");
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn task_dump_read_start(
+        &mut self,
+        index: u32,
+        _key: [u8; 16],
+    ) -> Result<DumpTask, SpError> {
+        debug!(&self.log, "received task_dump_read_start"; "index" => index);
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn task_dump_read_continue(
+        &mut self,
+        _key: [u8; 16],
+        seq: u32,
+        _buf: &mut [u8],
+    ) -> Result<Option<DumpSegment>, SpError> {
+        debug!(&self.log, "received task_dump_read_continue"; "seq" => seq);
+        Err(SpError::RequestUnsupportedForSp)
     }
 }
 

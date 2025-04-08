@@ -2,7 +2,7 @@
 //!
 //! Initial populating of the CockroachDB database happens in two different ways:
 //!
-//! 1. During "rack setup" (or during `omicron-dev db-run` or test suite
+//! 1. During "rack setup" (or during `db-dev run` or test suite
 //!    initialization), we create the omicron database, schema, and the *bare
 //!    minimum* data that needs to be there.
 //! 2. Every time Nexus starts up, we attempts to insert a bunch of built-in
@@ -42,8 +42,8 @@
 //! you define a single data-insertion step.  We have tests that ensure that
 //! each populator behaves as expected in the above ways.
 
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
@@ -349,15 +349,15 @@ const ALL_POPULATORS: [&dyn Populator; 10] = [
 
 #[cfg(test)]
 mod test {
+    use super::ALL_POPULATORS;
     use super::PopulateArgs;
     use super::Populator;
-    use super::ALL_POPULATORS;
     use anyhow::Context;
     use nexus_db_queries::authn;
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db;
-    use nexus_test_utils::db::test_setup_database;
+    use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
     use std::sync::Arc;
@@ -378,9 +378,9 @@ mod test {
         p: &dyn Populator,
     ) {
         let logctx = dev::test_setup_log("test_populator");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
+        let db = TestDatabase::new_populate_schema_only(&logctx.log).await;
+        let cfg = db::Config { url: db.crdb().pg_config().clone() };
+        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
         let datastore = Arc::new(
             db::DataStore::new(&logctx.log, pool, None).await.unwrap(),
         );
@@ -388,7 +388,7 @@ mod test {
             logctx.log.clone(),
             Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::internal_db_init(),
-            Arc::clone(&datastore),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let log = &logctx.log;
 
@@ -421,20 +421,15 @@ mod test {
                 )
             })
             .unwrap();
+        datastore.terminate().await;
 
-        // Test again with the database offline.  In principle we could do this
-        // immediately without creating a new pool and datastore.  However, the
-        // pool's default behavior is to wait 30 seconds for a connection, which
-        // makes this test take a long time.  (See the note in
-        // nexus/src/db/pool.rs about this.)  So let's create a pool with an
-        // arbitrarily short timeout now.  (We wouldn't want to do this above
-        // because we do want to wait a bit when we expect things to work, in
-        // case the test system is busy.)
+        // Test again with the database offline. In principle we could do this
+        // immediately without creating a new pool and datastore.
         //
-        // Anyway, if we try again with a broken database, we should get a
+        // If we try again with a broken database, we should get a
         // ServiceUnavailable error, which indicates a transient failure.
         let pool =
-            Arc::new(db::Pool::new_failfast_for_tests(&logctx.log, &cfg));
+            Arc::new(db::Pool::new_single_host_failfast(&logctx.log, &cfg));
         // We need to create the datastore before tearing down the database, as
         // it verifies the schema version of the DB while booting.
         let datastore = Arc::new(
@@ -444,11 +439,11 @@ mod test {
             logctx.log.clone(),
             Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::internal_db_init(),
-            Arc::clone(&datastore),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         info!(&log, "cleaning up database");
-        db.cleanup().await.unwrap();
+        db.terminate().await;
 
         info!(&log, "populator {:?}, with database offline", p);
         match p.populate(&opctx, &datastore, &args).await {
@@ -460,12 +455,11 @@ mod test {
             Err(error) => panic!(
                 "populator {:?}: expected ServiceUnavailable when the database \
                 was down, but got {:#} ({:?})",
-                p,
-                error,
-                error
+                p, error, error
             ),
         };
         info!(&log, "populator {:?} done", p);
+        datastore.terminate().await;
         logctx.cleanup_successful();
     }
 }

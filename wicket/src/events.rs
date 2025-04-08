@@ -1,21 +1,33 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
-use crate::{keymap::Cmd, state::ComponentId, State};
+use crate::{State, keymap::Cmd, state::ComponentId};
 use camino::Utf8PathBuf;
 use humantime::format_rfc3339;
+use omicron_common::update::ArtifactId;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
+use wicket_common::inventory::RackV1Inventory;
 use wicket_common::update_events::EventReport;
 use wicketd_client::types::{
-    ArtifactId, CurrentRssUserConfig, GetLocationResponse, IgnitionCommand,
-    RackOperationStatus, RackV1Inventory, SemverVersion,
+    CurrentRssUserConfig, GetLocationResponse, IgnitionCommand,
+    RackOperationStatus,
 };
 
 /// Event report type returned by the get_artifacts_and_event_reports API call.
 pub type EventReportMap = HashMap<String, HashMap<String, EventReport>>;
+
+/// Represents an artifact from a TUF repo
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactData {
+    /// Artifact ID
+    pub id: ArtifactId,
+    /// Optional sign information (currently only used for RoT images)
+    pub sign: Option<Vec<u8>>,
+}
 
 /// An event that will update state
 ///
@@ -26,12 +38,12 @@ pub enum Event {
     Term(Cmd),
 
     /// An Inventory Update Event
-    Inventory { inventory: RackV1Inventory, mgs_last_seen: Duration },
+    Inventory { inventory: RackV1Inventory },
 
     /// TUF repo artifacts unpacked by wicketd, and event reports
     ArtifactsAndEventReports {
-        system_version: Option<SemverVersion>,
-        artifacts: Vec<ArtifactId>,
+        system_version: Option<Version>,
+        artifacts: Vec<ArtifactData>,
         event_reports: EventReportMap,
     },
 
@@ -57,15 +69,9 @@ pub enum Event {
 
 impl Event {
     pub fn is_tick(&self) -> bool {
-        if let Event::Tick = self {
-            true
-        } else {
-            false
-        }
+        if let Event::Tick = self { true } else { false }
     }
 }
-
-/// An event that can be recorded.
 
 /// Instructions for the [`crate::Runner`]
 ///

@@ -9,26 +9,32 @@
 
 mod error;
 pub mod http_pagination;
-use dropshot::HttpError;
-pub use error::*;
-
+pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
-use anyhow::anyhow;
+use crate::update::ArtifactId;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
+use daft::Diffable;
+use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
+pub use error::*;
 use futures::stream::BoxStream;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
+use oxnet::IpNet;
+use oxnet::Ipv4Net;
 use parse_display::Display;
 use parse_display::FromStr;
-use rand::thread_rng;
 use rand::Rng;
+use rand::thread_rng;
 use schemars::JsonSchema;
-use semver;
+use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -36,9 +42,9 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
-use std::net::Ipv6Addr;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 // The type aliases below exist primarily to ensure consistency among return
@@ -69,6 +75,35 @@ pub type ObjectStream<T> = BoxStream<'static, Result<T, Error>>;
 /// currently used only for pagination.
 pub trait ObjectIdentity {
     fn identity(&self) -> &IdentityMetadata;
+}
+
+/// Exists for types that don't properly implement `ObjectIdentity` but
+/// still need to be paginated by id.
+pub trait SimpleIdentity {
+    fn id(&self) -> Uuid;
+}
+
+impl<T: ObjectIdentity> SimpleIdentity for T {
+    fn id(&self) -> Uuid {
+        self.identity().id
+    }
+}
+
+/// Exists for types that don't properly implement `ObjectIdentity` but
+/// still need to be paginated by name or id.
+pub trait SimpleIdentityOrName {
+    fn id(&self) -> Uuid;
+    fn name(&self) -> &Name;
+}
+
+impl<T: ObjectIdentity> SimpleIdentityOrName for T {
+    fn id(&self) -> Uuid {
+        self.identity().id
+    }
+
+    fn name(&self) -> &Name {
+        &self.identity().name
+    }
 }
 
 /// Parameters used to request a specific page of results when listing a
@@ -190,6 +225,7 @@ impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
 )]
 #[display("{0}")]
 #[serde(try_from = "String")]
+#[derive(Diffable)]
 pub struct Name(String);
 
 /// `Name::try_from(String)` is the primary method for constructing an Name
@@ -257,6 +293,12 @@ impl<'a> From<&'a Name> for &'a str {
     }
 }
 
+impl From<Name> for String {
+    fn from(name: Name) -> Self {
+        name.0
+    }
+}
+
 /// `Name` instances are comparable like Strings, primarily so that they can
 /// be used as keys in trees.
 impl<S> PartialEq<S> for Name
@@ -276,38 +318,20 @@ impl JsonSchema for Name {
     fn json_schema(
         _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some(
-                    "A name unique within the parent collection".to_string(),
-                ),
-                description: Some(
-                    "Names must begin with a lower case ASCII letter, be \
-                     composed exclusively of lowercase ASCII, uppercase \
-                     ASCII, numbers, and '-', and may not end with a '-'. \
-                     Names cannot be a UUID though they may contain a UUID."
-                        .to_string(),
-                ),
-                ..Default::default()
-            })),
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                max_length: Some(63),
-                min_length: Some(1),
-                pattern: Some(
-                    concat!(
-                        r#"^"#,
-                        // Cannot match a UUID
-                        r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
-                        r#"^[a-z][a-z0-9-]*[a-zA-Z0-9]*"#,
-                        r#"$"#,
-                    )
+        name_schema(schemars::schema::Metadata {
+            title: Some(
+                "A name unique within the parent collection".to_string(),
+            ),
+            description: Some(
+                "Names must begin with a lower case ASCII letter, be \
+                 composed exclusively of lowercase ASCII, uppercase \
+                 ASCII, numbers, and '-', and may not end with a '-'. \
+                 Names cannot be a UUID, but they may contain a UUID. \
+                 They can be at most 63 characters long."
                     .to_string(),
-                )
-            })),
+            ),
             ..Default::default()
-        }
-        .into()
+        })
     }
 }
 
@@ -316,10 +340,7 @@ impl Name {
     /// `Name::try_from(String)` that marshals any error into an appropriate
     /// `Error`.
     pub fn from_param(value: String, label: &str) -> Result<Name, Error> {
-        value.parse().map_err(|e| Error::InvalidValue {
-            label: String::from(label),
-            message: e,
-        })
+        value.parse().map_err(|e| Error::invalid_value(label, e))
     }
 
     /// Return the `&str` representing the actual name.
@@ -345,6 +366,16 @@ impl TryFrom<String> for NameOrId {
         } else {
             Ok(NameOrId::Name(Name::try_from(value)?))
         }
+    }
+}
+
+impl FromStr for NameOrId {
+    // TODO: We should have better error types here.
+    // See https://github.com/oxidecomputer/omicron/issues/347
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        NameOrId::try_from(String::from(value))
     }
 }
 
@@ -382,54 +413,85 @@ impl JsonSchema for NameOrId {
     }
 }
 
-// TODO: remove wrapper for semver::Version once this PR goes through
-// https://github.com/GREsau/schemars/pull/195
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Display,
-    FromStr,
-)]
-#[display("{0}")]
-#[serde(transparent)]
-pub struct SemverVersion(pub semver::Version);
+/// A username for a local-only user.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(try_from = "String")]
+pub struct UserId(String);
 
-impl SemverVersion {
-    pub const fn new(major: u64, minor: u64, patch: u64) -> Self {
-        Self(semver::Version::new(major, minor, patch))
+impl AsRef<str> for UserId {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
     }
-
-    /// This is the official ECMAScript-compatible validation regex for
-    /// semver:
-    /// <https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string>
-    const VALIDATION_REGEX: &str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
 }
 
-impl JsonSchema for SemverVersion {
+impl FromStr for UserId {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        UserId::try_from(String::from(value))
+    }
+}
+
+/// Used to impl `Deserialize`
+impl TryFrom<String> for UserId {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        // Mostly, this validation exists to cap the input size.  The specific
+        // length is not critical here.  For convenience and consistency, we use
+        // the same rules as `Name`.
+        let _ = Name::try_from(value.clone())?;
+        Ok(UserId(value))
+    }
+}
+
+impl JsonSchema for UserId {
     fn schema_name() -> String {
-        "SemverVersion".to_string()
+        "UserId".to_string()
     }
 
     fn json_schema(
         _: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(Self::VALIDATION_REGEX.to_owned()),
-                ..Default::default()
-            })),
+        name_schema(schemars::schema::Metadata {
+            title: Some("A username for a local-only user".to_string()),
+            description: Some(
+                "Usernames must begin with a lower case ASCII letter, be \
+                 composed exclusively of lowercase ASCII, uppercase ASCII, \
+                 numbers, and '-', and may not end with a '-'. Usernames \
+                 cannot be a UUID, but they may contain a UUID. They can be at \
+                 most 63 characters long."
+                    .to_string(),
+            ),
             ..Default::default()
-        }
-        .into()
+        })
     }
+}
+
+fn name_schema(
+    metadata: schemars::schema::Metadata,
+) -> schemars::schema::Schema {
+    schemars::schema::SchemaObject {
+        metadata: Some(Box::new(metadata)),
+        instance_type: Some(schemars::schema::InstanceType::String.into()),
+        string: Some(Box::new(schemars::schema::StringValidation {
+            max_length: Some(63),
+            min_length: Some(1),
+            pattern: Some(
+                concat!(
+                    r#"^"#,
+                    // Cannot match a UUID
+                    concat!(
+                        r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"#,
+                        r#"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
+                    ),
+                    r#"^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?"#,
+                    r#"$"#,
+                )
+                .to_string(),
+            ),
+        })),
+        ..Default::default()
+    }
+    .into()
 }
 
 /// Name for a built-in role
@@ -510,9 +572,32 @@ impl JsonSchema for RoleName {
 // in the database as an i64.  Constraining it here ensures that we can't fail
 // to serialize the value.
 //
-// TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+// TODO: custom JsonSchema impl to describe i64::MAX limit; this is blocked by
+// https://github.com/oxidecomputer/typify/issues/589
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    JsonSchema,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Diffable,
+)]
 pub struct ByteCount(u64);
+
+impl<'de> Deserialize<'de> for ByteCount {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = u64::deserialize(deserializer)?;
+        ByteCount::try_from(bytes).map_err(serde::de::Error::custom)
+    }
+}
 
 #[allow(non_upper_case_globals)]
 const KiB: u64 = 1024;
@@ -524,31 +609,31 @@ const GiB: u64 = MiB * 1024;
 const TiB: u64 = GiB * 1024;
 
 impl ByteCount {
-    pub fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
-        ByteCount::try_from(KiB * u64::from(kibibytes)).unwrap()
+    // None of these three constructors can create a value larger than
+    // `i64::MAX`. (Note that a `from_tebibytes_u32` could overflow u64.)
+    pub const fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
+        ByteCount(KiB * kibibytes as u64)
+    }
+    pub const fn from_mebibytes_u32(mebibytes: u32) -> ByteCount {
+        ByteCount(MiB * mebibytes as u64)
+    }
+    pub const fn from_gibibytes_u32(gibibytes: u32) -> ByteCount {
+        ByteCount(GiB * gibibytes as u64)
     }
 
-    pub fn from_mebibytes_u32(mebibytes: u32) -> ByteCount {
-        ByteCount::try_from(MiB * u64::from(mebibytes)).unwrap()
-    }
-
-    pub fn from_gibibytes_u32(gibibytes: u32) -> ByteCount {
-        ByteCount::try_from(GiB * u64::from(gibibytes)).unwrap()
-    }
-
-    pub fn to_bytes(&self) -> u64 {
+    pub const fn to_bytes(&self) -> u64 {
         self.0
     }
-    pub fn to_whole_kibibytes(&self) -> u64 {
+    pub const fn to_whole_kibibytes(&self) -> u64 {
         self.to_bytes() / KiB
     }
-    pub fn to_whole_mebibytes(&self) -> u64 {
+    pub const fn to_whole_mebibytes(&self) -> u64 {
         self.to_bytes() / MiB
     }
-    pub fn to_whole_gibibytes(&self) -> u64 {
+    pub const fn to_whole_gibibytes(&self) -> u64 {
         self.to_bytes() / GiB
     }
-    pub fn to_whole_tebibytes(&self) -> u64 {
+    pub const fn to_whole_tebibytes(&self) -> u64 {
         self.to_bytes() / TiB
     }
 }
@@ -614,34 +699,80 @@ impl From<ByteCount> for i64 {
 
 /// Generation numbers stored in the database, used for optimistic concurrency
 /// control
-// Because generation numbers are stored in the database, we represent them as
-// i64.
+//
+// A generation is a value between 0 and 2**63-1, i.e. equivalent to a u63.
+// The reason is that we store it as an i64 in the database, and we want to
+// disallow negative values. (We could potentially use two's complement to
+// store values greater than that as negative values, but surely 2**63 is
+// enough.)
 #[derive(
     Copy,
     Clone,
     Debug,
-    Deserialize,
     Eq,
+    Hash,
     JsonSchema,
     Ord,
     PartialEq,
     PartialOrd,
-    Serialize,
+    Diffable,
 )]
+#[daft(leaf)]
 pub struct Generation(u64);
 
 impl Generation {
-    pub fn new() -> Generation {
+    // `as` is a little distasteful because it allows lossy conversion, but we
+    // know converting `i64::MAX` to `u64` will always succeed losslessly.
+    const MAX: Generation = Generation(i64::MAX as u64);
+
+    pub const fn new() -> Generation {
         Generation(1)
     }
 
-    pub fn next(&self) -> Generation {
+    pub const fn from_u32(value: u32) -> Generation {
+        // `as` is a little distasteful because it allows lossy conversion, but
+        // (a) we know converting `u32` to `u64` will always succeed
+        // losslessly, and (b) it allows to make this function `const`, unlike
+        // if we were to use `u64::from(value)`.
+        Generation(value as u64)
+    }
+
+    pub const fn next(&self) -> Generation {
         // It should technically be an operational error if this wraps or even
         // exceeds the value allowed by an i64.  But it seems unlikely enough to
         // happen in practice that we can probably feel safe with this.
         let next_gen = self.0 + 1;
-        assert!(next_gen <= u64::try_from(i64::MAX).unwrap());
+        assert!(
+            next_gen <= Generation::MAX.0,
+            "attempt to overflow generation number"
+        );
         Generation(next_gen)
+    }
+}
+
+impl<'de> Deserialize<'de> for Generation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = u64::deserialize(deserializer)?;
+        Generation::try_from(value).map_err(|GenerationOverflowError(_)| {
+            serde::de::Error::invalid_value(
+                serde::de::Unexpected::Unsigned(value),
+                &"an integer between 0 and 9223372036854775807",
+            )
+        })
+    }
+}
+
+// This is the equivalent of applying `#[serde(transparent)]`, but that has a
+// side effect of changing the JsonSchema derive to no longer emit a schema.
+impl Serialize for Generation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
     }
 }
 
@@ -654,9 +785,13 @@ impl Display for Generation {
 impl From<&Generation> for i64 {
     fn from(g: &Generation) -> Self {
         // We have already validated that the value is within range.
-        // TODO-robustness We need to ensure that we don't deserialize a value
-        // out of range here.
         i64::try_from(g.0).unwrap()
+    }
+}
+
+impl From<Generation> for u64 {
+    fn from(g: Generation) -> Self {
+        g.0
     }
 }
 
@@ -667,13 +802,154 @@ impl From<u32> for Generation {
 }
 
 impl TryFrom<i64> for Generation {
-    type Error = anyhow::Error;
+    type Error = GenerationNegativeError;
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         Ok(Generation(
-            u64::try_from(value)
-                .map_err(|_| anyhow!("generation number too large"))?,
+            u64::try_from(value).map_err(|_| GenerationNegativeError(()))?,
         ))
+    }
+}
+
+impl TryFrom<u64> for Generation {
+    type Error = GenerationOverflowError;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        i64::try_from(value).map_err(|_| GenerationOverflowError(()))?;
+        Ok(Generation(value))
+    }
+}
+
+impl FromStr for Generation {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Try to parse `s` as both an i64 and u64, returning the error from
+        // either.
+        let _ = i64::from_str(s)?;
+        Ok(Generation(u64::from_str(s)?))
+    }
+}
+
+impl slog::Value for Generation {
+    fn serialize(
+        &self,
+        _rec: &slog::Record,
+        key: slog::Key,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        serializer.emit_u64(key, self.0)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("negative generation number")]
+pub struct GenerationNegativeError(());
+
+#[derive(Debug, thiserror::Error)]
+#[error("generation number too large")]
+pub struct GenerationOverflowError(());
+
+/// An RFC-1035-compliant hostname.
+#[derive(
+    Clone, Debug, Deserialize, Display, Eq, PartialEq, SerializeDisplay,
+)]
+#[display("{0}")]
+#[serde(try_from = "String", into = "String")]
+pub struct Hostname(String);
+
+impl Hostname {
+    /// Return the hostname as a string slice.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+// Regular expression for hostnames.
+//
+// Each name is a dot-separated sequence of labels. Each label is supposed to
+// be an "LDH": letter, dash, or hyphen. Hostnames can consist of one label, or
+// many, separated by a `.`. While _domain_ names are allowed to end in a `.`,
+// making them fully-qualified, hostnames are not.
+//
+// Note that labels are allowed to contain a hyphen, but may not start or end
+// with one. See RFC 952, "Lexical grammar" section.
+//
+// Note that we need to use a regex engine capable of lookbehind to support
+// this, since we need to check that labels don't end with a `-`.
+const HOSTNAME_REGEX: &str = r#"^([a-zA-Z0-9]+[a-zA-Z0-9\-]*(?<!-))(\.[a-zA-Z0-9]+[a-zA-Z0-9\-]*(?<!-))*$"#;
+
+// Labels need to be encoded on the wire, and prefixed with a signel length
+// octet. They also need to end with a length octet of 0 when encoded. So the
+// longest name is a single label of 253 characters, which will be encoded as
+// `\xfd<the label>\x00`.
+const HOSTNAME_MAX_LEN: u32 = 253;
+
+impl FromStr for Hostname {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        anyhow::ensure!(
+            s.len() <= HOSTNAME_MAX_LEN as usize,
+            "Max hostname length is {HOSTNAME_MAX_LEN}"
+        );
+        let re = regress::Regex::new(HOSTNAME_REGEX).unwrap();
+        if re.find(s).is_some() {
+            Ok(Hostname(s.to_string()))
+        } else {
+            anyhow::bail!("Hostnames must comply with RFC 1035")
+        }
+    }
+}
+
+impl TryFrom<&str> for Hostname {
+    type Error = <Hostname as FromStr>::Err;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl TryFrom<String> for Hostname {
+    type Error = <Hostname as FromStr>::Err;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.as_str().parse()
+    }
+}
+
+// Custom implementation of JsonSchema for Hostname to ensure RFC-1035-style
+// validation
+impl JsonSchema for Hostname {
+    fn schema_name() -> String {
+        "Hostname".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("An RFC-1035-compliant hostname".to_string()),
+                description: Some(
+                    "A hostname identifies a host on a network, and \
+                    is usually a dot-delimited sequence of labels, \
+                    where each label contains only letters, digits, \
+                    or the hyphen. See RFCs 1035 and 952 for more details."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(HOSTNAME_MAX_LEN),
+                min_length: Some(1),
+                pattern: Some(HOSTNAME_REGEX.to_string()),
+            })),
+            ..Default::default()
+        })
     }
 }
 
@@ -697,13 +973,20 @@ impl TryFrom<i64> for Generation {
 pub enum ResourceType {
     AddressLot,
     AddressLotBlock,
+    AffinityGroup,
+    AffinityGroupMember,
+    AntiAffinityGroup,
+    AntiAffinityGroupMember,
+    AllowList,
     BackgroundTask,
     BgpConfig,
     BgpAnnounceSet,
+    Blueprint,
     Fleet,
     Silo,
     SiloUser,
     SiloGroup,
+    SiloQuotas,
     IdentityProvider,
     SamlIdentityProvider,
     SshKey,
@@ -720,14 +1003,20 @@ pub enum ResourceType {
     Instance,
     LoopbackAddress,
     SwitchPortSettings,
+    SupportBundle,
     IpPool,
+    IpPoolResource,
     InstanceNetworkInterface,
+    InternetGateway,
+    InternetGatewayIpPool,
+    InternetGatewayIpAddress,
     PhysicalDisk,
     Rack,
     Service,
     ServiceNetworkInterface,
     Sled,
     SledInstance,
+    SledLedger,
     Switch,
     SagaDbg,
     Snapshot,
@@ -740,17 +1029,17 @@ pub enum ResourceType {
     Oximeter,
     MetricProducer,
     RoleBuiltin,
-    UpdateArtifact,
+    TufRepo,
+    TufArtifact,
     SwitchPort,
-    SystemUpdate,
-    ComponentUpdate,
-    SystemUpdateComponentUpdate,
-    UpdateDeployment,
-    UpdateableComponent,
     UserBuiltin,
     Zpool,
     Vmm,
     Ipv4NatEntry,
+    FloatingIp,
+    Probe,
+    ProbeNetworkInterface,
+    LldpLinkConfig,
 }
 
 // IDENTITY METADATA
@@ -798,6 +1087,7 @@ pub struct IdentityMetadataUpdateParams {
     Debug,
     Deserialize,
     Eq,
+    Hash,
     Ord,
     PartialEq,
     PartialOrd,
@@ -830,6 +1120,22 @@ pub enum InstanceState {
     Failed,
     /// The instance has been deleted.
     Destroyed,
+}
+
+impl From<crate::api::internal::nexus::VmmState> for InstanceState {
+    fn from(state: crate::api::internal::nexus::VmmState) -> Self {
+        use crate::api::internal::nexus::VmmState as InternalVmmState;
+        match state {
+            InternalVmmState::Starting => Self::Starting,
+            InternalVmmState::Running => Self::Running,
+            InternalVmmState::Stopping => Self::Stopping,
+            InternalVmmState::Stopped => Self::Stopped,
+            InternalVmmState::Rebooting => Self::Rebooting,
+            InternalVmmState::Migrating => Self::Migrating,
+            InternalVmmState::Failed => Self::Failed,
+            InternalVmmState::Destroyed => Self::Destroyed,
+        }
+    }
 }
 
 impl Display for InstanceState {
@@ -881,7 +1187,9 @@ impl InstanceState {
 }
 
 /// The number of CPUs in an Instance
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
 pub struct InstanceCpuCount(pub u16);
 
 impl TryFrom<i64> for InstanceCpuCount {
@@ -903,6 +1211,12 @@ impl From<&InstanceCpuCount> for i64 {
 pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     pub time_run_state_updated: DateTime<Utc>,
+    /// The timestamp of the most recent time this instance was automatically
+    /// restarted by the control plane.
+    ///
+    /// If this is not present, then this instance has not been automatically
+    /// restarted.
+    pub time_last_auto_restarted: Option<DateTime<Utc>>,
 }
 
 /// View of an Instance
@@ -920,10 +1234,169 @@ pub struct Instance {
     /// memory allocated for this Instance
     pub memory: ByteCount,
     /// RFC1035-compliant hostname for the Instance.
-    pub hostname: String, // TODO-cleanup different type?
+    pub hostname: String,
+
+    /// the ID of the disk used to boot this Instance, if a specific one is assigned.
+    pub boot_disk_id: Option<Uuid>,
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
+
+    #[serde(flatten)]
+    pub auto_restart_status: InstanceAutoRestartStatus,
+}
+
+/// Status of control-plane driven automatic failure recovery for this instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceAutoRestartStatus {
+    /// `true` if this instance's auto-restart policy will permit the control
+    /// plane to automatically restart it if it enters the `Failed` state.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_enabled")]
+    pub enabled: bool,
+
+    /// The auto-restart policy configured for this instance, or `null` if no
+    /// explicit policy has been configured.
+    ///
+    /// This policy determines whether the instance should be automatically
+    /// restarted by the control plane on failure. If this is `null`, the
+    /// control plane will use the default policy when determining whether or
+    /// not to automatically restart this instance, which may or may not allow
+    /// it to be restarted. The value of the `auto_restart_enabled` field
+    /// indicates whether the instance will be auto-restarted, based on its
+    /// current policy or the default if it has no configured policy.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_policy")]
+    pub policy: Option<InstanceAutoRestartPolicy>,
+
+    /// The time at which the auto-restart cooldown period for this instance
+    /// completes, permitting it to be automatically restarted again. If the
+    /// instance enters the `Failed` state, it will not be restarted until after
+    /// this time.
+    ///
+    /// If this is not present, then either the instance has never been
+    /// automatically restarted, or the cooldown period has already expired,
+    /// allowing the instance to be restarted immediately if it fails.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_cooldown_expiration")]
+    pub cooldown_expiration: Option<DateTime<Utc>>,
+}
+
+/// A policy determining when an instance should be automatically restarted by
+/// the control plane.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceAutoRestartPolicy {
+    /// The instance should not be automatically restarted by the control plane
+    /// if it fails.
+    Never,
+    /// If this instance is running and unexpectedly fails (e.g. due to a host
+    /// software crash or unexpected host reboot), the control plane will make a
+    /// best-effort attempt to restart it. The control plane may choose not to
+    /// restart the instance to preserve the overall availability of the system.
+    BestEffort,
+}
+
+// AFFINITY GROUPS
+
+/// Affinity policy used to describe "what to do when a request cannot be satisfied"
+///
+/// Used for both Affinity and Anti-Affinity Groups
+#[derive(
+    Clone, Copy, Debug, Deserialize, Hash, Eq, Serialize, PartialEq, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AffinityPolicy {
+    /// If the affinity request cannot be satisfied, allow it anyway.
+    ///
+    /// This enables a "best-effort" attempt to satisfy the affinity policy.
+    Allow,
+
+    /// If the affinity request cannot be satisfied, fail explicitly.
+    Fail,
+}
+
+/// Describes the scope of affinity for the purposes of co-location.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureDomain {
+    /// Instances are considered co-located if they are on the same sled
+    Sled,
+}
+
+/// A member of an Affinity Group
+///
+/// Membership in a group is not exclusive - members may belong to multiple
+/// affinity / anti-affinity groups.
+///
+/// Affinity Groups can contain up to 32 members.
+// See: AFFINITY_GROUP_MAX_MEMBERS
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum AffinityGroupMember {
+    /// An instance belonging to this group
+    ///
+    /// Instances can belong to up to 16 affinity groups.
+    // See: INSTANCE_MAX_AFFINITY_GROUPS
+    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+}
+
+impl SimpleIdentityOrName for AffinityGroupMember {
+    fn id(&self) -> Uuid {
+        match self {
+            AffinityGroupMember::Instance { id, .. } => *id.as_untyped_uuid(),
+        }
+    }
+
+    fn name(&self) -> &Name {
+        match self {
+            AffinityGroupMember::Instance { name, .. } => name,
+        }
+    }
+}
+
+/// A member of an Anti-Affinity Group
+///
+/// Membership in a group is not exclusive - members may belong to multiple
+/// affinity / anti-affinity groups.
+///
+/// Anti-Affinity Groups can contain up to 32 members.
+// See: ANTI_AFFINITY_GROUP_MAX_MEMBERS
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum AntiAffinityGroupMember {
+    /// An instance belonging to this group
+    ///
+    /// Instances can belong to up to 16 anti-affinity groups.
+    // See: INSTANCE_MAX_ANTI_AFFINITY_GROUPS
+    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
+}
+
+impl SimpleIdentityOrName for AntiAffinityGroupMember {
+    fn id(&self) -> Uuid {
+        match self {
+            AntiAffinityGroupMember::Instance { id, .. } => {
+                *id.as_untyped_uuid()
+            }
+        }
+    }
+
+    fn name(&self) -> &Name {
+        match self {
+            AntiAffinityGroupMember::Instance { name, .. } => name,
+        }
+    }
 }
 
 // DISKS
@@ -1065,338 +1538,33 @@ impl DiskState {
     }
 }
 
-/// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
-pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
-
-impl Ipv4Net {
-    /// Return `true` if this IPv4 subnetwork is from an RFC 1918 private
-    /// address space.
-    pub fn is_private(&self) -> bool {
-        self.0.network().is_private()
-    }
-}
-
-impl std::ops::Deref for Ipv4Net {
-    type Target = ipnetwork::Ipv4Network;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for Ipv4Net {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl JsonSchema for Ipv4Net {
-    fn schema_name() -> String {
-        "Ipv4Net".to_string()
-    }
-
-    fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some("An IPv4 subnet".to_string()),
-                description: Some(
-                    "An IPv4 subnet, including prefix and subnet mask"
-                        .to_string(),
-                ),
-                examples: vec!["192.168.1.0/24".into()],
-                ..Default::default()
-            })),
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(
-                    concat!(
-                        r#"^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\.){3}"#,
-                        r#"([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])"#,
-                        r#"/([0-9]|1[0-9]|2[0-9]|3[0-2])$"#,
-                    )
-                    .to_string(),
-                ),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
-/// An `Ipv6Net` represents a IPv6 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
-pub struct Ipv6Net(pub ipnetwork::Ipv6Network);
-
-impl Ipv6Net {
+pub trait Ipv6NetExt {
     /// The length for all VPC IPv6 prefixes
-    pub const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
+    const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
 
-    /// The prefix length for all VPC Sunets
-    pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
-
-    /// Return `true` if this subnetwork is in the IPv6 Unique Local Address
-    /// range defined in RFC 4193, e.g., `fd00:/8`
-    pub fn is_unique_local(&self) -> bool {
-        // TODO: Delegate to `Ipv6Addr::is_unique_local()` when stabilized.
-        self.0.network().octets()[0] == 0xfd
-    }
+    /// The prefix length for all VPC Subnets
+    const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
 
     /// Return `true` if this subnetwork is a valid VPC prefix.
     ///
     /// This checks that the subnet is a unique local address, and has the VPC
     /// prefix length required.
-    pub fn is_vpc_prefix(&self) -> bool {
-        self.is_unique_local()
-            && self.0.prefix() == Self::VPC_IPV6_PREFIX_LENGTH
-    }
+    fn is_vpc_prefix(&self) -> bool;
 
     /// Return `true` if this subnetwork is a valid VPC Subnet, given the VPC's
     /// prefix.
-    pub fn is_vpc_subnet(&self, vpc_prefix: &Ipv6Net) -> bool {
+    fn is_vpc_subnet(&self, vpc_prefix: &Self) -> bool;
+}
+
+impl Ipv6NetExt for oxnet::Ipv6Net {
+    fn is_vpc_prefix(&self) -> bool {
+        self.is_unique_local() && self.width() == Self::VPC_IPV6_PREFIX_LENGTH
+    }
+
+    fn is_vpc_subnet(&self, vpc_prefix: &Self) -> bool {
         self.is_unique_local()
-            && self.is_subnet_of(vpc_prefix.0)
-            && self.prefix() == Self::VPC_SUBNET_IPV6_PREFIX_LENGTH
-    }
-}
-
-impl std::ops::Deref for Ipv6Net {
-    type Target = ipnetwork::Ipv6Network;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for Ipv6Net {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<ipnetwork::Ipv6Network> for Ipv6Net {
-    fn from(n: ipnetwork::Ipv6Network) -> Ipv6Net {
-        Self(n)
-    }
-}
-
-impl JsonSchema for Ipv6Net {
-    fn schema_name() -> String {
-        "Ipv6Net".to_string()
-    }
-
-    fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some("An IPv6 subnet".to_string()),
-                description: Some(
-                    "An IPv6 subnet, including prefix and subnet mask"
-                        .to_string(),
-                ),
-                examples: vec!["fd12:3456::/64".into()],
-                ..Default::default()
-            })),
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(
-                    // Conforming to unique local addressing scheme,
-                    // `fd00::/8`.
-                    concat!(
-                        r#"^([fF][dD])[0-9a-fA-F]{2}:("#,
-                        r#"([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}"#,
-                        r#"|([0-9a-fA-F]{1,4}:){1,6}:)"#,
-                        r#"([0-9a-fA-F]{1,4})?"#,
-                        r#"\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"#,
-                    )
-                    .to_string(),
-                ),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
-/// An `IpNet` represents an IP network, either IPv4 or IPv6.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum IpNet {
-    V4(Ipv4Net),
-    V6(Ipv6Net),
-}
-
-impl IpNet {
-    /// Return the underlying address.
-    pub fn ip(&self) -> IpAddr {
-        match self {
-            IpNet::V4(inner) => inner.ip().into(),
-            IpNet::V6(inner) => inner.ip().into(),
-        }
-    }
-
-    /// Return the underlying prefix length.
-    pub fn prefix(&self) -> u8 {
-        match self {
-            IpNet::V4(inner) => inner.prefix(),
-            IpNet::V6(inner) => inner.prefix(),
-        }
-    }
-
-    /// Return the first address in this subnet
-    pub fn first_address(&self) -> IpAddr {
-        match self {
-            IpNet::V4(inner) => IpAddr::from(inner.iter().next().unwrap()),
-            IpNet::V6(inner) => IpAddr::from(inner.iter().next().unwrap()),
-        }
-    }
-
-    /// Return the last address in this subnet.
-    ///
-    /// For a subnet of size 1, e.g., a /32, this is the same as the first
-    /// address.
-    // NOTE: This is a workaround for the fact that the `ipnetwork` crate's
-    // iterator provides only the `Iterator::next()` method. That means that
-    // finding the last address is linear in the size of the subnet, which is
-    // completely untenable and totally avoidable with some addition. In the
-    // long term, we should either put up a patch to the `ipnetwork` crate or
-    // move the `ipnet` crate, which does provide an efficient iterator
-    // implementation.
-    pub fn last_address(&self) -> IpAddr {
-        match self {
-            IpNet::V4(inner) => {
-                let base: u32 = inner.network().into();
-                let size = inner.size() - 1;
-                std::net::IpAddr::V4(std::net::Ipv4Addr::from(base + size))
-            }
-            IpNet::V6(inner) => {
-                let base: u128 = inner.network().into();
-                let size = inner.size() - 1;
-                std::net::IpAddr::V6(std::net::Ipv6Addr::from(base + size))
-            }
-        }
-    }
-}
-
-impl From<ipnetwork::IpNetwork> for IpNet {
-    fn from(n: ipnetwork::IpNetwork) -> Self {
-        match n {
-            ipnetwork::IpNetwork::V4(v4) => IpNet::V4(Ipv4Net(v4)),
-            ipnetwork::IpNetwork::V6(v6) => IpNet::V6(Ipv6Net(v6)),
-        }
-    }
-}
-
-impl From<Ipv4Net> for IpNet {
-    fn from(n: Ipv4Net) -> IpNet {
-        IpNet::V4(n)
-    }
-}
-
-impl From<Ipv4Addr> for IpNet {
-    fn from(n: Ipv4Addr) -> IpNet {
-        IpNet::V4(Ipv4Net(ipnetwork::Ipv4Network::from(n)))
-    }
-}
-
-impl From<Ipv6Net> for IpNet {
-    fn from(n: Ipv6Net) -> IpNet {
-        IpNet::V6(n)
-    }
-}
-
-impl From<Ipv6Addr> for IpNet {
-    fn from(n: Ipv6Addr) -> IpNet {
-        IpNet::V6(Ipv6Net(ipnetwork::Ipv6Network::from(n)))
-    }
-}
-
-impl From<IpAddr> for IpNet {
-    fn from(n: IpAddr) -> IpNet {
-        match n {
-            IpAddr::V4(v4) => IpNet::from(v4),
-            IpAddr::V6(v6) => IpNet::from(v6),
-        }
-    }
-}
-
-impl std::fmt::Display for IpNet {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            IpNet::V4(inner) => write!(f, "{}", inner),
-            IpNet::V6(inner) => write!(f, "{}", inner),
-        }
-    }
-}
-
-impl FromStr for IpNet {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let net =
-            s.parse::<ipnetwork::IpNetwork>().map_err(|e| e.to_string())?;
-        match net {
-            ipnetwork::IpNetwork::V4(net) => Ok(IpNet::from(Ipv4Net(net))),
-            ipnetwork::IpNetwork::V6(net) => Ok(IpNet::from(Ipv6Net(net))),
-        }
-    }
-}
-
-impl From<IpNet> for ipnetwork::IpNetwork {
-    fn from(net: IpNet) -> ipnetwork::IpNetwork {
-        match net {
-            IpNet::V4(net) => ipnetwork::IpNetwork::from(net.0),
-            IpNet::V6(net) => ipnetwork::IpNetwork::from(net.0),
-        }
-    }
-}
-
-impl Serialize for IpNet {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            IpNet::V4(v4) => v4.serialize(serializer),
-            IpNet::V6(v6) => v6.serialize(serializer),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for IpNet {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let net = ipnetwork::IpNetwork::deserialize(deserializer)?;
-        match net {
-            ipnetwork::IpNetwork::V4(net) => Ok(IpNet::from(Ipv4Net(net))),
-            ipnetwork::IpNetwork::V6(net) => Ok(IpNet::from(Ipv6Net(net))),
-        }
-    }
-}
-
-impl JsonSchema for IpNet {
-    fn schema_name() -> String {
-        "IpNet".to_string()
-    }
-
-    fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
-                one_of: Some(vec![
-                    label_schema("v4", gen.subschema_for::<Ipv4Net>()),
-                    label_schema("v6", gen.subschema_for::<Ipv6Net>()),
-                ]),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
+            && self.is_subnet_of(vpc_prefix)
+            && self.width() == Self::VPC_SUBNET_IPV6_PREFIX_LENGTH
     }
 }
 
@@ -1456,10 +1624,13 @@ pub enum RouteTarget {
     #[display("inetgw:{0}")]
     /// Forward traffic to an internet gateway
     InternetGateway(Name),
+    #[display("drop")]
+    /// Drop matching traffic
+    Drop,
 }
 
-/// A `RouteDestination` is used to match traffic with a routing rule, on the
-/// destination of that traffic.
+/// A `RouteDestination` is used to match traffic with a routing rule based on
+/// the destination of that traffic.
 ///
 /// When traffic is to be sent to a destination that is within a given
 /// `RouteDestination`, the corresponding `RouterRoute` applies, and traffic
@@ -1477,13 +1648,13 @@ pub enum RouteTarget {
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 #[display("{}:{0}", style = "lowercase")]
 pub enum RouteDestination {
-    /// Route applies to traffic destined for a specific IP address
+    /// Route applies to traffic destined for the specified IP address
     Ip(IpAddr),
-    /// Route applies to traffic destined for a specific IP subnet
+    /// Route applies to traffic destined for the specified IP subnet
     IpNet(IpNet),
-    /// Route applies to traffic destined for the given VPC.
+    /// Route applies to traffic destined for the specified VPC
     Vpc(Name),
-    /// Route applies to traffic
+    /// Route applies to traffic destined for the specified VPC subnet
     Subnet(Name),
 }
 
@@ -1526,39 +1697,60 @@ pub enum RouterRouteKind {
 /// its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRoute {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-
     /// The ID of the VPC Router to which the route belongs
     pub vpc_router_id: Uuid,
-
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,
-
+    /// The location that matched packets should be forwarded to
     pub target: RouteTarget,
+    /// Selects which traffic this routing rule will apply to
     pub destination: RouteDestination,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpPool {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the internet gateway to which the IP pool entry belongs
+    pub internet_gateway_id: Uuid,
+    /// The ID of the referenced IP pool
+    pub ip_pool_id: Uuid,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIp {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the internet gateway to which the IP belongs
+    pub internet_gateway_id: Uuid,
+    /// The IP address
+    pub address: IpAddr,
 }
 
 /// A single rule in a VPC firewall
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRule {
-    /// common identifying metadata
+    /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    /// whether this rule is in effect
+    /// Whether this rule is in effect
     pub status: VpcFirewallRuleStatus,
-    /// whether this rule is for incoming or outgoing traffic
+    /// Whether this rule is for incoming or outgoing traffic
     pub direction: VpcFirewallRuleDirection,
-    /// list of sets of instances that the rule applies to
+    /// Determine the set of instances that the rule applies to
     pub targets: Vec<VpcFirewallRuleTarget>,
-    /// reductions on the scope of the rule
+    /// Reductions on the scope of the rule
     pub filters: VpcFirewallRuleFilter,
-    /// whether traffic matching the rule should be allowed or dropped
+    /// Whether traffic matching the rule should be allowed or dropped
     pub action: VpcFirewallRuleAction,
-    /// the relative priority of this rule
+    /// The relative priority of this rule
     pub priority: VpcFirewallRulePriority,
-    /// the VPC to which this rule belongs
+    /// The VPC to which this rule belongs
     pub vpc_id: Uuid,
 }
 
@@ -1571,29 +1763,29 @@ pub struct VpcFirewallRules {
 /// A single rule in a VPC firewall
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdate {
-    /// name of the rule, unique to this VPC
+    /// Name of the rule, unique to this VPC
     pub name: Name,
-    /// human-readable free-form text about a resource
+    /// Human-readable free-form text about a resource
     pub description: String,
-    /// whether this rule is in effect
+    /// Whether this rule is in effect
     pub status: VpcFirewallRuleStatus,
-    /// whether this rule is for incoming or outgoing traffic
+    /// Whether this rule is for incoming or outgoing traffic
     pub direction: VpcFirewallRuleDirection,
-    /// list of sets of instances that the rule applies to
+    /// Determine the set of instances that the rule applies to
+    #[schemars(length(max = 256))]
     pub targets: Vec<VpcFirewallRuleTarget>,
-    /// reductions on the scope of the rule
+    /// Reductions on the scope of the rule
     pub filters: VpcFirewallRuleFilter,
-    /// whether traffic matching the rule should be allowed or dropped
+    /// Whether traffic matching the rule should be allowed or dropped
     pub action: VpcFirewallRuleAction,
-    /// the relative priority of this rule
+    /// The relative priority of this rule
     pub priority: VpcFirewallRulePriority,
 }
 
-/// Updateable properties of a `Vpc`'s firewall
-/// Note that VpcFirewallRules are implicitly created along with a Vpc,
-/// so there is no explicit creation.
+/// Updated list of firewall rules. Will replace all existing rules.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdateParams {
+    #[schemars(length(max = 1024))]
     pub rules: Vec<VpcFirewallRuleUpdate>,
 }
 
@@ -1613,19 +1805,24 @@ pub struct VpcFirewallRuleUpdateParams {
 #[repr(transparent)]
 pub struct VpcFirewallRulePriority(pub u16);
 
-/// Filter for a firewall rule. A given packet must match every field that is
-/// present for the rule to apply to it. A packet matches a field if any entry
-/// in that field matches the packet.
+/// Filters reduce the scope of a firewall rule. Without filters, the rule
+/// applies to all packets to the targets (or from the targets, if it's an
+/// outbound rule). With multiple filters, the rule applies only to packets
+/// matching ALL filters. The maximum number of each type of filter is 256.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleFilter {
-    /// If present, the sources (if incoming) or destinations (if outgoing)
-    /// this rule applies to.
+    /// If present, host filters match the "other end" of traffic from the
+    /// target’s perspective: for an inbound rule, they match the source of
+    /// traffic. For an outbound rule, they match the destination.
+    #[schemars(length(max = 256))]
     pub hosts: Option<Vec<VpcFirewallRuleHostFilter>>,
 
     /// If present, the networking protocols this rule applies to.
+    #[schemars(length(max = 256))]
     pub protocols: Option<Vec<VpcFirewallRuleProtocol>>,
 
-    /// If present, the destination ports this rule applies to.
+    /// If present, the destination ports or port ranges this rule applies to.
+    #[schemars(length(max = 256))]
     pub ports: Option<Vec<L4PortRange>>,
 }
 
@@ -1659,8 +1856,11 @@ pub enum VpcFirewallRuleAction {
     Deny,
 }
 
-/// A `VpcFirewallRuleTarget` is used to specify the set of `Instance`s to
-/// which a firewall rule applies.
+/// A `VpcFirewallRuleTarget` is used to specify the set of instances to which
+/// a firewall rule applies. You can target instances directly by name, or
+/// specify a VPC, VPC subnet, IP, or IP subnet, which will apply the rule to
+/// traffic going to all matching instances. Targets are additive: the rule
+/// applies to instances matching ANY target.
 #[derive(
     Clone,
     Debug,
@@ -1683,7 +1883,7 @@ pub enum VpcFirewallRuleTarget {
     /// The rule applies to a specific IP address
     Ip(IpAddr),
     /// The rule applies to a specific IP subnet
-    IpNet(IpNet),
+    IpNet(oxnet::IpNet),
     // Tags not yet implemented
     // Tag(Name),
 }
@@ -1714,7 +1914,7 @@ pub enum VpcFirewallRuleHostFilter {
     /// The rule applies to traffic from/to a specific IP address
     Ip(IpAddr),
     /// The rule applies to traffic from/to a specific IP subnet
-    IpNet(IpNet),
+    IpNet(oxnet::IpNet),
     // TODO: Internet gateways not yet implemented
     // #[display("inetgw:{0}")]
     // InternetGateway(Name),
@@ -1820,7 +2020,7 @@ impl JsonSchema for L4PortRange {
                 title: Some("A range of IP ports".to_string()),
                 description: Some(
                     "An inclusive-inclusive range of IP ports. The second port \
-                    may be omitted to represent a single port"
+                    may be omitted to represent a single port."
                         .to_string(),
                 ),
                 examples: vec!["22".into(), "6667-7000".into()],
@@ -1852,9 +2052,13 @@ impl JsonSchema for L4PortRange {
     DeserializeFromStr,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
     SerializeDisplay,
     Hash,
+    Diffable,
 )]
+#[daft(leaf)]
 pub struct MacAddr(pub macaddr::MacAddr6);
 
 impl MacAddr {
@@ -1899,7 +2103,7 @@ impl MacAddr {
     /// Iterate the MAC addresses in the system address range
     /// (used as an allocator in contexts where collisions are not expected and
     /// determinism is useful, like in the test suite)
-    pub fn iter_system() -> impl Iterator<Item = MacAddr> {
+    pub fn iter_system() -> impl Iterator<Item = MacAddr> + Send {
         ((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR)
             .map(Self::from_i64)
     }
@@ -2020,6 +2224,7 @@ impl JsonSchema for MacAddr {
     Deserialize,
     Serialize,
     JsonSchema,
+    Diffable,
 )]
 pub struct Vni(u32);
 
@@ -2101,6 +2306,11 @@ pub struct InstanceNetworkInterface {
     /// True if this interface is the primary for the instance to which it's
     /// attached.
     pub primary: bool,
+
+    /// A set of additional networks that this interface may send and
+    /// receive traffic on.
+    #[serde(default)]
+    pub transit_ips: Vec<IpNet>,
 }
 
 #[derive(
@@ -2222,7 +2432,7 @@ pub struct LoopbackAddress {
     pub switch_location: String,
 
     /// The loopback IP address and prefix length.
-    pub address: IpNet,
+    pub address: oxnet::IpNet,
 }
 
 /// A switch port represents a physical external port on a rack switch.
@@ -2275,7 +2485,11 @@ pub struct SwitchPortSettingsView {
     pub links: Vec<SwitchPortLinkConfig>,
 
     /// Link-layer discovery protocol (LLDP) settings.
-    pub link_lldp: Vec<LldpServiceConfig>,
+    pub link_lldp: Vec<LldpLinkConfig>,
+
+    /// TX equalization settings.  These are optional, and most links will not
+    /// need them.
+    pub tx_eq: Vec<Option<TxEqConfig>>,
 
     /// Layer 3 interface settings.
     pub interfaces: Vec<SwitchInterfaceConfig>,
@@ -2287,7 +2501,7 @@ pub struct SwitchPortSettingsView {
     pub routes: Vec<SwitchPortRouteConfig>,
 
     /// BGP peer settings.
-    pub bgp_peers: Vec<SwitchPortBgpPeerConfig>,
+    pub bgp_peers: Vec<BgpPeer>,
 
     /// Layer 3 IP address settings.
     pub addresses: Vec<SwitchPortAddressConfig>,
@@ -2341,6 +2555,74 @@ pub struct SwitchPortConfig {
     pub geometry: SwitchPortGeometry,
 }
 
+/// The speed of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkSpeed {
+    /// Zero gigabits per second.
+    Speed0G,
+    /// 1 gigabit per second.
+    Speed1G,
+    /// 10 gigabits per second.
+    Speed10G,
+    /// 25 gigabits per second.
+    Speed25G,
+    /// 40 gigabits per second.
+    Speed40G,
+    /// 50 gigabits per second.
+    Speed50G,
+    /// 100 gigabits per second.
+    Speed100G,
+    /// 200 gigabits per second.
+    Speed200G,
+    /// 400 gigabits per second.
+    Speed400G,
+}
+
+/// The forward error correction mode of a link.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkFec {
+    /// Firecode forward error correction.
+    Firecode,
+    /// No forward error correction.
+    None,
+    /// Reed-Solomon forward error correction.
+    Rs,
+}
+
+impl From<crate::api::internal::shared::PortFec> for LinkFec {
+    fn from(x: crate::api::internal::shared::PortFec) -> LinkFec {
+        match x {
+            crate::api::internal::shared::PortFec::Firecode => Self::Firecode,
+            crate::api::internal::shared::PortFec::None => Self::None,
+            crate::api::internal::shared::PortFec::Rs => Self::Rs,
+        }
+    }
+}
+
+impl From<crate::api::internal::shared::PortSpeed> for LinkSpeed {
+    fn from(x: crate::api::internal::shared::PortSpeed) -> Self {
+        match x {
+            crate::api::internal::shared::PortSpeed::Speed0G => Self::Speed0G,
+            crate::api::internal::shared::PortSpeed::Speed1G => Self::Speed1G,
+            crate::api::internal::shared::PortSpeed::Speed10G => Self::Speed10G,
+            crate::api::internal::shared::PortSpeed::Speed25G => Self::Speed25G,
+            crate::api::internal::shared::PortSpeed::Speed40G => Self::Speed40G,
+            crate::api::internal::shared::PortSpeed::Speed50G => Self::Speed50G,
+            crate::api::internal::shared::PortSpeed::Speed100G => {
+                Self::Speed100G
+            }
+            crate::api::internal::shared::PortSpeed::Speed200G => {
+                Self::Speed200G
+            }
+            crate::api::internal::shared::PortSpeed::Speed400G => {
+                Self::Speed400G
+            }
+        }
+    }
+}
+
 /// A link configuration for a port settings object.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPortLinkConfig {
@@ -2349,45 +2631,127 @@ pub struct SwitchPortLinkConfig {
 
     /// The link-layer discovery protocol service configuration id for this
     /// link.
-    pub lldp_service_config_id: Uuid,
+    pub lldp_link_config_id: Option<Uuid>,
+
+    /// The tx_eq configuration id for this link.
+    pub tx_eq_config_id: Option<Uuid>,
 
     /// The name of this link.
     pub link_name: String,
 
     /// The maximum transmission unit for this link.
     pub mtu: u16,
+
+    /// The requested forward-error correction method.  If this is not
+    /// specified, the standard FEC for the underlying media will be applied
+    /// if it can be determined.
+    pub fec: Option<LinkFec>,
+
+    /// The configured speed of the link.
+    pub speed: LinkSpeed,
+
+    /// Whether or not the link has autonegotiation enabled.
+    pub autoneg: bool,
 }
 
 /// A link layer discovery protocol (LLDP) service configuration.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LldpServiceConfig {
+pub struct LldpLinkConfig {
     /// The id of this LLDP service instance.
     pub id: Uuid,
 
-    /// The link-layer discovery protocol configuration for this service.
-    pub lldp_config_id: Option<Uuid>,
-
     /// Whether or not the LLDP service is enabled.
     pub enabled: bool,
-}
 
-/// A link layer discovery protocol (LLDP) base configuration.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LldpConfig {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
+    /// The LLDP link name TLV.
+    pub link_name: Option<String>,
+
+    /// The LLDP link description TLV.
+    pub link_description: Option<String>,
 
     /// The LLDP chassis identifier TLV.
+    pub chassis_id: Option<String>,
+
+    /// The LLDP system name TLV.
+    pub system_name: Option<String>,
+
+    /// The LLDP system description TLV.
+    pub system_description: Option<String>,
+
+    /// The LLDP management IP TLV.
+    pub management_ip: Option<oxnet::IpNet>,
+}
+
+/// Information about LLDP advertisements from other network entities directly
+/// connected to a switch port.  This structure contains both metadata about
+/// when and where the neighbor was seen, as well as the specific information
+/// the neighbor was advertising.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LldpNeighbor {
+    // Unique ID assigned to this neighbor - only used for pagination
+    #[serde(skip)]
+    pub id: Uuid,
+
+    /// The port on which the neighbor was seen
+    pub local_port: String,
+
+    /// Initial sighting of this LldpNeighbor
+    pub first_seen: DateTime<Utc>,
+
+    /// Most recent sighting of this LldpNeighbor
+    pub last_seen: DateTime<Utc>,
+
+    /// The LLDP link name advertised by the neighbor
+    pub link_name: String,
+
+    /// The LLDP link description advertised by the neighbor
+    pub link_description: Option<String>,
+
+    /// The LLDP chassis identifier advertised by the neighbor
     pub chassis_id: String,
 
-    /// THE LLDP system name TLV.
-    pub system_name: String,
+    /// The LLDP system name advertised by the neighbor
+    pub system_name: Option<String>,
 
-    /// THE LLDP system description TLV.
-    pub system_description: String,
+    /// The LLDP system description advertised by the neighbor
+    pub system_description: Option<String>,
 
-    /// THE LLDP management IP TLV.
-    pub management_ip: IpNet,
+    /// The LLDP management IP(s) advertised by the neighbor
+    pub management_ip: Vec<oxnet::IpNet>,
+}
+
+impl SimpleIdentity for LldpNeighbor {
+    fn id(&self) -> Uuid {
+        self.id
+    }
+}
+
+/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
+/// equalization settings to improve signal integrity.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct TxEqConfig {
+    /// Pre-cursor tap1
+    pub pre1: Option<i32>,
+    /// Pre-cursor tap2
+    pub pre2: Option<i32>,
+    /// Main tap
+    pub main: Option<i32>,
+    /// Post-cursor tap2
+    pub post2: Option<i32>,
+    /// Post-cursor tap1
+    pub post1: Option<i32>,
+}
+
+impl From<crate::api::internal::shared::TxEqConfig> for TxEqConfig {
+    fn from(x: crate::api::internal::shared::TxEqConfig) -> TxEqConfig {
+        TxEqConfig {
+            pre1: x.pre1,
+            pre2: x.pre2,
+            main: x.main,
+            post2: x.post2,
+            post1: x.post1,
+        }
+    }
 }
 
 /// Describes the kind of an switch interface.
@@ -2454,16 +2818,20 @@ pub struct SwitchPortRouteConfig {
     pub interface_name: String,
 
     /// The route's destination network.
-    pub dst: IpNet,
+    pub dst: oxnet::IpNet,
 
     /// The route's gateway address.
-    pub gw: IpNet,
+    pub gw: oxnet::IpNet,
 
     /// The VLAN identifier for the route. Use this if the gateway is reachable
     /// over an 802.1Q tagged L2 segment.
     pub vlan_id: Option<u16>,
+
+    /// RIB Priority indicating priority within and across protocols.
+    pub rib_priority: Option<u8>,
 }
 
+/*
 /// A BGP peer configuration for a port settings object.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct SwitchPortBgpPeerConfig {
@@ -2481,6 +2849,74 @@ pub struct SwitchPortBgpPeerConfig {
 
     /// The address of the peer.
     pub addr: IpAddr,
+}
+*/
+
+/// A BGP peer configuration for an interface. Includes the set of announcements
+/// that will be advertised to the peer identified by `addr`. The `bgp_config`
+/// parameter is a reference to global BGP parameters. The `interface_name`
+/// indicates what interface the peer should be contacted on.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpPeer {
+    /// The global BGP configuration used for establishing a session with this
+    /// peer.
+    pub bgp_config: NameOrId,
+
+    /// The name of interface to peer on. This is relative to the port
+    /// configuration this BGP peer configuration is a part of. For example this
+    /// value could be phy0 to refer to a primary physical interface. Or it
+    /// could be vlan47 to refer to a VLAN interface.
+    pub interface_name: String,
+
+    /// The address of the host to peer with.
+    pub addr: IpAddr,
+
+    /// How long to hold peer connections between keepalives (seconds).
+    pub hold_time: u32,
+
+    /// How long to hold a peer in idle before attempting a new session
+    /// (seconds).
+    pub idle_hold_time: u32,
+
+    /// How long to delay sending an open request after establishing a TCP
+    /// session (seconds).
+    pub delay_open: u32,
+
+    /// How long to to wait between TCP connection retries (seconds).
+    pub connect_retry: u32,
+
+    /// How often to send keepalive requests (seconds).
+    pub keepalive: u32,
+
+    /// Require that a peer has a specified ASN.
+    pub remote_asn: Option<u32>,
+
+    /// Require messages from a peer have a minimum IP time to live field.
+    pub min_ttl: Option<u8>,
+
+    /// Use the given key for TCP-MD5 authentication with the peer.
+    pub md5_auth_key: Option<String>,
+
+    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
+    pub multi_exit_discriminator: Option<u32>,
+
+    /// Include the provided communities in updates sent to the peer.
+    pub communities: Vec<u32>,
+
+    /// Apply a local preference to routes received from this peer.
+    pub local_pref: Option<u32>,
+
+    /// Enforce that the first AS in paths received from this peer is the peer's AS.
+    pub enforce_first_as: bool,
+
+    /// Define import policy for a peer.
+    pub allowed_import: ImportExportPolicy,
+
+    /// Define export policy for a peer.
+    pub allowed_export: ImportExportPolicy,
+
+    /// Associate a VLAN ID with a peer.
+    pub vlan_id: Option<u16>,
 }
 
 /// A base BGP configuration.
@@ -2517,7 +2953,7 @@ pub struct BgpAnnouncement {
     pub address_lot_block_id: Uuid,
 
     /// The IP network being announced.
-    pub network: IpNet,
+    pub network: oxnet::IpNet,
 }
 
 /// An IP address configuration for a port settings object.
@@ -2530,7 +2966,10 @@ pub struct SwitchPortAddressConfig {
     pub address_lot_block_id: Uuid,
 
     /// The IP address and prefix.
-    pub address: IpNet,
+    pub address: oxnet::IpNet,
+
+    /// An optional VLAN ID
+    pub vlan_id: Option<u16>,
 
     /// The interface name this address belongs to.
     // TODO: https://github.com/oxidecomputer/omicron/issues/3050
@@ -2542,7 +2981,7 @@ pub struct SwitchPortAddressConfig {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum BgpPeerState {
-    /// Initial state. Refuse all incomming BGP connections. No resources
+    /// Initial state. Refuse all incoming BGP connections. No resources
     /// allocated to peer.
     Idle,
 
@@ -2561,9 +3000,24 @@ pub enum BgpPeerState {
     /// Synchronizing with peer.
     SessionSetup,
 
-    /// Session established. Able to exchange update, notification and keepliave
+    /// Session established. Able to exchange update, notification and keepalive
     /// messages with peers.
     Established,
+}
+
+impl From<mg_admin_client::types::FsmStateKind> for BgpPeerState {
+    fn from(s: mg_admin_client::types::FsmStateKind) -> BgpPeerState {
+        use mg_admin_client::types::FsmStateKind;
+        match s {
+            FsmStateKind::Idle => BgpPeerState::Idle,
+            FsmStateKind::Connect => BgpPeerState::Connect,
+            FsmStateKind::Active => BgpPeerState::Active,
+            FsmStateKind::OpenSent => BgpPeerState::OpenSent,
+            FsmStateKind::OpenConfirm => BgpPeerState::OpenConfirm,
+            FsmStateKind::SessionSetup => BgpPeerState::SessionSetup,
+            FsmStateKind::Established => BgpPeerState::Established,
+        }
+    }
 }
 
 /// The current status of a BGP peer.
@@ -2588,11 +3042,70 @@ pub struct BgpPeerStatus {
     pub switch: SwitchLocation,
 }
 
+/// The current status of a BGP peer.
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Default,
+)]
+pub struct BgpExported {
+    /// Exported routes indexed by peer address.
+    pub exports: HashMap<String, Vec<Ipv4Net>>,
+}
+
+/// Opaque object representing BGP message history for a given BGP peer. The
+/// contents of this object are not yet stable.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BgpMessageHistory(mg_admin_client::types::MessageHistory);
+
+impl BgpMessageHistory {
+    pub fn new(arg: mg_admin_client::types::MessageHistory) -> Self {
+        Self(arg)
+    }
+}
+
+impl JsonSchema for BgpMessageHistory {
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        let obj = schemars::schema::Schema::Object(
+            schemars::schema::SchemaObject::default(),
+        );
+        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        obj
+    }
+
+    fn schema_name() -> String {
+        "BgpMessageHistory".to_owned()
+    }
+}
+
+/// BGP message history for a particular switch.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SwitchBgpHistory {
+    /// Switch this message history is associated with.
+    pub switch: SwitchLocation,
+
+    /// Message history indexed by peer address.
+    pub history: HashMap<String, BgpMessageHistory>,
+}
+
+/// BGP message history for rack switches.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct AggregateBgpMessageHistory {
+    /// BGP history organized by switch.
+    switch_histories: Vec<SwitchBgpHistory>,
+}
+
+impl AggregateBgpMessageHistory {
+    pub fn new(switch_histories: Vec<SwitchBgpHistory>) -> Self {
+        Self { switch_histories }
+    }
+}
+
 /// A route imported from a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct BgpImportedRouteIpv4 {
     /// The destination network prefix.
-    pub prefix: Ipv4Net,
+    pub prefix: oxnet::Ipv4Net,
 
     /// The nexthop the prefix is reachable through.
     pub nexthop: Ipv4Addr,
@@ -2604,15 +3117,158 @@ pub struct BgpImportedRouteIpv4 {
     pub switch: SwitchLocation,
 }
 
+/// BFD connection mode.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BfdMode {
+    SingleHop,
+    MultiHop,
+}
+
+/// A description of an uploaded TUF repository.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepoDescription {
+    /// Information about the repository.
+    pub repo: TufRepoMeta,
+
+    /// Information about the artifacts present in the repository.
+    pub artifacts: Vec<TufArtifactMeta>,
+}
+
+impl TufRepoDescription {
+    /// Sorts the artifacts so that descriptions can be compared.
+    pub fn sort_artifacts(&mut self) {
+        self.artifacts.sort_by(|a, b| a.id.cmp(&b.id));
+    }
+}
+
+/// Metadata about a TUF repository.
+///
+/// Found within a `TufRepoDescription`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepoMeta {
+    /// The hash of the repository.
+    ///
+    /// This is a slight abuse of `ArtifactHash`, since that's the hash of
+    /// individual artifacts within the repository. However, we use it here for
+    /// convenience.
+    pub hash: ArtifactHash,
+
+    /// The version of the targets role.
+    pub targets_role_version: u64,
+
+    /// The time until which the repo is valid.
+    pub valid_until: DateTime<Utc>,
+
+    /// The system version in artifacts.json.
+    pub system_version: Version,
+
+    /// The file name of the repository.
+    ///
+    /// This is purely used for debugging and may not always be correct (e.g.
+    /// with wicket, we read the file contents from stdin so we don't know the
+    /// correct file name).
+    pub file_name: String,
+}
+
+/// Metadata about an individual TUF artifact.
+///
+/// Found within a `TufRepoDescription`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufArtifactMeta {
+    /// The artifact ID.
+    pub id: ArtifactId,
+
+    /// The hash of the artifact.
+    pub hash: ArtifactHash,
+
+    /// The size of the artifact in bytes.
+    pub size: u64,
+}
+
+/// Data about a successful TUF repo import into Nexus.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct TufRepoInsertResponse {
+    /// The repository as present in the database.
+    pub recorded: TufRepoDescription,
+
+    /// Whether this repository already existed or is new.
+    pub status: TufRepoInsertStatus,
+}
+
+/// Status of a TUF repo import.
+///
+/// Part of `TufRepoInsertResponse`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TufRepoInsertStatus {
+    /// The repository already existed in the database.
+    AlreadyExists,
+
+    /// The repository did not exist, and was inserted into the database.
+    Inserted,
+}
+
+/// Data about a successful TUF repo get from Nexus.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct TufRepoGetResponse {
+    /// The description of the repository.
+    pub description: TufRepoDescription,
+}
+
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, ObjectIdentity,
+)]
+pub struct Probe {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    pub sled: Uuid,
+}
+
+/// Define policy relating to the import and export of prefixes from a BGP
+/// peer.
+#[derive(
+    Default,
+    Debug,
+    Serialize,
+    Deserialize,
+    Clone,
+    JsonSchema,
+    Eq,
+    PartialEq,
+    Hash,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum ImportExportPolicy {
+    /// Do not perform any filtering.
+    #[default]
+    NoFiltering,
+    Allow(Vec<oxnet::IpNet>),
+}
+
 #[cfg(test)]
 mod test {
     use serde::Deserialize;
     use serde::Serialize;
 
-    use super::IpNet;
+    use super::Generation;
     use super::RouteDestination;
     use super::RouteTarget;
-    use super::SemverVersion;
     use super::VpcFirewallRuleHostFilter;
     use super::VpcFirewallRuleTarget;
     use super::{
@@ -2623,62 +3279,23 @@ mod test {
         VpcFirewallRuleUpdateParams,
     };
     use crate::api::external::Error;
+    use crate::api::external::Hostname;
     use crate::api::external::ResourceType;
+    use semver::Version;
     use std::convert::TryFrom;
     use std::str::FromStr;
 
-    #[test]
-    fn test_semver_validation() {
-        // Examples copied from
-        // https://github.com/dtolnay/semver/blob/cc2cfed67c17dfe6abae18726830bdb6d7cf740d/tests/test_version.rs#L13.
-        let valid = [
-            "1.2.3",
-            "1.2.3-alpha1",
-            "1.2.3+build5",
-            "1.2.3+5build",
-            "1.2.3-alpha1+build5",
-            "1.2.3-1.alpha1.9+build5.7.3aedf",
-            "1.2.3-0a.alpha1.9+05build.7.3aed",
-            "0.4.0-beta.1+0851523",
-            "1.1.0-beta-10",
-        ];
-        let invalid = [
-            // These examples are rejected by the validation regex.
-            "",
-            "1",
-            "1.2",
-            "1.2.3-",
-            "a.b.c",
-            "1.2.3 abc",
-            "1.2.3-01",
-        ];
-
-        let r = regress::Regex::new(SemverVersion::VALIDATION_REGEX)
-            .expect("validation regex is valid");
-        for input in valid {
-            let m = r
-                .find(input)
-                .unwrap_or_else(|| panic!("input {input} did not match regex"));
-            assert_eq!(m.start(), 0, "input {input} did not match start");
-            assert_eq!(m.end(), input.len(), "input {input} did not match end");
-        }
-
-        for input in invalid {
-            assert!(
-                r.find(input).is_none(),
-                "invalid input {input} should not match validation regex"
-            );
-        }
-    }
-
+    // This test originates from when we had a wrapper struct around
+    // `semver::Version`, but it's probably worth carrying this test that
+    // ensures the behavior we rely on is accurate.
     #[test]
     fn test_semver_serialize() {
         #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
         struct MyStruct {
-            version: SemverVersion,
+            version: Version,
         }
 
-        let v = MyStruct { version: SemverVersion::new(1, 2, 3) };
+        let v = MyStruct { version: Version::new(1, 2, 3) };
         let expected = "{\"version\":\"1.2.3\"}";
         assert_eq!(serde_json::to_string(&v).unwrap(), expected);
         assert_eq!(serde_json::from_str::<MyStruct>(expected).unwrap(), v);
@@ -2826,10 +3443,10 @@ mod test {
         assert!(result.is_err());
         assert_eq!(
             result,
-            Err(Error::InvalidValue {
-                label: "the_name".to_string(),
-                message: "name requires at least one character".to_string()
-            })
+            Err(Error::invalid_value(
+                "the_name",
+                "name requires at least one character"
+            ))
         );
     }
 
@@ -2870,6 +3487,21 @@ mod test {
         // For good measure, let's check i64::MIN
         let bogus = ByteCount::try_from(i64::MIN).unwrap_err();
         assert_eq!(bogus.to_string(), "value is too small for a byte count");
+
+        // The largest input value to the `from_*_u32` methods do not create
+        // a value larger than i64::MAX.
+        assert!(
+            ByteCount::from_kibibytes_u32(u32::MAX).to_bytes()
+                <= u64::try_from(i64::MAX).unwrap()
+        );
+        assert!(
+            ByteCount::from_mebibytes_u32(u32::MAX).to_bytes()
+                <= u64::try_from(i64::MAX).unwrap()
+        );
+        assert!(
+            ByteCount::from_gibibytes_u32(u32::MAX).to_bytes()
+                <= u64::try_from(i64::MAX).unwrap()
+        );
 
         // We've now exhaustively tested both sides of all boundary conditions
         // for all three constructors (to the extent that that's possible).
@@ -2914,6 +3546,51 @@ mod test {
             format!("{}", ByteCount::from_gibibytes_u32(1024)),
             "1 TiB".to_string()
         );
+    }
+
+    #[test]
+    fn test_generation_display_parse() {
+        assert_eq!(Generation::new().to_string(), "1");
+        assert_eq!(Generation::from_str("1").unwrap(), Generation::new());
+    }
+
+    #[test]
+    fn test_generation_serde() {
+        assert_eq!(serde_json::to_string(&Generation::new()).unwrap(), "1");
+        assert_eq!(
+            serde_json::from_str::<Generation>("1").unwrap(),
+            Generation::new()
+        );
+    }
+
+    #[test]
+    fn test_generation_from_int() {
+        for good_value in [0, Generation::MAX.0] {
+            Generation::try_from(good_value).unwrap();
+            serde_json::from_str::<Generation>(&good_value.to_string())
+                .unwrap();
+        }
+        for good_value in [0, i64::MAX] {
+            Generation::try_from(good_value).unwrap();
+            serde_json::from_str::<Generation>(&good_value.to_string())
+                .unwrap();
+        }
+        for bad_value in [Generation::MAX.0 + 1, u64::MAX] {
+            Generation::try_from(bad_value).unwrap_err();
+            serde_json::from_str::<Generation>(&bad_value.to_string())
+                .unwrap_err();
+        }
+        for bad_value in [-1, i64::MIN] {
+            Generation::try_from(bad_value).unwrap_err();
+            serde_json::from_str::<Generation>(&bad_value.to_string())
+                .unwrap_err();
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "attempt to overflow generation number")]
+    fn test_generation_overflow() {
+        Generation::MAX.next();
     }
 
     #[test]
@@ -3064,31 +3741,26 @@ mod test {
 
     #[test]
     fn test_ipv6_net_operations() {
-        use super::Ipv6Net;
-        assert!(Ipv6Net("fd00::/8".parse().unwrap()).is_unique_local());
-        assert!(!Ipv6Net("fe00::/8".parse().unwrap()).is_unique_local());
+        use super::Ipv6NetExt;
+        use oxnet::Ipv6Net;
 
-        assert!(Ipv6Net("fd00::/48".parse().unwrap()).is_vpc_prefix());
-        assert!(!Ipv6Net("fe00::/48".parse().unwrap()).is_vpc_prefix());
-        assert!(!Ipv6Net("fd00::/40".parse().unwrap()).is_vpc_prefix());
+        assert!("fd00::/8".parse::<Ipv6Net>().unwrap().is_unique_local());
+        assert!(!"fe00::/8".parse::<Ipv6Net>().unwrap().is_unique_local());
 
-        let vpc_prefix = Ipv6Net("fd00::/48".parse().unwrap());
+        assert!("fd00::/48".parse::<Ipv6Net>().unwrap().is_vpc_prefix());
+        assert!(!"fe00::/48".parse::<Ipv6Net>().unwrap().is_vpc_prefix());
+        assert!(!"fd00::/40".parse::<Ipv6Net>().unwrap().is_vpc_prefix());
+
+        let vpc_prefix = "fd00::/48".parse::<Ipv6Net>().unwrap();
         assert!(
-            Ipv6Net("fd00::/64".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
+            "fd00::/64".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
         );
         assert!(
-            !Ipv6Net("fd10::/64".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
+            !"fd10::/64".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
         );
         assert!(
-            !Ipv6Net("fd00::/63".parse().unwrap()).is_vpc_subnet(&vpc_prefix)
+            !"fd00::/63".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
         );
-    }
-
-    #[test]
-    fn test_ipv4_net_operations() {
-        use super::{IpNet, Ipv4Net};
-        let x: IpNet = "0.0.0.0/0".parse().unwrap();
-        assert_eq!(x, IpNet::V4(Ipv4Net("0.0.0.0/0".parse().unwrap())))
     }
 
     #[test]
@@ -3220,92 +3892,6 @@ mod test {
     }
 
     #[test]
-    fn test_ipnet_serde() {
-        //TODO: none of this actually exercises
-        // schemars::schema::StringValidation bits and the schemars
-        // documentation is not forthcoming on how this might be accomplished.
-        let net_str = "fd00:2::/32";
-        let net = IpNet::from_str(net_str).unwrap();
-        let ser = serde_json::to_string(&net).unwrap();
-
-        assert_eq!(format!(r#""{}""#, net_str), ser);
-        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
-        assert_eq!(net, net_des);
-
-        let net_str = "fd00:99::1/64";
-        let net = IpNet::from_str(net_str).unwrap();
-        let ser = serde_json::to_string(&net).unwrap();
-
-        assert_eq!(format!(r#""{}""#, net_str), ser);
-        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
-        assert_eq!(net, net_des);
-
-        let net_str = "192.168.1.1/16";
-        let net = IpNet::from_str(net_str).unwrap();
-        let ser = serde_json::to_string(&net).unwrap();
-
-        assert_eq!(format!(r#""{}""#, net_str), ser);
-        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
-        assert_eq!(net, net_des);
-
-        let net_str = "0.0.0.0/0";
-        let net = IpNet::from_str(net_str).unwrap();
-        let ser = serde_json::to_string(&net).unwrap();
-
-        assert_eq!(format!(r#""{}""#, net_str), ser);
-        let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
-        assert_eq!(net, net_des);
-    }
-
-    #[test]
-    fn test_ipnet_first_last_address() {
-        use std::net::IpAddr;
-        use std::net::Ipv4Addr;
-        use std::net::Ipv6Addr;
-        let net: IpNet = "fd00::/128".parse().unwrap();
-        assert_eq!(
-            net.first_address(),
-            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
-        );
-        assert_eq!(
-            net.last_address(),
-            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
-        );
-
-        let net: IpNet = "fd00::/64".parse().unwrap();
-        assert_eq!(
-            net.first_address(),
-            IpAddr::from(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0)),
-        );
-        assert_eq!(
-            net.last_address(),
-            IpAddr::from(Ipv6Addr::new(
-                0xfd00, 0, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff
-            )),
-        );
-
-        let net: IpNet = "10.0.0.0/16".parse().unwrap();
-        assert_eq!(
-            net.first_address(),
-            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
-        );
-        assert_eq!(
-            net.last_address(),
-            IpAddr::from(Ipv4Addr::new(10, 0, 255, 255)),
-        );
-
-        let net: IpNet = "10.0.0.0/32".parse().unwrap();
-        assert_eq!(
-            net.first_address(),
-            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
-        );
-        assert_eq!(
-            net.last_address(),
-            IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
-        );
-    }
-
-    #[test]
     fn test_macaddr() {
         use super::MacAddr;
         let _ = MacAddr::from_str(":::::").unwrap();
@@ -3345,5 +3931,25 @@ mod test {
         assert_eq!(mac.0.as_bytes(), &[0xa8, 0x40, 0x25, 0xff, 0x00, 0x01]);
         let conv = mac.to_i64();
         assert_eq!(original, conv);
+    }
+
+    #[test]
+    fn test_hostname_from_str() {
+        assert!(Hostname::from_str("name").is_ok());
+        assert!(Hostname::from_str("a.good.name").is_ok());
+        assert!(Hostname::from_str("another.very-good.name").is_ok());
+        assert!(Hostname::from_str("0name").is_ok());
+        assert!(Hostname::from_str("name0").is_ok());
+        assert!(Hostname::from_str("0name0").is_ok());
+
+        assert!(Hostname::from_str("").is_err());
+        assert!(Hostname::from_str("no_no").is_err());
+        assert!(Hostname::from_str("no.fqdns.").is_err());
+        assert!(Hostname::from_str("empty..label").is_err());
+        assert!(Hostname::from_str("-hypen.cannot.start").is_err());
+        assert!(Hostname::from_str("hypen.-cannot.start").is_err());
+        assert!(Hostname::from_str("hypen.cannot.end-").is_err());
+        assert!(Hostname::from_str("hyphen-cannot-end-").is_err());
+        assert!(Hostname::from_str(&"too-long".repeat(100)).is_err());
     }
 }

@@ -26,31 +26,33 @@
 //! "certificate resolver" object that impls
 //! [`rustls::server::ResolvesServerCert`].  See [`NexusCertResolver`].
 
-use super::silo::silo_dns_name;
-use crate::ServerContext;
+use crate::context::ApiContext;
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
-use anyhow::Context;
 use nexus_db_model::AuthenticationMode;
 use nexus_db_model::Certificate;
 use nexus_db_model::DnsGroup;
+use nexus_db_model::DnsZone;
+use nexus_db_model::Silo;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::Discoverability;
-use nexus_db_queries::db::fixed_data::silo::SILO_ID;
-use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::Discoverability;
+use nexus_db_queries::db::model::ServiceKind;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::DataPageParams;
+use nexus_types::silo::DEFAULT_SILO_ID;
+use nexus_types::silo::silo_dns_name;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
 use rustls::sign::CertifiedKey;
 use serde::Serialize;
 use serde_with::SerializeDisplay;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -225,7 +227,7 @@ impl ExternalEndpoints {
             .filter(|s| {
                 // Ignore the built-in Silo, which people are not supposed to
                 // log into.
-                s.id() != *SILO_ID
+                s.id() != DEFAULT_SILO_ID
             })
             .find(|s| s.authentication_mode == AuthenticationMode::Local)
             .and_then(|s| {
@@ -429,19 +431,21 @@ impl TryFrom<Certificate> for TlsCertificate {
 
         // Assemble a rustls CertifiedKey with both the certificate and the key.
         let certified_key = {
-            let private_key_der = private_key
-                .private_key_to_der()
-                .context("serializing private key to DER")?;
-            let rustls_private_key = rustls::PrivateKey(private_key_der);
+            let mut cursor = std::io::Cursor::new(db_cert.key.clone());
+            let rustls_private_key = rustls_pemfile::private_key(&mut cursor)
+                .expect("parsing private key PEM")
+                .expect("no private keys found");
             let rustls_signing_key =
-                rustls::sign::any_supported_type(&rustls_private_key)
-                    .context("parsing DER private key")?;
+                rustls::crypto::ring::sign::any_supported_type(
+                    &rustls_private_key,
+                )
+                .context("parsing DER private key")?;
             let rustls_certs = certs_pem
                 .iter()
                 .map(|x509| {
                     x509.to_der()
                         .context("serializing cert to DER")
-                        .map(rustls::Certificate)
+                        .map(rustls::pki_types::CertificateDer::from)
                 })
                 .collect::<Result<_, _>>()?;
             Arc::new(CertifiedKey::new(rustls_certs, rustls_signing_key))
@@ -486,69 +490,61 @@ pub(crate) async fn read_all_endpoints(
     datastore: &DataStore,
     opctx: &OpContext,
 ) -> Result<ExternalEndpoints, Error> {
-    // We will not look for more than this number of external DNS zones, Silos,
-    // or certificates.  We do not expect very many of any of these objects.
-    const MAX: u32 = 200;
-    let pagparams_id = DataPageParams {
-        marker: None,
-        limit: NonZeroU32::new(MAX).unwrap(),
-        direction: dropshot::PaginationOrder::Ascending,
-    };
-    let pagbyid = PaginatedBy::Id(pagparams_id);
-    let pagparams_name = DataPageParams {
-        marker: None,
-        limit: NonZeroU32::new(MAX).unwrap(),
-        direction: dropshot::PaginationOrder::Ascending,
-    };
+    // The batch size here is pretty arbitrary.  On the vast majority of
+    // systems, there will only ever be a handful of any of these objects.  Some
+    // systems are known to have a few dozen silos and a few hundred TLS
+    // certificates.  This code path is not particularly latency-sensitive.  Our
+    // purpose in limiting the batch size is just to avoid unbounded-size
+    // database transactions.
+    //
+    // unwrap(): safe because 200 is non-zero.
+    let batch_size = NonZeroU32::new(200).unwrap();
 
-    let silos =
-        datastore.silos_list(opctx, &pagbyid, Discoverability::All).await?;
-    let external_dns_zones = datastore
-        .dns_zones_list(opctx, DnsGroup::External, &pagparams_name)
-        .await?;
+    // Fetch all silos.
+    let mut silos = Vec::new();
+    let mut paginator = Paginator::new(batch_size);
+    while let Some(p) = paginator.next() {
+        let batch = datastore
+            .silos_list(
+                opctx,
+                &PaginatedBy::Id(p.current_pagparams()),
+                Discoverability::All,
+            )
+            .await?;
+        paginator = p.found_batch(&batch, &|s: &Silo| s.id());
+        silos.extend(batch.into_iter());
+    }
+
+    // Fetch all external DNS zones.  We should really only ever have one, but
+    // we may as well paginate this.
+    let mut external_dns_zones = Vec::new();
+    let mut paginator = Paginator::new(batch_size);
+    while let Some(p) = paginator.next() {
+        let batch = datastore
+            .dns_zones_list(opctx, DnsGroup::External, &p.current_pagparams())
+            .await?;
+        paginator = p.found_batch(&batch, &|z: &DnsZone| z.zone_name.clone());
+        external_dns_zones.extend(batch.into_iter());
+    }
     bail_unless!(
         !external_dns_zones.is_empty(),
         "expected at least one external DNS zone"
     );
-    let certs = datastore
-        .certificate_list_for(opctx, Some(ServiceKind::Nexus), &pagbyid, false)
-        .await?;
 
-    // If we found too many of any of these things, complain as loudly as we
-    // can.  Our results will be wrong.  But we still don't want to fail if we
-    // can avoid it because we want to be able to serve as many endpoints as we
-    // can.
-    // TODO-reliability we should prevent people from creating more than this
-    // maximum number of Silos and certificates.
-    let max = usize::try_from(MAX).unwrap();
-    if silos.len() >= max {
-        error!(
-            &opctx.log,
-            "reading endpoints: expected at most {} silos, but found at \
-            least {}.  TLS may not work on some Silos' external endpoints.",
-            MAX,
-            silos.len(),
-        );
-    }
-    if external_dns_zones.len() >= max {
-        error!(
-            &opctx.log,
-            "reading endpoints: expected at most {} external DNS zones, but \
-            found at least {}.  TLS may not work on some Silos' external \
-            endpoints.",
-            MAX,
-            external_dns_zones.len(),
-        );
-    }
-    if certs.len() >= max {
-        error!(
-            &opctx.log,
-            "reading endpoints: expected at most {} certificates, but \
-            found at least {}.  TLS may not work on some Silos' external \
-            endpoints.",
-            MAX,
-            certs.len(),
-        );
+    // Fetch all TLS certificates.
+    let mut certs = Vec::new();
+    let mut paginator = Paginator::new(batch_size);
+    while let Some(p) = paginator.next() {
+        let batch = datastore
+            .certificate_list_for(
+                opctx,
+                Some(ServiceKind::Nexus),
+                &PaginatedBy::Id(p.current_pagparams()),
+                false,
+            )
+            .await?;
+        paginator = p.found_batch(&batch, &|s: &Certificate| s.id());
+        certs.extend(batch);
     }
 
     Ok(ExternalEndpoints::new(silos, certs, external_dns_zones))
@@ -563,6 +559,7 @@ pub(crate) async fn read_all_endpoints(
 /// session.
 ///
 /// See the module-level comment for more details.
+#[derive(Debug)]
 pub struct NexusCertResolver {
     log: slog::Logger,
     config_rx: watch::Receiver<Option<ExternalEndpoints>>,
@@ -671,7 +668,7 @@ impl super::Nexus {
     /// case, we'll choose an arbitrary Silo.
     pub fn endpoint_for_request(
         &self,
-        rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
+        rqctx: &dropshot::RequestContext<ApiContext>,
     ) -> Result<Arc<ExternalEndpoint>, Error> {
         let log = &rqctx.log;
         let rqinfo = &rqctx.request;
@@ -787,18 +784,18 @@ fn endpoint_for_authority(
 
 #[cfg(test)]
 mod test {
-    use super::endpoint_for_authority;
     use super::ExternalEndpoints;
     use super::TlsCertificate;
-    use crate::app::external_endpoints::authority_for_request;
+    use super::endpoint_for_authority;
     use crate::app::external_endpoints::ExternalEndpointError;
     use crate::app::external_endpoints::NexusCertResolver;
+    use crate::app::external_endpoints::authority_for_request;
     use chrono::Utc;
-    use dropshot::endpoint;
-    use dropshot::test_util::LogContext;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
+    use dropshot::endpoint;
+    use dropshot::test_util::LogContext;
     use http::uri::Authority;
     use nexus_db_model::Certificate;
     use nexus_db_model::DnsGroup;
@@ -827,6 +824,7 @@ mod test {
                 name: name.parse().unwrap(),
                 description: String::new(),
             },
+            quotas: params::SiloQuotasCreate::empty(),
             discoverable: false,
             identity_mode,
             admin_group_name: None,
@@ -1284,9 +1282,9 @@ mod test {
 
         // At this point we haven't filled in the configuration so any attempt
         // to resolve anything should fail.
-        assert!(cert_resolver
-            .do_resolve(Some("silo1.sys.oxide1.test"))
-            .is_none());
+        assert!(
+            cert_resolver.do_resolve(Some("silo1.sys.oxide1.test")).is_none()
+        );
 
         // Now pass along the configuration and try again.
         watch_tx.send(Some(ee.clone())).unwrap();
@@ -1296,9 +1294,9 @@ mod test {
         let resolved_c2 =
             cert_resolver.do_resolve(Some("silo2.sys.oxide1.test")).unwrap();
         assert_eq!(resolved_c2.cert, c2.certified_key.cert);
-        assert!(cert_resolver
-            .do_resolve(Some("silo3.sys.oxide1.test"))
-            .is_none());
+        assert!(
+            cert_resolver.do_resolve(Some("silo3.sys.oxide1.test")).is_none()
+        );
         // We should get an expired cert if it's the only option.
         let resolved_c4 =
             cert_resolver.do_resolve(Some("silo4.sys.oxide1.test")).unwrap();
@@ -1319,14 +1317,9 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log("test_authority");
         let mut api = dropshot::ApiDescription::new();
         api.register(echo_server_name).unwrap();
-        let server = dropshot::HttpServerStarter::new(
-            &dropshot::ConfigDropshot::default(),
-            api,
-            (),
-            &logctx.log,
-        )
-        .expect("failed to create dropshot server")
-        .start();
+        let server = dropshot::ServerBuilder::new(api, (), logctx.log.clone())
+            .start()
+            .expect("failed to create dropshot server");
         let local_addr = server.local_addr();
         let port = local_addr.port();
 
@@ -1539,7 +1532,7 @@ mod test {
                     Err(Error::InvalidRequest { message }) => {
                         assert_eq!(rx_label, "empty");
                         assert_eq!(
-                            message,
+                            message.external_message(),
                             format!(
                                 "HTTP request for unknown server name {:?}",
                                 authority.host()

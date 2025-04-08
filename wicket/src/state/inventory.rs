@@ -4,27 +4,27 @@
 
 //! Information about all top-level Oxide components (sleds, switches, PSCs)
 
-use anyhow::{bail, Result};
-use omicron_common::api::internal::nexus::KnownArtifactKind;
-use once_cell::sync::Lazy;
+use anyhow::{Context as _, Result, bail};
+use omicron_common::api::external::SwitchLocation;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
-use wicket_common::rack_update::SpType;
-use wicketd_client::types::{
+use std::sync::LazyLock;
+use tufaceous_artifact::KnownArtifactKind;
+use wicket_common::inventory::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
-    SpComponentInfo, SpIgnition, SpState,
+    SpComponentInfo, SpIgnition, SpState, SpType, Transceiver,
 };
 
-pub static ALL_COMPONENT_IDS: Lazy<Vec<ComponentId>> = Lazy::new(|| {
-    (0..=31u8)
-        .map(ComponentId::Sled)
-        .chain((0..=1u8).map(ComponentId::Switch))
-        // Currently shipping racks don't have PSC 1.
-        .chain(std::iter::once(ComponentId::Psc(0)))
-        .collect()
-});
+pub static ALL_COMPONENT_IDS: LazyLock<Vec<ComponentId>> =
+    LazyLock::new(|| {
+        (0..=31u8)
+            .map(ComponentId::Sled)
+            .chain((0..=1u8).map(ComponentId::Switch))
+            .chain((0..=1u8).map(ComponentId::Psc))
+            .collect()
+    });
 
 /// Inventory is the most recent information about rack composition as
 /// received from MGS.
@@ -51,9 +51,15 @@ impl Inventory {
         &mut self,
         inventory: RackV1Inventory,
     ) -> anyhow::Result<()> {
+        let mgs_inventory = inventory
+            .mgs
+            .map(|mgs| mgs.inventory)
+            .context("Cannot update inventory without any details from MGS")?;
+        let mut transceiver_inventory =
+            inventory.transceivers.map(|tr| tr.inventory).unwrap_or_default();
         let mut new_inventory = Inventory::default();
 
-        for sp in inventory.sps {
+        for sp in mgs_inventory.sps {
             let i = sp.id.slot;
             let type_ = sp.id.type_;
             let sp = Sp {
@@ -69,7 +75,18 @@ impl Inventory {
             let id = ComponentId::from_sp_type_and_slot(type_, i)?;
             let component = match type_ {
                 SpType::Sled => Component::Sled(sp),
-                SpType::Switch => Component::Switch(sp),
+                SpType::Switch => {
+                    // Insert the switch's transceivers.
+                    let switch_id = match i {
+                        0 => SwitchLocation::Switch0,
+                        1 => SwitchLocation::Switch1,
+                        _ => unreachable!(),
+                    };
+                    let transceivers = transceiver_inventory
+                        .remove(&switch_id)
+                        .unwrap_or_default();
+                    Component::Switch { sp, transceivers }
+                }
                 SpType::Power => Component::Psc(sp),
             };
 
@@ -131,7 +148,7 @@ impl Sp {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Component {
     Sled(Sp),
-    Switch(Sp),
+    Switch { sp: Sp, transceivers: Vec<Transceiver> },
     Psc(Sp),
 }
 
@@ -139,11 +156,15 @@ fn version_or_unknown(caboose: Option<&SpComponentCaboose>) -> String {
     caboose.map(|c| c.version.as_str()).unwrap_or("UNKNOWN").to_string()
 }
 
+fn caboose_sign(caboose: &SpComponentCaboose) -> Option<Vec<u8>> {
+    caboose.sign.as_ref().map(|s| s.as_bytes().to_vec())
+}
+
 impl Component {
     pub fn sp(&self) -> &Sp {
         match self {
             Component::Sled(sp) => sp,
-            Component::Switch(sp) => sp,
+            Component::Switch { sp, .. } => sp,
             Component::Psc(sp) => sp,
         }
     }
@@ -170,6 +191,42 @@ impl Component {
         version_or_unknown(
             self.sp().rot.as_ref().and_then(|rot| rot.caboose_b.as_ref()),
         )
+    }
+
+    pub fn stage0_version(&self) -> String {
+        version_or_unknown(self.sp().rot.as_ref().and_then(|rot| {
+            // caboose_stage0 is an Option<Option<SpComponentCaboose>>, so we
+            // need to unwrap it twice, effectively. flatten would be nice but
+            // it doesn't work on Option<&Option<T>>, which is what we end up
+            // with.
+            rot.caboose_stage0.as_ref().map_or(None, |x| x.as_ref())
+        }))
+    }
+
+    pub fn stage0next_version(&self) -> String {
+        version_or_unknown(self.sp().rot.as_ref().and_then(|rot| {
+            // caboose_stage0next is an Option<Option<SpComponentCaboose>>, so we
+            // need to unwrap it twice, effectively. flatten would be nice but
+            // it doesn't work on Option<&Option<T>>, which is what we end up
+            // with.
+            rot.caboose_stage0next.as_ref().map_or(None, |x| x.as_ref())
+        }))
+    }
+
+    // Technically the slots could have different SIGN values in the
+    // caboose. An active slot implies the RoT is up and valid so
+    // we should rely on that value for selection.
+    // We also use this for the bootloader selection as the SIGN
+    // of the bootloader is going to be identical to the RoT.
+    pub fn rot_sign(&self) -> Option<Vec<u8>> {
+        match self.rot_active_slot()? {
+            RotSlot::A => self.sp().rot.as_ref().map_or(None, |rot| {
+                rot.caboose_a.as_ref().and_then(caboose_sign)
+            }),
+            RotSlot::B => self.sp().rot.as_ref().map_or(None, |rot| {
+                rot.caboose_b.as_ref().map_or(None, |x| caboose_sign(x))
+            }),
+        }
     }
 }
 
@@ -200,9 +257,7 @@ impl ComponentId {
     pub const MAX_SWITCH_ID: u8 = 1;
 
     /// The maximum possible power shelf ID.
-    ///
-    /// Currently shipping racks don't have PSC 1.
-    pub const MAX_PSC_ID: u8 = 0;
+    pub const MAX_PSC_ID: u8 = 1;
 
     pub fn new_sled(slot: u8) -> Result<Self> {
         if slot > Self::MAX_SLED_ID {
@@ -253,6 +308,14 @@ impl ComponentId {
             ComponentId::Sled(_) => KnownArtifactKind::GimletRot,
             ComponentId::Switch(_) => KnownArtifactKind::SwitchRot,
             ComponentId::Psc(_) => KnownArtifactKind::PscRot,
+        }
+    }
+
+    pub fn rot_bootloader_known_artifact_kind(&self) -> KnownArtifactKind {
+        match self {
+            ComponentId::Sled(_) => KnownArtifactKind::GimletRotBootloader,
+            ComponentId::Switch(_) => KnownArtifactKind::SwitchRotBootloader,
+            ComponentId::Psc(_) => KnownArtifactKind::PscRotBootloader,
         }
     }
 

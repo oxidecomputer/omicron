@@ -2,7 +2,7 @@ EXECUTING COMMAND: omdb ["db", "disks", "list"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-NAME ID SIZE STATE ATTACHED_TO 
+ID SIZE STATE NAME ATTACHED_TO 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -26,7 +26,7 @@ termination: Exited(0)
 stdout:
 DNS zone:                   oxide-dev.test (External)
 requested version:          2 (created at <REDACTED_TIMESTAMP>)
-version created by Nexus:   REDACTED_UUID_REDACTED_UUID_REDACTED
+version created by Nexus:   ..........<REDACTED_UUID>...........
 version created because:    create silo: "test-suite-silo"
 changes:                    names added: 1, names removed: 0
 
@@ -52,46 +52,7 @@ EXECUTING COMMAND: omdb ["db", "instances"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID NAME STATE PROPOLIS_ID SLED_ID HOST_SERIAL 
----------------------------------------------
-stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
-=============================================
-EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-SERVICE        INSTANCE_ID                          ADDR                     SLED_SERIAL  
-CruciblePantry REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-Dendrite       REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-Dendrite       REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-ExternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-InternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-Nexus          REDACTED_UUID_REDACTED_UUID_REDACTED [::ffff:127.0.0.1]:REDACTED_PORT sim-b6d65341 
-Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
----------------------------------------------
-stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
-=============================================
-EXECUTING COMMAND: omdb ["db", "services", "list-by-sled"]
-termination: Exited(0)
----------------------------------------------
-stdout:
-sled: sim-b6d65341 (id REDACTED_UUID_REDACTED_UUID_REDACTED)
-
-  SERVICE        INSTANCE_ID                          ADDR                     
-  CruciblePantry REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  Dendrite       REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  Dendrite       REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  ExternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  InternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  Nexus          REDACTED_UUID_REDACTED_UUID_REDACTED [::ffff:127.0.0.1]:REDACTED_PORT 
-  Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-
+ID STATE PROPOLIS_ID SLED_ID HOST_SERIAL NAME 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -101,8 +62,22 @@ EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-SERIAL       IP          ROLE     ID                                   
-sim-b6d65341 [::1]:REDACTED_PORT scrimlet REDACTED_UUID_REDACTED_UUID_REDACTED 
+ SERIAL        IP           ROLE      POLICY      STATE   ID                                   
+ sim-039be560  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+note: listing all commissioned sleds (use -F to filter, e.g. -F in-service)
+=============================================
+EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+ SERIAL        IP           ROLE      POLICY      STATE   ID                                   
+ sim-039be560  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -131,8 +106,8 @@ SPs FOUND THROUGH IGNITION
 SERVICE PROCESSOR STATES
 
     TYPE   SLOT MODEL            SERIAL      REV HUBRIS           PWR ROT_ACTIVE 
-    Sled   0    FAKE_SIM_GIMLET  SimGimlet00 0   0000000000000000 A2  slot A     
-    Sled   1    FAKE_SIM_GIMLET  SimGimlet01 0   0000000000000000 A2  slot A     
+    Sled   0    i86pc            SimGimlet00 0   0000000000000000 A2  slot A     
+    Sled   1    i86pc            SimGimlet01 0   0000000000000000 A2  slot A     
     Switch 0    FAKE_SIM_SIDECAR SimSidecar0 0   0000000000000000 A2  slot A     
     Switch 1    FAKE_SIM_SIDECAR SimSidecar1 0   0000000000000000 A2  slot A     
 
@@ -140,19 +115,33 @@ SP DETAILS: type "Sled" slot 0
 
     ROOT OF TRUST
 
-        NAME                               VALUE  
-        active slot                        slot A 
-        persistent boot preference         slot A 
-        pending persistent boot preference -      
-        transient boot preference          -      
-        slot A SHA3 256 digest             -      
-        slot B SHA3 256 digest             -      
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
 
     COMPONENTS
 
-        NAME         DESCRIPTION             DEVICE          PRESENCE SERIAL 
-        sp3-host-cpu FAKE host cpu           sp3-host-cpu    Present  None   
-        dev-0        FAKE temperature sensor fake-tmp-sensor Failed   None   
+        NAME         DESCRIPTION                              DEVICE          PRESENCE SERIAL 
+        sp3-host-cpu FAKE host cpu                            sp3-host-cpu    Present  None   
+        dev-0        FAKE temperature sensor                  fake-tmp-sensor Failed   None   
+        dev-1        FAKE temperature sensor                  tmp117          Present  None   
+        dev-2        FAKE Southeast temperature sensor        tmp117          Present  None   
+        dev-6        FAKE U.2 Sharkfin A VPD                  at24csw080      Present  None   
+        dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970         Present  None   
+        dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc        Present  None   
+        dev-39       FAKE T6 temperature sensor               tmp451          Present  None   
+        dev-46       CPU temperature sensor                   sbtsi           Present  None   
+        dev-53       FAKE Fan controller                      max31790        Present  None   
 
     CABOOSES: none found
 
@@ -160,18 +149,33 @@ SP DETAILS: type "Sled" slot 1
 
     ROOT OF TRUST
 
-        NAME                               VALUE  
-        active slot                        slot A 
-        persistent boot preference         slot A 
-        pending persistent boot preference -      
-        transient boot preference          -      
-        slot A SHA3 256 digest             -      
-        slot B SHA3 256 digest             -      
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
 
     COMPONENTS
 
-        NAME         DESCRIPTION   DEVICE       PRESENCE SERIAL 
-        sp3-host-cpu FAKE host cpu sp3-host-cpu Present  None   
+        NAME         DESCRIPTION                              DEVICE       PRESENCE SERIAL 
+        sp3-host-cpu FAKE host cpu                            sp3-host-cpu Present  None   
+        dev-0        FAKE temperature sensor                  tmp117       Present  None   
+        dev-1        FAKE temperature sensor                  tmp117       Present  None   
+        dev-2        FAKE Southeast temperature sensor        tmp117       Present  None   
+        dev-6        FAKE U.2 Sharkfin A VPD                  at24csw080   Present  None   
+        dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970      Present  None   
+        dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc     Present  None   
+        dev-39       FAKE T6 temperature sensor               tmp451       Present  None   
+        dev-46       CPU temperature sensor                   sbtsi        Present  None   
+        dev-53       FAKE Fan controller                      max31790     Present  None   
 
     CABOOSES: none found
 
@@ -179,13 +183,19 @@ SP DETAILS: type "Switch" slot 0
 
     ROOT OF TRUST
 
-        NAME                               VALUE  
-        active slot                        slot A 
-        persistent boot preference         slot A 
-        pending persistent boot preference -      
-        transient boot preference          -      
-        slot A SHA3 256 digest             -      
-        slot B SHA3 256 digest             -      
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
 
     COMPONENTS
 
@@ -199,13 +209,19 @@ SP DETAILS: type "Switch" slot 1
 
     ROOT OF TRUST
 
-        NAME                               VALUE  
-        active slot                        slot A 
-        persistent boot preference         slot A 
-        pending persistent boot preference -      
-        transient boot preference          -      
-        slot A SHA3 256 digest             -      
-        slot B SHA3 256 digest             -      
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
 
     COMPONENTS: none found
 
@@ -217,6 +233,38 @@ EXECUTING COMMAND: omdb ["nexus", "background-tasks", "doc"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
+task: "abandoned_vmm_reaper"
+    deletes sled reservations for VMMs that have been abandoned by their
+    instances
+
+
+task: "bfd_manager"
+    Manages bidirectional fowarding detection (BFD) configuration on rack
+    switches
+
+
+task: "blueprint_executor"
+    Executes the target blueprint
+
+
+task: "blueprint_loader"
+    Loads the current target blueprint from the DB
+
+
+task: "blueprint_rendezvous"
+    reconciles blueprints and inventory collection, updating Reconfigurator-
+    owned rendezvous tables that other subsystems consume
+
+
+task: "crdb_node_id_collector"
+    Collects node IDs of running CockroachDB zones
+
+
+task: "decommissioned_disk_cleaner"
+    deletes DB records for decommissioned disks, after regions and region
+    snapshots have been replaced
+
+
 task: "dns_config_external"
     watches external DNS data stored in CockroachDB
 
@@ -238,11 +286,11 @@ task: "dns_propagation_internal"
 
 
 task: "dns_servers_external"
-    watches list of external DNS servers stored in CockroachDB
+    watches list of external DNS servers stored in internal DNS
 
 
 task: "dns_servers_internal"
-    watches list of internal DNS servers stored in CockroachDB
+    watches list of internal DNS servers stored in internal DNS
 
 
 task: "external_endpoints"
@@ -251,13 +299,104 @@ task: "external_endpoints"
     on each one
 
 
+task: "instance_reincarnation"
+    schedules start sagas for failed instances that can be automatically
+    restarted
+
+
+task: "instance_updater"
+    detects if instances require update sagas and schedules them
+
+
+task: "instance_watcher"
+    periodically checks instance states
+
+
 task: "inventory_collection"
     collects hardware and software inventory data from the whole system
+
+
+task: "lookup_region_port"
+    fill in missing ports for region records
+
+
+task: "metrics_producer_gc"
+    unregisters Oximeter metrics producers that have not renewed their lease
 
 
 task: "nat_v4_garbage_collector"
     prunes soft-deleted IPV4 NAT entries from ipv4_nat_entry table based on a
     predetermined retention policy
+
+
+task: "phantom_disks"
+    detects and un-deletes phantom disks
+
+
+task: "physical_disk_adoption"
+    ensure new physical disks are automatically marked in-service
+
+
+task: "read_only_region_replacement_start"
+    detect if read-only regions need replacement and begin the process
+
+
+task: "region_replacement"
+    detects if a region requires replacing and begins the process
+
+
+task: "region_replacement_driver"
+    drive region replacements forward to completion
+
+
+task: "region_snapshot_replacement_finish"
+    complete a region snapshot replacement if all the steps are done
+
+
+task: "region_snapshot_replacement_garbage_collection"
+    clean up all region snapshot replacement step volumes
+
+
+task: "region_snapshot_replacement_start"
+    detect if region snapshots need replacement and begin the process
+
+
+task: "region_snapshot_replacement_step"
+    detect what volumes were affected by a region snapshot replacement, and run
+    the step saga for them
+
+
+task: "saga_recovery"
+    recovers sagas assigned to this Nexus
+
+
+task: "service_firewall_rule_propagation"
+    propagates VPC firewall rules for Omicron services with external network
+    connectivity
+
+
+task: "service_zone_nat_tracker"
+    ensures service zone nat records are recorded in NAT RPW table
+
+
+task: "support_bundle_collector"
+    Manage support bundle collection and cleanup
+
+
+task: "switch_port_config_manager"
+    manages switch port settings for rack switches
+
+
+task: "tuf_artifact_replication"
+    replicate update repo artifacts across sleds
+
+
+task: "v2p_manager"
+    manages opte v2p mappings for vpc networking
+
+
+task: "vpc_route_manager"
+    propagates updated VPC routes to all OPTE ports
 
 
 ---------------------------------------------
@@ -269,27 +408,27 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 task: "dns_config_internal"
-  configured period: every 1m
+  configured period: every <REDACTED_DURATION>m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 1
 
 task: "dns_servers_internal"
-  configured period: every 1m
+  configured period: every <REDACTED_DURATION>m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
       DNS_SERVER_ADDR 
       [::1]:REDACTED_PORT     
 
 task: "dns_propagation_internal"
-  configured period: every 1m
+  configured period: every <REDACTED_DURATION>m
   currently executing: no
-  last completed activation: iter 5, triggered by a dependent task completing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
       DNS_SERVER_ADDR LAST_RESULT 
@@ -297,27 +436,27 @@ task: "dns_propagation_internal"
 
 
 task: "dns_config_external"
-  configured period: every 1m
+  configured period: every <REDACTED_DURATION>m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 2
 
 task: "dns_servers_external"
-  configured period: every 1m
+  configured period: every <REDACTED_DURATION>m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
       DNS_SERVER_ADDR 
       [::1]:REDACTED_PORT     
 
 task: "dns_propagation_external"
-  configured period: every 1m
+  configured period: every <REDACTED_DURATION>m
   currently executing: no
-  last completed activation: iter 5, triggered by a dependent task completing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
       DNS_SERVER_ADDR LAST_RESULT 
@@ -325,39 +464,1156 @@ task: "dns_propagation_external"
 
 
 task: "nat_v4_garbage_collector"
-  configured period: every 30s
+  configured period: every <REDACTED_DURATION>s
   currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "nat_v4_garbage_collector" (don't know how to interpret details: Null)
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_loader"
+  configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+
+task: "blueprint_executor"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
+task: "abandoned_vmm_reaper"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total abandoned VMMs found:                0
+      VMM records deleted:                     0
+      VMMs already deleted by another Nexus:   0
+    sled resource reservations deleted:        0
+
+task: "bfd_manager"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_rendezvous"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
+task: "crdb_node_id_collector"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
+task: "decommissioned_disk_cleaner"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "decommissioned_disk_cleaner" (don't know how to interpret details: Object {"deleted": Number(0), "error": Null, "error_count": Number(0), "found": Number(0), "not_ready_to_be_deleted": Number(0)})
 
 task: "external_endpoints"
-  configured period: every 1m
+  configured period: every <REDACTED_DURATION>m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     external API endpoints: 2 ('*' below marks default)
 
           SILO_ID                              DNS_NAME                           
-          REDACTED_UUID_REDACTED_UUID_REDACTED default-silo.sys.oxide-dev.test    
-        * REDACTED_UUID_REDACTED_UUID_REDACTED test-suite-silo.sys.oxide-dev.test 
+          ..........<REDACTED_UUID>........... default-silo.sys.oxide-dev.test    
+        * ..........<REDACTED_UUID>........... test-suite-silo.sys.oxide-dev.test 
 
     warnings: 2
-        warning: silo REDACTED_UUID_REDACTED_UUID_REDACTED with DNS name "default-silo.sys.oxide-dev.test" has no usable certificates
-        warning: silo REDACTED_UUID_REDACTED_UUID_REDACTED with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
+        warning: silo ..........<REDACTED_UUID>........... with DNS name "default-silo.sys.oxide-dev.test" has no usable certificates
+        warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
 
-task: "inventory_collection"
-  configured period: every 10m
+task: "instance_reincarnation"
+  configured period: every <REDACTED_DURATION>m
   currently executing: no
-  last completed activation: iter 3, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last collection id:      REDACTED_UUID_REDACTED_UUID_REDACTED
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    instances eligible for reincarnation:                          0
+      instance failed instances:                                   0
+      start saga failed instances:                                 0
+    instances reincarnated successfully:                           0
+    instances which changed state before they could reincarnate:   0
+    instances which failed to reincarnate:                         0
+
+task: "instance_updater"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    task explicitly disabled by config!
+    instances in need of updates:             0
+      instances with Destroyed active VMMs:   0
+      instances with Failed active VMMs:      0
+      instances with terminated migrations:   0
+    update sagas started:                     0
+      update sagas completed successfully:    0
+      update sagas failed:                    0
+
+task: "instance_watcher"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total instances checked: 0
+    checks completed: 0
+       successful checks: 0
+       update sagas queued: 0
+       failed checks: 0
+    checks that could not be completed: 0
+    stale instance metrics pruned: 0
+
+task: "inventory_collection"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
     last collection done:    <REDACTED_TIMESTAMP>
+
+task: "lookup_region_port"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total filled in ports: 0
+    errors: 0
+
+task: "metrics_producer_gc"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED_TIMESTAMP>"), "pruned": Array []})
+
+task: "phantom_disks"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    number of phantom disks deleted: 0
+    number of phantom disk delete errors: 0
+
+task: "physical_disk_adoption"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: task disabled
+
+task: "read_only_region_replacement_start"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total requests created ok: 0
+    errors: 0
+
+task: "region_replacement"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    region replacement requests created ok: 0
+    region replacement start sagas started ok: 0
+    region replacement requests set to completed ok: 0
+    errors: 0
+
+task: "region_replacement_driver"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    region replacement drive sagas started ok: 0
+    region replacement finish sagas started ok: 0
+    errors: 0
+
+task: "region_snapshot_replacement_finish"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    region snapshot replacement finish sagas started ok: 0
+    errors: 0
+
+task: "region_snapshot_replacement_garbage_collection"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total garbage collections requested: 0
+    errors: 0
+
+task: "region_snapshot_replacement_start"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total requests created ok: 0
+    total start saga invoked ok: 0
+    total requests completed ok: 0
+    errors: 0
+
+task: "region_snapshot_replacement_step"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total step records created ok: 0
+    total step garbage collect saga invoked ok: 0
+    total step saga invoked ok: 0
+    total steps set to volume_deleted ok: 0
+    errors: 0
+
+task: "saga_recovery"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    since Nexus started:
+        sagas recovered:           0
+        sagas recovery errors:     0
+        sagas observed started:    0
+        sagas inferred finished:   0
+        missing from SEC:          0
+        bad state in SEC:          0
+    last pass:
+        found sagas:   0 (in-progress, assigned to this Nexus)
+        recovered:     0 (successfully)
+        failed:        0
+        skipped:       0 (already running)
+        removed:       0 (newly finished)
+    no recovered sagas
+    no saga recovery failures
+
+task: "service_firewall_rule_propagation"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+
+task: "service_zone_nat_tracker"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: inventory collection is None
+
+task: "support_bundle_collector"
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    Support Bundle Cleanup Report:
+      Bundles deleted from sleds: 0
+      Bundles not found on sleds: 0
+      Bundles delete failed on sleds: 0
+      Bundles deleted from database: 0
+      Bundles marked failed in database: 0
+
+task: "switch_port_config_manager"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "tuf_artifact_replication"
+  configured period: every <REDACTED_DURATION>h
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    request ringbuf:
+      <REDACTED_SECTION>
+    last run:
+      put config ok:    <PUT_CONFIG_OK_REDACTED>
+      put config err:   0
+      list ok:          <LIST_OK_REDACTED>
+      list err:         0
+      put ok:           0
+      put err:          0
+      copy ok:          0
+      copy err:         0
+    lifetime:
+      put config ok:    <PUT_CONFIG_OK_REDACTED>
+      put config err:   0
+      list ok:          <LIST_OK_REDACTED>
+      list err:         0
+      put ok:           0
+      put err:          0
+      copy ok:          0
+      copy err:         0
+    local repos: 0
+
+task: "v2p_manager"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "vpc_route_manager"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
 
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "saga_recovery"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+task: "saga_recovery"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    since Nexus started:
+        sagas recovered:           0
+        sagas recovery errors:     0
+        sagas observed started:    0
+        sagas inferred finished:   0
+        missing from SEC:          0
+        bad state in SEC:          0
+    last pass:
+        found sagas:   0 (in-progress, assigned to this Nexus)
+        recovered:     0 (successfully)
+        failed:        0
+        skipped:       0 (already running)
+        removed:       0 (newly finished)
+    no recovered sagas
+    no saga recovery failures
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "blueprint_loader", "blueprint_executor"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+task: "blueprint_loader"
+  configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+
+task: "blueprint_executor"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "dns_internal"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+task: "dns_config_internal"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last generation found: 1
+
+task: "dns_servers_internal"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    servers found: 1
+
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
+
+task: "dns_propagation_internal"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    attempt to propagate generation: 1
+
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
+
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "dns_external"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+task: "dns_config_external"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last generation found: 2
+
+task: "dns_servers_external"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    servers found: 1
+
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
+
+task: "dns_propagation_external"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    attempt to propagate generation: 2
+
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
+
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "background-tasks", "show", "all"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+task: "dns_config_internal"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last generation found: 1
+
+task: "dns_servers_internal"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    servers found: 1
+
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
+
+task: "dns_propagation_internal"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    attempt to propagate generation: 1
+
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
+
+
+task: "dns_config_external"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last generation found: 2
+
+task: "dns_servers_external"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    servers found: 1
+
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
+
+task: "dns_propagation_external"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    attempt to propagate generation: 2
+
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
+
+
+task: "nat_v4_garbage_collector"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_loader"
+  configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
+
+task: "blueprint_executor"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
+task: "abandoned_vmm_reaper"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total abandoned VMMs found:                0
+      VMM records deleted:                     0
+      VMMs already deleted by another Nexus:   0
+    sled resource reservations deleted:        0
+
+task: "bfd_manager"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_rendezvous"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
+task: "crdb_node_id_collector"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
+
+task: "decommissioned_disk_cleaner"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "decommissioned_disk_cleaner" (don't know how to interpret details: Object {"deleted": Number(0), "error": Null, "error_count": Number(0), "found": Number(0), "not_ready_to_be_deleted": Number(0)})
+
+task: "external_endpoints"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    external API endpoints: 2 ('*' below marks default)
+
+          SILO_ID                              DNS_NAME                           
+          ..........<REDACTED_UUID>........... default-silo.sys.oxide-dev.test    
+        * ..........<REDACTED_UUID>........... test-suite-silo.sys.oxide-dev.test 
+
+    warnings: 2
+        warning: silo ..........<REDACTED_UUID>........... with DNS name "default-silo.sys.oxide-dev.test" has no usable certificates
+        warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
+
+    TLS certificates: 0
+
+task: "instance_reincarnation"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    instances eligible for reincarnation:                          0
+      instance failed instances:                                   0
+      start saga failed instances:                                 0
+    instances reincarnated successfully:                           0
+    instances which changed state before they could reincarnate:   0
+    instances which failed to reincarnate:                         0
+
+task: "instance_updater"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    task explicitly disabled by config!
+    instances in need of updates:             0
+      instances with Destroyed active VMMs:   0
+      instances with Failed active VMMs:      0
+      instances with terminated migrations:   0
+    update sagas started:                     0
+      update sagas completed successfully:    0
+      update sagas failed:                    0
+
+task: "instance_watcher"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total instances checked: 0
+    checks completed: 0
+       successful checks: 0
+       update sagas queued: 0
+       failed checks: 0
+    checks that could not be completed: 0
+    stale instance metrics pruned: 0
+
+task: "inventory_collection"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last collection id:      ..........<REDACTED_UUID>...........
+    last collection started: <REDACTED_TIMESTAMP>
+    last collection done:    <REDACTED_TIMESTAMP>
+
+task: "lookup_region_port"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total filled in ports: 0
+    errors: 0
+
+task: "metrics_producer_gc"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED_TIMESTAMP>"), "pruned": Array []})
+
+task: "phantom_disks"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    number of phantom disks deleted: 0
+    number of phantom disk delete errors: 0
+
+task: "physical_disk_adoption"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: task disabled
+
+task: "read_only_region_replacement_start"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total requests created ok: 0
+    errors: 0
+
+task: "region_replacement"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    region replacement requests created ok: 0
+    region replacement start sagas started ok: 0
+    region replacement requests set to completed ok: 0
+    errors: 0
+
+task: "region_replacement_driver"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    region replacement drive sagas started ok: 0
+    region replacement finish sagas started ok: 0
+    errors: 0
+
+task: "region_snapshot_replacement_finish"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    region snapshot replacement finish sagas started ok: 0
+    errors: 0
+
+task: "region_snapshot_replacement_garbage_collection"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total garbage collections requested: 0
+    errors: 0
+
+task: "region_snapshot_replacement_start"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total requests created ok: 0
+    total start saga invoked ok: 0
+    total requests completed ok: 0
+    errors: 0
+
+task: "region_snapshot_replacement_step"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total step records created ok: 0
+    total step garbage collect saga invoked ok: 0
+    total step saga invoked ok: 0
+    total steps set to volume_deleted ok: 0
+    errors: 0
+
+task: "saga_recovery"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    since Nexus started:
+        sagas recovered:           0
+        sagas recovery errors:     0
+        sagas observed started:    0
+        sagas inferred finished:   0
+        missing from SEC:          0
+        bad state in SEC:          0
+    last pass:
+        found sagas:   0 (in-progress, assigned to this Nexus)
+        recovered:     0 (successfully)
+        failed:        0
+        skipped:       0 (already running)
+        removed:       0 (newly finished)
+    no recovered sagas
+    no saga recovery failures
+
+task: "service_firewall_rule_propagation"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+
+task: "service_zone_nat_tracker"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: inventory collection is None
+
+task: "support_bundle_collector"
+  configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    Support Bundle Cleanup Report:
+      Bundles deleted from sleds: 0
+      Bundles not found on sleds: 0
+      Bundles delete failed on sleds: 0
+      Bundles deleted from database: 0
+      Bundles marked failed in database: 0
+
+task: "switch_port_config_manager"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "tuf_artifact_replication"
+  configured period: every <REDACTED_DURATION>h
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    request ringbuf:
+      <REDACTED_SECTION>
+    last run:
+      put config ok:    <PUT_CONFIG_OK_REDACTED>
+      put config err:   0
+      list ok:          <LIST_OK_REDACTED>
+      list err:         0
+      put ok:           0
+      put err:          0
+      copy ok:          0
+      copy err:         0
+    lifetime:
+      put config ok:    <PUT_CONFIG_OK_REDACTED>
+      put config err:   0
+      list ok:          <LIST_OK_REDACTED>
+      list err:         0
+      put ok:           0
+      put err:          0
+      copy ok:          0
+      copy err:         0
+    local repos: 0
+
+task: "v2p_manager"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
+
+task: "vpc_route_manager"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "sagas", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+SAGA_ID STATE 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
+=============================================
+EXECUTING COMMAND: omdb ["--destructive", "nexus", "sagas", "demo-create"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+saga id:      ..........<REDACTED_UUID>...........
+demo saga id: ..........<REDACTED_UUID>........... (use this with `demo-complete`)
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "sagas", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+SAGA_ID                              STATE   
+..........<REDACTED_UUID>........... running 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
+=============================================
+EXECUTING COMMAND: omdb ["--destructive", "nexus", "background-tasks", "activate", "inventory_collection"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+activated background tasks: inventory_collection
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "list"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+T ENA ID                                   PARENT TIME_CREATED             
+* no  ......<REDACTED_BLUEPRINT_ID>....... <none> <REDACTED_TIMESTAMP> 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "show", "......<REDACTED_BLUEPRINT_ID>......."]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+blueprint  ......<REDACTED_BLUEPRINT_ID>.......
+parent:    <none>
+
+  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+
+    physical disks:
+    -----------------------------------------------------------------
+    vendor        model              serial               disposition
+    -----------------------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-10   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-11   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-12   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-13   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-14   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-15   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-16   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-17   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-18   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-19   in service 
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+
+    physical disks:
+    ----------------------------------------------------------------
+    vendor        model              serial              disposition
+    ----------------------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-0   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-1   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-2   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-3   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-4   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-5   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-6   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-7   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-8   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-9   in service 
+
+
+    datasets:
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
+
+
+    omicron zones:
+    ---------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP     
+    ---------------------------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED>
+    cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED>
+
+ METADATA:
+    created by:::::::::::   nexus-test-utils
+    created at:::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::   initial test blueprint
+    internal DNS version:   1
+    external DNS version:   2
+
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "show", "current-target"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+blueprint  ......<REDACTED_BLUEPRINT_ID>.......
+parent:    <none>
+
+  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+
+    physical disks:
+    -----------------------------------------------------------------
+    vendor        model              serial               disposition
+    -----------------------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-10   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-11   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-12   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-13   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-14   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-15   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-16   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-17   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-18   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-19   in service 
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+
+    physical disks:
+    ----------------------------------------------------------------
+    vendor        model              serial              disposition
+    ----------------------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-0   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-1   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-2   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-3   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-4   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-5   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-6   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-7   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-8   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-9   in service 
+
+
+    datasets:
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
+
+
+    omicron zones:
+    ---------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP     
+    ---------------------------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED>
+    cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED>
+
+ METADATA:
+    created by:::::::::::   nexus-test-utils
+    created at:::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::   initial test blueprint
+    internal DNS version:   1
+    external DNS version:   2
+
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "diff", "......<REDACTED_BLUEPRINT_ID>.......", "current-target"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+from: blueprint ......<REDACTED_BLUEPRINT_ID>.......
+to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
+
+ UNCHANGED SLEDS:
+
+  sled ..........<REDACTED_UUID>........... (active, config generation 2):
+
+    physical disks:
+    -----------------------------------------------------------------
+    vendor        model              serial               disposition
+    -----------------------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-10   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-11   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-12   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-13   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-14   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-15   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-16   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-17   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-18   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-19   in service 
+
+
+  sled ..........<REDACTED_UUID>........... (active, config generation 2):
+
+    physical disks:
+    ----------------------------------------------------------------
+    vendor        model              serial              disposition
+    ----------------------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-0   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-1   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-2   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-3   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-4   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-5   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-6   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-7   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-8   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-9   in service 
+
+
+    datasets:
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
+
+
+    omicron zones:
+    ---------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP     
+    ---------------------------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED> (unchanged)
+    cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED> (unchanged)
+
+ METADATA:
+    internal DNS version:   1 (unchanged)
+    external DNS version:   2 (unchanged)
+
+
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["reconfigurator", "export", "<TMP_PATH_REDACTED>"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+assembling reconfigurator state ... done
+wrote <TMP_PATH_REDACTED>
 =============================================

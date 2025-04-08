@@ -2,59 +2,119 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::impl_enum_wrapper;
+use super::impl_enum_type;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
-use std::io::Write;
+use std::fmt;
 
-impl_enum_wrapper!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "instance_state"))]
-    pub struct InstanceStateEnum;
+impl_enum_type!(
+    InstanceStateEnum:
 
-    #[derive(Clone, Debug, PartialEq, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    #[diesel(sql_type = InstanceStateEnum)]
-    pub struct InstanceState(pub external::InstanceState);
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+        strum::VariantArray,
+    )]
+    pub enum InstanceState;
 
     // Enum values
     Creating => b"creating"
-    Starting => b"starting"
-    Running => b"running"
-    Stopping => b"stopping"
-    Stopped => b"stopped"
-    Rebooting => b"rebooting"
-    Migrating => b"migrating"
-    Repairing => b"repairing"
+    NoVmm => b"no_vmm"
+    Vmm => b"vmm"
     Failed => b"failed"
     Destroyed => b"destroyed"
 );
 
 impl InstanceState {
-    pub fn new(state: external::InstanceState) -> Self {
-        Self(state)
+    /// Instance states where there is not currently a VMM incarnating this
+    /// instance, but might be in the future.
+    pub const NOT_INCARNATED_STATES: &'static [InstanceState] =
+        &[InstanceState::NoVmm, InstanceState::Creating, InstanceState::Failed];
+
+    pub fn state(&self) -> external::InstanceState {
+        external::InstanceState::from(*self)
     }
 
-    pub fn state(&self) -> &external::InstanceState {
-        &self.0
+    pub fn label(&self) -> &'static str {
+        match self {
+            InstanceState::Creating => "creating",
+            InstanceState::NoVmm => "no_VMM",
+            InstanceState::Vmm => "VMM",
+            InstanceState::Failed => "failed",
+            InstanceState::Destroyed => "destroyed",
+        }
+    }
+
+    pub const ALL_STATES: &'static [Self] =
+        <Self as strum::VariantArray>::VARIANTS;
+}
+
+impl fmt::Display for InstanceState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.label())
     }
 }
 
-impl From<InstanceState> for sled_agent_client::types::InstanceState {
-    fn from(s: InstanceState) -> Self {
-        use external::InstanceState::*;
-        use sled_agent_client::types::InstanceState as Output;
-        match s.0 {
-            Creating => Output::Creating,
-            Starting => Output::Starting,
-            Running => Output::Running,
-            Stopping => Output::Stopping,
-            Stopped => Output::Stopped,
-            Rebooting => Output::Rebooting,
-            Migrating => Output::Migrating,
-            Repairing => Output::Repairing,
-            Failed => Output::Failed,
-            Destroyed => Output::Destroyed,
+impl From<InstanceState> for omicron_common::api::external::InstanceState {
+    fn from(value: InstanceState) -> Self {
+        use omicron_common::api::external::InstanceState as Output;
+        match value {
+            InstanceState::Creating => Output::Creating,
+            InstanceState::NoVmm => Output::Stopped,
+            InstanceState::Vmm => Output::Running,
+            InstanceState::Failed => Output::Failed,
+            InstanceState::Destroyed => Output::Destroyed,
+        }
+    }
+}
+
+impl std::str::FromStr for InstanceState {
+    type Err = InstanceStateParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        for &v in Self::ALL_STATES {
+            if s.eq_ignore_ascii_case(v.label()) {
+                return Ok(v);
+            }
+        }
+
+        Err(InstanceStateParseError(()))
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct InstanceStateParseError(());
+
+impl fmt::Display for InstanceStateParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "expected one of [")?;
+        let mut variants = InstanceState::ALL_STATES.iter();
+        if let Some(v) = variants.next() {
+            write!(f, "{v}")?;
+            for v in variants {
+                write!(f, ", {v}")?;
+            }
+        }
+        f.write_str("]")
+    }
+}
+
+impl std::error::Error for InstanceStateParseError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_str_roundtrips() {
+        for &variant in InstanceState::ALL_STATES {
+            assert_eq!(Ok(dbg!(variant)), dbg!(variant.to_string().parse()));
         }
     }
 }

@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+
+<service_bundle type='manifest' name='opte-interface-setup'>
+
+<service name='oxide/opte-interface-setup' type='service' version='1'>
+  <create_default_instance enabled='false' />
+
+  <!-- Run after the operating system's svc:/network/physical service is done. -->
+  <dependency name='physical' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/network/physical:default' />
+  </dependency>
+
+  <dependency name='multi_user' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <exec_method type='method' name='start'
+    exec='/opt/oxide/zone-setup-cli/bin/zone-setup opte-interface -i %{config/interface} -g %{config/gateway} -p %{config/ip}'
+    timeout_seconds='0' />
+
+  <property_group name='startd' type='framework'>
+    <propval name='duration' type='astring' value='transient' />
+  </property_group>
+
+  <property_group name='config' type='application'>
+    <propval name='gateway' type='astring' value='unknown' />
+    <propval name='interface' type='astring' value='unknown' />
+    <propval name='ip' type='astring' value='unknown' />
+  </property_group>
+
+  <stability value='Unstable' />
+
+  <template>
+    <common_name>
+      <loctext xml:lang='C'>Oxide OPTE interface setup</loctext>
+    </common_name>
+    <description>
+      <loctext xml:lang='C'>Sets up an OPTE interface for control plane zones that require it</loctext>
+    </description>
+  </template>
+</service>
+
+</service_bundle>

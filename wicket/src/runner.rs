@@ -7,22 +7,22 @@ use crossterm::event::EventStream;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
-    LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+    enable_raw_mode,
 };
 use futures::StreamExt;
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use slog::Logger;
 use slog::{debug, error, info};
-use std::io::{stdout, Stdout};
+use std::io::{Stdout, stdout};
 use std::net::SocketAddrV6;
 use std::time::Instant;
 use tokio::sync::mpsc::{
-    unbounded_channel, UnboundedReceiver, UnboundedSender,
+    UnboundedReceiver, UnboundedSender, unbounded_channel,
 };
-use tokio::time::{interval, Duration};
-use wicketd_client::types::AbortUpdateOptions;
+use tokio::time::{Duration, interval};
+use wicket_common::rack_update::AbortUpdateOptions;
 
 use crate::events::EventReportMap;
 use crate::helpers::get_update_test_error;
@@ -34,7 +34,6 @@ use crate::{Action, Cmd, Event, KeyHandler, Recorder, State, TICK_INTERVAL};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
-pub type Frame<'a> = ratatui::Frame<'a, CrosstermBackend<Stdout>>;
 
 const MAX_RECORDED_EVENTS: usize = 10000;
 
@@ -76,7 +75,7 @@ impl RunnerCore {
     /// Resize and draw the initial screen before handling `Event`s
     pub fn init_screen(&mut self) -> anyhow::Result<()> {
         // Size the initial screen
-        let rect = self.terminal.get_frame().size();
+        let rect = self.terminal.get_frame().area();
         self.screen.resize(&mut self.state, rect.width, rect.height);
 
         // Draw the initial screen
@@ -123,10 +122,17 @@ impl RunnerCore {
                 self.screen.resize(&mut self.state, width, height);
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Event::Inventory { inventory, mgs_last_seen } => {
-                self.state.service_status.reset_mgs(mgs_last_seen);
-                self.state.service_status.reset_wicketd(Duration::ZERO);
+            Event::Inventory { inventory } => {
+                if let Some(mgs) = &inventory.mgs {
+                    self.state.service_status.reset_mgs(mgs.last_seen);
+                }
+                if let Some(transceivers) = &inventory.transceivers {
+                    self.state
+                        .service_status
+                        .reset_transceivers(transceivers.last_seen);
+                }
                 self.state.inventory.update_inventory(inventory)?;
+                self.state.service_status.reset_wicketd(Duration::ZERO);
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
             Event::ArtifactsAndEventReports {
@@ -177,6 +183,10 @@ impl RunnerCore {
             Action::StartUpdate(component_id) => {
                 if let Some(wicketd) = wicketd {
                     let options = CreateStartUpdateOptions {
+                        force_update_rot_bootloader: self
+                            .state
+                            .force_update_state
+                            .force_update_rot_bootloader,
                         force_update_rot: self
                             .state
                             .force_update_state

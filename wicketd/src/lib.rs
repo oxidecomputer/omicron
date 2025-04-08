@@ -9,48 +9,41 @@ mod context;
 mod helpers;
 mod http_entrypoints;
 mod installinator_progress;
-mod inventory;
 pub mod mgs;
 mod nexus_proxy;
 mod preflight_check;
 mod rss_config;
+mod transceivers;
 mod update_tracker;
 
-use anyhow::{anyhow, Result};
-use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
+use anyhow::{Context, Result, anyhow, bail};
+use artifacts::{
+    WicketdArtifactStore, WicketdInstallinatorApiImpl,
+    WicketdInstallinatorContext,
+};
 use bootstrap_addrs::BootstrapPeers;
 pub use config::Config;
 pub(crate) use context::ServerContext;
+use display_error_chain::DisplayErrorChain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
-use internal_dns::resolver::Resolver;
-pub use inventory::{RackV1Inventory, SpInventory};
+use internal_dns_resolver::Resolver;
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 use nexus_proxy::NexusTcpProxy;
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::FileKv;
+use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use preflight_check::PreflightCheckerHandler;
-use sled_hardware::Baseboard;
-use slog::{debug, error, o, Drain};
+use sled_hardware_types::Baseboard;
+use slog::{Drain, debug, error, o};
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 use std::{
     net::{SocketAddr, SocketAddrV6},
     sync::Arc,
 };
+use transceivers::Manager as TransceiverManager;
 pub use update_tracker::{StartUpdateError, UpdateTracker};
-
-/// Run the OpenAPI generator for the API; which emits the OpenAPI spec
-/// to stdout.
-pub fn run_openapi() -> Result<(), String> {
-    http_entrypoints::api()
-        .openapi("Oxide Technician Port Control Service", "0.0.1")
-        .description("API for use by the technician port TUI: wicket")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
-}
 
 /// Command line arguments for wicketd
 pub struct Args {
@@ -70,7 +63,6 @@ pub struct SmfConfigValues {
 impl SmfConfigValues {
     #[cfg(target_os = "illumos")]
     pub fn read_current() -> Result<Self> {
-        use anyhow::Context;
         use illumos_utils::scf::ScfHandle;
 
         const CONFIG_PG: &str = "config";
@@ -117,7 +109,7 @@ impl SmfConfigValues {
 
 pub struct Server {
     pub wicketd_server: HttpServer<ServerContext>,
-    pub artifact_server: HttpServer<installinator_artifactd::ServerContext>,
+    pub installinator_server: HttpServer<WicketdInstallinatorContext>,
     pub artifact_store: WicketdArtifactStore,
     pub update_tracker: Arc<UpdateTracker>,
     pub ipr_update_tracker: IprUpdateTracker,
@@ -126,31 +118,35 @@ pub struct Server {
 
 impl Server {
     /// Run an instance of the wicketd server
-    pub async fn start(log: slog::Logger, args: Args) -> Result<Self, String> {
+    pub async fn start(log: slog::Logger, args: Args) -> anyhow::Result<Self> {
         let (drain, registration) = slog_dtrace::with_drain(log);
 
         let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
         if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
             let msg = format!("failed to register DTrace probes: {}", e);
             error!(log, "{}", msg);
-            return Err(msg);
+            bail!(msg);
         } else {
             debug!(log, "registered DTrace probes");
         };
 
         let dropshot_config = ConfigDropshot {
             bind_address: SocketAddr::V6(args.address),
-            // The maximum request size is set to 4 GB -- artifacts can be large
-            // and there's currently no way to set a larger request size for
-            // some endpoints.
-            request_body_max_bytes: 4 << 30,
+            default_request_body_max_bytes: 8 * 1024 * 1024,
             default_handler_task_mode: HandlerTaskMode::Detached,
+            log_headers: vec![],
         };
 
         let mgs_manager = MgsManager::new(&log, args.mgs_address);
         let mgs_handle = mgs_manager.get_handle();
         tokio::spawn(async move {
             mgs_manager.run().await;
+        });
+
+        let transceiver_manager = TransceiverManager::new(&log);
+        let transceiver_handle = transceiver_manager.get_handle();
+        tokio::spawn(async move {
+            transceiver_manager.run().await;
         });
 
         let (ipr_artifact, ipr_update_tracker) =
@@ -173,7 +169,8 @@ impl Server {
                     addr,
                 )
                 .map_err(|err| {
-                    format!("Could not create internal DNS resolver: {err}")
+                    anyhow!(err)
+                        .context("Could not create internal DNS resolver")
                 })
             })
             .transpose()?;
@@ -185,18 +182,20 @@ impl Server {
             &log,
         )
         .await
-        .map_err(|err| format!("failed to start Nexus TCP proxy: {err}"))?;
+        .map_err(|err| {
+            anyhow!(err).context("failed to start Nexus TCP proxy")
+        })?;
 
         let wicketd_server = {
             let ds_log = log.new(o!("component" => "dropshot (wicketd)"));
             let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
-            dropshot::HttpServerStarter::new(
-                &dropshot_config,
+            dropshot::ServerBuilder::new(
                 http_entrypoints::api(),
                 ServerContext {
                     bind_address: args.address,
                     mgs_handle,
                     mgs_client,
+                    transceiver_handle,
                     log: log.clone(),
                     local_switch_id: OnceLock::new(),
                     bootstrap_peers,
@@ -206,27 +205,42 @@ impl Server {
                     preflight_checker: PreflightCheckerHandler::new(&log),
                     internal_dns_resolver,
                 },
-                &ds_log,
+                ds_log,
             )
-            .map_err(|err| format!("initializing http server: {}", err))?
+            .config(dropshot_config)
             .start()
+            .map_err(|err| anyhow!(err).context("initializing http server"))?
         };
 
-        let server =
-            WicketdArtifactServer::new(&log, store.clone(), ipr_artifact);
-        let artifact_server = installinator_artifactd::ArtifactServer::new(
-            server,
-            args.artifact_address,
-            &log,
-        )
-        .start()
-        .map_err(|error| {
-            format!("failed to start artifact server: {error:?}")
-        })?;
+        let installinator_server = {
+            let installinator_config = installinator_api::default_config(
+                SocketAddr::V6(args.artifact_address),
+            );
+            let api_description =
+                installinator_api::installinator_api_mod::api_description::<
+                    WicketdInstallinatorApiImpl,
+                >()?;
+
+            dropshot::ServerBuilder::new(
+                api_description,
+                WicketdInstallinatorContext::new(
+                    &log,
+                    store.clone(),
+                    ipr_artifact,
+                ),
+                log,
+            )
+            .config(installinator_config)
+            .start()
+            .map_err(|err| {
+                anyhow!(err)
+                    .context("failed to create installinator artifact server")
+            })?
+        };
 
         Ok(Self {
             wicketd_server,
-            artifact_server,
+            installinator_server,
             artifact_store: store,
             update_tracker,
             ipr_update_tracker,
@@ -239,7 +253,7 @@ impl Server {
         self.wicketd_server.close().await.map_err(|error| {
             anyhow!("error closing wicketd server: {error}")
         })?;
-        self.artifact_server.close().await.map_err(|error| {
+        self.installinator_server.close().await.map_err(|error| {
             anyhow!("error closing artifact server: {error}")
         })?;
         self.nexus_tcp_proxy.shutdown();
@@ -256,13 +270,72 @@ impl Server {
                     Err(err) => Err(format!("running wicketd server: {err}")),
                 }
             }
-            res = self.artifact_server => {
+            res = self.installinator_server => {
                 match res {
                     Ok(()) => Err("artifact server exited unexpectedly".to_owned()),
-                    // The artifact server returns an anyhow::Error, which has a `Debug` impl that
-                    // prints out the chain of errors.
+                    // The artifact server returns an anyhow::Error, which has a
+                    // `Debug` impl that prints out the chain of errors.
                     Err(err) => Err(format!("running artifact server: {err:?}")),
                 }
+            }
+        }
+    }
+
+    /// Instruct a running server at the specified address to reload its config
+    /// parameters
+    pub async fn refresh_config(
+        log: slog::Logger,
+        address: SocketAddrV6,
+    ) -> Result<()> {
+        // It's possible we're being told to refresh a server's config before
+        // it's ready to receive such a request, so we'll give it a healthy
+        // amount of time before we give up: we'll set a client timeout and also
+        // retry a few times. See
+        // https://github.com/oxidecomputer/omicron/issues/4604.
+        const CLIENT_TIMEOUT: Duration = Duration::from_secs(5);
+        const SLEEP_BETWEEN_RETRIES: Duration = Duration::from_secs(10);
+        const NUM_RETRIES: usize = 3;
+
+        let client = reqwest::Client::builder()
+            .connect_timeout(CLIENT_TIMEOUT)
+            .timeout(CLIENT_TIMEOUT)
+            .build()
+            .context("failed to construct reqwest Client")?;
+
+        let client = wicketd_client::Client::new_with_client(
+            &format!("http://{address}"),
+            client,
+            log,
+        );
+        let log = client.inner();
+
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+
+            // If we succeed, we're done.
+            let Err(err) = client.post_reload_config().await else {
+                return Ok(());
+            };
+
+            // If we failed, either warn+sleep and try again, or fail.
+            if attempt < NUM_RETRIES {
+                slog::warn!(
+                    log,
+                    "failed to refresh wicketd config \
+                     (attempt {attempt} of {NUM_RETRIES}); \
+                     will retry after {CLIENT_TIMEOUT:?}";
+                    "err" => %DisplayErrorChain::new(&err),
+                );
+                tokio::time::sleep(SLEEP_BETWEEN_RETRIES).await;
+            } else {
+                slog::error!(
+                    log,
+                    "failed to refresh wicketd config \
+                     (tried {NUM_RETRIES} times)";
+                    "err" => %DisplayErrorChain::new(&err),
+                );
+                return Err(err).context("failed to contact wicketd");
             }
         }
     }

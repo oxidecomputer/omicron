@@ -43,18 +43,18 @@
 //!    the persistent DNS data
 
 pub mod dns_server;
-pub mod dns_types;
 pub mod http_server;
 pub mod storage;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
+use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::config::NameServerConfig;
+use hickory_resolver::config::Protocol;
+use hickory_resolver::config::ResolverConfig;
+use hickory_resolver::config::ResolverOpts;
+use internal_dns_types::config::DnsConfigParams;
 use slog::o;
 use std::net::SocketAddr;
-use trust_dns_resolver::config::NameServerConfig;
-use trust_dns_resolver::config::Protocol;
-use trust_dns_resolver::config::ResolverConfig;
-use trust_dns_resolver::config::ResolverOpts;
-use trust_dns_resolver::TokioAsyncResolver;
 
 /// Starts both the HTTP and DNS servers over a given store.
 pub async fn start_servers(
@@ -80,14 +80,14 @@ pub async fn start_servers(
         let http_api = http_server::api();
         let http_api_context = http_server::Context::new(store);
 
-        dropshot::HttpServerStarter::new(
-            dropshot_config,
+        dropshot::ServerBuilder::new(
             http_api,
             http_api_context,
-            &log.new(o!("component" => "http")),
+            log.new(o!("component" => "http")),
         )
-        .map_err(|error| anyhow!("setting up HTTP server: {:#}", error))?
+        .config(dropshot_config.clone())
         .start()
+        .map_err(|error| anyhow!("setting up HTTP server: {:#}", error))?
     };
 
     Ok((dns_server, dropshot_server))
@@ -137,8 +137,9 @@ impl TransientServer {
             &dns_server::Config { bind_address: dns_bind_address },
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
-                request_body_max_bytes: 4 * 1024 * 1024,
+                default_request_body_max_bytes: 4 * 1024 * 1024,
                 default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
+                log_headers: vec![],
             },
         )
         .await?;
@@ -148,7 +149,7 @@ impl TransientServer {
     pub async fn initialize_with_config(
         &self,
         log: &slog::Logger,
-        dns_config: &dns_service_client::types::DnsConfigParams,
+        dns_config: &DnsConfigParams,
     ) -> Result<(), anyhow::Error> {
         let dns_config_client = dns_service_client::Client::new(
             &format!("http://{}", self.dropshot_server.local_addr()),
@@ -167,12 +168,14 @@ impl TransientServer {
             socket_addr: self.dns_server.local_address(),
             protocol: Protocol::Udp,
             tls_dns_name: None,
-            trust_nx_responses: false,
+            trust_negative_responses: false,
             bind_addr: None,
         });
+        let mut resolver_opts = ResolverOpts::default();
+        // Enable edns for potentially larger records
+        resolver_opts.edns0 = true;
         let resolver =
-            TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
-                .context("creating DNS resolver")?;
+            TokioAsyncResolver::tokio(resolver_config, resolver_opts);
         Ok(resolver)
     }
 }

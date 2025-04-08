@@ -1,0 +1,117 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= So You Want To Upgrade CockroachDB
+
+CockroachDB has a number of overlapping things called "versions":
+
+1. The `cockroachdb` executable is built from a particular version, such
+   as v22.2.19. We'll call this the *executable version*.
+2. The executable version is made up of three components: a number
+   representing the release year, a number representing which release
+   it was within that year, and a patch release number. The first two
+   components constitute the *major version* (such as v22.2).
+3. There is also a version for the on-disk data format that CockroachDB
+   writes and manages. This is called the *cluster version*. When
+   you create a new cluster while running major version v22.2, it
+   is initialized at cluster version `22.2`. Each major version of
+   CockroachDB can operate on both its own associated cluster version,
+   and the previous major version's cluster version, to facilitate
+   rolling upgrades.
+
+By default the cluster version is upgraded and _finalized_ once
+all nodes in the cluster have upgraded to a new major version
+(the CockroachDB docs refer to this as "auto-finalization").
+<<crdb-tn-upgrades>> However, it is not possible to downgrade the
+cluster version. To mitigate the risk of one-way upgrades, we use a
+CockroachDB cluster setting named `cluster.preserve_downgrade_option`
+to prevent auto-finalization and... preserve our option to downgrade in
+a future release, as the option name would suggest. We then perform an
+upgrade to the next major version across at least two releases, which we
+refer to as a tick-tock cycle:
+
+- In a *tick release*, we upgrade the executable versions across the
+  cluster.
+- In a *tock release*, we release our downgrade option and allow
+  CockroachDB to perform the cluster upgrade automatically. When the
+  upgrade is complete, we configure the "preserve downgrade option"
+  setting again to prepare for the next tick release.
+
+(This is not strictly speaking a "tick-tock" cycle, because any number
+of releases may occur between a tick and a tock, and between a tock and
+a tick, but they must occur in that order.)
+
+== Process for a tick release
+
+. Determine whether to move to the next major release of CockroachDB.
+  We have generally avoided being early adopters of new major releases
+  and prefer to see the rate of https://www.cockroachlabs.com/docs/advisories/[technical
+  advisories] that solely affect the new major version drop off. (This
+  generally won't stop you from working on building and testing the
+  next major version, however, as the build process sometimes changes
+  significantly from release to release.)
+. Build a new version of CockroachDB for illumos. You will want to
+  update the https://github.com/oxidecomputer/garbage-compactor/tree/master/cockroach[build
+  scripts in garbage-compactor].
+. In your local Omicron checkout on a Helios machine, unpack the
+  resulting tarball to `out/cockroachdb`, and update `tools/cockroachdb_version`
+  to the version you've built.
+. Add an enum variant for the new version to `CockroachDbClusterVersion`
+  in `nexus/types/src/deployment/planning_input.rs`, and change the
+  associated constant `NEWLY_INITIALIZED` to that value.
+. Regenerate the Nexus internal OpenAPI document, which contains an enum
+  of CockroachDB versions:
++
+....
+cargo xtask openapi generate
+....
+. Run the full test suite, which should catch any unexpected SQL
+  compatibility issues between releases and help validate that your
+  build works.
+. Submit a PR for your changes to garbage-compactor; when merged,
+  publish the final build to the `oxide-cockroachdb-build` S3 bucket.
+. Update `tools/cockroachdb_checksums`. For non-illumos checksums, use
+  the https://www.cockroachlabs.com/docs/releases/[official releases]
+  matching the version you built.
+. Submit a PR with your changes (including `tools/cockroachdb_version`
+  and `tools/cockroachdb_checksums`) to Omicron.
+
+== Process for a tock release
+
+. Change the associated constant `CockroachDbClusterVersion::POLICY` in
+  `nexus/types/src/deployment/planning_input.rs` from the previous major
+  version to the current major version.
+
+== What Nexus does
+
+The Reconfigurator collects the current cluster version, and compares
+this to the desired cluster version set by policy (which we update in
+tock releases).
+
+If they do not match, CockroachDB ensures the
+`cluster.preserve_downgrade_option` setting is the default value (an
+empty string), which allows CockroachDB to perform the upgrade to the
+desired version. The end result of this upgrade is that the current and
+desired cluster versions will match.
+
+When they match, Nexus ensures that the
+`cluster.preserve_downgrade_option` setting is set to the current
+cluster version, to prevent automatic cluster upgrades when CockroachDB
+is next upgraded to a new major version.
+
+Because blueprints are serialized and continue to run even if the
+underlying state has changed, Nexus needs to ensure its view of the
+world is not out-of-date. Nexus saves a fingerprint of the current
+cluster state in the blueprint (intended to be opaque, but ultimately
+a hash of the cluster version and executable version of the node we're
+currently connected to). When setting CockroachDB options, it verifies
+this fingerprint in a way that causes an error instead of setting the
+option.
+
+[bibliography]
+== External References
+
+- [[[crdb-tn-upgrades]]] Cockroach Labs. Cluster versions and upgrades.
+  November 2023.
+  https://github.com/cockroachdb/cockroach/blob/53262957399e6e0fccd63c91add57a510b86dc9a/docs/tech-notes/version_upgrades.md

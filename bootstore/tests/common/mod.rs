@@ -12,7 +12,7 @@ use bootstore::schemes::v0::{
     ApiError, Envelope, Fsm, FsmConfig, Msg, MsgError, RackUuid, Request,
     RequestType, Response, ResponseType,
 };
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
@@ -39,7 +39,9 @@ pub struct CommonTestState {
     // The generated configuration
     pub config: FsmConfig,
 
-    // IDs of all initial members
+    // IDs of all initial members. Not currently used, but useful for
+    // debugging.
+    #[allow(dead_code)]
     pub initial_members: BTreeSet<Baseboard>,
 
     // Any peers connected to the SUT Fsm

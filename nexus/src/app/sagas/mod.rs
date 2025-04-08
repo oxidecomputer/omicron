@@ -10,45 +10,58 @@
 // easier it will be to test, version, and update in deployed systems.
 
 use crate::saga_interface::SagaContext;
-use once_cell::sync::Lazy;
 use std::sync::Arc;
-use steno::new_action_noop_undo;
+use std::sync::LazyLock;
 use steno::ActionContext;
 use steno::ActionError;
+use steno::DagBuilder;
+use steno::SagaDag;
+use steno::SagaName;
 use steno::SagaType;
+use steno::new_action_noop_undo;
 use thiserror::Error;
 use uuid::Uuid;
 
+pub mod demo;
 pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
+pub mod image_create;
 pub mod image_delete;
-pub mod import_blocks_from_url;
-mod instance_common;
+pub(crate) mod instance_common;
 pub mod instance_create;
 pub mod instance_delete;
+pub mod instance_ip_attach;
+pub mod instance_ip_detach;
 pub mod instance_migrate;
 pub mod instance_start;
-pub mod loopback_address_create;
-pub mod loopback_address_delete;
+pub mod instance_update;
 pub mod project_create;
+pub mod region_replacement_drive;
+pub mod region_replacement_finish;
+pub mod region_replacement_start;
+pub mod region_snapshot_replacement_finish;
+pub mod region_snapshot_replacement_garbage_collect;
+pub mod region_snapshot_replacement_start;
+pub mod region_snapshot_replacement_step;
+pub mod region_snapshot_replacement_step_garbage_collect;
 pub mod snapshot_create;
 pub mod snapshot_delete;
-pub mod switch_port_settings_apply;
-pub mod switch_port_settings_clear;
-pub mod switch_port_settings_common;
 pub mod test_saga;
 pub mod volume_delete;
 pub mod volume_remove_rop;
 pub mod vpc_create;
+pub mod vpc_subnet_create;
+pub mod vpc_subnet_delete;
+pub mod vpc_subnet_update;
 
 pub mod common_storage;
 
 #[cfg(test)]
-mod test_helpers;
+pub(crate) mod test_helpers;
 
 #[derive(Debug)]
-pub(crate) struct NexusSagaType;
+pub struct NexusSagaType;
 impl steno::SagaType for NexusSagaType {
     type ExecContextType = Arc<SagaContext>;
 }
@@ -70,6 +83,17 @@ pub(crate) trait NexusSaga {
         params: &Self::Params,
         builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError>;
+
+    fn prepare(
+        params: &Self::Params,
+    ) -> Result<SagaDag, omicron_common::api::external::Error> {
+        let builder = DagBuilder::new(SagaName::new(Self::NAME));
+        let dag = Self::make_saga_dag(&params, builder)?;
+        let params = serde_json::to_value(&params).map_err(|e| {
+            SagaInitError::SerializeError(format!("saga params: {params:?}"), e)
+        })?;
+        Ok(SagaDag::new(dag, params))
+    }
 }
 
 #[derive(Debug, Error)]
@@ -110,67 +134,58 @@ impl From<SagaInitError> for omicron_common::api::external::Error {
     }
 }
 
-pub(super) static ACTION_GENERATE_ID: Lazy<NexusAction> = Lazy::new(|| {
-    new_action_noop_undo("common.uuid_generate", saga_generate_uuid)
-});
-pub(crate) static ACTION_REGISTRY: Lazy<Arc<ActionRegistry>> =
-    Lazy::new(|| Arc::new(make_action_registry()));
+pub(super) static ACTION_GENERATE_ID: LazyLock<NexusAction> =
+    LazyLock::new(|| {
+        new_action_noop_undo("common.uuid_generate", saga_generate_uuid)
+    });
+pub(crate) static ACTION_REGISTRY: LazyLock<Arc<ActionRegistry>> =
+    LazyLock::new(|| Arc::new(make_action_registry()));
+
+macro_rules! register_actions {
+    ( $registry:ident, $( $saga: ty ),* ) => {
+        $(
+            <$saga as NexusSaga>::register_actions(&mut $registry);
+        )*
+    };
+}
 
 fn make_action_registry() -> ActionRegistry {
     let mut registry = steno::ActionRegistry::new();
     registry.register(Arc::clone(&*ACTION_GENERATE_ID));
 
-    <disk_create::SagaDiskCreate as NexusSaga>::register_actions(&mut registry);
-    <disk_delete::SagaDiskDelete as NexusSaga>::register_actions(&mut registry);
-    <finalize_disk::SagaFinalizeDisk as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <import_blocks_from_url::SagaImportBlocksFromUrl as NexusSaga>::register_actions(&mut registry);
-    <instance_create::SagaInstanceCreate as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <instance_delete::SagaInstanceDelete as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <instance_start::SagaInstanceStart as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <loopback_address_create::SagaLoopbackAddressCreate
-        as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <loopback_address_delete::SagaLoopbackAddressDelete
-        as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <switch_port_settings_apply::SagaSwitchPortSettingsApply as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <switch_port_settings_clear::SagaSwitchPortSettingsClear as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <project_create::SagaProjectCreate as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <snapshot_create::SagaSnapshotCreate as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <snapshot_delete::SagaSnapshotDelete as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <volume_delete::SagaVolumeDelete as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <volume_remove_rop::SagaVolumeRemoveROP as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <vpc_create::SagaVpcCreate as NexusSaga>::register_actions(&mut registry);
-    <image_delete::SagaImageDelete as NexusSaga>::register_actions(
-        &mut registry,
-    );
+    register_actions! [
+        registry,
+        demo::SagaDemo,
+        disk_create::SagaDiskCreate,
+        disk_delete::SagaDiskDelete,
+        finalize_disk::SagaFinalizeDisk,
+        instance_create::SagaInstanceCreate,
+        instance_delete::SagaInstanceDelete,
+        instance_ip_attach::SagaInstanceIpAttach,
+        instance_ip_detach::SagaInstanceIpDetach,
+        instance_migrate::SagaInstanceMigrate,
+        instance_start::SagaInstanceStart,
+        instance_update::SagaInstanceUpdate,
+        project_create::SagaProjectCreate,
+        snapshot_create::SagaSnapshotCreate,
+        snapshot_delete::SagaSnapshotDelete,
+        volume_delete::SagaVolumeDelete,
+        volume_remove_rop::SagaVolumeRemoveROP,
+        vpc_create::SagaVpcCreate,
+        vpc_subnet_create::SagaVpcSubnetCreate,
+        vpc_subnet_delete::SagaVpcSubnetDelete,
+        vpc_subnet_update::SagaVpcSubnetUpdate,
+        image_delete::SagaImageDelete,
+        region_replacement_start::SagaRegionReplacementStart,
+        region_replacement_drive::SagaRegionReplacementDrive,
+        region_replacement_finish::SagaRegionReplacementFinish,
+        region_snapshot_replacement_start::SagaRegionSnapshotReplacementStart,
+        region_snapshot_replacement_garbage_collect::SagaRegionSnapshotReplacementGarbageCollect,
+        region_snapshot_replacement_step::SagaRegionSnapshotReplacementStep,
+        region_snapshot_replacement_step_garbage_collect::SagaRegionSnapshotReplacementStepGarbageCollect,
+        region_snapshot_replacement_finish::SagaRegionSnapshotReplacementFinish,
+        image_create::SagaImageCreate
+    ];
 
     #[cfg(test)]
     <test_saga::SagaTest as NexusSaga>::register_actions(&mut registry);
@@ -277,8 +292,8 @@ macro_rules! declare_saga_actions {
     // Basically, everything to the left of "<>" is just us propagating state
     // through the macro, and everything to the right of it is user input.
     (S = $saga:ident $($nodes:ident),* <> $node:ident -> $out:literal { + $a:ident - $u:ident } $($tail:tt)*) => {
-        static $node: ::once_cell::sync::Lazy<crate::app::sagas::NexusAction> =
-            ::once_cell::sync::Lazy::new(|| {
+        static $node: ::std::sync::LazyLock<crate::app::sagas::NexusAction> =
+            ::std::sync::LazyLock::new(|| {
                 ::steno::ActionFunc::new_action(
                     crate::app::sagas::__action_name!($saga, $node), $a, $u,
                 )
@@ -288,8 +303,8 @@ macro_rules! declare_saga_actions {
     };
     // Same as the prior match, but without the undo action.
     (S = $saga:ident $($nodes:ident),* <> $node:ident -> $out:literal { + $a:ident } $($tail:tt)*) => {
-        static $node: ::once_cell::sync::Lazy<crate::app::sagas::NexusAction> =
-            ::once_cell::sync::Lazy::new(|| {
+        static $node: ::std::sync::LazyLock<crate::app::sagas::NexusAction> =
+            ::std::sync::LazyLock::new(|| {
                 ::steno::new_action_noop_undo(
                     crate::app::sagas::__action_name!($saga, $node), $a,
                 )
@@ -314,91 +329,7 @@ macro_rules! declare_saga_actions {
     };
 }
 
-use omicron_common::OMICRON_DPD_TAG as NEXUS_DPD_TAG;
-
 pub(crate) use __action_name;
 pub(crate) use __emit_action;
 pub(crate) use __stringify_ident;
 pub(crate) use declare_saga_actions;
-
-use futures::Future;
-
-/// Retry a progenitor client operation until a known result is returned.
-///
-/// Saga execution relies on the outcome of an external call being known: since
-/// they are idempotent, reissue the external call until a known result comes
-/// back. Retry if a communication error is seen, or if another retryable error
-/// is seen.
-///
-/// Note that retrying is only valid if the call itself is idempotent.
-pub(crate) async fn retry_until_known_result<F, T, E, Fut>(
-    log: &slog::Logger,
-    mut f: F,
-) -> Result<T, progenitor_client::Error<E>>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
-    E: std::fmt::Debug,
-{
-    use omicron_common::backoff;
-
-    backoff::retry_notify(
-        backoff::retry_policy_internal_service(),
-        move || {
-            let fut = f();
-            async move {
-                match fut.await {
-                    Err(progenitor_client::Error::CommunicationError(e)) => {
-                        warn!(
-                            log,
-                            "saw transient communication error {}, retrying...",
-                            e,
-                        );
-
-                        Err(backoff::BackoffError::transient(
-                            progenitor_client::Error::CommunicationError(e),
-                        ))
-                    }
-
-                    Err(progenitor_client::Error::ErrorResponse(
-                        response_value,
-                    )) => {
-                        match response_value.status() {
-                            // Retry on 503 or 429
-                            http::StatusCode::SERVICE_UNAVAILABLE
-                            | http::StatusCode::TOO_MANY_REQUESTS => {
-                                Err(backoff::BackoffError::transient(
-                                    progenitor_client::Error::ErrorResponse(
-                                        response_value,
-                                    ),
-                                ))
-                            }
-
-                            // Anything else is a permanent error
-                            _ => Err(backoff::BackoffError::Permanent(
-                                progenitor_client::Error::ErrorResponse(
-                                    response_value,
-                                ),
-                            )),
-                        }
-                    }
-
-                    Err(e) => {
-                        warn!(log, "saw permanent error {}, aborting", e,);
-
-                        Err(backoff::BackoffError::Permanent(e))
-                    }
-
-                    Ok(v) => Ok(v),
-                }
-            }
-        },
-        |error: progenitor_client::Error<_>, delay| {
-            warn!(
-                log,
-                "failed external call ({:?}), will retry in {:?}", error, delay,
-            );
-        },
-    )
-    .await
-}

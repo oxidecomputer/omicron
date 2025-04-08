@@ -2,23 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{impl_enum_type, Generation, Name, RouterRoute};
+use super::{Generation, Name, RouterRoute, impl_enum_type};
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{router_route, vpc_router};
+use crate::{DatastoreAttachTargetConfig, VpcSubnet};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_db_schema::schema::{router_route, vpc_router, vpc_subnet};
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_router_kind"))]
-    pub struct VpcRouterKindEnum;
+    VpcRouterKindEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = VpcRouterKindEnum)]
     pub enum VpcRouterKind;
 
     // Enum values
@@ -41,9 +39,10 @@ pub struct VpcRouter {
     #[diesel(embed)]
     identity: VpcRouterIdentity,
 
-    pub vpc_id: Uuid,
     pub kind: VpcRouterKind,
+    pub vpc_id: Uuid,
     pub rcgen: Generation,
+    pub resolved_version: i64,
 }
 
 impl VpcRouter {
@@ -54,7 +53,13 @@ impl VpcRouter {
         params: params::VpcRouterCreate,
     ) -> Self {
         let identity = VpcRouterIdentity::new(router_id, params.identity);
-        Self { identity, vpc_id, kind, rcgen: Generation::new() }
+        Self {
+            identity,
+            vpc_id,
+            kind,
+            rcgen: Generation::new(),
+            resolved_version: 0,
+        }
     }
 }
 
@@ -91,4 +96,17 @@ impl From<params::VpcRouterUpdate> for VpcRouterUpdate {
             time_modified: Utc::now(),
         }
     }
+}
+
+impl DatastoreAttachTargetConfig<VpcSubnet> for VpcRouter {
+    type Id = Uuid;
+
+    type CollectionIdColumn = vpc_router::dsl::id;
+    type CollectionTimeDeletedColumn = vpc_router::dsl::time_deleted;
+
+    type ResourceIdColumn = vpc_subnet::dsl::id;
+    type ResourceCollectionIdColumn = vpc_subnet::dsl::custom_router_id;
+    type ResourceTimeDeletedColumn = vpc_subnet::dsl::time_deleted;
+
+    const ALLOW_FROM_ATTACHED: bool = true;
 }

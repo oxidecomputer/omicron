@@ -2,21 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::ACTION_GENERATE_ID;
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
-use super::ACTION_GENERATE_ID;
 use crate::app::sagas::declare_saga_actions;
 use crate::external_api::params;
-use nexus_db_queries::db::queries::vpc_subnet::SubnetError;
+use nexus_db_model::InternetGatewayIpPool;
+use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
+use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
-use omicron_common::api::external::RouteDestination;
-use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::RouterRouteKind;
+use oxnet::IpNet;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -44,13 +44,25 @@ declare_saga_actions! {
         + svc_create_router
         - svc_create_router_undo
     }
-    VPC_CREATE_ROUTE -> "route" {
-        + svc_create_route
-        - svc_create_route_undo
+    VPC_CREATE_GATEWAY -> "gateway" {
+        + svc_create_gateway
+        - svc_create_gateway_undo
+    }
+    VPC_CREATE_V4_ROUTE -> "route4" {
+        + svc_create_v4_route
+        - svc_create_v4_route_undo
+    }
+    VPC_CREATE_V6_ROUTE -> "route6" {
+        + svc_create_v6_route
+        - svc_create_v6_route_undo
     }
     VPC_CREATE_SUBNET -> "subnet" {
         + svc_create_subnet
         - svc_create_subnet_undo
+    }
+    VPC_CREATE_SUBNET_ROUTE -> "route" {
+        + svc_create_subnet_route
+        - svc_create_subnet_route_undo
     }
     VPC_UPDATE_FIREWALL -> "firewall" {
         + svc_update_firewall
@@ -79,8 +91,18 @@ pub fn create_dag(
         ACTION_GENERATE_ID.as_ref(),
     ));
     builder.append(Node::action(
-        "default_route_id",
-        "GenerateDefaultRouteId",
+        "default_v4_route_id",
+        "GenerateDefaultV4RouteId",
+        ACTION_GENERATE_ID.as_ref(),
+    ));
+    builder.append(Node::action(
+        "default_v6_route_id",
+        "GenerateDefaultV6RouteId",
+        ACTION_GENERATE_ID.as_ref(),
+    ));
+    builder.append(Node::action(
+        "subnet_route_id",
+        "GenerateSubnetRouteId",
         ACTION_GENERATE_ID.as_ref(),
     ));
     builder.append(Node::action(
@@ -88,11 +110,19 @@ pub fn create_dag(
         "GenerateDefaultSubnetId",
         ACTION_GENERATE_ID.as_ref(),
     ));
+    builder.append(Node::action(
+        "default_internet_gateway_id",
+        "GenerateDefaultInternetGatewayId",
+        ACTION_GENERATE_ID.as_ref(),
+    ));
     builder.append(vpc_create_vpc_action());
     builder.append(vpc_create_router_action());
-    builder.append(vpc_create_route_action());
+    builder.append(vpc_create_v4_route_action());
+    builder.append(vpc_create_v6_route_action());
     builder.append(vpc_create_subnet_action());
+    builder.append(vpc_create_subnet_route_action());
     builder.append(vpc_update_firewall_action());
+    builder.append(vpc_create_gateway_action());
     builder.append(vpc_notify_sleds_action());
 
     Ok(builder.build()?)
@@ -189,7 +219,7 @@ async fn svc_create_router(
             identity: IdentityMetadataCreateParams {
                 name: "system".parse().unwrap(),
                 description: "Routes are automatically added to this \
-                    router as vpc subnets are created"
+                    router as VPC subnets are created"
                     .into(),
             },
         },
@@ -217,8 +247,45 @@ async fn svc_create_router_undo(
     Ok(())
 }
 
+async fn svc_create_v4_route(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let default_route_id = sagactx.lookup::<Uuid>("default_v4_route_id")?;
+    let default_route =
+        "0.0.0.0/0".parse().expect("known-valid specifier for a default route");
+    svc_create_route(sagactx, default_route_id, default_route, "default-v4")
+        .await
+}
+
+async fn svc_create_v4_route_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let route_id = sagactx.lookup::<Uuid>("default_v4_route_id")?;
+    svc_create_route_undo(sagactx, route_id).await
+}
+
+async fn svc_create_v6_route(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let default_route_id = sagactx.lookup::<Uuid>("default_v6_route_id")?;
+    let default_route =
+        "::/0".parse().expect("known-valid specifier for a default route");
+    svc_create_route(sagactx, default_route_id, default_route, "default-v6")
+        .await
+}
+
+async fn svc_create_v6_route_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let route_id = sagactx.lookup::<Uuid>("default_v6_route_id")?;
+    svc_create_route_undo(sagactx, route_id).await
+}
+
 async fn svc_create_route(
     sagactx: NexusActionContext,
+    route_id: Uuid,
+    default_net: IpNet,
+    name: &str,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -226,23 +293,22 @@ async fn svc_create_route(
         &sagactx,
         &params.serialized_authn,
     );
-    let default_route_id = sagactx.lookup::<Uuid>("default_route_id")?;
     let system_router_id = sagactx.lookup::<Uuid>("system_router_id")?;
     let authz_router = sagactx.lookup::<authz::VpcRouter>("router")?;
 
     let route = db::model::RouterRoute::new(
-        default_route_id,
+        route_id,
         system_router_id,
-        RouterRouteKind::Default,
+        external::RouterRouteKind::Default,
         params::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
-                name: "default".parse().unwrap(),
+                name: name.parse().unwrap(),
                 description: "The default route of a vpc".to_string(),
             },
-            target: RouteTarget::InternetGateway("outbound".parse().unwrap()),
-            destination: RouteDestination::Vpc(
-                params.vpc_create.identity.name.clone(),
+            target: external::RouteTarget::InternetGateway(
+                "default".parse().unwrap(),
             ),
+            destination: external::RouteDestination::IpNet(default_net),
         },
     );
 
@@ -256,6 +322,7 @@ async fn svc_create_route(
 
 async fn svc_create_route_undo(
     sagactx: NexusActionContext,
+    route_id: Uuid,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
@@ -264,7 +331,6 @@ async fn svc_create_route_undo(
         &params.serialized_authn,
     );
     let authz_router = sagactx.lookup::<authz::VpcRouter>("router")?;
-    let route_id = sagactx.lookup::<Uuid>("default_route_id")?;
     let authz_route = authz::RouterRoute::new(
         authz_router,
         route_id,
@@ -291,15 +357,13 @@ async fn svc_create_subnet(
 
     // Allocate the first /64 sub-range from the requested or created
     // prefix.
-    let ipv6_block = external::Ipv6Net(
-        ipnetwork::Ipv6Network::new(db_vpc.ipv6_prefix.network(), 64)
-            .map_err(|_| {
-                external::Error::internal_error(
-                    "Failed to allocate default IPv6 subnet",
-                )
-            })
-            .map_err(ActionError::action_failed)?,
-    );
+    let ipv6_block = oxnet::Ipv6Net::new(db_vpc.ipv6_prefix.prefix(), 64)
+        .map_err(|_| {
+            external::Error::internal_error(
+                "Failed to allocate default IPv6 subnet",
+            )
+        })
+        .map_err(ActionError::action_failed)?;
 
     let subnet = db::model::VpcSubnet::new(
         default_subnet_id,
@@ -325,7 +389,7 @@ async fn svc_create_subnet(
         .vpc_create_subnet(&opctx, &authz_vpc, subnet)
         .await
         .map_err(|err| match err {
-            SubnetError::OverlappingIpRange(ip) => {
+            InsertVpcSubnetError::OverlappingIpRange(ip) => {
                 let ipv4_block = &defaults::DEFAULT_VPC_SUBNET_IPV4_BLOCK;
                 let log = sagactx.user_data().log();
                 error!(
@@ -345,7 +409,7 @@ async fn svc_create_subnet(
                         found overlapping IP address ranges",
                 )
             }
-            SubnetError::External(e) => e,
+            InsertVpcSubnetError::External(e) => e,
         })
         .map_err(ActionError::action_failed)
 }
@@ -363,10 +427,59 @@ async fn svc_create_subnet_undo(
     let (authz_subnet, db_subnet) =
         sagactx.lookup::<(authz::VpcSubnet, db::model::VpcSubnet)>("subnet")?;
 
+    let res = osagactx
+        .datastore()
+        .vpc_delete_subnet_raw(&opctx, &db_subnet, &authz_subnet)
+        .await;
+
+    match res {
+        Ok(_) | Err(external::Error::ObjectNotFound { .. }) => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+async fn svc_create_subnet_route(
+    sagactx: NexusActionContext,
+) -> Result<authz::RouterRoute, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let route_id = sagactx.lookup::<Uuid>("subnet_route_id")?;
+    let (.., db_subnet) =
+        sagactx.lookup::<(authz::VpcSubnet, db::model::VpcSubnet)>("subnet")?;
+    let authz_system_router = sagactx.lookup::<authz::VpcRouter>("router")?;
+
     osagactx
         .datastore()
-        .vpc_delete_subnet(&opctx, &db_subnet, &authz_subnet)
-        .await?;
+        .vpc_create_subnet_route(
+            &opctx,
+            &authz_system_router,
+            &db_subnet,
+            route_id,
+        )
+        .await
+        .map_err(ActionError::action_failed)
+        .map(|(auth, ..)| auth)
+}
+
+async fn svc_create_subnet_route_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let authz_route = sagactx.lookup::<authz::RouterRoute>("route")?;
+
+    osagactx.datastore().router_delete_route(&opctx, &authz_route).await?;
+
     Ok(())
 }
 
@@ -417,6 +530,93 @@ async fn svc_update_firewall_undo(
     Ok(())
 }
 
+async fn svc_create_gateway(
+    sagactx: NexusActionContext,
+) -> Result<authz::InternetGateway, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let vpc_id = sagactx.lookup::<Uuid>("vpc_id")?;
+    let default_igw_id =
+        sagactx.lookup::<Uuid>("default_internet_gateway_id")?;
+    let (authz_vpc, _) =
+        sagactx.lookup::<(authz::Vpc, db::model::Vpc)>("vpc")?;
+
+    let igw = db::model::InternetGateway::new(
+        default_igw_id,
+        vpc_id,
+        params::InternetGatewayCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "default".parse().unwrap(),
+                description: "Automatically created default VPC gateway".into(),
+            },
+        },
+    );
+
+    let (authz_igw, _) = osagactx
+        .datastore()
+        .vpc_create_internet_gateway(&opctx, &authz_vpc, igw)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    match osagactx.datastore().ip_pools_fetch_default(&opctx).await {
+        Ok((authz_ip_pool, _db_ip_pool)) => {
+            // Attach the default IP pool to the default gateway.
+            // Failure of this saga takes out the gateway with a cascading delete and
+            // thus this ip pool.
+            osagactx
+                .datastore()
+                .internet_gateway_attach_ip_pool(
+                    &opctx,
+                    &authz_igw,
+                    InternetGatewayIpPool::new(
+                        Uuid::new_v4(),
+                        authz_ip_pool.id(),
+                        authz_igw.id(),
+                        IdentityMetadataCreateParams {
+                            name: "default".parse().unwrap(),
+                            description:
+                                "Automatically attached default IP pool".into(),
+                        },
+                    ),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+        Err(e) => {
+            warn!(
+                opctx.log,
+                "Default ip pool lookup failed: {e}. \
+                Default gateway has no ip pool association",
+            );
+        }
+    };
+
+    Ok(authz_igw)
+}
+
+async fn svc_create_gateway_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let vpc_id = sagactx.lookup::<Uuid>("vpc_id")?;
+    let authz_igw = sagactx.lookup::<authz::InternetGateway>("gateway")?;
+
+    osagactx
+        .datastore()
+        .vpc_delete_internet_gateway(&opctx, &authz_igw, vpc_id, true)
+        .await?;
+    Ok(())
+}
+
 async fn svc_notify_sleds(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -436,27 +636,34 @@ async fn svc_notify_sleds(
         .await
         .map_err(ActionError::action_failed)?;
 
+    osagactx
+        .datastore()
+        .vpc_increment_rpw_version(&opctx, db_vpc.id())
+        .await
+        .map_err(ActionError::action_failed)?;
+
     Ok(())
 }
 
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
-        app::saga::create_saga_dag, app::sagas::vpc_create::Params,
-        app::sagas::vpc_create::SagaVpcCreate, external_api::params,
+        app::sagas::vpc_create::Params, app::sagas::vpc_create::SagaVpcCreate,
+        external_api::params,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::db::fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
     use nexus_db_queries::{
         authn::saga::Serialized, authz, context::OpContext,
         db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
         db::lookup::LookupPath,
     };
+    use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
@@ -469,7 +676,7 @@ pub(crate) mod test {
     const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        populate_ip_pool(&client, "default", None).await;
+        create_default_ip_pool(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }
@@ -496,7 +703,7 @@ pub(crate) mod test {
     fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
@@ -505,7 +712,7 @@ pub(crate) mod test {
         project_id: Uuid,
         action: authz::Action,
     ) -> authz::Project {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_selector =
             params::ProjectSelector { project: NameOrId::Id(project_id) };
         let opctx = test_opctx(&cptestctx);
@@ -523,7 +730,7 @@ pub(crate) mod test {
         project_id: Uuid,
     ) {
         let opctx = test_opctx(&cptestctx);
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
         let default_name = Name::try_from("default".to_string()).unwrap();
         let system_name = Name::try_from("system".to_string()).unwrap();
 
@@ -540,12 +747,25 @@ pub(crate) mod test {
             .await
             .expect("Failed to delete default Subnet");
 
-        // Default route
+        // Default gateway routes
         let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
             .project_id(project_id)
             .vpc_name(&default_name.clone().into())
             .vpc_router_name(&system_name.clone().into())
-            .router_route_name(&default_name.clone().into())
+            .router_route_name(&"default-v4".parse::<Name>().unwrap().into())
+            .fetch()
+            .await
+            .expect("Failed to fetch default route");
+        datastore
+            .router_delete_route(&opctx, &authz_route)
+            .await
+            .expect("Failed to delete default route");
+
+        let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
+            .project_id(project_id)
+            .vpc_name(&default_name.clone().into())
+            .vpc_router_name(&system_name.clone().into())
+            .router_route_name(&"default-v6".parse::<Name>().unwrap().into())
             .fetch()
             .await
             .expect("Failed to fetch default route");
@@ -566,6 +786,25 @@ pub(crate) mod test {
             .vpc_delete_router(&opctx, &authz_router)
             .await
             .expect("Failed to delete system router");
+
+        // Default gateway
+        let (.., authz_vpc, authz_igw, _igw) =
+            LookupPath::new(&opctx, &datastore)
+                .project_id(project_id)
+                .vpc_name(&default_name.clone().into())
+                .internet_gateway_name(&default_name.clone().into())
+                .fetch()
+                .await
+                .expect("Failed to fetch default gateway");
+        datastore
+            .vpc_delete_internet_gateway(
+                &opctx,
+                &authz_igw,
+                authz_vpc.id(),
+                true,
+            )
+            .await
+            .expect("Failed to delete default gateway");
 
         // Default VPC & Firewall Rules
         let (.., authz_vpc, vpc) = LookupPath::new(&opctx, &datastore)
@@ -589,12 +828,14 @@ pub(crate) mod test {
         assert!(no_routers_exist(datastore).await);
         assert!(no_routes_exist(datastore).await);
         assert!(no_subnets_exist(datastore).await);
+        assert!(no_gateways_exist(datastore).await);
+        assert!(no_gateway_links_exist(datastore).await);
         assert!(no_firewall_rules_exist(datastore).await);
     }
 
     async fn no_vpcs_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Vpc;
-        use nexus_db_queries::db::schema::vpc::dsl;
+        use nexus_db_schema::schema::vpc::dsl;
 
         dsl::vpc
             .filter(dsl::time_deleted.is_null())
@@ -615,7 +856,7 @@ pub(crate) mod test {
 
     async fn no_routers_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::VpcRouter;
-        use nexus_db_queries::db::schema::vpc_router::dsl;
+        use nexus_db_schema::schema::vpc_router::dsl;
 
         dsl::vpc_router
             .filter(dsl::time_deleted.is_null())
@@ -634,10 +875,53 @@ pub(crate) mod test {
             .is_none()
     }
 
+    async fn no_gateways_exist(datastore: &DataStore) -> bool {
+        use nexus_db_queries::db::model::InternetGateway;
+        use nexus_db_schema::schema::internet_gateway::dsl;
+
+        dsl::internet_gateway
+            .filter(dsl::time_deleted.is_null())
+            // ignore built-in services VPC
+            .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
+            .select(InternetGateway::as_select())
+            .first_async::<InternetGateway>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .optional()
+            .unwrap()
+            .map(|igw| {
+                eprintln!("Internet gateway exists: {igw:?}");
+            })
+            .is_none()
+    }
+
+    async fn no_gateway_links_exist(datastore: &DataStore) -> bool {
+        use nexus_db_queries::db::model::InternetGatewayIpPool;
+        use nexus_db_schema::schema::internet_gateway_ip_pool::dsl;
+
+        dsl::internet_gateway_ip_pool
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::internet_gateway_id.ne(*SERVICES_INTERNET_GATEWAY_ID))
+            .select(InternetGatewayIpPool::as_select())
+            .first_async::<InternetGatewayIpPool>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .optional()
+            .unwrap()
+            .map(|igw_ip_pool| {
+                eprintln!(
+                    "Internet gateway ip pool links exists: {igw_ip_pool:?}"
+                );
+            })
+            .is_none()
+    }
+
     async fn no_routes_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::RouterRoute;
-        use nexus_db_queries::db::schema::router_route::dsl;
-        use nexus_db_queries::db::schema::vpc_router::dsl as vpc_router_dsl;
+        use nexus_db_schema::schema::router_route::dsl;
+        use nexus_db_schema::schema::vpc_router::dsl as vpc_router_dsl;
 
         dsl::router_route
             .filter(dsl::time_deleted.is_null())
@@ -665,7 +949,7 @@ pub(crate) mod test {
 
     async fn no_subnets_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::VpcSubnet;
-        use nexus_db_queries::db::schema::vpc_subnet::dsl;
+        use nexus_db_schema::schema::vpc_subnet::dsl;
 
         dsl::vpc_subnet
             .filter(dsl::time_deleted.is_null())
@@ -686,7 +970,7 @@ pub(crate) mod test {
 
     async fn no_firewall_rules_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::VpcFirewallRule;
-        use nexus_db_queries::db::schema::vpc_firewall_rule::dsl;
+        use nexus_db_schema::schema::vpc_firewall_rule::dsl;
 
         dsl::vpc_firewall_rule
             .filter(dsl::time_deleted.is_null())
@@ -710,7 +994,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_and_project(&client).await;
         delete_project_vpc_defaults(&cptestctx, project_id).await;
 
@@ -726,11 +1010,7 @@ pub(crate) mod test {
         )
         .await;
         let params = new_test_params(&opctx, authz_project);
-        let dag = create_saga_dag::<SagaVpcCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        nexus.run_saga(runnable_saga).await.unwrap();
+        nexus.sagas.saga_execute::<SagaVpcCreate>(params).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]
@@ -740,7 +1020,7 @@ pub(crate) mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_and_project(&client).await;
         delete_project_vpc_defaults(&cptestctx, project_id).await;
 

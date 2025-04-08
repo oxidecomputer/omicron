@@ -1,0 +1,6 @@
+error: invalid value '🫡' for '<VERSION>': version contains invalid byte `\xf0` (allowed: ^[a-zA-Z0-9._+-]{1,63}$)
+
+For more information, try '--help'.
+error: invalid value 'aaaa' for '<HASH>': Invalid string length
+
+For more information, try '--help'.

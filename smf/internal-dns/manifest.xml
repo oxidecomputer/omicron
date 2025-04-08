@@ -4,11 +4,16 @@
 <service_bundle type='manifest' name='internal_dns'>
 
   <service name='oxide/internal_dns' type='service' version='1'>
-  <create_default_instance enabled='false' />
+  <create_default_instance enabled='true' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
     type='service'>
   <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <dependency name='zone_network_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/zone-network-setup:default' />
   </dependency>
 
   <exec_method type='method' name='start'

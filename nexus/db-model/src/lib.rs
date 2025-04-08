@@ -10,14 +10,19 @@ extern crate diesel;
 extern crate newtype_derive;
 
 mod address_lot;
+mod affinity;
+mod allow_list;
+mod bfd;
 mod bgp;
 mod block_size;
 mod bootstore;
 mod bytecount;
 mod certificate;
+mod clickhouse_policy;
+mod cockroachdb_node_id;
 mod collection;
 mod console_session;
-mod dataset;
+mod crucible_dataset;
 mod dataset_kind;
 mod db_metadata;
 mod device_auth;
@@ -25,44 +30,60 @@ mod digest;
 mod disk;
 mod disk_state;
 mod dns;
+mod downstairs;
 mod external_ip;
 mod generation;
 mod identity_provider;
 mod image;
 mod instance;
+mod instance_auto_restart_policy;
 mod instance_cpu_count;
 mod instance_state;
+mod internet_gateway;
 mod inventory;
 mod ip_pool;
 mod ipv4net;
-mod ipv6;
+pub mod ipv6;
 mod ipv6net;
 mod l4_port_range;
 mod macaddr;
+mod migration;
+mod migration_state;
 mod name;
 mod network_interface;
 mod oximeter_info;
 mod physical_disk;
 mod physical_disk_kind;
+mod physical_disk_policy;
+mod physical_disk_state;
+mod probe;
 mod producer_endpoint;
 mod project;
+mod rendezvous_debug_dataset;
 mod semver_version;
 mod switch_interface;
 mod switch_port;
-mod system_update;
+mod target_release;
+mod v2p_mapping;
+mod vmm_state;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
+mod deployment;
 mod ipv4_nat_entry;
-pub mod queries;
+mod omicron_zone_config;
+mod quota;
 mod rack;
 mod region;
+mod region_replacement;
+mod region_replacement_step;
 mod region_snapshot;
+mod region_snapshot_replacement;
+mod region_snapshot_replacement_step;
 mod role_assignment;
 mod role_builtin;
 pub mod saga_types;
-pub mod schema;
-mod service;
+mod schema_versions;
 mod service_kind;
 mod silo;
 mod silo_group;
@@ -70,19 +91,27 @@ mod silo_user;
 mod silo_user_password_hash;
 mod sled;
 mod sled_instance;
-mod sled_resource;
-mod sled_resource_kind;
+mod sled_policy;
+mod sled_resource_vmm;
+mod sled_state;
+mod sled_underlay_subnet_allocation;
 mod snapshot;
 mod ssh_key;
+mod support_bundle;
 mod switch;
+mod tuf_repo;
+mod typed_uuid;
 mod unsigned;
-mod update_artifact;
+mod upstairs_repair;
 mod user_builtin;
+mod utilization;
 mod virtual_provisioning_collection;
 mod virtual_provisioning_resource;
 mod vmm;
 mod vni;
 mod volume;
+mod volume_repair;
+mod volume_resource_usage;
 mod vpc;
 mod vpc_firewall_rule;
 mod vpc_route;
@@ -101,28 +130,37 @@ mod db {
 pub use self::macaddr::*;
 pub use self::unsigned::*;
 pub use address_lot::*;
+pub use affinity::*;
+pub use allow_list::*;
+pub use bfd::*;
 pub use bgp::*;
 pub use block_size::*;
 pub use bootstore::*;
 pub use bytecount::*;
 pub use certificate::*;
+pub use clickhouse_policy::*;
+pub use cockroachdb_node_id::*;
 pub use collection::*;
 pub use console_session::*;
-pub use dataset::*;
+pub use crucible_dataset::*;
 pub use dataset_kind::*;
 pub use db_metadata::*;
+pub use deployment::*;
 pub use device_auth::*;
 pub use digest::*;
 pub use disk::*;
 pub use disk_state::*;
 pub use dns::*;
+pub use downstairs::*;
 pub use external_ip::*;
 pub use generation::*;
 pub use identity_provider::*;
 pub use image::*;
 pub use instance::*;
+pub use instance_auto_restart_policy::*;
 pub use instance_cpu_count::*;
 pub use instance_state::*;
+pub use internet_gateway::*;
 pub use inventory::*;
 pub use ip_pool::*;
 pub use ipv4_nat_entry::*;
@@ -130,20 +168,32 @@ pub use ipv4net::*;
 pub use ipv6::*;
 pub use ipv6net::*;
 pub use l4_port_range::*;
+pub use migration::*;
+pub use migration_state::*;
 pub use name::*;
 pub use network_interface::*;
 pub use oximeter_info::*;
 pub use physical_disk::*;
 pub use physical_disk_kind::*;
+pub use physical_disk_policy::*;
+pub use physical_disk_state::*;
+pub use probe::*;
 pub use producer_endpoint::*;
 pub use project::*;
+pub use quota::*;
 pub use rack::*;
 pub use region::*;
+pub use region_replacement::*;
+pub use region_replacement_step::*;
 pub use region_snapshot::*;
+pub use region_snapshot_replacement::*;
+pub use region_snapshot_replacement_step::*;
+pub use rendezvous_debug_dataset::*;
 pub use role_assignment::*;
 pub use role_builtin::*;
+pub use saga_types::*;
+pub use schema_versions::*;
 pub use semver_version::*;
-pub use service::*;
 pub use service_kind::*;
 pub use silo::*;
 pub use silo_group::*;
@@ -151,21 +201,31 @@ pub use silo_user::*;
 pub use silo_user_password_hash::*;
 pub use sled::*;
 pub use sled_instance::*;
-pub use sled_resource::*;
-pub use sled_resource_kind::*;
+pub use sled_policy::to_db_sled_policy; // Do not expose DbSledPolicy
+pub use sled_resource_vmm::*;
+pub use sled_state::*;
+pub use sled_underlay_subnet_allocation::*;
 pub use snapshot::*;
 pub use ssh_key::*;
+pub use support_bundle::*;
 pub use switch::*;
 pub use switch_interface::*;
 pub use switch_port::*;
-pub use system_update::*;
-pub use update_artifact::*;
+pub use target_release::*;
+pub use tuf_repo::*;
+pub use typed_uuid::to_db_typed_uuid;
+pub use upstairs_repair::*;
 pub use user_builtin::*;
+pub use utilization::*;
+pub use v2p_mapping::*;
 pub use virtual_provisioning_collection::*;
 pub use virtual_provisioning_resource::*;
 pub use vmm::*;
+pub use vmm_state::*;
 pub use vni::*;
 pub use volume::*;
+pub use volume_repair::*;
+pub use volume_resource_usage::*;
 pub use vpc::*;
 pub use vpc_firewall_rule::*;
 pub use vpc_route::*;
@@ -187,20 +247,17 @@ pub use zpool::*;
 /// sample usage.
 macro_rules! impl_enum_wrapper {
     (
-        $(#[$enum_meta:meta])*
-        pub struct $diesel_type:ident;
+        $diesel_type:ident:
 
         $(#[$model_meta:meta])*
         pub struct $model_type:ident(pub $ext_type:ty);
         $($enum_item:ident => $sql_value:literal)+
     ) => {
-        $(#[$enum_meta])*
-        pub struct $diesel_type;
-
         $(#[$model_meta])*
+        #[diesel(sql_type = ::nexus_db_schema::enums::$diesel_type)]
         pub struct $model_type(pub $ext_type);
 
-        impl ::diesel::serialize::ToSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
+        impl ::diesel::serialize::ToSql<::nexus_db_schema::enums::$diesel_type, ::diesel::pg::Pg> for $model_type {
             fn to_sql<'a>(
                 &'a self,
                 out: &mut ::diesel::serialize::Output<'a, '_, ::diesel::pg::Pg>,
@@ -216,7 +273,7 @@ macro_rules! impl_enum_wrapper {
             }
         }
 
-        impl ::diesel::deserialize::FromSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
+        impl ::diesel::deserialize::FromSql<::nexus_db_schema::enums::$diesel_type, ::diesel::pg::Pg> for $model_type {
             fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>) -> ::diesel::deserialize::Result<Self> {
                 match <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue::<'_>::as_bytes(&bytes) {
                     $(
@@ -238,29 +295,25 @@ macro_rules! impl_enum_wrapper {
 pub(crate) use impl_enum_wrapper;
 
 /// This macro implements serialization and deserialization of an enum type from
-/// our database into our model types. See [`VpcRouterKindEnum`] and
-/// [`VpcRouterKind`] for a sample usage
+/// our database into our model types. See [`VpcRouterKind`] for a sample usage.
 macro_rules! impl_enum_type {
     (
-        $(#[$enum_meta:meta])*
-        pub struct $diesel_type:ident;
+        $diesel_type:ident:
 
         $(#[$model_meta:meta])*
         pub enum $model_type:ident;
 
         $($enum_item:ident => $sql_value:literal)+
     ) => {
-        $(#[$enum_meta])*
-        pub struct $diesel_type;
-
         $(#[$model_meta])*
+        #[diesel(sql_type = ::nexus_db_schema::enums::$diesel_type)]
         pub enum $model_type {
             $(
                 $enum_item,
             )*
         }
 
-        impl ::diesel::serialize::ToSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
+        impl ::diesel::serialize::ToSql<::nexus_db_schema::enums::$diesel_type, ::diesel::pg::Pg> for $model_type {
             fn to_sql<'a>(
                 &'a self,
                 out: &mut ::diesel::serialize::Output<'a, '_, ::diesel::pg::Pg>,
@@ -277,7 +330,7 @@ macro_rules! impl_enum_type {
             }
         }
 
-        impl ::diesel::deserialize::FromSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
+        impl ::diesel::deserialize::FromSql<::nexus_db_schema::enums::$diesel_type, ::diesel::pg::Pg> for $model_type {
             fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>) -> ::diesel::deserialize::Result<Self> {
                 match <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue::<'_>::as_bytes(&bytes) {
                     $(
@@ -285,10 +338,9 @@ macro_rules! impl_enum_type {
                         Ok($model_type::$enum_item)
                     }
                     )*
-                    _ => {
-                        Err(concat!("Unrecognized enum variant for ",
-                                stringify!{$model_type})
-                            .into())
+                    other => {
+                        let s = concat!("Unrecognized enum variant for ", stringify!{$model_type});
+                        Err(format!("{}: (raw bytes: {:?})", s, other).into())
                     }
                 }
             }
@@ -400,12 +452,13 @@ impl DatabaseString for ProjectRole {
 
 #[cfg(test)]
 mod tests {
+    use crate::RequestAddressError;
+
     use super::VpcSubnet;
-    use ipnetwork::Ipv4Network;
-    use ipnetwork::Ipv6Network;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::Ipv4Net;
-    use omicron_common::api::external::Ipv6Net;
+    use oxnet::IpNet;
+    use oxnet::Ipv4Net;
+    use oxnet::Ipv6Net;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
@@ -413,9 +466,8 @@ mod tests {
 
     #[test]
     fn test_vpc_subnet_check_requestable_addr() {
-        let ipv4_block =
-            Ipv4Net("192.168.0.0/16".parse::<Ipv4Network>().unwrap());
-        let ipv6_block = Ipv6Net("fd00::/48".parse::<Ipv6Network>().unwrap());
+        let ipv4_block = "192.168.0.0/16".parse::<Ipv4Net>().unwrap();
+        let ipv6_block = "fd00::/48".parse::<Ipv6Net>().unwrap();
         let identity = IdentityMetadataCreateParams {
             name: "net-test-vpc".parse().unwrap(),
             description: "A test VPC".parse().unwrap(),
@@ -428,55 +480,75 @@ mod tests {
             ipv6_block,
         );
         // Within subnet
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
-                192, 168, 1, 10
-            )))
-            .is_ok());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                    192, 168, 1, 10
+                )))
+                .is_ok()
+        );
         // Network address is reserved
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(192, 168, 0, 0)))
-            .is_err());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                    192, 168, 0, 0
+                )))
+                .is_err()
+        );
         // Broadcast address is reserved
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
-                192, 168, 255, 255
-            )))
-            .is_err());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                    192, 168, 255, 255
+                )))
+                .is_err()
+        );
         // Within subnet, but reserved
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(192, 168, 0, 1)))
-            .is_err());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                    192, 168, 0, 1
+                )))
+                .is_err()
+        );
         // Not within subnet
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(192, 160, 1, 1)))
-            .is_err());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                    192, 160, 1, 1
+                )))
+                .is_err()
+        );
 
         // Within subnet
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
-                0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
-            )))
-            .is_ok());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
+                    0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
+                )))
+                .is_ok()
+        );
         // Within subnet, but reserved
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
-                0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
-            )))
-            .is_err());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
+                    0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+                )))
+                .is_err()
+        );
         // Not within subnet
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
-                0xfc00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
-            )))
-            .is_err());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
+                    0xfc00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
+                )))
+                .is_err()
+        );
     }
 
     #[test]
     fn test_ipv6_net_random_subnet() {
-        let base = super::Ipv6Net(Ipv6Net(
-            "fd00::/48".parse::<Ipv6Network>().unwrap(),
-        ));
+        let base = super::Ipv6Net("fd00::/48".parse::<Ipv6Net>().unwrap());
         assert!(
             base.random_subnet(8).is_none(),
             "random_subnet() should fail when prefix is less than the base prefix"
@@ -487,11 +559,11 @@ mod tests {
         );
         let subnet = base.random_subnet(64).unwrap();
         assert_eq!(
-            subnet.prefix(),
+            subnet.width(),
             64,
             "random_subnet() returned an incorrect prefix"
         );
-        let octets = subnet.network().octets();
+        let octets = subnet.prefix().octets();
         const EXPECTED_RANDOM_BYTES: [u8; 8] = [253, 0, 0, 0, 0, 0, 111, 127];
         assert_eq!(octets[..8], EXPECTED_RANDOM_BYTES);
         assert!(
@@ -499,27 +571,46 @@ mod tests {
             "Host address portion should be 0"
         );
         assert!(
-            base.is_supernet_of(subnet.0 .0),
+            base.is_supernet_of(&subnet.0),
             "random_subnet should generate an actual subnet"
         );
-        assert_eq!(base.random_subnet(base.prefix()), Some(base));
+        assert_eq!(base.random_subnet(base.width()), Some(base));
     }
 
     #[test]
     fn test_ip_subnet_check_requestable_address() {
-        let subnet = super::Ipv4Net(Ipv4Net("192.168.0.0/16".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("192.168.0.10".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("192.168.1.0".parse().unwrap()));
-        assert!(!subnet.check_requestable_addr("192.168.0.0".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("192.168.0.255".parse().unwrap()));
-        assert!(
-            !subnet.check_requestable_addr("192.168.255.255".parse().unwrap())
+        let subnet = super::Ipv4Net("192.168.0.0/16".parse().unwrap());
+        subnet.check_requestable_addr("192.168.0.10".parse().unwrap()).unwrap();
+        subnet.check_requestable_addr("192.168.1.0".parse().unwrap()).unwrap();
+        let addr = "192.178.0.10".parse().unwrap();
+        assert_eq!(
+            subnet.check_requestable_addr(addr),
+            Err(RequestAddressError::OutsideSubnet(
+                addr.into(),
+                IpNet::from(subnet.0).into()
+            ))
+        );
+        assert_eq!(
+            subnet.check_requestable_addr("192.168.0.0".parse().unwrap()),
+            Err(RequestAddressError::Reserved)
         );
 
-        let subnet = super::Ipv6Net(Ipv6Net("fd00::/64".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("fd00::a".parse().unwrap()));
-        assert!(!subnet.check_requestable_addr("fd00::1".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("fd00::1:1".parse().unwrap()));
+        subnet
+            .check_requestable_addr("192.168.0.255".parse().unwrap())
+            .unwrap();
+
+        assert_eq!(
+            subnet.check_requestable_addr("192.168.255.255".parse().unwrap()),
+            Err(RequestAddressError::Broadcast)
+        );
+
+        let subnet = super::Ipv6Net("fd00::/64".parse().unwrap());
+        subnet.check_requestable_addr("fd00::a".parse().unwrap()).unwrap();
+        assert_eq!(
+            subnet.check_requestable_addr("fd00::1".parse().unwrap()),
+            Err(RequestAddressError::Reserved)
+        );
+        subnet.check_requestable_addr("fd00::1:1".parse().unwrap()).unwrap();
     }
 
     /// Does some basic smoke checks on an impl of `DatabaseString`

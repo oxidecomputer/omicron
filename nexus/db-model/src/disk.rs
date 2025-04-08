@@ -3,13 +3,17 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{BlockSize, ByteCount, DiskState, Generation};
-use crate::{schema::disk, unsigned::SqlU8};
+use crate::typed_uuid::DbTypedUuid;
+use crate::unsigned::SqlU8;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_db_schema::schema::disk;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::internal;
+use omicron_uuid_kinds::VolumeKind;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::net::SocketAddrV6;
@@ -38,7 +42,7 @@ pub struct Disk {
     pub project_id: Uuid,
 
     /// Root volume of the disk
-    pub volume_id: Uuid,
+    volume_id: DbTypedUuid<VolumeKind>,
 
     /// runtime state of the Disk
     #[diesel(embed)]
@@ -81,7 +85,7 @@ impl Disk {
     pub fn new(
         disk_id: Uuid,
         project_id: Uuid,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         params: params::DiskCreate,
         block_size: BlockSize,
         runtime_initial: DiskRuntimeState,
@@ -103,7 +107,7 @@ impl Disk {
             identity,
             rcgen: external::Generation::new().into(),
             project_id,
-            volume_id,
+            volume_id: volume_id.into(),
             runtime_state: runtime_initial,
             slot: None,
             size: params.size.into(),
@@ -128,6 +132,10 @@ impl Disk {
 
     pub fn pantry_address(&self) -> Option<SocketAddrV6> {
         self.pantry_address.as_ref().map(|x| x.parse().unwrap())
+    }
+
+    pub fn volume_id(&self) -> VolumeUuid {
+        self.volume_id.into()
     }
 }
 

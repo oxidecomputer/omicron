@@ -4,30 +4,32 @@
 
 //! Generate oximeter samples from kernel statistics.
 
-use crate::kstat::hrtime_to_utc;
+use super::Timestamp;
+use super::now;
 use crate::kstat::Error;
 use crate::kstat::Expiration;
 use crate::kstat::ExpirationReason;
 use crate::kstat::KstatTarget;
+use crate::kstat::hrtime_to_utc;
 use chrono::DateTime;
 use chrono::Utc;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use kstat_rs::Ctl;
 use kstat_rs::Kstat;
-use oximeter::types::Cumulative;
 use oximeter::Metric;
 use oximeter::MetricsError;
 use oximeter::Sample;
+use oximeter::types::Cumulative;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::o;
 use slog::trace;
 use slog::warn;
-use slog::Logger;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -37,42 +39,20 @@ use std::task::Poll;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::time::Sleep;
 use tokio::time::interval;
 use tokio::time::sleep;
-use tokio::time::Sleep;
-
-#[cfg(test)]
-use tokio::time::Instant;
 
 // The `KstatSampler` generates some statistics about its own operation, mostly
 // for surfacing failures to collect and dropped samples.
 mod self_stats {
+    oximeter::use_timeseries!("kstat-sampler.toml");
     use super::BTreeMap;
     use super::Cumulative;
     use super::TargetId;
-
-    /// Information identifying this kstat sampler.
-    #[derive(Debug, oximeter::Target)]
-    pub struct KstatSampler {
-        /// The hostname (or zonename) of the host machine.
-        pub hostname: String,
-    }
-
-    /// The total number of samples dropped for a single target.
-    #[derive(Debug, oximeter::Metric)]
-    pub struct SamplesDropped {
-        /// The ID of the target being tracked.
-        pub target_id: u64,
-        /// The name of the target being tracked.
-        pub target_name: String,
-        pub datum: Cumulative<u64>,
-    }
-
-    /// The cumulative number of expired targets.
-    #[derive(Debug, oximeter::Metric)]
-    pub struct ExpiredTargets {
-        pub datum: Cumulative<u64>,
-    }
+    pub use kstat_sampler::ExpiredTargets;
+    pub use kstat_sampler::KstatSampler;
+    pub use kstat_sampler::SamplesDropped;
 
     #[derive(Debug)]
     pub struct SelfStats {
@@ -86,7 +66,7 @@ mod self_stats {
     impl SelfStats {
         pub fn new(hostname: String) -> Self {
             Self {
-                target: KstatSampler { hostname },
+                target: KstatSampler { hostname: hostname.into() },
                 drops: BTreeMap::new(),
                 expired: ExpiredTargets { datum: Cumulative::new(0) },
             }
@@ -165,12 +145,7 @@ pub enum TargetStatus {
     /// The target is currently being collected from normally.
     ///
     /// The timestamp of the last collection is included.
-    Ok {
-        #[cfg(test)]
-        last_collection: Option<Instant>,
-        #[cfg(not(test))]
-        last_collection: Option<DateTime<Utc>>,
-    },
+    Ok { last_collection: Option<Timestamp> },
     /// The target has been expired.
     ///
     /// The details about the expiration are included.
@@ -178,10 +153,7 @@ pub enum TargetStatus {
         reason: ExpirationReason,
         // NOTE: The error is a string, because it's not cloneable.
         error: String,
-        #[cfg(test)]
-        expired_at: Instant,
-        #[cfg(not(test))]
-        expired_at: DateTime<Utc>,
+        expired_at: Timestamp,
     },
 }
 
@@ -201,10 +173,16 @@ enum Request {
         id: TargetId,
         reply_tx: oneshot::Sender<Result<TargetStatus, Error>>,
     },
+    /// Update a target.
+    UpdateTarget {
+        target: Box<dyn KstatTarget>,
+        details: CollectionDetails,
+        reply_tx: oneshot::Sender<Result<TargetId, Error>>,
+    },
     /// Remove a target.
     RemoveTarget { id: TargetId, reply_tx: oneshot::Sender<Result<(), Error>> },
     /// Return the creation times of all tracked / extant kstats.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "illumos"))]
     CreationTimes {
         reply_tx: oneshot::Sender<BTreeMap<KstatPath, DateTime<Utc>>>,
     },
@@ -218,15 +196,9 @@ struct SampledKstat {
     /// The details around collection and expiration behavior.
     details: CollectionDetails,
     /// The time at which we _added_ this target to the sampler.
-    #[cfg(test)]
-    time_added: Instant,
-    #[cfg(not(test))]
-    time_added: DateTime<Utc>,
+    time_added: Timestamp,
     /// The last time we successfully collected from the target.
-    #[cfg(test)]
-    time_of_last_collection: Option<Instant>,
-    #[cfg(not(test))]
-    time_of_last_collection: Option<DateTime<Utc>>,
+    time_of_last_collection: Option<Timestamp>,
     /// Attempts since we last successfully collected from the target.
     attempts_since_last_collection: usize,
 }
@@ -384,7 +356,7 @@ fn hostname() -> Option<String> {
 }
 
 /// Stores the number of samples taken, used for testing.
-#[cfg(test)]
+#[cfg(all(test, target_os = "illumos"))]
 pub(crate) struct SampleCounts {
     pub total: usize,
     pub overflow: usize,
@@ -420,7 +392,8 @@ impl KstatSamplerWorker {
     /// kstats at their intervals. Samples will be pushed onto the queue.
     async fn run(
         mut self,
-        #[cfg(test)] sample_count_tx: mpsc::UnboundedSender<SampleCounts>,
+        #[cfg(all(test, target_os = "illumos"))]
+        sample_count_tx: mpsc::UnboundedSender<SampleCounts>,
     ) {
         let mut sample_timeouts = FuturesUnordered::new();
         let mut creation_prune_interval =
@@ -487,7 +460,7 @@ impl KstatSamplerWorker {
                             // Send the total number of samples we've actually
                             // taken and the number we've appended over to any
                             // testing code which might be listening.
-                            #[cfg(test)]
+                            #[cfg(all(test, target_os = "illumos"))]
                             sample_count_tx.send(SampleCounts {
                                 total: n_samples,
                                 overflow: n_overflow_samples,
@@ -583,6 +556,45 @@ impl KstatSamplerWorker {
                                 }
                             }
                         }
+                        Request::UpdateTarget { target, details, reply_tx } => {
+                            match self.update_target(target, details) {
+                                Ok(id) => {
+                                    let timeout = YieldIdAfter::new(id, details.interval);
+                                    sample_timeouts.push(timeout);
+                                    trace!(
+                                        self.log,
+                                        "updated target with timeout";
+                                        "id" => ?id,
+                                        "details" => ?details,
+                                    );
+                                    match reply_tx.send(Ok(id)) {
+                                        Ok(_) => trace!(self.log, "sent reply"),
+                                        Err(e) => error!(
+                                            self.log,
+                                            "failed to send reply";
+                                            "id" => ?id,
+                                            "error" => ?e,
+                                        )
+                                    }
+                                }
+                                Err(e) => {
+                                    error!(
+                                        self.log,
+                                        "failed to update target";
+                                        "error" => ?e,
+                                    );
+                                    match reply_tx.send(Err(e)) {
+                                        Ok(_) => trace!(self.log, "sent reply"),
+                                        Err(e) => error!(
+                                            self.log,
+                                            "failed to send reply";
+                                            "error" => ?e,
+                                        )
+                                    }
+                                }
+                            }
+
+                        }
                         Request::RemoveTarget { id, reply_tx } => {
                             self.targets.remove(&id);
                             if let Some(remaining_samples) = self.samples.lock().unwrap().remove(&id) {
@@ -635,7 +647,7 @@ impl KstatSamplerWorker {
                                 ),
                             }
                         }
-                        #[cfg(test)]
+                        #[cfg(all(test, target_os = "illumos"))]
                         Request::CreationTimes { reply_tx } => {
                             debug!(self.log, "request for creation times");
                             reply_tx.send(self.creation_times.clone()).unwrap();
@@ -671,7 +683,7 @@ impl KstatSamplerWorker {
         let n_current_samples = current_samples.len();
         let n_total_samples = n_new_samples + n_current_samples;
         let n_overflow_samples =
-            n_total_samples.checked_sub(self.sample_limit).unwrap_or(0);
+            n_total_samples.saturating_sub(self.sample_limit);
         if n_overflow_samples > 0 {
             warn!(
                 self.log,
@@ -734,13 +746,7 @@ impl KstatSamplerWorker {
             .collect::<Result<Vec<_>, _>>();
         match kstats {
             Ok(k) if !k.is_empty() => {
-                cfg_if::cfg_if! {
-                    if #[cfg(test)] {
-                        sampled_kstat.time_of_last_collection = Some(Instant::now());
-                    } else {
-                        sampled_kstat.time_of_last_collection = Some(Utc::now());
-                    }
-                }
+                sampled_kstat.time_of_last_collection = Some(now());
                 sampled_kstat.attempts_since_last_collection = 0;
                 sampled_kstat.target.to_samples(&k).map(Option::Some)
             }
@@ -769,17 +775,10 @@ impl KstatSamplerWorker {
                         if sampled_kstat.attempts_since_last_collection
                             >= n_attempts
                         {
-                            cfg_if::cfg_if! {
-                                if #[cfg(test)] {
-                                    let expired_at = Instant::now();
-                                } else {
-                                    let expired_at = Utc::now();
-                                }
-                            }
                             return Err(Error::Expired(Expiration {
                                 reason: ExpirationReason::Attempts(n_attempts),
                                 error: Box::new(e),
-                                expired_at,
+                                expired_at: now(),
                             }));
                         }
                     }
@@ -788,20 +787,14 @@ impl KstatSamplerWorker {
                         // or the time we added the kstat if not.
                         let start = sampled_kstat
                             .time_of_last_collection
-                            .unwrap_or_else(|| sampled_kstat.time_added);
+                            .unwrap_or(sampled_kstat.time_added);
                         let expire_at = start + duration;
-                        cfg_if::cfg_if! {
-                            if #[cfg(test)] {
-                                let now = Instant::now();
-                            } else {
-                                let now = Utc::now();
-                            }
-                        }
-                        if now >= expire_at {
+                        let now_ = now();
+                        if now_ >= expire_at {
                             return Err(Error::Expired(Expiration {
                                 reason: ExpirationReason::Duration(duration),
                                 error: Box::new(e),
-                                expired_at: now,
+                                expired_at: now_,
                             }));
                         }
                     }
@@ -830,7 +823,7 @@ impl KstatSamplerWorker {
             *drops += n_overflow_samples as u64;
             let metric = self_stats::SamplesDropped {
                 target_id: target_id.0,
-                target_name,
+                target_name: target_name.into(),
                 datum: *drops,
             };
             let sample = match Sample::new(&stats.target, &metric) {
@@ -1018,19 +1011,57 @@ impl KstatSamplerWorker {
             }
             None => {}
         }
-        self.ensure_creation_times_for_target(&*target)?;
 
-        cfg_if::cfg_if! {
-            if #[cfg(test)] {
-                let time_added = Instant::now();
-            } else {
-                let time_added = Utc::now();
+        self.insert_target(id, target, details)
+    }
+
+    fn update_target(
+        &mut self,
+        target: Box<dyn KstatTarget>,
+        details: CollectionDetails,
+    ) -> Result<TargetId, Error> {
+        let id = hash_target(&*target);
+        match self.targets.get(&id) {
+            // If the target is already expired, we'll replace it with the new
+            // target and start sampling it again.
+            Some(SampledObject::Expired(e)) => {
+                warn!(
+                    self.log,
+                    "replacing expired kstat target";
+                    "id" => ?id,
+                    "expiration_reason" => ?e.reason,
+                    "error" => ?e.error,
+                    "expired_at" => ?e.expired_at,
+                );
             }
+            Some(_) => {}
+            None => return Err(Error::NoSuchTarget),
         }
+
+        self.insert_target(id, target, details)
+    }
+
+    fn update_chain(&mut self) -> Result<(), Error> {
+        let new_ctl = match self.ctl.take() {
+            None => Ctl::new(),
+            Some(old) => old.update(),
+        }
+        .map_err(Error::Kstat)?;
+        let _ = self.ctl.insert(new_ctl);
+        Ok(())
+    }
+
+    fn insert_target(
+        &mut self,
+        id: TargetId,
+        target: Box<dyn KstatTarget>,
+        details: CollectionDetails,
+    ) -> Result<TargetId, Error> {
+        self.ensure_creation_times_for_target(&*target)?;
         let item = SampledKstat {
             target,
             details,
-            time_added,
+            time_added: now(),
             time_of_last_collection: None,
             attempts_since_last_collection: 0,
         };
@@ -1055,17 +1086,8 @@ impl KstatSamplerWorker {
                 "n_samples" => n,
             ),
         }
-        Ok(id)
-    }
 
-    fn update_chain(&mut self) -> Result<(), Error> {
-        let new_ctl = match self.ctl.take() {
-            None => Ctl::new(),
-            Some(old) => old.update(),
-        }
-        .map_err(Error::Kstat)?;
-        let _ = self.ctl.insert(new_ctl);
-        Ok(())
+        Ok(id)
     }
 }
 
@@ -1076,7 +1098,7 @@ pub struct KstatSampler {
     outbox: mpsc::Sender<Request>,
     self_stat_rx: Arc<Mutex<mpsc::Receiver<Sample>>>,
     _worker_task: Arc<tokio::task::JoinHandle<()>>,
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "illumos"))]
     sample_count_rx: Arc<Mutex<mpsc::UnboundedReceiver<SampleCounts>>>,
 }
 
@@ -1110,7 +1132,7 @@ impl KstatSampler {
             samples.clone(),
             limit,
         )?;
-        #[cfg(test)]
+        #[cfg(all(test, target_os = "illumos"))]
         let (sample_count_rx, _worker_task) = {
             let (sample_count_tx, sample_count_rx) = mpsc::unbounded_channel();
             (
@@ -1118,14 +1140,14 @@ impl KstatSampler {
                 Arc::new(tokio::task::spawn(worker.run(sample_count_tx))),
             )
         };
-        #[cfg(not(test))]
+        #[cfg(not(all(test, target_os = "illumos")))]
         let _worker_task = Arc::new(tokio::task::spawn(worker.run()));
         Ok(Self {
             samples,
             outbox,
             self_stat_rx: Arc::new(Mutex::new(self_stat_rx)),
             _worker_task,
-            #[cfg(test)]
+            #[cfg(all(test, target_os = "illumos"))]
             sample_count_rx,
         })
     }
@@ -1154,6 +1176,22 @@ impl KstatSampler {
         reply_rx.await.map_err(|_| Error::RecvError)?
     }
 
+    /// Update the details for a target.
+    pub async fn update_target(
+        &self,
+        target: impl KstatTarget,
+        details: CollectionDetails,
+    ) -> Result<TargetId, Error> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let request = Request::UpdateTarget {
+            target: Box::new(target),
+            details,
+            reply_tx,
+        };
+        self.outbox.send(request).await.map_err(|_| Error::SendError)?;
+        reply_rx.await.map_err(|_| Error::RecvError)?
+    }
+
     /// Fetch the status for a target.
     ///
     /// If the target is being collected normally, then `TargetStatus::Ok` is
@@ -1174,7 +1212,7 @@ impl KstatSampler {
     }
 
     /// Return the number of samples pushed by the sampling task, if any.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "illumos"))]
     pub(crate) fn sample_counts(&self) -> Option<SampleCounts> {
         match self.sample_count_rx.lock().unwrap().try_recv() {
             Ok(c) => Some(c),
@@ -1184,7 +1222,7 @@ impl KstatSampler {
     }
 
     /// Return the creation times for all tracked kstats.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "illumos"))]
     pub(crate) async fn creation_times(
         &self,
     ) -> BTreeMap<KstatPath, DateTime<Utc>> {

@@ -2,28 +2,26 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{impl_enum_wrapper, L4PortRange, SqlU16};
-use crate::schema::vpc_firewall_rule;
+use super::{L4PortRange, SqlU16, impl_enum_wrapper};
 use db_macros::Resource;
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
+use nexus_db_schema::schema::vpc_firewall_rule;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::io::Write;
 use uuid::Uuid;
 
 impl_enum_wrapper!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_firewall_rule_status"))]
-    pub struct VpcFirewallRuleStatusEnum;
+    VpcFirewallRuleStatusEnum:
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    #[diesel(sql_type = VpcFirewallRuleStatusEnum)]
     pub struct VpcFirewallRuleStatus(pub external::VpcFirewallRuleStatus);
 
     Disabled => b"disabled"
@@ -33,12 +31,9 @@ NewtypeFrom! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStat
 NewtypeDeref! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStatus); }
 
 impl_enum_wrapper!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_firewall_rule_direction"))]
-    pub struct VpcFirewallRuleDirectionEnum;
+    VpcFirewallRuleDirectionEnum:
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    #[diesel(sql_type = VpcFirewallRuleDirectionEnum)]
     pub struct VpcFirewallRuleDirection(pub external::VpcFirewallRuleDirection);
 
     Inbound => b"inbound"
@@ -48,12 +43,9 @@ NewtypeFrom! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleD
 NewtypeDeref! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
 
 impl_enum_wrapper!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_firewall_rule_action"))]
-    pub struct VpcFirewallRuleActionEnum;
+    VpcFirewallRuleActionEnum:
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    #[diesel(sql_type = VpcFirewallRuleActionEnum)]
     pub struct VpcFirewallRuleAction(pub external::VpcFirewallRuleAction);
 
     Allow => b"allow"
@@ -63,12 +55,9 @@ NewtypeFrom! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleActi
 NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 
 impl_enum_wrapper!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_firewall_rule_protocol"))]
-    pub struct VpcFirewallRuleProtocolEnum;
+    VpcFirewallRuleProtocolEnum:
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    #[diesel(sql_type = VpcFirewallRuleProtocolEnum)]
     pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
 
     Tcp => b"TCP"
@@ -165,7 +154,7 @@ impl ToSql<sql_types::Int4, Pg> for VpcFirewallRulePriority {
         out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
         <SqlU16 as ToSql<sql_types::Int4, Pg>>::to_sql(
-            &SqlU16(self.0 .0),
+            &SqlU16(self.0.0),
             &mut out.reborrow(),
         )
     }
@@ -210,12 +199,34 @@ pub struct VpcFirewallRule {
     pub priority: VpcFirewallRulePriority,
 }
 
+/// Cap on the number of rules in a VPC
+///
+/// The choice of value is somewhat arbitrary, but the goal is to have a
+/// large number that customers are unlikely to actually hit, but which still
+/// meaningfully limits the ability to overload the DB with a single request.
+const MAX_FW_RULES_PER_VPC: usize = 1024;
+
+/// Cap on targets and on each type of filter
+const MAX_FW_RULE_PARTS: usize = 256;
+
+fn ensure_max_len<T>(
+    items: &Vec<T>,
+    label: &str,
+    max: usize,
+) -> Result<(), external::Error> {
+    if items.len() > max {
+        let msg = format!("max length {}", max);
+        return Err(external::Error::invalid_value(label, msg));
+    }
+    Ok(())
+}
+
 impl VpcFirewallRule {
     pub fn new(
         rule_id: Uuid,
         vpc_id: Uuid,
         rule: &external::VpcFirewallRuleUpdate,
-    ) -> Self {
+    ) -> Result<Self, external::Error> {
         let identity = VpcFirewallRuleIdentity::new(
             rule_id,
             external::IdentityMetadataCreateParams {
@@ -223,7 +234,20 @@ impl VpcFirewallRule {
                 description: rule.description.clone(),
             },
         );
-        Self {
+
+        ensure_max_len(&rule.targets, "targets", MAX_FW_RULE_PARTS)?;
+
+        if let Some(hosts) = rule.filters.hosts.as_ref() {
+            ensure_max_len(&hosts, "filters.hosts", MAX_FW_RULE_PARTS)?;
+        }
+        if let Some(ports) = rule.filters.ports.as_ref() {
+            ensure_max_len(&ports, "filters.ports", MAX_FW_RULE_PARTS)?;
+        }
+        if let Some(protocols) = rule.filters.protocols.as_ref() {
+            ensure_max_len(&protocols, "filters.protocols", MAX_FW_RULE_PARTS)?;
+        }
+
+        Ok(Self {
             identity,
             vpc_id,
             status: rule.status.into(),
@@ -247,19 +271,47 @@ impl VpcFirewallRule {
             }),
             action: rule.action.into(),
             priority: rule.priority.into(),
-        }
+        })
     }
 
     pub fn vec_from_params(
         vpc_id: Uuid,
         params: external::VpcFirewallRuleUpdateParams,
-    ) -> Vec<VpcFirewallRule> {
+    ) -> Result<Vec<VpcFirewallRule>, external::Error> {
+        ensure_no_duplicates(&params)?;
+        ensure_max_len(&params.rules, "rules", MAX_FW_RULES_PER_VPC)?;
         params
             .rules
-            .iter()
-            .map(|rule| VpcFirewallRule::new(Uuid::new_v4(), vpc_id, rule))
+            .into_iter()
+            .map(|rule| VpcFirewallRule::new(Uuid::new_v4(), vpc_id, &rule))
             .collect()
     }
+}
+
+fn ensure_no_duplicates(
+    params: &external::VpcFirewallRuleUpdateParams,
+) -> Result<(), external::Error> {
+    // we could do this by comparing set(names).len() to names.len(), but this
+    // way we can say what the duplicate names are, and that's nice!
+    let mut names = HashSet::new();
+    let mut dupes = HashSet::new();
+    for r in params.rules.iter() {
+        if !names.insert(r.name.clone()) {
+            // insert returns false if already present
+            dupes.insert(r.name.clone());
+        }
+    }
+
+    if dupes.is_empty() {
+        return Ok(());
+    }
+
+    let dupes_str =
+        dupes.iter().map(|d| format!("\"{d}\"")).collect::<Vec<_>>().join(", ");
+    return Err(external::Error::invalid_value(
+        "rules",
+        format!("Rule names must be unique. Duplicates: [{}]", dupes_str),
+    ));
 }
 
 impl Into<external::VpcFirewallRule> for VpcFirewallRule {

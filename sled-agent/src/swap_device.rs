@@ -15,7 +15,9 @@ pub enum SwapDeviceError {
     #[error("Error listing swap devices: {0}")]
     ListDevices(String),
 
-    #[error("Error adding swap device: {msg} (path=\"{path}\", start={start}, length={length})")]
+    #[error(
+        "Error adding swap device: {msg} (path=\"{path}\", start={start}, length={length})"
+    )]
     AddDevice { msg: String, path: String, start: u64, length: u64 },
 
     #[error("{msg}: {error}")]
@@ -62,7 +64,7 @@ pub(crate) fn ensure_swap_device(
     assert!(size_gb > 0);
 
     let devs = swapctl::list_swap_devices()?;
-    if devs.len() > 0 {
+    if !devs.is_empty() {
         if devs.len() > 1 {
             // This should really never happen unless we've made a mistake, but it's
             // probably fine to have more than one swap device. Thus, don't panic
@@ -122,7 +124,7 @@ fn zvol_exists(name: &str) -> Result<bool, SwapDeviceError> {
                 error: format!(
                     "found dataset \"{}\" for swap device, but it is not a volume",
                     name
-                     ),
+                ),
             });
         } else {
             return Ok(true);
@@ -225,9 +227,11 @@ fn create_encrypted_swap_zvol(
         use std::io::Write;
         let res = stdin.write_all(&secret);
         if res.is_err() {
-            error!(child_log,
+            error!(
+                child_log,
                 "could not write key to stdin of `zfs create` for swap zvol: {:?}",
-                res);
+                res
+            );
         }
         secret.zeroize();
     });
@@ -450,7 +454,7 @@ mod swapctl {
             let path = String::from_utf8_lossy(p.to_bytes()).to_string();
 
             devices.push(SwapDevice {
-                path: path,
+                path,
                 start: e.ste_start as u64,
                 length: e.ste_length as u64,
                 total_pages: e.ste_pages as u64,
@@ -473,8 +477,8 @@ mod swapctl {
             SwapDeviceError::AddDevice {
                 msg: format!("could not convert path to CString: {}", e,),
                 path: path_cp.clone(),
-                start: start,
-                length: length,
+                start,
+                length,
             }
         })?;
 
@@ -490,8 +494,8 @@ mod swapctl {
                 SwapDeviceError::AddDevice {
                     msg: e.to_string(),
                     path: path_cp,
-                    start: start,
-                    length: length,
+                    start,
+                    length,
                 }
             })?
         };

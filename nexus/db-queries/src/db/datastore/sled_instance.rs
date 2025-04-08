@@ -2,9 +2,8 @@ use super::DataStore;
 
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -21,7 +20,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SledInstance> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use db::schema::sled_instance::dsl;
+        use nexus_db_schema::schema::sled_instance::dsl;
         paginated(dsl::sled_instance, dsl::id, &pagparams)
             .filter(dsl::active_sled_id.eq(authz_sled.id()))
             .select(SledInstance::as_select())

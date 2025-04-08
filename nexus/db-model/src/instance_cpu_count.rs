@@ -13,7 +13,15 @@ use serde::Serialize;
 use std::convert::TryFrom;
 
 #[derive(
-    Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize,
+    Copy,
+    Clone,
+    Debug,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
 )]
 #[diesel(sql_type = sql_types::BigInt)]
 pub struct InstanceCpuCount(pub external::InstanceCpuCount);
@@ -47,6 +55,6 @@ where
 
 impl From<InstanceCpuCount> for sled_agent_client::types::InstanceCpuCount {
     fn from(i: InstanceCpuCount) -> Self {
-        Self(i.0 .0)
+        Self(i.0.0)
     }
 }

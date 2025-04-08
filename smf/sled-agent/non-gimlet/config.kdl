@@ -1,0 +1,368 @@
+key-pair "test-root-a" {
+    p384
+}
+
+entity "test-root-a" {
+    country-name "US"
+    organization-name "Oxide Computer Company"
+    common-name "test-root-a"
+}
+
+certificate "test-root-a" {
+    issuer-entity "test-root-a"
+    issuer-key "test-root-a"
+
+    subject-entity "test-root-a"
+    subject-key "test-root-a"
+
+    digest-algorithm "sha-384"
+    not-after "9999-12-31T23:59:59Z"
+    serial-number "00"
+
+    extensions {
+        subject-key-identifier critical=false
+
+        basic-constraints critical=true ca=true
+        key-usage critical=true {
+            key-cert-sign
+            crl-sign
+        }
+        certificate-policies critical=true {
+            oana-platform-identity
+            tcg-dice-kp-identity-init
+            tcg-dice-kp-attest-init
+            tcg-dice-kp-eca
+        }
+    }
+}
+
+key-pair "test-signer-a1" {
+    p384
+}
+
+entity "test-signer-a1" {
+    country-name "US"
+    organization-name "Oxide Computer Company"
+    common-name "test-signer-a1"
+}
+
+certificate "test-signer-a1" {
+    issuer-certificate "test-root-a"
+    issuer-key "test-root-a"
+
+    subject-entity "test-signer-a1"
+    subject-key "test-signer-a1"
+
+    digest-algorithm "sha-384"
+    not-after "9999-12-31T23:59:59Z"
+    serial-number "01"
+
+    extensions {
+        subject-key-identifier critical=false
+        authority-key-identifier critical=false {
+            key-id
+        }
+
+        basic-constraints critical=true ca=true
+        key-usage critical=true {
+            key-cert-sign
+            crl-sign
+        }
+        certificate-policies critical=true {
+            oana-platform-identity
+            tcg-dice-kp-identity-init
+            tcg-dice-kp-attest-init
+            tcg-dice-kp-eca
+        }
+    }
+}
+
+key-pair "test-signer-a2" {
+    p384
+}
+
+entity "test-signer-a2" {
+    country-name "US"
+    organization-name "Oxide Computer Company"
+    common-name "test-platformid-1 Signer Staging A2"
+}
+
+certificate "test-signer-a2" {
+    issuer-certificate "test-root-a"
+    issuer-key "test-root-a"
+
+    subject-entity "test-signer-a2"
+    subject-key "test-signer-a2"
+
+    digest-algorithm "sha-384"
+    not-after "9999-12-31T23:59:59Z"
+    serial-number "01"
+
+    extensions {
+        subject-key-identifier critical=false
+        authority-key-identifier critical=false {
+            key-id
+        }
+
+        basic-constraints critical=true ca=true
+        key-usage critical=true {
+            key-cert-sign
+            crl-sign
+        }
+        certificate-policies critical=true {
+            oana-platform-identity
+            tcg-dice-kp-identity-init
+            tcg-dice-kp-attest-init
+            tcg-dice-kp-eca
+        }
+    }
+}
+/// Device 1
+key-pair "test-platformid-1" {
+    ed25519
+}
+
+entity "test-platformid-1" {
+    country-name "US"
+    organization-name "Oxide Computer Company"
+    common-name "PDV2:PPP-PPPPPPP:RRR:SSSSSSSSSS1"
+}
+
+certificate "test-platformid-1" {
+    issuer-certificate "test-signer-a1"
+    issuer-key "test-signer-a1"
+
+    subject-entity "test-platformid-1"
+    subject-key "test-platformid-1"
+
+    digest-algorithm "sha-384"
+    not-after "9999-12-31T23:59:59Z"
+    serial-number "02"
+
+    extensions {
+        subject-key-identifier critical=false
+        authority-key-identifier critical=false {
+            key-id
+        }
+
+        basic-constraints critical=true ca=true
+        key-usage critical=true {
+            key-cert-sign
+            crl-sign
+        }
+        certificate-policies critical=true {
+            oana-platform-identity
+            tcg-dice-kp-identity-init
+            tcg-dice-kp-attest-init
+            tcg-dice-kp-eca
+        }
+    }
+}
+
+key-pair "test-deviceid-1" {
+    ed25519
+}
+
+entity "test-deviceid-1" {
+    country-name "US"
+    organization-name "Oxide Computer Company"
+    common-name "/C=US/O=Oxide Computer Company/CN=test-deviceid-1"
+}
+
+certificate "test-deviceid-1" {
+    issuer-certificate "test-platformid-1"
+    issuer-key "test-platformid-1"
+
+    subject-entity "test-deviceid-1"
+    subject-key "test-deviceid-1"
+
+    digest-algorithm "sha-512"
+    not-after "9999-12-31T23:59:59Z"
+    serial-number "03"
+
+    extensions {
+        subject-key-identifier critical=false
+        authority-key-identifier critical=false {
+            key-id
+        }
+
+        basic-constraints critical=true ca=true
+        key-usage critical=true {
+            key-cert-sign
+            crl-sign
+        }
+        certificate-policies critical=true {
+            oana-platform-identity
+            tcg-dice-kp-identity-init
+            tcg-dice-kp-attest-init
+            tcg-dice-kp-eca
+        }
+    }
+}
+
+key-pair "test-sprockets-auth-1" {
+    ed25519
+}
+
+entity "test-sprockets-auth-1" {
+    country-name "US"
+    organization-name "Oxide Computer Company"
+    common-name "/C=US/O=Oxide Computer Company/CN=test-sprockets-auth-1"
+}
+
+certificate "test-sprockets-auth-1" {
+    issuer-certificate "test-deviceid-1"
+    issuer-key "test-deviceid-1"
+
+    subject-entity "test-sprockets-auth-1"
+    subject-key "test-sprockets-auth-1"
+
+    digest-algorithm "sha-512"
+    not-after "9999-12-31T23:59:59Z"
+    serial-number "04"
+
+    extensions {
+        subject-key-identifier critical=false
+        authority-key-identifier critical=false {
+            key-id
+        }
+
+        basic-constraints critical=true ca=false
+        key-usage critical=true {
+            digital-signature
+            non-repudiation
+        }
+        certificate-policies critical=true {
+            oana-platform-identity
+            tcg-dice-kp-identity-init
+            tcg-dice-kp-attest-init
+            tcg-dice-kp-eca
+        }
+    }
+}
+
+/// Device 2
+
+key-pair "test-platformid-2" {
+    ed25519
+}
+
+entity "test-platformid-2" {
+    country-name "US"
+    organization-name "Oxide Computer Company"
+    common-name "PDV2:PPP-PPPPPPP:RRR:SSSSSSSSSS2"
+}
+
+certificate "test-platformid-2" {
+    issuer-certificate "test-signer-a1"
+    issuer-key "test-signer-a1"
+
+    subject-entity "test-platformid-2"
+    subject-key "test-platformid-2"
+
+    digest-algorithm "sha-384"
+    not-after "9999-12-31T23:59:59Z"
+    serial-number "05"
+
+    extensions {
+        subject-key-identifier critical=false
+        authority-key-identifier critical=false {
+            key-id
+        }
+
+        basic-constraints critical=true ca=true
+        key-usage critical=true {
+            key-cert-sign
+            crl-sign
+        }
+        certificate-policies critical=true {
+            oana-platform-identity
+            tcg-dice-kp-identity-init
+            tcg-dice-kp-attest-init
+            tcg-dice-kp-eca
+        }
+    }
+}
+
+key-pair "test-deviceid-2" {
+    ed25519
+}
+
+entity "test-deviceid-2" {
+    country-name "US"
+    organization-name "Oxide Computer Company"
+    common-name "/C=US/O=Oxide Computer Company/CN=test-deviceid-2"
+}
+
+certificate "test-deviceid-2" {
+    issuer-certificate "test-platformid-2"
+    issuer-key "test-platformid-2"
+
+    subject-entity "test-deviceid-2"
+    subject-key "test-deviceid-2"
+
+    digest-algorithm "sha-512"
+    not-after "9999-12-31T23:59:59Z"
+    serial-number "06"
+
+    extensions {
+        subject-key-identifier critical=false
+        authority-key-identifier critical=false {
+            key-id
+        }
+
+        basic-constraints critical=true ca=true
+        key-usage critical=true {
+            key-cert-sign
+            crl-sign
+        }
+        certificate-policies critical=true {
+            oana-platform-identity
+            tcg-dice-kp-identity-init
+            tcg-dice-kp-attest-init
+            tcg-dice-kp-eca
+        }
+    }
+}
+
+key-pair "test-sprockets-auth-2" {
+    ed25519
+}
+
+entity "test-sprockets-auth-2" {
+    country-name "US"
+    organization-name "Oxide Computer Company"
+    common-name "/C=US/O=Oxide Computer Company/CN=test-sprockets-auth-2"
+}
+
+certificate "test-sprockets-auth-2" {
+    issuer-certificate "test-deviceid-2"
+    issuer-key "test-deviceid-2"
+
+    subject-entity "test-sprockets-auth-2"
+    subject-key "test-sprockets-auth-2"
+
+    digest-algorithm "sha-512"
+    not-after "9999-12-31T23:59:59Z"
+    serial-number "07"
+
+    extensions {
+        subject-key-identifier critical=false
+        authority-key-identifier critical=false {
+            key-id
+        }
+
+        basic-constraints critical=true ca=false
+        key-usage critical=true {
+            digital-signature
+            non-repudiation
+        }
+        certificate-policies critical=true {
+            oana-platform-identity
+            tcg-dice-kp-identity-init
+            tcg-dice-kp-attest-init
+            tcg-dice-kp-eca
+        }
+    }
+}
+

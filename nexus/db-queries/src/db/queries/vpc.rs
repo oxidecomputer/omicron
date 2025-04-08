@@ -10,18 +10,18 @@ use crate::db::model::Name;
 use crate::db::model::Vni;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::NextItem;
-use crate::db::schema::vpc;
-use crate::db::schema::vpc::dsl;
 use chrono::DateTime;
 use chrono::Utc;
+use diesel::Column;
+use diesel::Insertable;
 use diesel::pg::Pg;
 use diesel::query_builder::AstPass;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 use diesel::sql_types;
-use diesel::Column;
-use diesel::Insertable;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::vpc;
+use nexus_db_schema::schema::vpc::dsl;
 use omicron_common::api::external;
 use uuid::Uuid;
 
@@ -246,8 +246,8 @@ struct NextVni {
 impl NextVni {
     fn new(vni: Vni) -> Self {
         let VniShifts { min_shift, max_shift } = VniShifts::new(vni);
-        let generator =
-            DefaultShiftGenerator { base: vni, max_shift, min_shift };
+        let generator = DefaultShiftGenerator::new(vni, max_shift, min_shift)
+            .expect("invalid min/max shift");
         let inner = NextItem::new_unscoped(generator);
         Self { inner }
     }
@@ -262,8 +262,8 @@ impl NextVni {
             -i32::try_from(base_u32)
                 .expect("Expected a valid VNI at this point"),
         );
-        let generator =
-            DefaultShiftGenerator { base: vni, max_shift, min_shift };
+        let generator = DefaultShiftGenerator::new(vni, max_shift, min_shift)
+            .expect("invalid min/max shift");
         let inner = NextItem::new_unscoped(generator);
         Self { inner }
     }
@@ -382,11 +382,11 @@ impl std::iter::Iterator for VniSearchIter {
 
 #[cfg(test)]
 mod tests {
-    use super::external;
+    use super::MAX_VNI_SEARCH_RANGE_SIZE;
     use super::Vni;
     use super::VniSearchIter;
     use super::VniShifts;
-    use super::MAX_VNI_SEARCH_RANGE_SIZE;
+    use super::external;
 
     // Ensure that when the search range lies entirely within the range of VNIs,
     // we search from the start VNI through the maximum allowed range size.
@@ -440,11 +440,7 @@ mod tests {
         pub const fn div_ceil(x: u32, y: u32) -> u32 {
             let d = x / y;
             let r = x % y;
-            if r > 0 && y > 0 {
-                d + 1
-            } else {
-                d
-            }
+            if r > 0 && y > 0 { d + 1 } else { d }
         }
         const N_EXPECTED: u32 = div_ceil(
             external::Vni::MAX_VNI - external::Vni::MIN_GUEST_VNI,

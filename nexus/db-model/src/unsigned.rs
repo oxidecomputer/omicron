@@ -7,6 +7,7 @@ use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
@@ -76,6 +77,7 @@ where
     FromSqlRow,
     Serialize,
     Deserialize,
+    JsonSchema,
 )]
 #[diesel(sql_type = sql_types::Int4)]
 #[repr(transparent)]
@@ -128,6 +130,7 @@ where
     FromSqlRow,
     Serialize,
     Deserialize,
+    QueryId,
 )]
 #[diesel(sql_type = sql_types::BigInt)]
 #[repr(transparent)]

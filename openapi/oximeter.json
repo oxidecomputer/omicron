@@ -12,6 +12,7 @@
   "paths": {
     "/info": {
       "get": {
+        "summary": "Return identifying information about this collector.",
         "operationId": "collector_info",
         "responses": {
           "200": {
@@ -35,6 +36,7 @@
     },
     "/producers": {
       "get": {
+        "summary": "List all producers.",
         "operationId": "producers_list",
         "parameters": [
           {
@@ -79,22 +81,33 @@
         "x-dropshot-pagination": {
           "required": []
         }
-      },
-      "post": {
-        "operationId": "producers_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProducerEndpoint"
+      }
+    },
+    "/producers/{producer_id}": {
+      "get": {
+        "summary": "Get details about a producer by ID.",
+        "operationId": "producer_details",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "producer_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProducerDetails"
+                }
               }
             }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -103,10 +116,9 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/producers/{producer_id}": {
+      },
       "delete": {
+        "summary": "Delete a producer by ID.",
         "operationId": "producer_delete",
         "parameters": [
           {
@@ -142,6 +154,12 @@
             "description": "The collector's UUID.",
             "type": "string",
             "format": "uuid"
+          },
+          "last_refresh": {
+            "nullable": true,
+            "description": "Last time we refreshed our producer list with Nexus.",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -186,16 +204,120 @@
           "request_id"
         ]
       },
+      "FailedCollection": {
+        "description": "Details about a previous failed collection.",
+        "type": "object",
+        "properties": {
+          "reason": {
+            "description": "The reason the collection failed.",
+            "type": "string"
+          },
+          "started_at": {
+            "description": "The time at which we started a collection.\n\nNote that this is the time we queued a request to collect for processing by a background task. The `time_queued` can be added to this time to figure out when processing began, and `time_collecting` can be added to that to figure out how long the actual collection process took.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_collecting": {
+            "description": "The time it took for the actual collection.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "time_queued": {
+            "description": "The time this request spent queued before being processed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "reason",
+          "started_at",
+          "time_collecting",
+          "time_queued"
+        ]
+      },
+      "ProducerDetails": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The current collection address.",
+            "type": "string"
+          },
+          "id": {
+            "description": "The producer's ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "interval": {
+            "description": "The current collection interval.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "last_failure": {
+            "nullable": true,
+            "description": "Details about the last failed collection.\n\nThis is None if we've never failed to collect from the producer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FailedCollection"
+              }
+            ]
+          },
+          "last_success": {
+            "nullable": true,
+            "description": "Details about the last successful collection.\n\nThis is None if we've never successfully collected from the producer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SuccessfulCollection"
+              }
+            ]
+          },
+          "n_collections": {
+            "description": "The total number of successful collections we've made.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "n_failures": {
+            "description": "The total number of failed collections.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "registered": {
+            "description": "The time the producer was first registered with us.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated": {
+            "description": "The last time the producer's information was updated.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "address",
+          "id",
+          "interval",
+          "n_collections",
+          "n_failures",
+          "registered",
+          "updated"
+        ]
+      },
       "ProducerEndpoint": {
         "description": "Information announced by a metric server, used so that clients can contact it and collect available metric data from it.",
         "type": "object",
         "properties": {
           "address": {
             "description": "The IP address and port at which `oximeter` can collect metrics from the producer.",
-            "type": "string"
-          },
-          "base_route": {
-            "description": "The API base route from which `oximeter` can collect metrics.\n\nThe full route is `{base_route}/{id}`.",
             "type": "string"
           },
           "id": {
@@ -212,7 +334,6 @@
             ]
           },
           "kind": {
-            "nullable": true,
             "description": "The kind of producer.",
             "allOf": [
               {
@@ -223,9 +344,9 @@
         },
         "required": [
           "address",
-          "base_route",
           "id",
-          "interval"
+          "interval",
+          "kind"
         ]
       },
       "ProducerEndpointResultsPage": {
@@ -272,7 +393,53 @@
             "enum": [
               "instance"
             ]
+          },
+          {
+            "description": "The producer is a management gateway service.",
+            "type": "string",
+            "enum": [
+              "management_gateway"
+            ]
           }
+        ]
+      },
+      "SuccessfulCollection": {
+        "description": "Details about a previous successful collection.",
+        "type": "object",
+        "properties": {
+          "n_samples": {
+            "description": "The number of samples collected.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "started_at": {
+            "description": "The time at which we started a collection.\n\nNote that this is the time we queued a request to collect for processing by a background task. The `time_queued` can be added to this time to figure out when processing began, and `time_collecting` can be added to that to figure out how long the actual collection process took.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_collecting": {
+            "description": "The time it took for the actual collection.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "time_queued": {
+            "description": "The time this request spent queued before being processed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "n_samples",
+          "started_at",
+          "time_collecting",
+          "time_queued"
         ]
       }
     },

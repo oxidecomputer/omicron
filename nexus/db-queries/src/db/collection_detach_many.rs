@@ -79,7 +79,6 @@ pub trait DatastoreDetachManyTarget<ResourceType>:
         // Treat the collection and resource as boxed tables.
         CollectionTable<ResourceType, Self>: BoxableTable,
         ResourceTable<ResourceType, Self>: BoxableTable,
-
         // Allows treating "collection_exists_query" as a boxed "dyn QueryFragment<Pg>".
         QueryFromClause<CollectionTable<ResourceType, Self>>:
             QueryFragment<Pg> + Send,
@@ -88,14 +87,12 @@ pub trait DatastoreDetachManyTarget<ResourceType>:
         QueryFromClause<ResourceTable<ResourceType, Self>>:
             QueryFragment<Pg> + Send,
         QuerySqlType<ResourceTable<ResourceType, Self>>: Send,
-
         // Allows calling ".filter()" on the boxed collection table.
         BoxedQuery<CollectionTable<ResourceType, Self>>: FilterBy<Eq<CollectionPrimaryKey<ResourceType, Self>, Self::Id>>
             + FilterBy<IsNull<Self::CollectionTimeDeletedColumn>>,
         // Allows calling ".filter()" on the boxed resource table.
         BoxedQuery<ResourceTable<ResourceType, Self>>: FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>>
             + FilterBy<IsNull<Self::ResourceTimeDeletedColumn>>,
-
         // Allows calling "update.into_boxed()"
         UpdateStatement<
             CollectionTable<ResourceType, Self>,
@@ -107,7 +104,6 @@ pub trait DatastoreDetachManyTarget<ResourceType>:
             ResourceTableDefaultWhereClause<ResourceType, Self>,
             VR,
         >: BoxableUpdateStatement<ResourceTable<ResourceType, Self>, VR>,
-
         // Allows calling
         // ".filter(collection_table().primary_key().eq(collection_id)" on the
         // boxed update statement.
@@ -126,7 +122,6 @@ pub trait DatastoreDetachManyTarget<ResourceType>:
             VR,
         >: FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>>
             + FilterBy<IsNull<Self::ResourceTimeDeletedColumn>>,
-
         // Allows using "id" in expressions (e.g. ".eq(...)") with...
         Self::Id: AsExpression<
                 // ... The Collection table's PK
@@ -141,7 +136,6 @@ pub trait DatastoreDetachManyTarget<ResourceType>:
         ExprSqlType<CollectionPrimaryKey<ResourceType, Self>>: SingleValue,
         ExprSqlType<ResourcePrimaryKey<ResourceType, Self>>: SingleValue,
         ExprSqlType<Self::ResourceCollectionIdColumn>: SingleValue,
-
         ResourceType: Selectable<Pg>,
     {
         let collection_table =
@@ -479,20 +473,15 @@ where
 mod test {
     use super::*;
     use crate::db::collection_attach::DatastoreAttachTarget;
-    use crate::db::{
-        self, error::TransactionError, identity::Resource as IdentityResource,
-    };
-    use async_bb8_diesel::{
-        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-        ConnectionManager,
-    };
+    use crate::db::identity::Resource as IdentityResource;
+    use crate::db::pub_test_utils::TestDatabase;
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use chrono::Utc;
     use db_macros::Resource;
-    use diesel::expression_methods::ExpressionMethods;
-    use diesel::pg::Pg;
     use diesel::QueryDsl;
     use diesel::SelectableHelper;
-    use nexus_test_utils::db::test_setup_database;
+    use diesel::expression_methods::ExpressionMethods;
+    use diesel::pg::Pg;
     use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
     use omicron_test_utils::dev;
     use uuid::Uuid;
@@ -522,8 +511,8 @@ mod test {
 
     async fn setup_db(
         pool: &crate::db::Pool,
-    ) -> bb8::PooledConnection<ConnectionManager<DbConnection>> {
-        let connection = pool.pool().get().await.unwrap();
+    ) -> crate::db::datastore::DataStoreConnection {
+        let connection = pool.claim().await.unwrap();
         (*connection)
             .batch_execute_async(
                 "CREATE SCHEMA IF NOT EXISTS test_schema; \
@@ -779,11 +768,9 @@ mod test {
     async fn test_detach_missing_collection_fails() {
         let logctx =
             dev::test_setup_log("test_detach_missing_collection_fails");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let _resource_id = uuid::Uuid::new_v4();
@@ -801,7 +788,7 @@ mod test {
 
         assert!(matches!(detach, Err(DetachManyError::CollectionNotFound)));
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -809,11 +796,9 @@ mod test {
     async fn test_detach_missing_resource_succeeds() {
         let logctx =
             dev::test_setup_log("test_detach_missing_resource_succeeds");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let _resource_id = uuid::Uuid::new_v4();
@@ -843,18 +828,16 @@ mod test {
             get_collection(collection_id, &conn).await
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_detach_once() {
         let logctx = dev::test_setup_log("test_detach_once");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -886,18 +869,16 @@ mod test {
             get_collection(collection_id, &conn).await
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_detach_once_synchronous() {
         let logctx = dev::test_setup_log("test_detach_once_synchronous");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -919,39 +900,28 @@ mod test {
                 .set(resource::dsl::collection_id.eq(Option::<Uuid>::None)),
         );
 
-        type TxnError =
-            TransactionError<DetachManyError<Collection, DieselError>>;
-        let result = conn
-            .transaction_async(|conn| async move {
-                detach_query.detach_and_get_result_async(&conn).await.map_err(
-                    |e| match e {
-                        DetachManyError::DatabaseError(e) => TxnError::from(e),
-                        e => TxnError::CustomError(e),
-                    },
-                )
-            })
-            .await;
-
         // "detach_and_get_result" should return the "detached" resource.
-        let returned_collection = result.expect("Detach should have worked");
+        let returned_collection = detach_query
+            .detach_and_get_result_async(&conn)
+            .await
+            .expect("Detach should have worked");
+
         // The returned values should be the latest value in the DB.
         assert_eq!(
             returned_collection,
             get_collection(collection_id, &conn).await
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_detach_while_already_detached() {
         let logctx = dev::test_setup_log("test_detach_while_already_detached");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
 
@@ -996,18 +966,16 @@ mod test {
             "... and again!"
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_detach_filter_collection() {
         let logctx = dev::test_setup_log("test_detach_filter_collection");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
 
@@ -1047,18 +1015,16 @@ mod test {
             _ => panic!("Unexpected error: {:?}", err),
         };
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_detach_deleted_resource() {
         let logctx = dev::test_setup_log("test_detach_deleted_resource");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -1105,18 +1071,16 @@ mod test {
             &collection_id,
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_detach_many() {
         let logctx = dev::test_setup_log("test_detach_many");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         // Create the collection and some resources.
         let collection_id1 = uuid::Uuid::new_v4();
@@ -1161,14 +1125,12 @@ mod test {
         assert_eq!(returned_resource.description(), "Updated desc");
 
         // Note that only "resource1" and "resource2" should be detached.
-        assert!(get_resource(resource_id1, &conn)
-            .await
-            .collection_id
-            .is_none());
-        assert!(get_resource(resource_id2, &conn)
-            .await
-            .collection_id
-            .is_none());
+        assert!(
+            get_resource(resource_id1, &conn).await.collection_id.is_none()
+        );
+        assert!(
+            get_resource(resource_id2, &conn).await.collection_id.is_none()
+        );
 
         // "resource3" should have been left alone.
         assert_eq!(
@@ -1180,7 +1142,7 @@ mod test {
             &collection_id2
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

@@ -7,14 +7,14 @@
 
 pub mod disk;
 pub mod external_ip;
-pub mod instance;
 pub mod ip_pool;
 #[macro_use]
 mod next_item;
 pub mod network_interface;
+pub mod oximeter;
 pub mod region_allocation;
+pub mod sled_reservation;
 pub mod virtual_provisioning_collection_update;
-pub mod volume;
 pub mod vpc;
 pub mod vpc_subnet;
 
@@ -36,6 +36,5 @@ pub mod vpc_subnet;
 /// the same pooled connection after this SQL gets run.
 ///
 /// **BE VERY CAREFUL WHEN USING THIS.**
-pub const ALLOW_FULL_TABLE_SCAN_SQL: &str =
-    "set local disallow_full_table_scans = off; \
+pub const ALLOW_FULL_TABLE_SCAN_SQL: &str = "set local disallow_full_table_scans = off; \
      set local large_full_scan_rows = 1000;";

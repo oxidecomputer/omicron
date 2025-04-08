@@ -1,0 +1,195 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= Demo saga
+
+Nexus ships with a "demo" saga that can be used to interactively experiment with sagas, saga recovery, and saga transfer (after Nexus zone expungement).  The demo saga consists of a single action that blocks until it's instructed to proceed.  You instruct it to proceed using a request to the Nexus _internal_ API.
+
+In the example below, we'll:
+
+. Use `omicron-dev run-all` to run a simulated control plane stack
+. Start a second Nexus whose execution we can control precisely
+. Use the `omdb nexus sagas demo-create` command to kick off a demo saga
+. Use the `omdb nexus sagas demo-complete` command to instruct that saga to finish
+
+For steps 1-2, we're just following the https://github.com/oxidecomputer/omicron/blob/main/docs/how-to-run-simulated.adoc#using-both-omicron-dev-run-all-and-running-nexus-manually[docs for running a simulated stack and a second Nexus].  First, run `omicron-dev run-all`:
+
+```terminal
+$ cargo xtask omicron-dev run-all
+...
+omicron-dev: setting up all services ...
+log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.7162.0.log
+note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.7162.0.log"
+DB URL: postgresql://root@[::1]:43428/omicron?sslmode=disable
+DB address: [::1]:43428
+log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.7162.2.log
+note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.7162.2.log"
+log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.7162.3.log
+note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.7162.3.log"
+omicron-dev: services are running.
+omicron-dev: nexus external API:    127.0.0.1:12220
+omicron-dev: nexus internal API:    [::1]:12221
+omicron-dev: cockroachdb pid:       7166
+omicron-dev: cockroachdb URL:       postgresql://root@[::1]:43428/omicron?sslmode=disable
+omicron-dev: cockroachdb directory: /dangerzone/omicron_tmp/.tmpkzPi6h
+omicron-dev: internal DNS HTTP:     http://[::1]:55952
+omicron-dev: internal DNS:          [::1]:36474
+omicron-dev: external DNS name:     oxide-dev.test
+omicron-dev: external DNS HTTP:     http://[::1]:64396
+omicron-dev: external DNS:          [::1]:35977
+omicron-dev:   e.g. `dig @::1 -p 35977 test-suite-silo.sys.oxide-dev.test`
+omicron-dev: management gateway:    http://[::1]:33325 (switch0)
+omicron-dev: management gateway:    http://[::1]:61144 (switch1)
+omicron-dev: silo name:             test-suite-silo
+omicron-dev: privileged user name:  test-privileged
+```
+
+Then follow those docs to configure and start a second Nexus:
+
+```terminal
+$ cargo run --bin=nexus -- config-second.toml
+...
+Aug 12 20:16:25.405 INFO listening, local_addr: [::1]:12223, component: dropshot_internal, name: a4ef738a-1fb0-47b1-9da2-4919c7ec7c7f, file: /home/dap/.cargo/git/checkouts/dropshot-a4a923d29dccc492/52d900a/dropshot/src/server.rs:205
+...
+```
+
+The rest of these instructions will use `omdb` pointed at the second Nexus instance, so we'll set OMDB_NEXUS_URL in the environment:
+
+```terminal
+$ export OMDB_NEXUS_URL=http://[::1]:12223
+```
+
+Now we can use `omdb nexus sagas list` to list the sagas that have run _in that second Nexus process_ only:
+
+```terminal
+$ cargo run --bin=omdb -- nexus sagas list
+...
+note: using Nexus URL http://[::1]:12223
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
+SAGA_ID STATE
+```
+
+Now we can create a demo saga:
+
+```terminal
+$ cargo run --bin=omdb -- --destructive nexus sagas demo-create
+...
+note: using Nexus URL http://[::1]:12223
+saga id:      f7765d6a-6e45-4c13-8904-2677b79a97eb
+demo saga id: 88eddf09-dda3-4d70-8d99-1d3b441c57da (use this with `demo-complete`)
+```
+
+We have to use the `--destructive` option because this command by nature changes state in Nexus and `omdb` won't allow commands that change state by default.
+
+We can see the new saga in the list of sagas now.  It's running:
+
+```terminal
+$ cargo run --bin=omdb -- nexus sagas list
+...
+note: using Nexus URL http://[::1]:12223
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
+SAGA_ID                              STATE   
+f7765d6a-6e45-4c13-8904-2677b79a97eb running 
+```
+
+and it will stay running indefinitely until we run `demo-complete`.  Let's do that:
+
+```terminal
+$ cargo run --bin=omdb -- --destructive nexus sagas demo-complete 88eddf09-dda3-4d70-8d99-1d3b441c57da
+...
+note: using Nexus URL http://[::1]:12223
+```
+
+and then list sagas again:
+
+```terminal
+$ cargo run --bin=omdb -- nexus sagas list
+...
+note: using Nexus URL http://[::1]:12223
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
+SAGA_ID                              STATE     
+f7765d6a-6e45-4c13-8904-2677b79a97eb succeeded 
+```
+
+It works across recovery, too.  You can go through the same loop again, but this time kill Nexus and start it again:
+
+```terminal
+$ cargo run --bin=omdb -- --destructive nexus sagas demo-create
+...
+note: using Nexus URL http://[::1]:12223
+saga id:      65253cb6-4428-4aa7-9afc-bf9b42166cb5
+demo saga id: 208ebc89-acc6-42d3-9f40-7f5567c8a39b (use this with `demo-complete`)
+```
+
+Now restart Nexus (^C the second invocation and run it again).  Now if we use `omdb` we don't see the earlier saga because it was finished when this new Nexus process started.  But we see the one we created later because it was recovered:
+
+```terminal
+$ cargo run --bin=omdb -- nexus sagas list
+...
+note: using Nexus URL http://[::1]:12223
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
+SAGA_ID                              STATE   
+65253cb6-4428-4aa7-9afc-bf9b42166cb5 running 
+```
+
+Side note: we can see it was recovered:
+
+```terminal
+$ cargo run --bin=omdb -- nexus background-tasks show
+...
+task: "saga_recovery"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: iter 1, triggered by a periodic timer firing
+    started at 2024-08-12T20:20:41.714Z (44s ago) and ran for 79ms
+    since Nexus started:
+        sagas recovered:           1
+        sagas recovery errors:     0
+        sagas observed started:    0
+        sagas inferred finished:   0
+        missing from SEC:          0
+        bad state in SEC:          0
+    last pass:
+        found sagas:   1 (in-progress, assigned to this Nexus)
+        recovered:     1 (successfully)
+        failed:        0
+        skipped:       0 (already running)
+        removed:       0 (newly finished)
+    recently recovered sagas (1):
+        TIME                 SAGA_ID
+        2024-08-12T20:20:41Z 65253cb6-4428-4aa7-9afc-bf9b42166cb5
+    no saga recovery failures
+...
+```
+
+Now we can complete that saga:
+
+```terminal
+$ cargo run --bin=omdb -- --destructive nexus sagas demo-complete 208ebc89-acc6-42d3-9f40-7f5567c8a39b
+...
+note: using Nexus URL http://[::1]:12223
+```
+
+and see it finish:
+
+```
+$ cargo run --bin=omdb -- nexus sagas list
+...
+note: using Nexus URL http://[::1]:12223
+NOTE: This command only reads in-memory state from the targeted Nexus instance.
+Sagas may be missing if they were run by a different Nexus instance or if they
+finished before this Nexus instance last started up.
+SAGA_ID                              STATE
+65253cb6-4428-4aa7-9afc-bf9b42166cb5 succeeded
+```
+
+Note too that the completion is not synchronous with the `demo-complete` command, though it usually _is_ pretty quick.  It's possible you'll catch it `running` if you run `nexus sagas list` right after running `nexus sagas demo-complete`, but you should quickly see it `succeeded` if you keep running `nexus sagas list`.

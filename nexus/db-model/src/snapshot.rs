@@ -2,23 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{impl_enum_type, ByteCount};
-use crate::schema::snapshot;
+use super::{ByteCount, impl_enum_type};
 use crate::BlockSize;
 use crate::Generation;
+use crate::typed_uuid::DbTypedUuid;
 use db_macros::Resource;
+use nexus_db_schema::schema::snapshot;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
+use omicron_uuid_kinds::VolumeKind;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "snapshot_state"))]
-    pub struct SnapshotStateEnum;
+    SnapshotStateEnum:
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = SnapshotStateEnum)]
     pub enum SnapshotState;
 
     Creating => b"creating"
@@ -45,10 +45,10 @@ pub struct Snapshot {
     pub project_id: Uuid,
     // which disk is this a snapshot of
     pub disk_id: Uuid,
-    pub volume_id: Uuid,
+    pub volume_id: DbTypedUuid<VolumeKind>,
 
     // destination of all snapshot blocks
-    pub destination_volume_id: Uuid,
+    pub destination_volume_id: DbTypedUuid<VolumeKind>,
 
     pub gen: Generation,
     pub state: SnapshotState,
@@ -78,5 +78,15 @@ impl From<SnapshotState> for views::SnapshotState {
             SnapshotState::Faulted => Self::Faulted,
             SnapshotState::Destroyed => Self::Destroyed,
         }
+    }
+}
+
+impl Snapshot {
+    pub fn volume_id(&self) -> VolumeUuid {
+        self.volume_id.into()
+    }
+
+    pub fn destination_volume_id(&self) -> VolumeUuid {
+        self.destination_volume_id.into()
     }
 }

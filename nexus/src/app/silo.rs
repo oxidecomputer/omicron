@@ -14,21 +14,20 @@ use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::model::Name;
-use nexus_db_queries::db::model::SshKey;
 use nexus_db_queries::db::{self, lookup};
 use nexus_db_queries::{authn, authz};
+use nexus_types::deployment::execution::blueprint_nexus_external_ips;
 use nexus_types::internal_api::params::DnsRecord;
-use omicron_common::api::external::http_pagination::PaginatedBy;
+use nexus_types::silo::silo_dns_name;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{CreateResult, LookupType};
 use omicron_common::api::external::{DataPageParams, ResourceType};
 use omicron_common::api::external::{DeleteResult, NameOrId};
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::bail_unless;
-use ref_cast::RefCast;
 use std::net::IpAddr;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -98,8 +97,16 @@ impl super::Nexus {
 
         // Set up an external DNS name for this Silo's API and console
         // endpoints (which are the same endpoint).
-        let (nexus_external_ips, nexus_external_dns_zones) =
-            datastore.nexus_external_addresses(nexus_opctx).await?;
+        let nexus_external_dns_zones = datastore
+            .dns_zones_list_all(nexus_opctx, DnsGroup::External)
+            .await
+            .internal_context("listing external DNS zones")?;
+        let (_, target_blueprint) = datastore
+            .blueprint_target_get_current_full(opctx)
+            .await
+            .internal_context("loading target blueprint")?;
+        let nexus_external_ips =
+            blueprint_nexus_external_ips(&target_blueprint);
         let dns_records: Vec<DnsRecord> = nexus_external_ips
             .into_iter()
             .map(|addr| match addr {
@@ -362,7 +369,7 @@ impl super::Nexus {
         authz_silo: &authz::Silo,
         db_silo: &db::model::Silo,
         authenticated_subject: &authn::silos::AuthenticatedSubject,
-    ) -> LookupResult<Option<db::model::SiloUser>> {
+    ) -> LookupResult<db::model::SiloUser> {
         // XXX create user permission?
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
         opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
@@ -376,35 +383,38 @@ impl super::Nexus {
             )
             .await?;
 
-        let (authz_silo_user, db_silo_user) =
-            if let Some(existing_silo_user) = fetch_result {
-                existing_silo_user
-            } else {
-                // In this branch, no user exists for the authenticated subject
-                // external id. The next action depends on the silo's user
-                // provision type.
-                match db_silo.user_provision_type {
-                    // If the user provision type is ApiOnly, do not create a
-                    // new user if one does not exist.
-                    db::model::UserProvisionType::ApiOnly => {
-                        return Ok(None);
-                    }
-
-                    // If the user provision type is JIT, then create the user if
-                    // one does not exist
-                    db::model::UserProvisionType::Jit => {
-                        let silo_user = db::model::SiloUser::new(
-                            authz_silo.id(),
-                            Uuid::new_v4(),
-                            authenticated_subject.external_id.clone(),
-                        );
-
-                        self.db_datastore
-                            .silo_user_create(&authz_silo, silo_user)
-                            .await?
-                    }
+        let (authz_silo_user, db_silo_user) = if let Some(existing_silo_user) =
+            fetch_result
+        {
+            existing_silo_user
+        } else {
+            // In this branch, no user exists for the authenticated subject
+            // external id. The next action depends on the silo's user
+            // provision type.
+            match db_silo.user_provision_type {
+                // If the user provision type is ApiOnly, do not create a
+                // new user if one does not exist.
+                db::model::UserProvisionType::ApiOnly => {
+                    return Err(Error::Unauthenticated {
+                            internal_message: "User must exist before login when user provision type is ApiOnly".to_string(),
+                    });
                 }
-            };
+
+                // If the user provision type is JIT, then create the user if
+                // one does not exist
+                db::model::UserProvisionType::Jit => {
+                    let silo_user = db::model::SiloUser::new(
+                        authz_silo.id(),
+                        Uuid::new_v4(),
+                        authenticated_subject.external_id.clone(),
+                    );
+
+                    self.db_datastore
+                        .silo_user_create(&authz_silo, silo_user)
+                        .await?
+                }
+            }
+        };
 
         // Gather a list of groups that the user is part of based on what the
         // IdP sent us. Also, if the silo user provision type is Jit, create
@@ -453,7 +463,7 @@ impl super::Nexus {
             )
             .await?;
 
-        Ok(Some(db_silo_user))
+        Ok(db_silo_user)
     }
 
     // Silo user passwords
@@ -580,7 +590,7 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
         credentials: params::UsernamePasswordCredentials,
-    ) -> Result<Option<db::model::SiloUser>, Error> {
+    ) -> Result<db::model::SiloUser, Error> {
         let (authz_silo, _) = self.local_idp_fetch_silo(silo_lookup).await?;
 
         // NOTE: It's very important that we not bail out early if we fail to
@@ -610,9 +620,11 @@ impl super::Nexus {
                 "passed password verification without a valid user"
             );
             let db_user = fetch_user.unwrap().1;
-            Ok(Some(db_user))
+            Ok(db_user)
         } else {
-            Ok(None)
+            Err(Error::Unauthenticated {
+                internal_message: "Failed password verification".to_string(),
+            })
         }
     }
 
@@ -647,74 +659,6 @@ impl super::Nexus {
         }
     }
 
-    // SSH Keys
-    pub fn ssh_key_lookup<'a>(
-        &'a self,
-        opctx: &'a OpContext,
-        ssh_key_selector: &'a params::SshKeySelector,
-    ) -> LookupResult<lookup::SshKey<'a>> {
-        match ssh_key_selector {
-            params::SshKeySelector {
-                silo_user_id: _,
-                ssh_key: NameOrId::Id(id),
-            } => {
-                let ssh_key =
-                    LookupPath::new(opctx, &self.db_datastore).ssh_key_id(*id);
-                Ok(ssh_key)
-            }
-            params::SshKeySelector {
-                silo_user_id,
-                ssh_key: NameOrId::Name(name),
-            } => {
-                let ssh_key = LookupPath::new(opctx, &self.db_datastore)
-                    .silo_user_id(*silo_user_id)
-                    .ssh_key_name(Name::ref_cast(name));
-                Ok(ssh_key)
-            }
-        }
-    }
-
-    pub(crate) async fn ssh_key_create(
-        &self,
-        opctx: &OpContext,
-        silo_user_id: Uuid,
-        params: params::SshKeyCreate,
-    ) -> CreateResult<db::model::SshKey> {
-        let ssh_key = db::model::SshKey::new(silo_user_id, params);
-        let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
-            .silo_user_id(silo_user_id)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
-        assert_eq!(authz_user.id(), silo_user_id);
-        self.db_datastore.ssh_key_create(opctx, &authz_user, ssh_key).await
-    }
-
-    pub(crate) async fn ssh_keys_list(
-        &self,
-        opctx: &OpContext,
-        silo_user_id: Uuid,
-        page_params: &PaginatedBy<'_>,
-    ) -> ListResultVec<SshKey> {
-        let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
-            .silo_user_id(silo_user_id)
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-        assert_eq!(authz_user.id(), silo_user_id);
-        self.db_datastore.ssh_keys_list(opctx, &authz_user, page_params).await
-    }
-
-    pub(crate) async fn ssh_key_delete(
-        &self,
-        opctx: &OpContext,
-        silo_user_id: Uuid,
-        ssh_key_lookup: &lookup::SshKey<'_>,
-    ) -> DeleteResult {
-        let (.., authz_silo_user, authz_ssh_key) =
-            ssh_key_lookup.lookup_for(authz::Action::Delete).await?;
-        assert_eq!(authz_silo_user.id(), silo_user_id);
-        self.db_datastore.ssh_key_delete(opctx, &authz_ssh_key).await
-    }
-
     // identity providers
 
     pub fn saml_identity_provider_lookup<'a>(
@@ -727,7 +671,6 @@ impl super::Nexus {
                 saml_identity_provider: NameOrId::Id(id),
                 silo: None,
             } => {
-
                 let saml_provider = LookupPath::new(opctx, &self.db_datastore)
                     .saml_identity_provider_id(id);
                 Ok(saml_provider)
@@ -744,8 +687,12 @@ impl super::Nexus {
             params::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Id(_),
                 silo: _,
-            } => Err(Error::invalid_request("when providing provider as an ID, silo should not be specified")),
-            _ => Err(Error::invalid_request("provider should either be a UUID or silo should be specified"))
+            } => Err(Error::invalid_request(
+                "when providing provider as an ID, silo should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "provider should either be a UUID or silo should be specified",
+            )),
         }
     }
 
@@ -822,25 +769,24 @@ impl super::Nexus {
                     })?;
 
                 let response = client.get(url).send().await.map_err(|e| {
-                    Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!("error querying url: {}", e),
-                    }
+                    Error::invalid_value(
+                        "url",
+                        format!("error querying url: {e}"),
+                    )
                 })?;
 
                 if !response.status().is_success() {
-                    return Err(Error::InvalidValue {
-                        label: String::from("url"),
-                        message: format!(
-                            "querying url returned: {}",
-                            response.status()
-                        ),
-                    });
+                    return Err(Error::invalid_value(
+                        "url",
+                        format!("querying url returned: {}", response.status()),
+                    ));
                 }
 
-                response.text().await.map_err(|e| Error::InvalidValue {
-                    label: String::from("url"),
-                    message: format!("error getting text from url: {}", e),
+                response.text().await.map_err(|e| {
+                    Error::invalid_value(
+                        "url",
+                        format!("error getting text from url: {e}"),
+                    )
                 })?
             }
 
@@ -849,12 +795,11 @@ impl super::Nexus {
                     &base64::engine::general_purpose::STANDARD,
                     data,
                 )
-                .map_err(|e| Error::InvalidValue {
-                    label: String::from("data"),
-                    message: format!(
-                        "error getting decoding base64 data: {}",
-                        e
-                    ),
+                .map_err(|e| {
+                    Error::invalid_value(
+                        "data",
+                        format!("error getting decoding base64 data: {e}"),
+                    )
                 })?;
                 String::from_utf8_lossy(&bytes).into_owned()
             }
@@ -958,17 +903,4 @@ impl super::Nexus {
     ) -> db::lookup::SiloGroup<'a> {
         LookupPath::new(opctx, &self.db_datastore).silo_group_id(*group_id)
     }
-}
-
-/// Returns the (relative) DNS name for this Silo's API and console endpoints
-/// _within_ the external DNS zone (i.e., without that zone's suffix)
-///
-/// This specific naming scheme is determined under RFD 357.
-pub(crate) fn silo_dns_name(
-    name: &omicron_common::api::external::Name,
-) -> String {
-    // RFD 4 constrains resource names (including Silo names) to DNS-safe
-    // strings, which is why it's safe to directly put the name of the
-    // resource into the DNS name rather than doing any kind of escaping.
-    format!("{}.sys", name)
 }

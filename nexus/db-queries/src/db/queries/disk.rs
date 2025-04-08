@@ -4,12 +4,12 @@
 
 //! Helper queries for working with disks.
 
-use crate::db;
 use crate::db::queries::next_item::{DefaultShiftGenerator, NextItem};
 use diesel::{
+    Column, QueryResult,
     pg::Pg,
     query_builder::{AstPass, QueryFragment, QueryId},
-    sql_types, Column, QueryResult,
+    sql_types,
 };
 use uuid::Uuid;
 
@@ -36,21 +36,22 @@ pub const MAX_DISKS_PER_INSTANCE: u32 = 8;
 #[derive(Debug, Clone, Copy)]
 struct NextDiskSlot {
     inner: NextItem<
-        db::schema::disk::table,
+        nexus_db_schema::schema::disk::table,
         i16,
-        db::schema::disk::dsl::slot,
+        nexus_db_schema::schema::disk::dsl::slot,
         Uuid,
-        db::schema::disk::dsl::attach_instance_id,
+        nexus_db_schema::schema::disk::dsl::attach_instance_id,
     >,
 }
 
 impl NextDiskSlot {
     fn new(instance_id: Uuid) -> Self {
-        let generator = DefaultShiftGenerator {
-            base: 0,
-            max_shift: i64::try_from(MAX_DISKS_PER_INSTANCE).unwrap(),
-            min_shift: 0,
-        };
+        let generator = DefaultShiftGenerator::new(
+            0,
+            i64::try_from(MAX_DISKS_PER_INSTANCE).unwrap(),
+            0,
+        )
+        .expect("invalid min/max shift");
         Self { inner: NextItem::new_scoped(generator, instance_id) }
     }
 }
@@ -140,15 +141,19 @@ impl QueryFragment<Pg> for DiskSetClauseForAttach {
         //
         // Rather than spar extensively with Diesel over these details, just
         // implement the whole SET by hand.
-        out.push_identifier(db::schema::disk::dsl::attach_instance_id::NAME)?;
+        out.push_identifier(
+            nexus_db_schema::schema::disk::dsl::attach_instance_id::NAME,
+        )?;
         out.push_sql(" = ");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.attach_instance_id)?;
         out.push_sql(", ");
-        out.push_identifier(db::schema::disk::dsl::disk_state::NAME)?;
+        out.push_identifier(
+            nexus_db_schema::schema::disk::dsl::disk_state::NAME,
+        )?;
         out.push_sql(" = ");
         out.push_bind_param::<sql_types::Text, str>(attached_label)?;
         out.push_sql(", ");
-        out.push_identifier(db::schema::disk::dsl::slot::NAME)?;
+        out.push_identifier(nexus_db_schema::schema::disk::dsl::slot::NAME)?;
         out.push_sql(" = (");
         self.next_slot.walk_ast(out.reborrow())?;
         out.push_sql(")");
@@ -159,7 +164,7 @@ impl QueryFragment<Pg> for DiskSetClauseForAttach {
 
 // Required to pass `DiskSetClauseForAttach` to `set`.
 impl diesel::query_builder::AsChangeset for DiskSetClauseForAttach {
-    type Target = db::schema::disk::dsl::disk;
+    type Target = nexus_db_schema::schema::disk::dsl::disk;
     type Changeset = Self;
 
     fn as_changeset(self) -> Self::Changeset {

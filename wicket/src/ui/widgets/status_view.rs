@@ -3,12 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Rect},
     text::Text,
     widgets::{Block, Borders, List, Paragraph, StatefulWidget, Widget},
 };
-
-use crate::Frame;
 
 use super::{BoxConnector, BoxConnectorKind};
 

@@ -5,72 +5,69 @@
 //! Queries for inserting and deleting network interfaces.
 
 use crate::db;
+use crate::db::error::{ErrorHandler, public_error_from_diesel, retryable};
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::pool::DbConnection;
 use crate::db::queries::next_item::DefaultShiftGenerator;
-use crate::db::queries::next_item::NextItem;
-use crate::db::schema::network_interface::dsl;
+use crate::db::queries::next_item::{NextItem, NextItemSelfJoined};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
-use diesel::pg::Pg;
-use diesel::prelude::Column;
-use diesel::query_builder::AstPass;
-use diesel::query_builder::QueryFragment;
-use diesel::query_builder::QueryId;
-use diesel::result::Error as DieselError;
-use diesel::sql_types;
 use diesel::Insertable;
 use diesel::QueryResult;
 use diesel::RunQueryDsl;
+use diesel::pg::Pg;
+use diesel::prelude::Column;
+use diesel::query_builder::QueryFragment;
+use diesel::query_builder::QueryId;
+use diesel::query_builder::{AstPass, Query};
+use diesel::result::Error as DieselError;
+use diesel::sql_types::{self, Nullable};
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
-use nexus_db_model::NetworkInterfaceKind;
-use nexus_db_model::NetworkInterfaceKindEnum;
+use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use nexus_db_model::SqlU8;
+use nexus_db_model::{MAX_NICS_PER_INSTANCE, NetworkInterfaceKind};
+use nexus_db_schema::enums::NetworkInterfaceKindEnum;
+use nexus_db_schema::schema::network_interface::dsl;
 use omicron_common::api::external;
 use omicron_common::api::external::MacAddr;
-use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use std::net::IpAddr;
+use slog_error_chain::SlogInlineError;
+use std::net::{IpAddr, Ipv6Addr};
+use std::sync::LazyLock;
 use uuid::Uuid;
-
-/// The max number of interfaces that may be associated with a resource,
-/// e.g., instance or service.
-///
-/// RFD 135 caps instances at 8 interfaces and we use the same limit for
-/// all types of interfaces for simplicity.
-pub(crate) const MAX_NICS: usize = 8;
 
 // These are sentinel values and other constants used to verify the state of the
 // system when operating on network interfaces
-lazy_static::lazy_static! {
-    // States an instance must be in to operate on its network interfaces, in
-    // most situations.
-    static ref INSTANCE_STOPPED: db::model::InstanceState =
-        db::model::InstanceState(external::InstanceState::Stopped);
 
-    static ref INSTANCE_FAILED: db::model::InstanceState =
-        db::model::InstanceState(external::InstanceState::Failed);
+// States an instance must be in to operate on its network interfaces, in
+// most situations.
+const INSTANCE_STOPPED: db::model::InstanceState =
+    db::model::InstanceState::NoVmm;
 
-    // An instance can be in the creating state while we manipulate its
-    // interfaces. The intention is for this only to be the case during sagas.
-    static ref INSTANCE_CREATING: db::model::InstanceState =
-        db::model::InstanceState(external::InstanceState::Creating);
+const INSTANCE_FAILED: db::model::InstanceState =
+    db::model::InstanceState::Failed;
 
-    // A sentinel value for the instance state when the instance actually does
-    // not exist.
-    static ref INSTANCE_DESTROYED: db::model::InstanceState =
-        db::model::InstanceState(external::InstanceState::Destroyed);
+// An instance can be in the creating state while we manipulate its
+// interfaces. The intention is for this only to be the case during sagas.
+const INSTANCE_CREATING: db::model::InstanceState =
+    db::model::InstanceState::Creating;
 
-    // A sentinel value for the instance state when the instance has an active
-    // VMM, irrespective of that VMM's actual state.
-    static ref INSTANCE_RUNNING: db::model::InstanceState =
-        db::model::InstanceState(external::InstanceState::Running);
+// A sentinel value for the instance state when the instance actually does
+// not exist.
+const INSTANCE_DESTROYED: db::model::InstanceState =
+    db::model::InstanceState::Destroyed;
 
-    static ref NO_INSTANCE_SENTINEL_STRING: String =
-        String::from(NO_INSTANCE_SENTINEL);
+// A sentinel value for the instance state when the instance has an active
+// VMM, irrespective of that VMM's actual state.
+const INSTANCE_RUNNING: db::model::InstanceState =
+    db::model::InstanceState::Vmm;
 
-    static ref INSTANCE_BAD_STATE_SENTINEL_STRING: String =
-        String::from(INSTANCE_BAD_STATE_SENTINEL);
-}
+static NO_INSTANCE_SENTINEL_STRING: LazyLock<String> =
+    LazyLock::new(|| String::from(NO_INSTANCE_SENTINEL));
+
+static INSTANCE_BAD_STATE_SENTINEL_STRING: LazyLock<String> =
+    LazyLock::new(|| String::from(INSTANCE_BAD_STATE_SENTINEL));
 
 // Uncastable sentinel used to detect when an instance exists, but is not
 // in the right state to have its network interfaces altered
@@ -79,8 +76,7 @@ const INSTANCE_BAD_STATE_SENTINEL: &'static str = "bad-state";
 // Error message generated when we're attempting to operate on an instance,
 // either inserting or deleting an interface, and that instance exists but is
 // in a state we can't work on.
-const INSTANCE_BAD_STATE_ERROR_MESSAGE: &'static str =
-    "could not parse \"bad-state\" as type uuid: uuid: incorrect UUID length: bad-state";
+const INSTANCE_BAD_STATE_ERROR_MESSAGE: &'static str = "could not parse \"bad-state\" as type uuid: uuid: incorrect UUID length: bad-state";
 
 // Uncastable sentinel used to detect when an instance doesn't exist
 const NO_INSTANCE_SENTINEL: &'static str = "no-instance";
@@ -89,8 +85,7 @@ const NO_INSTANCE_SENTINEL: &'static str = "no-instance";
 // either inserting or deleting an interface, and that instance does not exist
 // at all or has been destroyed. These are the same thing from the point of view
 // of the client's API call.
-const NO_INSTANCE_ERROR_MESSAGE: &'static str =
-    "could not parse \"no-instance\" as type uuid: uuid: incorrect UUID length: no-instance";
+const NO_INSTANCE_ERROR_MESSAGE: &'static str = "could not parse \"no-instance\" as type uuid: uuid: incorrect UUID length: no-instance";
 
 /// Errors related to inserting or attaching a NetworkInterface
 #[derive(Debug)]
@@ -110,6 +105,8 @@ pub enum InsertError {
     IpAddressNotAvailable(std::net::IpAddr),
     /// An explicity-requested MAC address is already in use
     MacAddressNotAvailable(MacAddr),
+    /// An explicity-requested interface slot is already in use
+    SlotNotAvailable(u8),
     /// There are no slots available for a new interface
     NoSlotsAvailable,
     /// There are no MAC addresses available
@@ -120,6 +117,8 @@ pub enum InsertError {
     InstanceMustBeStopped(Uuid),
     /// The instance does not exist at all, or is in the destroyed state.
     InstanceNotFound(Uuid),
+    /// The operation occurred within a transaction, and is retryable
+    Retryable(DieselError),
     /// Any other error
     External(external::Error),
 }
@@ -135,7 +134,6 @@ impl InsertError {
         e: DieselError,
         interface: &IncompleteNetworkInterface,
     ) -> Self {
-        use crate::db::error;
         match e {
             // Catch the specific errors designed to communicate the failures we
             // want to distinguish
@@ -143,9 +141,9 @@ impl InsertError {
                 decode_database_error(e, interface)
             }
             // Any other error at all is a bug
-            _ => InsertError::External(error::public_error_from_diesel(
+            _ => InsertError::External(public_error_from_diesel(
                 e,
-                error::ErrorHandler::Server,
+                ErrorHandler::Server,
             )),
         }
     }
@@ -153,14 +151,24 @@ impl InsertError {
     /// Convert this error into an external one.
     pub fn into_external(self) -> external::Error {
         match self {
-            InsertError::InterfaceAlreadyExists(name, NetworkInterfaceKind::Instance) => {
-                external::Error::ObjectAlreadyExists {
-                    type_name: external::ResourceType::InstanceNetworkInterface,
-                    object_name: name,
-                }
-            }
-            InsertError::InterfaceAlreadyExists(_name, NetworkInterfaceKind::Service) => {
+            InsertError::InterfaceAlreadyExists(
+                name,
+                NetworkInterfaceKind::Instance,
+            ) => external::Error::ObjectAlreadyExists {
+                type_name: external::ResourceType::InstanceNetworkInterface,
+                object_name: name,
+            },
+            InsertError::InterfaceAlreadyExists(
+                _name,
+                NetworkInterfaceKind::Service,
+            ) => {
                 unimplemented!("service network interface")
+            }
+            InsertError::InterfaceAlreadyExists(
+                _name,
+                NetworkInterfaceKind::Probe,
+            ) => {
+                unimplemented!("probe network interface")
             }
             InsertError::NoAvailableIpAddresses => {
                 external::Error::invalid_request(
@@ -174,21 +182,26 @@ impl InsertError {
                 ))
             }
             InsertError::IpAddressNotAvailable(ip) => {
-                external::Error::invalid_request(&format!(
+                external::Error::invalid_request(format!(
                     "The IP address '{}' is not available",
                     ip
                 ))
             }
             InsertError::MacAddressNotAvailable(mac) => {
-                external::Error::invalid_request(&format!(
+                external::Error::invalid_request(format!(
                     "The MAC address '{}' is not available",
                     mac
                 ))
             }
+            InsertError::SlotNotAvailable(slot) => {
+                external::Error::invalid_request(format!(
+                    "The interface slot '{slot}' is not available",
+                ))
+            }
             InsertError::NoSlotsAvailable => {
-                external::Error::invalid_request(&format!(
+                external::Error::invalid_request(format!(
                     "May not attach more than {} network interfaces",
-                    MAX_NICS
+                    MAX_NICS_PER_INSTANCE
                 ))
             }
             InsertError::NoMacAddrressesAvailable => {
@@ -198,16 +211,22 @@ impl InsertError {
             }
             InsertError::NonUniqueVpcSubnets => {
                 external::Error::invalid_request(
-                    "Each interface must be in a distinct VPC Subnet"
+                    "Each interface must be in a distinct VPC Subnet",
                 )
             }
             InsertError::InstanceMustBeStopped(_) => {
                 external::Error::invalid_request(
-                    "Instance must be stopped to attach a new network interface"
+                    "Instance must be stopped to attach a new network interface",
                 )
             }
             InsertError::InstanceNotFound(id) => {
-                external::Error::not_found_by_id(external::ResourceType::Instance, &id)
+                external::Error::not_found_by_id(
+                    external::ResourceType::Instance,
+                    &id,
+                )
+            }
+            InsertError::Retryable(err) => {
+                public_error_from_diesel(err, ErrorHandler::Server)
             }
             InsertError::External(e) => e,
         }
@@ -256,6 +275,12 @@ fn decode_database_error(
         "network_interface_vpc_id_mac_key";
 
     // The name of the index whose uniqueness is violated if we try to assign a
+    // slot to an interface that is already allocated to another interface in
+    // the same instance or service.
+    const SLOT_NOT_AVAILABLE_CONSTRAINT: &str =
+        "network_interface_parent_id_slot_key";
+
+    // The name of the index whose uniqueness is violated if we try to assign a
     // name to an interface that is already used for another interface on the
     // same resource.
     const NAME_CONFLICT_CONSTRAINT: &str =
@@ -289,6 +314,10 @@ fn decode_database_error(
         r#"could not parse "non-unique-subnets" as type uuid: "#,
         r#"uuid: incorrect UUID length: non-unique-subnets"#,
     );
+
+    if retryable(&err) {
+        return InsertError::Retryable(err);
+    }
 
     match err {
         // If the address allocation subquery fails, we'll attempt to insert
@@ -377,6 +406,12 @@ fn decode_database_error(
                 let mac = interface.mac.unwrap_or_else(|| MacAddr::from_i64(0));
                 InsertError::MacAddressNotAvailable(mac)
             }
+            // Constraint violated if a user-requested slot has
+            // already been assigned within the same instance or service.
+            Some(constraint) if constraint == SLOT_NOT_AVAILABLE_CONSTRAINT => {
+                let slot = interface.slot.unwrap_or(0);
+                InsertError::SlotNotAvailable(slot)
+            }
             // Constraint violated if the user-requested name is already
             // assigned to an interface on this resource
             Some(constraint) if constraint == NAME_CONFLICT_CONSTRAINT => {
@@ -386,6 +421,9 @@ fn decode_database_error(
                     }
                     NetworkInterfaceKind::Service => {
                         external::ResourceType::ServiceNetworkInterface
+                    }
+                    NetworkInterfaceKind::Probe => {
+                        external::ResourceType::ProbeNetworkInterface
                     }
                 };
                 InsertError::External(error::public_error_from_diesel(
@@ -419,36 +457,6 @@ fn decode_database_error(
     }
 }
 
-// Helper to return the offset of the last valid/allocatable IP in a subnet.
-// Note that this is the offset from the _first available address_, not the
-// network address.
-fn last_address_offset(subnet: &IpNetwork) -> u32 {
-    // Generate last address in the range.
-    //
-    // NOTE: First subtraction is to convert from the subnet size to an
-    // offset, since `generate_series` is inclusive of the last value.
-    // Example: 256 -> 255.
-    let last_address_offset = match subnet {
-        IpNetwork::V4(network) => network.size() - 1,
-        IpNetwork::V6(network) => {
-            // TODO-robustness: IPv6 subnets are always /64s, so in theory we
-            // could require searching all ~2^64 items for the next address.
-            // That won't happen in practice, because there will be other limits
-            // on the number of IPs (such as MAC addresses, or just project
-            // accounting limits). However, we should update this to be the
-            // actual maximum size we expect or want to support, once we get a
-            // better sense of what that is.
-            u32::try_from(network.size() - 1).unwrap_or(u32::MAX - 1)
-        }
-    };
-
-    // This subtraction is because the last address in a subnet is
-    // explicitly reserved for Oxide use.
-    last_address_offset
-        .checked_sub(1 + NUM_INITIAL_RESERVED_IP_ADDRESSES as u32)
-        .unwrap_or_else(|| panic!("Unexpectedly small IP subnet: '{}'", subnet))
-}
-
 // Return the first available address in a subnet. This is not the network
 // address, since Oxide reserves the first few addresses.
 fn first_available_address(subnet: &IpNetwork) -> IpAddr {
@@ -460,12 +468,9 @@ fn first_available_address(subnet: &IpNetwork) -> IpAddr {
             })
             .into(),
         IpNetwork::V6(network) => {
-            // TODO-performance: This is unfortunate. `ipnetwork` implements a
-            // direct addition-based approach for IPv4 but not IPv6. This will
-            // loop, which, while it may not matter much, can be nearly
-            // trivially avoided by converting to u128, adding, and converting
-            // back. Given that these spaces can be _really_ big, that is
-            // probably worth doing.
+            // NOTE: This call to `nth()` will loop and call the `next()`
+            // implementation. That's inefficient, but the number of reserved
+            // addresses is very small, so it should not matter.
             network
                 .iter()
                 .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _)
@@ -477,27 +482,55 @@ fn first_available_address(subnet: &IpNetwork) -> IpAddr {
     }
 }
 
+// Return the last available address in a subnet. This is not the broadcast
+// address, since that is reserved.
+fn last_available_address(subnet: &IpNetwork) -> IpAddr {
+    // NOTE: In both cases below, we subtract 2 from the network size. That's
+    // because we first subtract 1 to go from a size to an index, and then
+    // another 1 because the broadcast address isn't valid for an interface.
+    match subnet {
+        IpNetwork::V4(network) => network
+            .size()
+            .checked_sub(2)
+            .and_then(|n| network.nth(n))
+            .map(IpAddr::V4)
+            .unwrap_or_else(|| {
+                panic!("Unexpectedly small IPv4 subnetwork: '{}'", network);
+            }),
+        IpNetwork::V6(network) => {
+            // NOTE: The iterator implementation for `Ipv6Network` only
+            // implements the required `Iterator::next()` method. That means we
+            // get the default implementation of the `nth()` method, which will
+            // loop and call `next()`. That is ridiculously inefficient, so we
+            // manually compute the nth address through addition instead.
+            let base = u128::from(network.network());
+            let n = network.size().checked_sub(2).unwrap_or_else(|| {
+                panic!("Unexpectedly small IPv6 subnetwork: '{}'", network);
+            });
+            IpAddr::V6(Ipv6Addr::from(base + n))
+        }
+    }
+}
+
 /// The `NextIpv4Address` query is a `NextItem` query for choosing the next
 /// available IPv4 address for an interface.
 #[derive(Debug, Clone, Copy)]
 pub struct NextIpv4Address {
-    inner: NextItem<
-        db::schema::network_interface::table,
+    inner: NextItemSelfJoined<
+        nexus_db_schema::schema::network_interface::table,
         IpNetwork,
-        db::schema::network_interface::dsl::ip,
+        nexus_db_schema::schema::network_interface::dsl::ip,
         Uuid,
-        db::schema::network_interface::dsl::subnet_id,
+        nexus_db_schema::schema::network_interface::dsl::subnet_id,
     >,
 }
 
 impl NextIpv4Address {
     pub fn new(subnet: Ipv4Network, subnet_id: Uuid) -> Self {
         let subnet = IpNetwork::from(subnet);
-        let net = IpNetwork::from(first_available_address(&subnet));
-        let max_shift = i64::from(last_address_offset(&subnet));
-        let generator =
-            DefaultShiftGenerator { base: net, max_shift, min_shift: 0 };
-        Self { inner: NextItem::new_scoped(generator, subnet_id) }
+        let min = IpNetwork::from(first_available_address(&subnet));
+        let max = IpNetwork::from(last_available_address(&subnet));
+        Self { inner: NextItemSelfJoined::new_scoped(subnet_id, min, max) }
     }
 }
 
@@ -544,22 +577,23 @@ delegate_query_fragment_impl!(NextIpv4Address);
 #[derive(Debug, Clone, Copy)]
 pub struct NextNicSlot {
     inner: NextItem<
-        db::schema::network_interface::table,
+        nexus_db_schema::schema::network_interface::table,
         i16,
-        db::schema::network_interface::dsl::slot,
+        nexus_db_schema::schema::network_interface::dsl::slot,
         Uuid,
-        db::schema::network_interface::dsl::parent_id,
+        nexus_db_schema::schema::network_interface::dsl::parent_id,
     >,
 }
 
 impl NextNicSlot {
     pub fn new(parent_id: Uuid) -> Self {
-        let generator = DefaultShiftGenerator {
-            base: 0,
-            max_shift: i64::try_from(MAX_NICS)
+        let generator = DefaultShiftGenerator::new(
+            0,
+            i64::try_from(MAX_NICS_PER_INSTANCE)
                 .expect("Too many network interfaces"),
-            min_shift: 0,
-        };
+            0,
+        )
+        .expect("invalid min/max shift");
         Self { inner: NextItem::new_scoped(generator, parent_id) }
     }
 }
@@ -577,35 +611,28 @@ impl QueryFragment<Pg> for NextNicSlot {
 /// a network interface.
 #[derive(Debug, Clone, Copy)]
 pub struct NextMacAddress {
-    inner: NextItem<
-        db::schema::network_interface::table,
+    inner: NextItemSelfJoined<
+        nexus_db_schema::schema::network_interface::table,
         db::model::MacAddr,
-        db::schema::network_interface::dsl::mac,
+        nexus_db_schema::schema::network_interface::dsl::mac,
         Uuid,
-        db::schema::network_interface::dsl::vpc_id,
+        nexus_db_schema::schema::network_interface::dsl::vpc_id,
     >,
 }
 
 impl NextMacAddress {
     pub fn new(vpc_id: Uuid, kind: NetworkInterfaceKind) -> Self {
-        let (base, max_shift, min_shift) = match kind {
-            NetworkInterfaceKind::Instance => {
-                let base = MacAddr::random_guest();
-                let x = base.to_i64();
-                let max_shift = MacAddr::MAX_GUEST_ADDR - x;
-                let min_shift = x - MacAddr::MIN_GUEST_ADDR;
-                (base.into(), max_shift, min_shift)
+        let (min, max) = match kind {
+            NetworkInterfaceKind::Instance | NetworkInterfaceKind::Probe => {
+                (MacAddr::MIN_GUEST_ADDR, MacAddr::MAX_GUEST_ADDR)
             }
             NetworkInterfaceKind::Service => {
-                let base = MacAddr::random_system();
-                let x = base.to_i64();
-                let max_shift = MacAddr::MAX_SYSTEM_ADDR - x;
-                let min_shift = x - MacAddr::MAX_SYSTEM_ADDR;
-                (base.into(), max_shift, min_shift)
+                (MacAddr::MIN_SYSTEM_ADDR, MacAddr::MAX_SYSTEM_ADDR)
             }
         };
-        let generator = DefaultShiftGenerator { base, max_shift, min_shift };
-        Self { inner: NextItem::new_scoped(generator, vpc_id) }
+        let min = db::model::MacAddr(MacAddr::from_i64(min));
+        let max = db::model::MacAddr(MacAddr::from_i64(max));
+        Self { inner: NextItemSelfJoined::new_scoped(vpc_id, min, max) }
     }
 }
 
@@ -975,6 +1002,7 @@ pub struct InsertQuery {
     parent_id_str: String,
     ip_sql: Option<IpNetwork>,
     mac_sql: Option<db::model::MacAddr>,
+    slot_sql: Option<SqlU8>,
     next_mac_subquery: NextMacAddress,
     next_ipv4_address_subquery: NextIpv4Address,
     next_slot_subquery: NextNicSlot,
@@ -989,10 +1017,11 @@ impl InsertQuery {
         let parent_id_str = interface.parent_id.to_string();
         let ip_sql = interface.ip.map(|ip| ip.into());
         let mac_sql = interface.mac.map(|mac| mac.into());
+        let slot_sql = interface.slot.map(|slot| slot.into());
         let next_mac_subquery =
             NextMacAddress::new(interface.subnet.vpc_id, interface.kind);
         let next_ipv4_address_subquery = NextIpv4Address::new(
-            interface.subnet.ipv4_block.0 .0,
+            interface.subnet.ipv4_block.0.into(),
             interface.subnet.identity.id,
         );
         let next_slot_subquery = NextNicSlot::new(interface.parent_id);
@@ -1006,6 +1035,7 @@ impl InsertQuery {
             parent_id_str,
             ip_sql,
             mac_sql,
+            slot_sql,
             next_mac_subquery,
             next_ipv4_address_subquery,
             next_slot_subquery,
@@ -1017,7 +1047,7 @@ impl InsertQuery {
 type FromClause<T> =
     diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
 type NetworkInterfaceFromClause =
-    FromClause<db::schema::network_interface::table>;
+    FromClause<nexus_db_schema::schema::network_interface::table>;
 const NETWORK_INTERFACE_FROM_CLAUSE: NetworkInterfaceFromClause =
     NetworkInterfaceFromClause::new();
 
@@ -1026,7 +1056,9 @@ impl QueryId for InsertQuery {
     const HAS_STATIC_QUERY_ID: bool = false;
 }
 
-impl Insertable<db::schema::network_interface::table> for InsertQuery {
+impl Insertable<nexus_db_schema::schema::network_interface::table>
+    for InsertQuery
+{
     type Values = InsertQueryValues;
 
     fn values(self) -> Self::Values {
@@ -1160,7 +1192,11 @@ impl QueryFragment<Pg> for InsertQuery {
         out.push_identifier(dsl::ip::NAME)?;
         out.push_sql(", ");
 
-        select_from_cte(out.reborrow(), dsl::slot::NAME)?;
+        if let Some(slot) = &self.slot_sql {
+            out.push_bind_param::<sql_types::Int2, SqlU8>(slot)?;
+        } else {
+            select_from_cte(out.reborrow(), dsl::slot::NAME)?;
+        }
         out.push_sql(", ");
         select_from_cte(out.reborrow(), dsl::is_primary::NAME)?;
 
@@ -1263,7 +1299,7 @@ impl QueryFragment<Pg> for IsPrimaryNic {
     }
 }
 
-type InstanceFromClause = FromClause<db::schema::instance::table>;
+type InstanceFromClause = FromClause<nexus_db_schema::schema::instance::table>;
 const INSTANCE_FROM_CLAUSE: InstanceFromClause = InstanceFromClause::new();
 
 // Subquery used to ensure an instance both exists and is either stopped (or
@@ -1330,41 +1366,59 @@ fn push_instance_state_verification_subquery<'a>(
     mut out: AstPass<'_, 'a, Pg>,
     failed_ok: bool,
 ) -> QueryResult<()> {
+    use nexus_db_schema::enums::InstanceStateEnum;
+
     out.push_sql("CAST(CASE COALESCE((SELECT ");
     out.push_sql("CASE WHEN ");
-    out.push_identifier(db::schema::instance::dsl::active_propolis_id::NAME)?;
+    out.push_identifier(
+        nexus_db_schema::schema::instance::dsl::active_propolis_id::NAME,
+    )?;
     out.push_sql(" IS NULL THEN ");
-    out.push_identifier(db::schema::instance::dsl::state::NAME)?;
+    out.push_identifier(nexus_db_schema::schema::instance::dsl::state::NAME)?;
     out.push_sql(" ELSE ");
-    out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_RUNNING)?;
+    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
+        &INSTANCE_RUNNING,
+    )?;
     out.push_sql(" END ");
     out.push_sql(" FROM ");
     INSTANCE_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" WHERE ");
-    out.push_identifier(db::schema::instance::dsl::id::NAME)?;
+    out.push_identifier(nexus_db_schema::schema::instance::dsl::id::NAME)?;
     out.push_sql(" = ");
     out.push_bind_param::<sql_types::Uuid, Uuid>(instance_id)?;
     out.push_sql(" AND ");
-    out.push_identifier(db::schema::instance::dsl::time_deleted::NAME)?;
+    out.push_identifier(
+        nexus_db_schema::schema::instance::dsl::time_deleted::NAME,
+    )?;
     out.push_sql(" IS NULL), ");
-    out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_DESTROYED)?;
+    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
+        &INSTANCE_DESTROYED,
+    )?;
     out.push_sql(") WHEN ");
-    out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_STOPPED)?;
+    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
+        &INSTANCE_STOPPED,
+    )?;
     out.push_sql(" THEN ");
     out.push_bind_param::<sql_types::Text, String>(instance_id_str)?;
     out.push_sql(" WHEN ");
-    out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_CREATING)?;
+    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
+        &INSTANCE_CREATING,
+    )?;
     out.push_sql(" THEN ");
     out.push_bind_param::<sql_types::Text, String>(instance_id_str)?;
     if failed_ok {
         // FAILED is ok for DeleteQuery, but not for InsertQuery!
         out.push_sql(" WHEN ");
-        out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_FAILED)?;
+        out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
+            &INSTANCE_FAILED,
+        )?;
         out.push_sql(" THEN ");
         out.push_bind_param::<sql_types::Text, String>(instance_id_str)?;
     }
     out.push_sql(" WHEN ");
-    out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_DESTROYED)?;
+    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
+        &INSTANCE_DESTROYED,
+    )?;
     out.push_sql(" THEN ");
     out.push_bind_param::<sql_types::Text, String>(
         &NO_INSTANCE_SENTINEL_STRING,
@@ -1430,18 +1484,39 @@ fn push_instance_state_verification_subquery<'a>(
 ///                     parent_id = <parent_id> AND
 ///                     kind = <kind> AND
 ///                     time_deleted IS NULL
-///             ) = 1,
+///             ) <= 1,
 ///             '<interface_id>',
 ///             'secondaries'
 ///         ) AS UUID)
+///     ),
+///     found_interface AS (
+///         SELECT
+///             id
+///         FROM
+///             network_interface
+///         WHERE
+///             id = <interface_id>
+///     ),
+///     updated AS (
+///         UPDATE
+///             network_interface
+///         SET
+///             time_deleted = NOW()
+///         WHERE
+///             id = <interface_id> AND
+///             time_deleted IS NULL
+///         RETURNING
+///             id
 ///     )
-/// UPDATE
-///     network_interface
-/// SET
-///     time_deleted = NOW()
-/// WHERE
-///     id = <interface_id> AND
-///     time_deleted IS NULL
+/// SELECT
+///     found_interface.id,
+///     updated.id
+/// FROM
+///     found_interface
+/// LEFT JOIN
+///     updated
+/// ON
+///     found_interface.id = updated.id
 /// ```
 ///
 /// Notes
@@ -1471,6 +1546,37 @@ impl DeleteQuery {
             kind,
             parent_id,
             parent_id_str: parent_id.to_string(),
+        }
+    }
+
+    /// Issue the delete and parses the result.
+    ///
+    /// The three outcomes are:
+    /// - Ok(Row exists and was deleted)
+    /// - Ok(Row exists, but was not deleted)
+    /// - Error (row doesn't exist, or other diesel error)
+    pub async fn execute_and_check(
+        self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<bool, DieselError> {
+        let (found_id, deleted_id) =
+            self.get_result_async::<(Option<Uuid>, Option<Uuid>)>(conn).await?;
+        match (found_id, deleted_id) {
+            (Some(found), Some(deleted)) => {
+                assert_eq!(
+                    found, deleted,
+                    "internal query error: mismatched interface IDs"
+                );
+                Ok(true)
+            }
+            (Some(_), None) => Ok(false),
+            (None, Some(deleted)) => {
+                panic!(
+                    "internal query error: \
+                     deleted nonexisted interface {deleted}"
+                )
+            }
+            (None, None) => Err(DieselError::NotFound),
         }
     }
 }
@@ -1520,13 +1626,21 @@ impl QueryFragment<Pg> for DeleteQuery {
         )?;
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL) = 1, ");
+        out.push_sql(" IS NULL) <= 1, ");
         out.push_bind_param::<sql_types::Text, String>(&self.parent_id_str)?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Text, &str>(
             &DeleteError::HAS_SECONDARIES_SENTINEL,
         )?;
-        out.push_sql(") AS UUID)) UPDATE ");
+        out.push_sql(") AS UUID)), found_interface AS (SELECT ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" FROM ");
+        NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.interface_id)?;
+        out.push_sql("), updated AS (UPDATE ");
         NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" SET ");
         out.push_identifier(dsl::time_deleted::NAME)?;
@@ -1536,25 +1650,43 @@ impl QueryFragment<Pg> for DeleteQuery {
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.interface_id)?;
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL");
+        out.push_sql(" IS NULL RETURNING ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(") SELECT found_interface.");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(", updated.");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" FROM found_interface LEFT JOIN updated");
+        out.push_sql(" ON found_interface.");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" = updated.");
+        out.push_identifier(dsl::id::NAME)?;
         Ok(())
     }
+}
+
+impl Query for DeleteQuery {
+    type SqlType = (Nullable<sql_types::Uuid>, Nullable<sql_types::Uuid>);
 }
 
 impl RunQueryDsl<DbConnection> for DeleteQuery {}
 
 /// Errors related to deleting a network interface
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error, SlogInlineError, PartialEq)]
 pub enum DeleteError {
     /// Attempting to delete the primary interface, while there still exist
     /// secondary interfaces.
+    #[error("cannot delete primary interface while secondaries exist")]
     SecondariesExist(Uuid),
     /// Instance must be stopped or failed prior to deleting interfaces from it
+    #[error("cannot delete interface in current instance state")]
     InstanceBadState(Uuid),
     /// The instance does not exist at all, or is in the destroyed state.
+    #[error("instance not found ({0})")]
     InstanceNotFound(Uuid),
     /// Any other error
-    External(external::Error),
+    #[error("cannot delete interface")]
+    External(#[source] external::Error),
 }
 
 impl DeleteError {
@@ -1576,6 +1708,24 @@ impl DeleteError {
                     e,
                     query.parent_id,
                 )
+            }
+            // Faithfully plumb through `NotFound`
+            DieselError::NotFound => {
+                let type_name = match query.kind {
+                    NetworkInterfaceKind::Instance => {
+                        external::ResourceType::InstanceNetworkInterface
+                    }
+                    NetworkInterfaceKind::Service => {
+                        external::ResourceType::ServiceNetworkInterface
+                    }
+                    NetworkInterfaceKind::Probe => {
+                        external::ResourceType::ProbeNetworkInterface
+                    }
+                };
+                DeleteError::External(external::Error::ObjectNotFound {
+                    type_name,
+                    lookup_type: external::LookupType::ById(query.interface_id),
+                })
             }
             // Any other error at all is a bug
             _ => DeleteError::External(error::public_error_from_diesel(
@@ -1627,8 +1777,7 @@ fn decode_delete_network_interface_database_error(
 
     // Error message generated when we're attempting to delete a primary
     // interface, and that instance also has one or more secondary interfaces
-    const HAS_SECONDARIES_ERROR_MESSAGE: &'static str =
-        "could not parse \"secondaries\" as type uuid: uuid: \
+    const HAS_SECONDARIES_ERROR_MESSAGE: &'static str = "could not parse \"secondaries\" as type uuid: uuid: \
         incorrect UUID length: secondaries";
 
     match err {
@@ -1669,11 +1818,11 @@ fn decode_delete_network_interface_database_error(
 
 #[cfg(test)]
 mod tests {
-    use super::first_available_address;
-    use super::last_address_offset;
+    use super::DeleteError;
     use super::InsertError;
-    use super::MAX_NICS;
+    use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use super::first_available_address;
     use crate::authz;
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
@@ -1682,15 +1831,15 @@ mod tests {
     use crate::db::model;
     use crate::db::model::IncompleteNetworkInterface;
     use crate::db::model::Instance;
+    use crate::db::model::InstanceState;
     use crate::db::model::NetworkInterface;
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
+    use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::queries::network_interface::last_available_address;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
-    use ipnetwork::Ipv4Network;
-    use ipnetwork::Ipv6Network;
     use model::NetworkInterfaceKind;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
@@ -1699,16 +1848,17 @@ mod tests {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::InstanceCpuCount;
-    use omicron_common::api::external::Ipv4Net;
-    use omicron_common::api::external::Ipv6Net;
     use omicron_common::api::external::MacAddr;
     use omicron_test_utils::dev;
-    use omicron_test_utils::dev::db::CockroachInstance;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::InstanceUuid;
+    use oxnet::Ipv4Net;
+    use oxnet::Ipv6Net;
+    use std::collections::HashSet;
     use std::convert::TryInto;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
-    use std::sync::Arc;
     use uuid::Uuid;
 
     // Add an instance. We'll use this to verify that the instance must be
@@ -1718,7 +1868,7 @@ mod tests {
         project_id: Uuid,
         db_datastore: &DataStore,
     ) -> Instance {
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
         // Use the first chunk of the UUID as the name, to avoid conflicts.
         // Start with a lower ascii character to satisfy the name constraints.
         let name = format!("a{}", instance_id)[..9].parse().unwrap();
@@ -1729,12 +1879,16 @@ mod tests {
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(4),
-            hostname: "inst".to_string(),
+            hostname: "inst".parse().unwrap(),
             user_data: vec![],
+            ssh_public_keys: Some(Vec::new()),
             network_interfaces: InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],
+            boot_disk: None,
             start: true,
+            auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
         };
 
         let instance = Instance::new(instance_id, project_id, &params);
@@ -1757,55 +1911,32 @@ mod tests {
         db_datastore: &DataStore,
     ) -> Instance {
         let instance = create_instance(opctx, project_id, db_datastore).await;
-        instance_set_state(
-            db_datastore,
-            instance,
-            external::InstanceState::Stopped,
-        )
-        .await
+        instance_set_state(db_datastore, instance, InstanceState::NoVmm).await
     }
 
     async fn instance_set_state(
         db_datastore: &DataStore,
         mut instance: Instance,
-        state: external::InstanceState,
+        state: InstanceState,
     ) -> Instance {
-        let new_runtime = model::InstanceRuntimeState {
-            nexus_state: model::InstanceState::new(state),
-            gen: instance.runtime_state.gen.next().into(),
-            ..instance.runtime_state.clone()
+        let propolis_id = match state {
+            InstanceState::Vmm => Some(Uuid::new_v4()),
+            _ => None,
         };
-        let res = db_datastore
-            .instance_update_runtime(&instance.id(), &new_runtime)
-            .await;
-        assert!(matches!(res, Ok(true)), "Failed to change instance state");
-        instance.runtime_state = new_runtime;
-        instance
-    }
 
-    /// Sets or clears the active Propolis ID in the supplied instance record.
-    /// This can be used to exercise the "does this instance have an active
-    /// VMM?" test that determines in part whether an instance's network
-    /// interfaces can change.
-    ///
-    /// Note that this routine does not construct a VMM record for the
-    /// corresponding ID, so any functions that expect such a record to exist
-    /// will fail in strange and exciting ways.
-    async fn instance_set_active_vmm(
-        db_datastore: &DataStore,
-        mut instance: Instance,
-        propolis_id: Option<Uuid>,
-    ) -> Instance {
         let new_runtime = model::InstanceRuntimeState {
+            nexus_state: state,
             propolis_id,
             gen: instance.runtime_state.gen.next().into(),
             ..instance.runtime_state.clone()
         };
-
         let res = db_datastore
-            .instance_update_runtime(&instance.id(), &new_runtime)
+            .instance_update_runtime(
+                &InstanceUuid::from_untyped_uuid(instance.id()),
+                &new_runtime,
+            )
             .await;
-        assert!(matches!(res, Ok(true)), "Failed to change instance VMM ref");
+        assert!(matches!(res, Ok(true)), "Failed to change instance state");
         instance.runtime_state = new_runtime;
         instance
     }
@@ -1821,25 +1952,13 @@ mod tests {
             let vpc_id = Uuid::new_v4();
             let mut subnets = Vec::with_capacity(n_subnets as _);
             for i in 0..n_subnets {
-                let ipv4net = Ipv4Net(
-                    Ipv4Network::new(Ipv4Addr::new(172, 30, 0, i), 28).unwrap(),
-                );
-                let ipv6net = Ipv6Net(
-                    Ipv6Network::new(
-                        Ipv6Addr::new(
-                            0xfd12,
-                            0x3456,
-                            0x7890,
-                            i.into(),
-                            0,
-                            0,
-                            0,
-                            0,
-                        ),
-                        64,
-                    )
-                    .unwrap(),
-                );
+                let ipv4net =
+                    Ipv4Net::new(Ipv4Addr::new(172, 30, 0, i), 28).unwrap();
+                let ipv6net = Ipv6Net::new(
+                    Ipv6Addr::new(0xfd12, 0x3456, 0x7890, i.into(), 0, 0, 0, 0),
+                    64,
+                )
+                .unwrap();
                 let subnet = VpcSubnet::new(
                     Uuid::new_v4(),
                     vpc_id,
@@ -1859,9 +1978,11 @@ mod tests {
             self.subnets
                 .iter()
                 .map(|subnet| {
-                    subnet.ipv4_block.size() as usize
-                        - NUM_INITIAL_RESERVED_IP_ADDRESSES
-                        - 1
+                    let size_minus_1 = match subnet.ipv4_block.size() {
+                        Some(n) => n - 1,
+                        None => u32::MAX,
+                    } as usize;
+                    size_minus_1 - NUM_INITIAL_RESERVED_IP_ADDRESSES
                 })
                 .collect()
         }
@@ -1870,9 +1991,7 @@ mod tests {
     // Context for testing network interface queries.
     struct TestContext {
         logctx: LogContext,
-        opctx: OpContext,
-        db: CockroachInstance,
-        db_datastore: Arc<DataStore>,
+        db: TestDatabase,
         project_id: Uuid,
         net1: Network,
         net2: Network,
@@ -1882,9 +2001,8 @@ mod tests {
         async fn new(test_name: &str, n_subnets: u8) -> Self {
             let logctx = dev::test_setup_log(test_name);
             let log = logctx.log.new(o!());
-            let db = test_setup_database(&log).await;
-            let (opctx, db_datastore) =
-                crate::db::datastore::datastore_test(&logctx, &db).await;
+            let db = TestDatabase::new_with_datastore(&log).await;
+            let (opctx, datastore) = (db.opctx(), db.datastore());
 
             let authz_silo = opctx.authn.silo_required().unwrap();
 
@@ -1899,11 +2017,11 @@ mod tests {
                 },
             );
             let (.., project) =
-                db_datastore.project_create(&opctx, project).await.unwrap();
+                datastore.project_create(&opctx, project).await.unwrap();
 
-            use crate::db::schema::vpc_subnet::dsl::vpc_subnet;
+            use nexus_db_schema::schema::vpc_subnet::dsl::vpc_subnet;
             let conn =
-                db_datastore.pool_connection_authorized(&opctx).await.unwrap();
+                datastore.pool_connection_authorized(&opctx).await.unwrap();
             let net1 = Network::new(n_subnets);
             let net2 = Network::new(n_subnets);
             for subnet in net1.subnets.iter().chain(net2.subnets.iter()) {
@@ -1914,56 +2032,124 @@ mod tests {
                     .unwrap();
             }
             drop(conn);
-            Self {
-                logctx,
-                opctx,
-                db,
-                db_datastore,
-                project_id: project.id(),
-                net1,
-                net2,
-            }
+            Self { logctx, db, project_id: project.id(), net1, net2 }
         }
 
-        async fn success(mut self) {
-            self.db.cleanup().await.unwrap();
+        fn opctx(&self) -> &OpContext {
+            self.db.opctx()
+        }
+
+        fn datastore(&self) -> &DataStore {
+            self.db.datastore()
+        }
+
+        async fn success(self) {
+            self.db.terminate().await;
             self.logctx.cleanup_successful();
         }
 
         async fn create_stopped_instance(&self) -> Instance {
             instance_set_state(
-                &self.db_datastore,
+                self.datastore(),
                 create_instance(
-                    &self.opctx,
+                    self.opctx(),
                     self.project_id,
-                    &self.db_datastore,
+                    self.datastore(),
                 )
                 .await,
-                external::InstanceState::Stopped,
+                InstanceState::NoVmm,
             )
             .await
         }
 
         async fn create_running_instance(&self) -> Instance {
-            let instance = instance_set_state(
-                &self.db_datastore,
+            instance_set_state(
+                self.datastore(),
                 create_instance(
-                    &self.opctx,
+                    self.opctx(),
                     self.project_id,
-                    &self.db_datastore,
+                    self.datastore(),
                 )
                 .await,
-                external::InstanceState::Starting,
-            )
-            .await;
-
-            instance_set_active_vmm(
-                &self.db_datastore,
-                instance,
-                Some(Uuid::new_v4()),
+                InstanceState::Vmm,
             )
             .await
         }
+    }
+
+    #[tokio::test]
+    async fn test_delete_service_is_idempotent() {
+        let context =
+            TestContext::new("test_delete_service_is_idempotent", 2).await;
+        let service_id = Uuid::new_v4();
+        let ip = context.net1.subnets[0]
+            .ipv4_block
+            .addr_iter()
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .unwrap();
+        let interface = IncompleteNetworkInterface::new_service(
+            Uuid::new_v4(),
+            service_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "service-nic".parse().unwrap(),
+                description: String::from("service nic"),
+            },
+            ip.into(),
+            MacAddr::random_system(),
+            0,
+        )
+        .unwrap();
+        let inserted_interface = context
+            .datastore()
+            .service_create_network_interface_raw(context.opctx(), interface)
+            .await
+            .expect("Failed to insert interface");
+
+        // We should be able to delete twice, and be told that the first delete
+        // modified the row and the second did not.
+        let first_deleted = context
+            .datastore()
+            .service_delete_network_interface(
+                context.opctx(),
+                service_id,
+                inserted_interface.id(),
+            )
+            .await
+            .expect("failed first delete");
+        assert!(first_deleted, "first delete removed interface");
+
+        let second_deleted = context
+            .datastore()
+            .service_delete_network_interface(
+                context.opctx(),
+                service_id,
+                inserted_interface.id(),
+            )
+            .await
+            .expect("failed second delete");
+        assert!(!second_deleted, "second delete did nothing");
+
+        // Attempting to delete a nonexistent interface should fail.
+        let bogus_id = Uuid::new_v4();
+        let err = context
+            .datastore()
+            .service_delete_network_interface(
+                context.opctx(),
+                service_id,
+                bogus_id,
+            )
+            .await
+            .expect_err(
+                "unexpectedly succeeded deleting nonexistent interface",
+            );
+        let expected_err =
+            DeleteError::External(external::Error::ObjectNotFound {
+                type_name: external::ResourceType::ServiceNetworkInterface,
+                lookup_type: external::LookupType::ById(bogus_id),
+            });
+        assert_eq!(err, expected_err);
+        context.success().await;
     }
 
     #[tokio::test]
@@ -1971,7 +2157,7 @@ mod tests {
         let context =
             TestContext::new("test_insert_running_instance_fails", 2).await;
         let instance = context.create_running_instance().await;
-        let instance_id = instance.id();
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let requested_ip = "172.30.0.5".parse().unwrap();
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
@@ -1984,8 +2170,8 @@ mod tests {
             Some(requested_ip),
         )
         .unwrap();
-        let err = context.db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface.clone())
+        let err = context.datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface.clone())
             .await
             .expect_err("Should not be able to create an interface for a running instance");
         assert!(
@@ -2000,7 +2186,7 @@ mod tests {
     async fn test_insert_request_exact_ip() {
         let context = TestContext::new("test_insert_request_exact_ip", 2).await;
         let instance = context.create_stopped_instance().await;
-        let instance_id = instance.id();
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let requested_ip = "172.30.0.5".parse().unwrap();
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
@@ -2014,9 +2200,9 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
+            .datastore()
             .instance_create_network_interface_raw(
-                &context.opctx,
+                context.opctx(),
                 interface.clone(),
             )
             .await
@@ -2036,7 +2222,7 @@ mod tests {
             TestContext::new("test_insert_no_instance_fails", 2).await;
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            Uuid::new_v4(),
+            InstanceUuid::new_v4(),
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-b".parse().unwrap(),
@@ -2045,8 +2231,8 @@ mod tests {
             None,
         )
         .unwrap();
-        let err = context.db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface.clone())
+        let err = context.datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface.clone())
             .await
             .expect_err("Should not be able to insert an interface for an instance that doesn't exist");
         assert!(
@@ -2066,14 +2252,15 @@ mod tests {
             TestContext::new("test_insert_sequential_ip_allocation", 2).await;
         let addresses = context.net1.subnets[0]
             .ipv4_block
-            .iter()
+            .addr_iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
 
         for (i, expected_address) in addresses.take(2).enumerate() {
             let instance = context.create_stopped_instance().await;
+            let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
-                instance.id(),
+                instance_id,
                 context.net1.subnets[0].clone(),
                 IdentityMetadataCreateParams {
                     name: format!("interface-{}", i).parse().unwrap(),
@@ -2083,9 +2270,9 @@ mod tests {
             )
             .unwrap();
             let inserted_interface = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface.clone(),
                 )
                 .await
@@ -2109,12 +2296,15 @@ mod tests {
             TestContext::new("test_insert_request_same_ip_fails", 2).await;
 
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let new_instance = context.create_stopped_instance().await;
+        let new_instance_id =
+            InstanceUuid::from_untyped_uuid(new_instance.id());
 
         // Insert an interface on the first instance.
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2124,8 +2314,8 @@ mod tests {
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
 
@@ -2133,7 +2323,7 @@ mod tests {
         // other parameters are valid.
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            new_instance.id(),
+            new_instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2143,8 +2333,8 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(result, Err(InsertError::IpAddressNotAvailable(_))),
@@ -2157,7 +2347,93 @@ mod tests {
     async fn test_insert_request_mac() {
         let context = TestContext::new("test_insert_request_mac", 1).await;
 
-        // Insert a service NIC with an explicit MAC address
+        // Ensure service NICs are recorded with the explicit requested MAC
+        // address
+        let service_id = Uuid::new_v4();
+        let ip = context.net1.subnets[0]
+            .ipv4_block
+            .addr_iter()
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .unwrap();
+        let mac = MacAddr::random_system();
+        let interface = IncompleteNetworkInterface::new_service(
+            Uuid::new_v4(),
+            service_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "service-nic".parse().unwrap(),
+                description: String::from("service nic"),
+            },
+            ip.into(),
+            mac,
+            0,
+        )
+        .unwrap();
+        let inserted_interface = context
+            .datastore()
+            .service_create_network_interface_raw(context.opctx(), interface)
+            .await
+            .expect("Failed to insert interface");
+        assert_eq!(inserted_interface.mac.0, mac);
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_insert_request_slot() {
+        let context = TestContext::new("test_insert_request_slot", 1).await;
+
+        // Ensure service NICs are recorded with the explicit requested slot
+        let mut used_macs = HashSet::new();
+        let mut ips = context.net1.subnets[0]
+            .ipv4_block
+            .addr_iter()
+            .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
+        for slot in 0..u8::try_from(MAX_NICS_PER_INSTANCE).unwrap() {
+            let service_id = Uuid::new_v4();
+            let ip = ips.next().expect("exhausted test subnet");
+            let mut mac = MacAddr::random_system();
+            while !used_macs.insert(mac) {
+                mac = MacAddr::random_system();
+            }
+            let interface = IncompleteNetworkInterface::new_service(
+                Uuid::new_v4(),
+                service_id,
+                context.net1.subnets[0].clone(),
+                IdentityMetadataCreateParams {
+                    name: "service-nic".parse().unwrap(),
+                    description: String::from("service nic"),
+                },
+                ip.into(),
+                mac,
+                slot,
+            )
+            .unwrap();
+            let inserted_interface = context
+                .datastore()
+                .service_create_network_interface_raw(
+                    context.opctx(),
+                    interface,
+                )
+                .await
+                .expect("Failed to insert interface");
+            assert_eq!(*inserted_interface.slot, slot);
+        }
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_insert_request_same_mac_fails() {
+        let context =
+            TestContext::new("test_insert_request_same_mac_fails", 2).await;
+
+        let mut ips = context.net1.subnets[0]
+            .ipv4_block
+            .addr_iter()
+            .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
+
+        // Insert a service NIC
         let service_id = Uuid::new_v4();
         let mac = MacAddr::random_system();
         let interface = IncompleteNetworkInterface::new_service(
@@ -2168,44 +2444,17 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            None,
-            Some(mac),
+            ips.next().expect("exhausted test subnet").into(),
+            mac,
+            0,
         )
         .unwrap();
         let inserted_interface = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .service_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         assert_eq!(inserted_interface.mac.0, mac);
-
-        context.success().await;
-    }
-
-    #[tokio::test]
-    async fn test_insert_request_same_mac_fails() {
-        let context =
-            TestContext::new("test_insert_request_same_mac_fails", 2).await;
-
-        // Insert a service NIC
-        let service_id = Uuid::new_v4();
-        let interface = IncompleteNetworkInterface::new_service(
-            Uuid::new_v4(),
-            service_id,
-            context.net1.subnets[0].clone(),
-            IdentityMetadataCreateParams {
-                name: "service-nic".parse().unwrap(),
-                description: String::from("service nic"),
-            },
-            None,
-            None,
-        )
-        .unwrap();
-        let inserted_interface = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, interface)
-            .await
-            .expect("Failed to insert interface");
 
         // Inserting an interface with the same MAC should fail, even if all
         // other parameters are valid.
@@ -2218,13 +2467,17 @@ mod tests {
                 name: "new-service-nic".parse().unwrap(),
                 description: String::from("new-service nic"),
             },
-            None,
-            Some(inserted_interface.mac.0),
+            ips.next().expect("exhausted test subnet").into(),
+            mac,
+            0,
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .service_create_network_interface_raw(&context.opctx, new_interface)
+            .datastore()
+            .service_create_network_interface_raw(
+                context.opctx(),
+                new_interface,
+            )
             .await;
         assert!(
             matches!(result, Err(InsertError::MacAddressNotAvailable(_))),
@@ -2234,13 +2487,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_insert_request_same_slot_fails() {
+        let context =
+            TestContext::new("test_insert_request_same_slot_fails", 2).await;
+
+        let ip0 = context.net1.subnets[0]
+            .ipv4_block
+            .addr_iter()
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .unwrap();
+        let ip1 = context.net1.subnets[1]
+            .ipv4_block
+            .addr_iter()
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .unwrap();
+
+        let mut next_mac = {
+            let mut used_macs = HashSet::new();
+            move || {
+                let mut mac = MacAddr::random_system();
+                while !used_macs.insert(mac) {
+                    mac = MacAddr::random_system();
+                }
+                mac
+            }
+        };
+
+        // Insert a service NIC
+        let service_id = Uuid::new_v4();
+        let interface = IncompleteNetworkInterface::new_service(
+            Uuid::new_v4(),
+            service_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "service-nic".parse().unwrap(),
+                description: String::from("service nic"),
+            },
+            ip0.into(),
+            next_mac(),
+            0,
+        )
+        .unwrap();
+        let inserted_interface = context
+            .datastore()
+            .service_create_network_interface_raw(context.opctx(), interface)
+            .await
+            .expect("Failed to insert interface");
+        assert_eq!(*inserted_interface.slot, 0);
+
+        // Inserting an interface with the same slot on the same service should
+        let new_interface = IncompleteNetworkInterface::new_service(
+            Uuid::new_v4(),
+            service_id,
+            context.net1.subnets[1].clone(),
+            IdentityMetadataCreateParams {
+                name: "new-service-nic".parse().unwrap(),
+                description: String::from("new-service nic"),
+            },
+            ip1.into(),
+            next_mac(),
+            0,
+        )
+        .unwrap();
+        let result = context
+            .datastore()
+            .service_create_network_interface_raw(
+                context.opctx(),
+                new_interface,
+            )
+            .await;
+        assert!(
+            matches!(result, Err(InsertError::SlotNotAvailable(0))),
+            "Requesting an interface with an existing slot should fail"
+        );
+        context.success().await;
+    }
+
+    #[tokio::test]
     async fn test_insert_with_duplicate_name_fails() {
         let context =
             TestContext::new("test_insert_with_duplicate_name_fails", 2).await;
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2250,16 +2581,16 @@ mod tests {
         )
         .unwrap();
         let _ = context
-            .db_datastore
+            .datastore()
             .instance_create_network_interface_raw(
-                &context.opctx,
+                context.opctx(),
                 interface.clone(),
             )
             .await
             .expect("Failed to insert interface");
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[1].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2269,8 +2600,8 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(
@@ -2287,9 +2618,10 @@ mod tests {
         let context =
             TestContext::new("test_insert_same_vpc_subnet_fails", 2).await;
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2299,13 +2631,13 @@ mod tests {
         )
         .unwrap();
         let _ = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-d".parse().unwrap(),
@@ -2315,8 +2647,8 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(result, Err(InsertError::NonUniqueVpcSubnets)),
@@ -2330,9 +2662,10 @@ mod tests {
         let context =
             TestContext::new("test_insert_same_interface_fails", 2).await;
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2342,16 +2675,16 @@ mod tests {
         )
         .unwrap();
         let _ = context
-            .db_datastore
+            .datastore()
             .instance_create_network_interface_raw(
-                &context.opctx,
+                context.opctx(),
                 interface.clone(),
             )
             .await
             .expect("Failed to insert interface");
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(
@@ -2371,9 +2704,10 @@ mod tests {
         let context =
             TestContext::new("test_insert_multiple_vpcs_fails", 2).await;
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2383,15 +2717,15 @@ mod tests {
         )
         .unwrap();
         let _ = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
         let expected_address = "172.30.0.5".parse().unwrap();
         for addr in [Some(expected_address), None] {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
-                instance.id(),
+                instance_id,
                 context.net2.subnets[0].clone(),
                 IdentityMetadataCreateParams {
                     name: "interface-a".parse().unwrap(),
@@ -2401,14 +2735,17 @@ mod tests {
             )
             .unwrap();
             let result = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface,
                 )
                 .await;
             assert!(
-                matches!(result, Err(InsertError::ResourceSpansMultipleVpcs(_))),
+                matches!(
+                    result,
+                    Err(InsertError::ResourceSpansMultipleVpcs(_))
+                ),
                 "Attaching an interface to a resource which already has one in a different VPC should fail"
             );
         }
@@ -2424,9 +2761,10 @@ mod tests {
         let n_interfaces = context.net1.available_ipv4_addresses()[0];
         for _ in 0..n_interfaces {
             let instance = context.create_stopped_instance().await;
+            let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
-                instance.id(),
+                instance_id,
                 context.net1.subnets[0].clone(),
                 IdentityMetadataCreateParams {
                     name: "interface-c".parse().unwrap(),
@@ -2436,9 +2774,9 @@ mod tests {
             )
             .unwrap();
             let _ = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface,
                 )
                 .await
@@ -2447,14 +2785,15 @@ mod tests {
 
         // Next one should fail
         let instance = create_stopped_instance(
-            &context.opctx,
+            context.opctx(),
             context.project_id,
-            &context.db_datastore,
+            context.datastore(),
         )
         .await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-d".parse().unwrap(),
@@ -2464,12 +2803,13 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
-            .instance_create_network_interface_raw(&context.opctx, interface)
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
             matches!(result, Err(InsertError::NoAvailableIpAddresses)),
-            "Address exhaustion should be detected and handled"
+            "Address exhaustion should be detected and handled, found {:?}",
+            result,
         );
         context.success().await;
     }
@@ -2482,10 +2822,11 @@ mod tests {
             TestContext::new("test_insert_multiple_vpc_subnets_succeeds", 2)
                 .await;
         let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
         for (i, subnet) in context.net1.subnets.iter().enumerate() {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
-                instance.id(),
+                instance_id,
                 subnet.clone(),
                 IdentityMetadataCreateParams {
                     name: format!("if{}", i).parse().unwrap(),
@@ -2495,9 +2836,9 @@ mod tests {
             )
             .unwrap();
             let result = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface,
                 )
                 .await;
@@ -2529,6 +2870,7 @@ mod tests {
             NetworkInterfaceKind::Service => {
                 (inserted.mac.is_system(), "system")
             }
+            NetworkInterfaceKind::Probe => (inserted.mac.is_system(), "probe"),
         };
         assert!(
             mac_in_range,
@@ -2543,15 +2885,16 @@ mod tests {
     async fn test_limit_number_of_interfaces_per_instance_query() {
         let context = TestContext::new(
             "test_limit_number_of_interfaces_per_instance_query",
-            MAX_NICS as u8 + 1,
+            MAX_NICS_PER_INSTANCE as u8 + 1,
         )
         .await;
         let instance = context.create_stopped_instance().await;
-        for slot in 0..MAX_NICS {
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+        for slot in 0..MAX_NICS_PER_INSTANCE {
             let subnet = &context.net1.subnets[slot];
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
-                instance.id(),
+                instance_id,
                 subnet.clone(),
                 IdentityMetadataCreateParams {
                     name: format!("interface-{}", slot).parse().unwrap(),
@@ -2561,15 +2904,14 @@ mod tests {
             )
             .unwrap();
             let inserted_interface = context
-                .db_datastore
+                .datastore()
                 .instance_create_network_interface_raw(
-                    &context.opctx,
+                    context.opctx(),
                     interface.clone(),
                 )
                 .await
                 .expect("Should be able to insert up to 8 interfaces");
-            let actual_slot = usize::try_from(inserted_interface.slot)
-                .expect("Bad slot index");
+            let actual_slot = usize::from(*inserted_interface.slot);
             assert_eq!(
                 slot, actual_slot,
                 "Failed to allocate next available interface slot"
@@ -2587,7 +2929,7 @@ mod tests {
         // The next one should fail
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
-            instance.id(),
+            instance_id,
             context.net1.subnets.last().unwrap().clone(),
             IdentityMetadataCreateParams {
                 name: "interface-8".parse().unwrap(),
@@ -2597,9 +2939,9 @@ mod tests {
         )
         .unwrap();
         let result = context
-            .db_datastore
+            .datastore()
             .instance_create_network_interface_raw(
-                &context.opctx,
+                context.opctx(),
                 interface.clone(),
             )
             .await
@@ -2607,24 +2949,6 @@ mod tests {
         assert!(matches!(result, InsertError::NoSlotsAvailable,));
 
         context.success().await;
-    }
-
-    #[test]
-    fn test_last_address_offset() {
-        let subnet = "172.30.0.0/28".parse().unwrap();
-        assert_eq!(
-            last_address_offset(&subnet),
-            // /28 = 2 ** 4 = 16 total addresses
-            // ... - 1 for converting from size to index = 15
-            // ... - 1 for reserved broadcast address = 14
-            // ... - 5 for reserved initial addresses = 9
-            9,
-        );
-        let subnet = "fd00::/64".parse().unwrap();
-        assert_eq!(
-            last_address_offset(&subnet),
-            u32::MAX - 1 - 1 - super::NUM_INITIAL_RESERVED_IP_ADDRESSES as u32,
-        );
     }
 
     #[test]
@@ -2638,6 +2962,20 @@ mod tests {
         assert_eq!(
             first_available_address(&subnet),
             "fd00::5".parse::<IpAddr>().unwrap(),
+        );
+    }
+
+    #[test]
+    fn test_last_available_address() {
+        let subnet = "172.30.0.0/28".parse().unwrap();
+        assert_eq!(
+            last_available_address(&subnet),
+            "172.30.0.14".parse::<IpAddr>().unwrap(),
+        );
+        let subnet = "fd00::/64".parse().unwrap();
+        assert_eq!(
+            last_available_address(&subnet),
+            "fd00::ffff:ffff:ffff:fffe".parse::<IpAddr>().unwrap(),
         );
     }
 }

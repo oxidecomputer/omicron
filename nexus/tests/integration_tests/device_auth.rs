@@ -4,14 +4,14 @@
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::{
-    DeviceAccessTokenGrant, DeviceAccessTokenType, DeviceAuthResponse,
-};
-use omicron_nexus::external_api::device_auth::{
-    DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
+use nexus_types::external_api::{
+    params::{DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify},
+    views::{
+        DeviceAccessTokenGrant, DeviceAccessTokenType, DeviceAuthResponse,
+    },
 };
 
-use http::{header, method::Method, StatusCode};
+use http::{StatusCode, header, method::Method};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -81,13 +81,16 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to redirect to login on auth failure");
 
     // Authenticated requests get the console verification page.
-    assert!(NexusRequest::object_get(testctx, "/device/verify")
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to get verification page")
-        .body
-        .starts_with(b"<html>"));
+    assert!(
+        NexusRequest::object_get(testctx, "/device/verify")
+            .console_asset()
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to get verification page")
+            .body
+            .starts_with(b"<html>")
+    );
 
     let confirm_params = DeviceAuthVerify { user_code };
 

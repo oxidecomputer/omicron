@@ -1,0 +1,49 @@
+///Auto-generated identity for [`AssetWithUuidKind`] from deriving [`macro@Asset`].
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Selectable,
+    Queryable,
+    Insertable,
+    serde::Serialize,
+    serde::Deserialize
+)]
+#[diesel(table_name = my_target)]
+pub struct AssetWithUuidKindIdentity {
+    pub id: crate::typed_uuid::DbTypedUuid<::omicron_uuid_kinds::CustomKind>,
+    pub time_created: ::chrono::DateTime<::chrono::Utc>,
+    pub time_modified: ::chrono::DateTime<::chrono::Utc>,
+}
+impl AssetWithUuidKindIdentity {
+    pub fn new(
+        id: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind>,
+    ) -> Self {
+        let now = ::chrono::Utc::now();
+        Self {
+            id: crate::to_db_typed_uuid(id),
+            time_created: now,
+            time_modified: now,
+        }
+    }
+}
+trait __AssetWithUuidKindIdentityMarker {}
+impl __AssetWithUuidKindIdentityMarker for AssetWithUuidKindIdentity {}
+const _: () = {
+    fn assert_identity<T: __AssetWithUuidKindIdentityMarker>() {}
+    fn assert_all() {
+        assert_identity::<AssetWithUuidKindIdentity>();
+    }
+};
+impl ::nexus_types::identity::Asset for AssetWithUuidKind {
+    type IdType = ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind>;
+    fn id(&self) -> ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind> {
+        ::omicron_uuid_kinds::TypedUuid::from(self.identity.id)
+    }
+    fn time_created(&self) -> ::chrono::DateTime<::chrono::Utc> {
+        self.identity.time_created
+    }
+    fn time_modified(&self) -> ::chrono::DateTime<::chrono::Utc> {
+        self.identity.time_modified
+    }
+}

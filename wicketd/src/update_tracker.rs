@@ -4,70 +4,77 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use crate::artifacts::ArtifactIdData;
-use crate::artifacts::UpdatePlan;
 use crate::artifacts::WicketdArtifactStore;
 use crate::helpers::sps_to_string;
-use crate::http_entrypoints::ClearUpdateStateResponse;
-use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
-use crate::http_entrypoints::StartUpdateOptions;
-use crate::http_entrypoints::UpdateSimulatedResult;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
-use anyhow::Context;
 use base64::Engine;
+use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
+use futures::Stream;
 use futures::TryFutureExt;
+use gateway_client::types::GetRotBootInfoParams;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::HostPhase2RecoveryImageId;
 use gateway_client::types::HostStartupOptions;
 use gateway_client::types::InstallinatorImageId;
 use gateway_client::types::PowerState;
 use gateway_client::types::RotCfpaSlot;
+use gateway_client::types::RotImageError;
+use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
-use gateway_client::types::SpIdentifier;
-use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
-use gateway_messages::SpComponent;
 use gateway_messages::ROT_PAGE_SIZE;
+use gateway_messages::SpComponent;
 use hubtools::RawHubrisArchive;
 use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::InstallinatorSpec;
-use installinator_common::M2Slot;
 use installinator_common::WriteOutput;
-use omicron_common::api::external::SemverVersion;
-use omicron_common::update::ArtifactHash;
+use omicron_common::disk::M2Slot;
+use semver::Version;
+use slog::Logger;
 use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
-use slog::Logger;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::io;
+use std::collections::btree_map::Entry;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
-use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::io::StreamReader;
-use update_engine::events::ProgressUnits;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactVersion;
+use update_common::artifacts::ArtifactIdData;
+use update_common::artifacts::ArtifactsWithPlan;
+use update_common::artifacts::ControlPlaneZonesMode;
+use update_common::artifacts::UpdatePlan;
 use update_engine::AbortHandle;
 use update_engine::StepSpec;
+use update_engine::events::ProgressUnits;
 use uuid::Uuid;
+use wicket_common::inventory::SpComponentCaboose;
+use wicket_common::inventory::SpIdentifier;
+use wicket_common::inventory::SpType;
+use wicket_common::rack_update::ClearUpdateStateResponse;
+use wicket_common::rack_update::StartUpdateOptions;
+use wicket_common::rack_update::UpdateSimulatedResult;
 use wicket_common::update_events::ComponentRegistrar;
 use wicket_common::update_events::EventBuffer;
 use wicket_common::update_events::EventReport;
@@ -90,15 +97,31 @@ use wicket_common::update_events::UpdateComponent;
 use wicket_common::update_events::UpdateEngine;
 use wicket_common::update_events::UpdateStepId;
 use wicket_common::update_events::UpdateTerminalError;
+use wicketd_api::GetArtifactsAndEventReportsResponse;
 
 #[derive(Debug)]
 struct SpUpdateData {
-    task: JoinHandle<()>,
+    // See the documentation for is_finished.
+    finished: Arc<AtomicBool>,
     abort_handle: AbortHandle,
     // Note: Our mutex here is a standard mutex, not a tokio mutex. We generally
     // hold it only log enough to update its state or push a new update event
     // into its running log; occasionally we hold it long enough to clone it.
     event_buffer: Arc<StdMutex<EventBuffer>>,
+}
+
+impl SpUpdateData {
+    /// Returns true if the update has reached a terminal state.
+    ///
+    /// To check whether an update has finished, we used to store the
+    /// JoinHandle to the task and check `task.is_finished()`. However, there
+    /// are some minor things we do after finishing the update (e.g. in the
+    /// case of a fake update, sending a message indicating that the update has
+    /// finished). So instead, we use a boolean as a flag to indicate when the
+    /// task has finished doing the bulk of its work.
+    fn is_finished(&self) -> bool {
+        self.finished.load(std::sync::atomic::Ordering::Acquire)
+    }
 }
 
 #[derive(Debug)]
@@ -181,14 +204,19 @@ impl UpdateTracker {
     }
 
     /// Starts a fake update that doesn't perform any steps, but simply waits
-    /// for a watch receiver to resolve.
+    /// for a receiver to resolve.
+    ///
+    /// The inner sender will resolve once the update is completed.
     #[doc(hidden)]
     pub async fn start_fake_update(
         &self,
         sps: BTreeSet<SpIdentifier>,
-        watch_receiver: watch::Receiver<()>,
+        fake_step_receiver: oneshot::Receiver<oneshot::Sender<()>>,
     ) -> Result<(), Vec<StartUpdateError>> {
-        let imp = FakeUpdateDriver { watch_receiver, log: self.log.clone() };
+        let imp = FakeUpdateDriver {
+            fake_step_receiver: Some(fake_step_receiver),
+            log: self.log.clone(),
+        };
         self.start_impl(sps, Some(imp)).await
     }
 
@@ -246,7 +274,7 @@ impl UpdateTracker {
                 // This used to check that the task was finished, but we changed
                 // that in favor of forcing users to clear update state before
                 // starting a new one.
-                update_data.sp_update_data.get(sp).is_some()
+                update_data.sp_update_data.contains_key(sp)
             })
             .copied()
             .collect();
@@ -289,19 +317,10 @@ impl UpdateTracker {
                         );
                     }
                     // Occupied: we've previously started an update to this sp.
-                    Entry::Occupied(mut slot) => {
-                        assert!(
-                            slot.get().task.is_finished(),
-                            "we just checked that the task was finished"
-                        );
-                        slot.insert(
-                            spawn_update_driver
-                                .spawn_update_driver(
-                                    sp,
-                                    plan.clone(),
-                                    &setup_data,
-                                )
-                                .await,
+                    Entry::Occupied(_) => {
+                        panic!(
+                            "we just checked that there was \
+                             no update data for this SP"
                         );
                     }
                 }
@@ -330,15 +349,23 @@ impl UpdateTracker {
     }
 
     /// Updates the repository stored inside the update tracker.
-    pub(crate) async fn put_repository<T>(
+    pub(crate) async fn put_repository(
         &self,
-        data: T,
-    ) -> Result<(), HttpError>
-    where
-        T: io::Read + io::Seek + Send + 'static,
-    {
+        stream: impl Stream<Item = Result<Bytes, HttpError>> + Send + 'static,
+    ) -> Result<(), HttpError> {
+        // Build the ArtifactsWithPlan from the stream.
+        let artifacts_with_plan = ArtifactsWithPlan::from_stream(
+            stream,
+            // We don't have a good file name here because file contents are
+            // uploaded over stdin, so let ArtifactsWithPlan pick the name.
+            None,
+            ControlPlaneZonesMode::Composite,
+            &self.log,
+        )
+        .await
+        .map_err(|error| error.to_http_error())?;
         let mut update_data = self.sp_update_data.lock().await;
-        update_data.put_repository(data).await
+        update_data.set_artifacts_with_plan(artifacts_with_plan).await
     }
 
     /// Gets a list of artifacts stored in the update repository.
@@ -419,7 +446,7 @@ struct RealSpawnUpdateDriver<'tr> {
 }
 
 #[async_trait::async_trait]
-impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
+impl SpawnUpdateDriver for RealSpawnUpdateDriver<'_> {
     type Setup = watch::Receiver<UploadTrampolinePhase2ToMgsStatus>;
 
     async fn setup(&mut self, plan: &UpdatePlan) -> Self::Setup {
@@ -492,20 +519,25 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
         // ideal, but it works and is the easiest way to send it without
         // restructuring this code.
         let (abort_handle_sender, abort_handle_receiver) = oneshot::channel();
-        let task = tokio::spawn(update_driver.run(
+
+        let finished = Arc::new(AtomicBool::new(false));
+        let finished_indicator = SetTrueOnDrop(finished.clone());
+
+        tokio::spawn(update_driver.run(
             plan,
             update_cx,
             event_buffer.clone(),
             ipr_start_receiver,
             self.opts.clone(),
             abort_handle_sender,
+            finished_indicator,
         ));
 
         let abort_handle = abort_handle_receiver
             .await
             .expect("abort handle is sent immediately");
 
-        SpUpdateData { task, abort_handle, event_buffer }
+        SpUpdateData { finished, abort_handle, event_buffer }
     }
 }
 
@@ -515,7 +547,7 @@ impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
 /// waits for a [`watch::Receiver`] to resolve.
 #[derive(Debug)]
 struct FakeUpdateDriver {
-    watch_receiver: watch::Receiver<()>,
+    fake_step_receiver: Option<oneshot::Receiver<oneshot::Sender<()>>>,
     log: Logger,
 }
 
@@ -531,7 +563,7 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
         _plan: UpdatePlan,
         _setup_data: &Self::Setup,
     ) -> SpUpdateData {
-        let (sender, mut receiver) = mpsc::channel(128);
+        let (sender, mut receiver) = update_engine::channel();
         let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
         let event_buffer_2 = event_buffer.clone();
         let log = self.log.clone();
@@ -539,22 +571,27 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
         let engine = UpdateEngine::new(&log, sender);
         let abort_handle = engine.abort_handle();
 
-        let mut watch_receiver = self.watch_receiver.clone();
+        let fake_step_receiver = self
+            .fake_step_receiver
+            .take()
+            .expect("fake step receiver is only taken once");
 
-        let task = tokio::spawn(async move {
+        let finished = Arc::new(AtomicBool::new(false));
+        let finished_indicator = SetTrueOnDrop(finished.clone());
+
+        tokio::spawn(async move {
             // The step component and ID have been chosen arbitrarily here --
             // they aren't important.
-            engine
+            let final_sender_handle = engine
                 .new_step(
                     UpdateComponent::Host,
                     UpdateStepId::RunningInstallinator,
                     "Fake step that waits for receiver to resolve",
-                    move |_cx| async move {
-                        // This will resolve as soon as the watch sender
-                        // (typically a test) sends a value over the watch
-                        // channel.
-                        _ = watch_receiver.changed().await;
-                        StepSuccess::new(()).into()
+                    async |_cx| {
+                        // This will resolve as soon as the sender (typically a
+                        // test) sends a value over the channel.
+                        let ret = fake_step_receiver.await;
+                        StepSuccess::new(ret).into()
                     },
                 )
                 .register();
@@ -566,19 +603,42 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
                 }
             });
 
-            match engine.execute().await {
-                Ok(_cx) => (),
-                Err(err) => {
-                    error!(log, "update failed"; "err" => %err);
-                }
-            }
+            let engine_res = engine.execute().await;
 
             // Wait for all events to be received and written to the event
             // buffer.
             event_receiving_task.await.expect("event receiving task panicked");
+
+            // Indicate to the outside world that the update is finished.
+            std::mem::drop(finished_indicator);
+
+            // Finally, notify the receiving end of the inner sender: this
+            // indicates that the update is done.
+            match engine_res {
+                Ok(cx) => {
+                    info!(log, "fake update completed successfully");
+                    let final_sender =
+                        final_sender_handle.into_value(cx.token()).await;
+                    match final_sender {
+                        Ok(sender) => {
+                            if let Err(_) = sender.send(()) {
+                                warn!(log, "failed to send final value");
+                            }
+                        }
+                        Err(error) => {
+                            // This occurs if the fake_step_receiver's sender
+                            // side was closed. Nothing to do here but warn.
+                            warn!(log, "failed to get final sender: {}", error);
+                        }
+                    }
+                }
+                Err(error) => {
+                    error!(log, "fake update failed: {}", error);
+                }
+            }
         });
 
-        SpUpdateData { task, abort_handle, event_buffer }
+        SpUpdateData { finished, abort_handle, event_buffer }
     }
 }
 
@@ -625,9 +685,7 @@ impl UpdateTrackerData {
             .filter_map(|sp| {
                 self.sp_update_data
                     .get(sp)
-                    .map_or(false, |update_data| {
-                        !update_data.task.is_finished()
-                    })
+                    .map_or(false, |update_data| !update_data.is_finished())
                     .then(|| *sp)
             })
             .collect::<Vec<_>>();
@@ -665,7 +723,7 @@ impl UpdateTrackerData {
         // There's a race possible here between the task finishing and this
         // check, but that's totally fine: the worst case is that the abort is
         // ignored.
-        if update_data.task.is_finished() {
+        if update_data.is_finished() {
             return Err(AbortUpdateError::UpdateFinished);
         }
 
@@ -682,28 +740,28 @@ impl UpdateTrackerData {
         }
     }
 
-    async fn put_repository<T>(&mut self, data: T) -> Result<(), HttpError>
-    where
-        T: io::Read + io::Seek + Send + 'static,
-    {
+    async fn set_artifacts_with_plan(
+        &mut self,
+        artifacts_with_plan: ArtifactsWithPlan,
+    ) -> Result<(), HttpError> {
         // Are there any updates currently running? If so, then reject the new
         // repository.
         let running_sps = self
             .sp_update_data
             .iter()
             .filter_map(|(sp_identifier, update_data)| {
-                (!update_data.task.is_finished()).then(|| *sp_identifier)
+                (!update_data.is_finished()).then(|| *sp_identifier)
             })
             .collect::<Vec<_>>();
         if !running_sps.is_empty() {
             return Err(HttpError::for_bad_request(
                 None,
-                "Updates currently running for {running_sps:?}".to_owned(),
+                format!("Updates currently running for {running_sps:?}"),
             ));
         }
 
-        // Put the repository into the artifact store.
-        self.artifact_store.put_repository(data).await?;
+        // Set the new artifacts_with_plan.
+        self.artifact_store.set_artifacts_with_plan(artifacts_with_plan);
 
         // Reset all running data: a new repository means starting afresh.
         self.sp_update_data.clear();
@@ -760,10 +818,19 @@ impl AbortUpdateError {
     }
 }
 
+struct SetTrueOnDrop(Arc<AtomicBool>);
+
+impl Drop for SetTrueOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
 #[derive(Debug)]
 struct UpdateDriver {}
 
 impl UpdateDriver {
+    #![allow(clippy::too_many_arguments)]
     async fn run(
         self,
         plan: UpdatePlan,
@@ -772,6 +839,7 @@ impl UpdateDriver {
         ipr_start_receiver: IprStartReceiver,
         opts: StartUpdateOptions,
         abort_handle_sender: oneshot::Sender<AbortHandle>,
+        finished_indicator: SetTrueOnDrop,
     ) {
         let update_cx = &update_cx;
 
@@ -792,7 +860,7 @@ impl UpdateDriver {
         //    the newest components for the SP and RoT, and one without.
 
         // Build the update executor.
-        let (sender, mut receiver) = mpsc::channel(128);
+        let (sender, mut receiver) = update_engine::channel();
         let mut engine = UpdateEngine::new(&update_cx.log, sender);
         let abort_handle = engine.abort_handle();
         _ = abort_handle_sender.send(abort_handle);
@@ -801,18 +869,44 @@ impl UpdateDriver {
             define_test_steps(&engine, secs);
         }
 
-        let (rot_a, rot_b, sp_artifacts) = match update_cx.sp.type_ {
-            SpType::Sled => {
-                (&plan.gimlet_rot_a, &plan.gimlet_rot_b, &plan.gimlet_sp)
-            }
-            SpType::Power => (&plan.psc_rot_a, &plan.psc_rot_b, &plan.psc_sp),
-            SpType::Switch => {
-                (&plan.sidecar_rot_a, &plan.sidecar_rot_b, &plan.sidecar_sp)
-            }
-        };
+        let (rot_a, rot_b, sp_artifacts, rot_bootloader) =
+            match update_cx.sp.type_ {
+                SpType::Sled => (
+                    &plan.gimlet_rot_a,
+                    &plan.gimlet_rot_b,
+                    &plan.gimlet_sp,
+                    &plan.gimlet_rot_bootloader,
+                ),
+                SpType::Power => (
+                    &plan.psc_rot_a,
+                    &plan.psc_rot_b,
+                    &plan.psc_sp,
+                    &plan.psc_rot_bootloader,
+                ),
+                SpType::Switch => (
+                    &plan.sidecar_rot_a,
+                    &plan.sidecar_rot_b,
+                    &plan.sidecar_sp,
+                    &plan.sidecar_rot_bootloader,
+                ),
+            };
 
+        let rot_bootloader_registrar =
+            engine.for_component(UpdateComponent::RotBootloader);
         let rot_registrar = engine.for_component(UpdateComponent::Rot);
         let sp_registrar = engine.for_component(UpdateComponent::Sp);
+
+        // There are some extra checks and verifications needed to
+        // before we can update the RoT bootloader
+        let rot_bootloader_interrogation = rot_bootloader_registrar
+            .new_step(
+                UpdateStepId::InterrogateRot,
+                "Checking current RoT bootloader version",
+                async |_cx| {
+                    update_cx.interrogate_rot_bootloader(rot_bootloader).await
+                },
+            )
+            .register();
 
         // To update the RoT, we have to know which slot (A or B) it is
         // currently executing; we must update the _other_ slot. We also want to
@@ -822,9 +916,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::InterrogateRot,
                 "Checking current RoT version and active slot",
-                move |_cx| async move {
-                    update_cx.interrogate_rot(rot_a, rot_b).await
-                },
+                async |_cx| update_cx.interrogate_rot(rot_a, rot_b).await,
             )
             .register();
 
@@ -839,7 +931,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::InterrogateSp,
                 "Checking SP board and current version",
-                move |_cx| async move {
+                async move |_cx| {
                     let caboose = update_cx
                         .mgs_client
                         .sp_component_caboose_get(
@@ -868,7 +960,7 @@ impl UpdateDriver {
                         "SP board {}, version {} (git commit {})",
                         caboose.board, caboose.version, caboose.git_commit
                     );
-                    match caboose.version.parse::<SemverVersion>() {
+                    match caboose.version.parse::<ArtifactVersion>() {
                         Ok(version) => {
                             StepSuccess::new((sp_artifact, Some(version)))
                                 .with_message(message)
@@ -885,6 +977,87 @@ impl UpdateDriver {
                 },
             )
             .register();
+
+        // Send the bootloader update to the RoT.
+        let inner_cx = SpComponentUpdateContext::new(
+            update_cx,
+            UpdateComponent::RotBootloader,
+        );
+        rot_bootloader_registrar
+            .new_step(
+                UpdateStepId::SpComponentUpdate,
+                "Updating RoT bootloader",
+                async move |cx| {
+                    if let Some(result) = opts.test_simulate_rot_bootloader_result {
+                        return simulate_result(result);
+                    }
+
+                    let rot_bootloader_interrogation =
+                        match rot_bootloader_interrogation.into_value(cx.token()).await {
+                        Some(v) => v,
+                        None => return StepSkipped::new(
+                            (),
+                            "Skipping bootloader update, check interrogation step",
+                        ).into(),
+                    };
+
+                    let bootloader_has_this_version = rot_bootloader_interrogation
+                        .active_version_matches_artifact_to_apply();
+
+                    let sp_can_update = rot_bootloader_interrogation.sp_can_update_bootloader(&update_cx.mgs_client).await;
+
+                    if !sp_can_update {
+                        return StepSkipped::new(
+                            (),
+                                "SP version needs to be upgraded before RoT bootloader can be updated",
+                        )
+                        .into();
+
+                    }
+
+                    // If this RoT already has this version, skip the rest of
+                    // this step, UNLESS we've been told to skip this version
+                    // check.
+                    if bootloader_has_this_version && !opts.skip_rot_bootloader_version_check {
+                        return StepSkipped::new(
+                            (),
+                            format!(
+                                "RoT bootloader already at version {}",
+                                rot_bootloader_interrogation.artifact_to_apply.id.version,
+                            ),
+                        )
+                        .into();
+                    }
+
+                    cx.with_nested_engine(|engine| {
+                        inner_cx.register_steps(
+                            engine,
+                            rot_bootloader_interrogation.slot_to_update,
+                            &rot_bootloader_interrogation.artifact_to_apply,
+                        );
+                        Ok(())
+                    })
+                    .await?;
+
+                    // If we updated despite the RoT already having the version
+                    // we updated to, make this step return a warning with that
+                    // message; otherwise, this is a normal success.
+                    if bootloader_has_this_version {
+                        StepWarning::new(
+                            (),
+                            format!(
+                                "RoT bootloader updated despite already having version {}",
+                                rot_bootloader_interrogation.artifact_to_apply.id.version,
+                            ),
+                        )
+                        .into()
+                    } else {
+                        StepSuccess::new(()).into()
+                    }
+                },
+            )
+            .register();
+
         // Send the update to the RoT.
         let inner_cx =
             SpComponentUpdateContext::new(update_cx, UpdateComponent::Rot);
@@ -892,7 +1065,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SpComponentUpdate,
                 "Updating RoT",
-                move |cx| async move {
+                async move |cx| {
                     if let Some(result) = opts.test_simulate_rot_result {
                         return simulate_result(result);
                     }
@@ -911,24 +1084,17 @@ impl UpdateDriver {
                             (),
                             format!(
                                 "RoT active slot already at version {}",
-                                rot_interrogation.available_artifacts_version,
+                                rot_interrogation.artifact_to_apply.id.version
                             ),
                         )
                         .into();
                     }
 
-                    let artifact_to_apply = rot_interrogation
-                        .choose_artifact_to_apply(
-                            &update_cx.mgs_client,
-                            &update_cx.log,
-                        )
-                        .await?;
-
                     cx.with_nested_engine(|engine| {
                         inner_cx.register_steps(
                             engine,
                             rot_interrogation.slot_to_update,
-                            artifact_to_apply,
+                            &rot_interrogation.artifact_to_apply,
                         );
                         Ok(())
                     })
@@ -942,7 +1108,7 @@ impl UpdateDriver {
                             (),
                             format!(
                                 "RoT updated despite already having version {}",
-                                rot_interrogation.available_artifacts_version
+                                rot_interrogation.artifact_to_apply.id.version
                             ),
                         )
                         .into()
@@ -959,7 +1125,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SpComponentUpdate,
                 "Updating SP",
-                move |cx| async move {
+                async move |cx| {
                     if let Some(result) = opts.test_simulate_sp_result {
                         return simulate_result(result);
                     }
@@ -1039,6 +1205,8 @@ impl UpdateDriver {
 
         // Wait for all events to be received and written to the update log.
         event_receiving_task.await.expect("event receiving task panicked");
+        // This would happen anyway, but be explicit about the drop.
+        std::mem::drop(finished_indicator);
     }
 
     fn register_sled_steps<'a>(
@@ -1059,7 +1227,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::DownloadingInstallinator,
                 "Downloading installinator, waiting for it to start",
-                move |cx| async move {
+                async |cx| {
                     let image_id = image_id_handle.into_value(cx.token()).await;
                     // The previous step should send this value in.
                     let report_receiver = update_cx
@@ -1073,8 +1241,8 @@ impl UpdateDriver {
                             UpdateTerminalError::DownloadingInstallinatorFailed { error }
                         })?;
 
-                        StepSuccess::new(report_receiver).into()
-                    },
+                    StepSuccess::new(report_receiver).into()
+                },
             )
             .register();
 
@@ -1082,7 +1250,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::RunningInstallinator,
                 "Running installinator",
-                move |cx| async move {
+                async |cx| {
                     let report_receiver =
                         start_handle.into_value(cx.token()).await;
                     let write_output = update_cx
@@ -1151,7 +1319,7 @@ impl UpdateDriver {
         let image_id_step_handle = registrar.new_step(
             UpdateStepId::WaitingForTrampolinePhase2Upload,
             "Waiting for trampoline phase 2 upload to MGS",
-            move |_cx| async move {
+            async move |_cx| {
                 // We expect this loop to run just once, but iterate just in
                 // case the image ID doesn't get populated the first time.
                 loop {
@@ -1185,17 +1353,17 @@ impl UpdateDriver {
                     upload_trampoline_phase_2_to_mgs.changed().await.map_err(
                         |_recv_err| {
                             UpdateTerminalError::TrampolinePhase2UploadCancelled
-                        }
+                    }
                     )?;
                 }
             },
-        ).register();
+            ).register();
 
         registrar
             .new_step(
                 UpdateStepId::SettingInstallinatorImageId,
                 "Setting installinator image ID",
-                move |_cx| async move {
+                async move |_cx| {
                     let installinator_image_id = InstallinatorImageId {
                         control_plane: plan.control_plane_hash.to_string(),
                         host_phase_2: plan.host_phase_2_hash.to_string(),
@@ -1225,7 +1393,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SettingHostStartupOptions,
                 "Setting host startup options",
-                move |_cx| async move {
+                async move |_cx| {
                     update_cx
                         .set_component_active_slot(
                             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
@@ -1274,7 +1442,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SetHostPowerState { state: PowerState::A0 },
                 "Setting host power state to A0",
-                move |_cx| async move {
+                async move |_cx| {
                     update_cx.set_host_power_state(PowerState::A0).await
                 },
             )
@@ -1309,14 +1477,14 @@ impl UpdateDriver {
         registrar.new_step(
             UpdateStepId::ClearingInstallinatorImageId,
             "Clearing installinator image ID",
-            move |_cx| async move {
+            async move |_cx| {
                 if let Err(err) = update_cx
                     .mgs_client
-                    .sp_installinator_image_id_delete(
-                        update_cx.sp.type_,
-                        update_cx.sp.slot,
-                    )
-                    .await
+                        .sp_installinator_image_id_delete(
+                            update_cx.sp.type_,
+                            update_cx.sp.slot,
+                        )
+                        .await
                 {
                     warn!(
                         update_cx.log,
@@ -1332,7 +1500,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SettingHostStartupOptions,
                 "Setting startup options for standard boot",
-                move |cx| async move {
+                async move |cx| {
                     // Persistently set to boot off of the first disk
                     // installinator successfully updated (usually 0, unless it
                     // only updated 1).
@@ -1396,7 +1564,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SetHostPowerState { state: PowerState::A0 },
                 "Booting the host",
-                |_cx| async {
+                async |_cx| {
                     update_cx.set_host_power_state(PowerState::A0).await
                 },
             )
@@ -1415,7 +1583,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SetHostPowerState { state: PowerState::A2 },
                 "Setting host power state to A2",
-                move |_cx| async move {
+                async |_cx| {
                     update_cx.set_host_power_state(PowerState::A2).await
                 },
             )
@@ -1427,7 +1595,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SpComponentUpdate,
                 format!("Updating {kind} phase 1"),
-                move |cx| async move {
+                async move |cx| {
                     let slots_to_update =
                         slots_to_update.into_value(cx.token()).await;
 
@@ -1452,7 +1620,7 @@ fn define_test_steps(engine: &UpdateEngine, secs: u64) {
             UpdateComponent::Rot,
             UpdateStepId::TestStep,
             "Test step",
-            move |cx| async move {
+            async move |cx| {
                 cx.with_nested_engine(
                     |engine: &mut UpdateEngine<TestStepSpec>| {
                         engine
@@ -1460,239 +1628,103 @@ fn define_test_steps(engine: &UpdateEngine, secs: u64) {
                                 TestStepComponent::Test,
                                 TestStepId::Delay,
                                 format!("Delay step ({secs} secs)"),
-                                |cx| async move {
+                                async move |cx| {
                                     for sec in 0..secs {
                                         cx.send_progress(
-                                        StepProgress::with_current_and_total(
-                                            sec,
-                                            secs,
-                                            "seconds",
-                                            serde_json::Value::Null,
-                                        ),
-                                    )
-                                    .await;
+                                            StepProgress::with_current_and_total(
+                                                sec,
+                                                secs,
+                                                "seconds",
+                                                serde_json::Value::Null,
+                                            ),
+                                        )
+                                            .await;
                                         tokio::time::sleep(
                                             Duration::from_secs(1),
                                         )
-                                        .await;
-                                    }
+                                            .await;
+                                        }
 
                                     StepSuccess::new(())
                                         .with_message(format!(
-                                        "Step completed after {secs} seconds"
-                                    ))
+                                            "Step completed after {secs} seconds"
+                                        ))
                                         .into()
                                 },
-                            )
-                            .register();
+                                )
+                                    .register();
 
                         engine
-                        .new_step(
-                            TestStepComponent::Test,
-                            TestStepId::Delay,
-                            "Nested stub step",
-                            |_cx| async move { StepSuccess::new(()).into() },
-                        )
-                        .register();
+                            .new_step(
+                                TestStepComponent::Test,
+                                TestStepId::Delay,
+                                "Nested stub step",
+                                async |_cx| { StepSuccess::new(()).into() },
+                            )
+                            .register();
 
                         Ok(())
                     },
                 )
-                .await?;
+                    .await?;
 
                 StepSuccess::new(()).into()
             },
-        )
-        .register();
+            )
+                .register();
 }
 
 #[derive(Debug)]
 struct RotInterrogation {
     // Which RoT slot we need to update.
     slot_to_update: u16,
-    // This is a `Vec<_>` because we may have the same version of the RoT
-    // artifact supplied with different keys. Once we decide whether we're going
-    // to apply this update at all, we'll ask the RoT for its CMPA and CFPA
-    // pages to filter this list down to the one matching artifact.
-    available_artifacts: Vec<ArtifactIdData>,
-    // We require all the artifacts in `available_artifacts` to have the same
-    // version, and we record that here for use in our methods below.
-    available_artifacts_version: SemverVersion,
     // Identifier of the target RoT's SP.
     sp: SpIdentifier,
     // Version reported by the target RoT.
-    active_version: Option<SemverVersion>,
+    artifact_to_apply: ArtifactIdData,
+    active_version: Option<ArtifactVersion>,
 }
 
 impl RotInterrogation {
-    fn active_version_matches_artifact_to_apply(&self) -> bool {
-        Some(&self.available_artifacts_version) == self.active_version.as_ref()
-    }
-
-    /// Via `client`, ask the target RoT for its CMPA/CFPA pages, then loop
-    /// through our `available_artifacts` to find one that verifies.
-    ///
-    /// For backwards compatibility with RoTs that do not know how to return
-    /// their CMPA/CFPA pages, if we fail to fetch them _and_
-    /// `available_artifacts` has exactly one item, we will return that one
-    /// item.
-    async fn choose_artifact_to_apply(
+    async fn sp_can_update_bootloader(
         &self,
         client: &gateway_client::Client,
-        log: &Logger,
-    ) -> Result<&ArtifactIdData, UpdateTerminalError> {
-        let cmpa = match client
-            .sp_rot_cmpa_get(
+    ) -> bool {
+        let sp_caboose = client
+            .sp_component_caboose_get(
                 self.sp.type_,
                 self.sp.slot,
-                SpComponent::ROT.const_as_str(),
+                SpComponent::SP_ITSELF.const_as_str(),
+                0,
             )
             .await
-        {
-            Ok(response) => {
-                let data = response.into_inner().base64_data;
-                self.decode_rot_page(&data).map_err(|error| {
-                    UpdateTerminalError::GetRotCmpaFailed { error }
-                })?
-            }
-            // TODO is there a better way to check the _specific_ error response
-            // we get here? We only have a couple of strings; we could check the
-            // error string contents for something like "WrongVersion", but
-            // that's pretty fragile. Instead we'll treat any error response
-            // here as a "fallback to previous behavior".
-            Err(err @ gateway_client::Error::ErrorResponse(_)) => {
-                if self.available_artifacts.len() == 1 {
-                    info!(
-                        log,
-                        "Failed to get RoT CMPA page; \
-                         using only available RoT artifact";
-                        "err" => %err,
-                    );
-                    return Ok(&self.available_artifacts[0]);
-                } else {
-                    error!(
-                        log,
-                        "Failed to get RoT CMPA; unable to choose from \
-                         multiple available RoT artifacts";
-                        "err" => %err,
-                        "num_rot_artifacts" => self.available_artifacts.len(),
-                    );
-                    return Err(UpdateTerminalError::GetRotCmpaFailed {
-                        error: err.into(),
-                    });
-                }
-            }
-            // For any other error (e.g., comms failures), just fail as normal.
-            Err(err) => {
-                return Err(UpdateTerminalError::GetRotCmpaFailed {
-                    error: err.into(),
-                });
-            }
-        };
+            .ok()
+            .map(|v| v.into_inner());
 
-        // We have a CMPA; we also need the CFPA, but we don't bother checking
-        // for an `ErrorResponse` as above because succeeding in getting the
-        // CMPA means the RoT is new enough to support returning both.
-        let cfpa = client
-            .sp_rot_cfpa_get(
-                self.sp.type_,
-                self.sp.slot,
-                SpComponent::ROT.const_as_str(),
-                &gateway_client::types::GetCfpaParams {
-                    slot: RotCfpaSlot::Active,
+        // Older versions of the SP have a bug that prevents setting
+        // the active slot for the RoT bootloader. Check for these
+        // and skip the update until the SP gets updated
+        const MIN_GIMLET_VERSION: Version = Version::new(1, 0, 21);
+        const MIN_SWITCH_VERSION: Version = Version::new(1, 0, 21);
+        const MIN_PSC_VERSION: Version = Version::new(1, 0, 20);
+
+        match sp_caboose {
+            // If we can't get the SP caboose for whatever reason don't risk
+            // trying an update
+            None => false,
+            Some(caboose) => match caboose.version.parse::<Version>() {
+                Ok(vers) => match self.sp.type_ {
+                    SpType::Sled => vers >= MIN_GIMLET_VERSION,
+                    SpType::Switch => vers >= MIN_SWITCH_VERSION,
+                    SpType::Power => vers >= MIN_PSC_VERSION,
                 },
-            )
-            .await
-            .map_err(|err| UpdateTerminalError::GetRotCfpaFailed {
-                error: err.into(),
-            })
-            .and_then(|response| {
-                let data = response.into_inner().base64_data;
-                self.decode_rot_page(&data).map_err(|error| {
-                    UpdateTerminalError::GetRotCfpaFailed { error }
-                })
-            })?;
-
-        // Loop through our possible artifacts and find the first (we only
-        // expect one!) that verifies against the RoT's CMPA/CFPA.
-        for artifact in &self.available_artifacts {
-            let image = artifact
-                .data
-                .reader_stream()
-                .and_then(|stream| async {
-                    let mut buf = Vec::with_capacity(artifact.data.file_size());
-                    StreamReader::new(stream)
-                        .read_to_end(&mut buf)
-                        .await
-                        .context("I/O error reading extracted archive")?;
-                    Ok(buf)
-                })
-                .await
-                .map_err(|error| {
-                    UpdateTerminalError::FailedFindingSignedRotImage { error }
-                })?;
-            let archive = RawHubrisArchive::from_vec(image).map_err(|err| {
-                UpdateTerminalError::FailedFindingSignedRotImage {
-                    error: anyhow::Error::new(err).context(format!(
-                        "failed to read hubris archive for {:?}",
-                        artifact.id
-                    )),
-                }
-            })?;
-            match archive.verify(&cmpa, &cfpa) {
-                Ok(()) => {
-                    info!(
-                        log, "RoT archive verification success";
-                        "name" => artifact.id.name.as_str(),
-                        "version" => %artifact.id.version,
-                        "kind" => ?artifact.id.kind,
-                    );
-                    return Ok(artifact);
-                }
-                Err(err) => {
-                    // We log this but don't fail - we want to continue
-                    // looking for a verifiable artifact.
-                    info!(
-                        log, "RoT archive verification failed";
-                        "artifact" => ?artifact.id,
-                        "err" => %DisplayErrorChain::new(&err),
-                    );
-                }
-            }
+                Err(_) => false,
+            },
         }
-
-        // If the loop above didn't find a verifiable image, we cannot proceed.
-        Err(UpdateTerminalError::FailedFindingSignedRotImage {
-            error: anyhow!("no RoT image found with valid CMPA/CFPA"),
-        })
     }
 
-    /// Decode a base64-encoded RoT page we received from MGS.
-    fn decode_rot_page(
-        &self,
-        data: &str,
-    ) -> anyhow::Result<[u8; ROT_PAGE_SIZE]> {
-        // Even though we know `data` should decode to exactly
-        // `ROT_PAGE_SIZE` bytes, the base64 crate requires an output buffer
-        // of at least `decoded_len_estimate`. Allocate such a buffer here,
-        // then we'll copy to the fixed-size array we need after confirming
-        // the number of decoded bytes;
-        let mut output_buf = vec![0; base64::decoded_len_estimate(data.len())];
-
-        let n = base64::engine::general_purpose::STANDARD
-            .decode_slice(&data, &mut output_buf)
-            .with_context(|| {
-                format!("failed to decode base64 string: {data:?}")
-            })?;
-        if n != ROT_PAGE_SIZE {
-            bail!(
-                "incorrect len ({n}, expected {ROT_PAGE_SIZE}) \
-                     after decoding base64 string: {data:?}",
-            );
-        }
-        let mut page = [0; ROT_PAGE_SIZE];
-        page.copy_from_slice(&output_buf[..n]);
-        Ok(page)
+    fn active_version_matches_artifact_to_apply(&self) -> bool {
+        Some(&self.artifact_to_apply.id.version) == self.active_version.as_ref()
     }
 }
 
@@ -1725,7 +1757,7 @@ struct UpdateContext {
 }
 
 impl UpdateContext {
-    async fn process_installinator_reports<'engine>(
+    async fn process_installinator_reports(
         &self,
         cx: &StepContext,
         mut ipr_receiver: watch::Receiver<EventReport<InstallinatorSpec>>,
@@ -1781,6 +1813,145 @@ impl UpdateContext {
         })
     }
 
+    async fn interrogate_rot_bootloader(
+        &self,
+        rot_bootloader: &[ArtifactIdData],
+    ) -> Result<StepResult<Option<RotInterrogation>>, UpdateTerminalError> {
+        // We have a known set of bootloader FWID that don't have cabooses.
+        static KNOWN_MISSING_CABOOSE: [&str; 18] = [
+            "1122095f4a3797db8a7d6279ae889ddde0316631f1f3bc204bdc39c2d75707af",
+            "1525832a663024f6421c13c0f7c7d9e9b32ebf433898565a2ad8112e7d237ead",
+            "29fc0d31e1739865c7f3d4bb5f5b86779db92a65a2decbd59e42f6e95dd84698",
+            "37aa40d0ea12e1290477a84014cd03dbc6fa9817223d1546a10847510d75c383",
+            "53cb91f4a3fbb69efa733a9eb326bd9f71c849782b0eea4306ebc66620158d44",
+            "60effb7fd6c4780138887e0d65c9e9b9c8447ce4ea3ea71e08194aec2847b185",
+            "77b8fc4308221dfe123d93431c21b57fa896db65c015ca82e22a337c7aa7cd77",
+            "77c2b94e3a83fc6b3c8924d38b0d23ac7c1e7a15defa910ee3f850b41af9ca4c",
+            "8c58b2272fe2da219ab0757ff27398b8d4a459eb4e75c32c782f98d684269352",
+            "9dd79a4e7609bd4af8e39a03f77b997b35f5050409a2ecd19de1e7d16184b1f3",
+            "b123a0f683f4e7b60238840139c9f3dbfe2b2c61597d9cdd4e92c718f7f98bb7",
+            "ba08df44e7282a1daeae2d9346b99ca741bfc2649c12aa8292f413a1c84d80b7",
+            "bfa9adfc127886aeaa1ac58d30c07c76e89592c29fc83dfa88062e7f3a48335e",
+            "c23a53858e94932a95945f28730e41ae4a2d1a8db4776283245eda143b6b2994",
+            "e7ec5dae7ac462cc7f7561a91ef244a2ece0894ff212995fcccb1e86438cb665",
+            "ee688a237a480e9fd111a7f70cc4c6f9ac837dcac65a01e7cfa29f7c28545d07",
+            "f31442015da37523a13ffaa173b4dfe0b069c6d890cf1c9748a898001fe4110e",
+            "fa73f26fb73b27b5db8f425320e206df5ebf3e137475d40be76b540ea8bd2af9",
+        ];
+
+        let stage0_fwid = match self
+            .mgs_client
+            .sp_rot_boot_info(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::ROT.const_as_str(),
+                &GetRotBootInfoParams {
+                    version:
+                        gateway_messages::RotBootInfo::HIGHEST_KNOWN_VERSION,
+                },
+            )
+            .await
+        {
+            Ok(v) => match v.into_inner() {
+                // the minimum we will ever return is 3
+                RotState::V2 { .. } => unreachable!(),
+                RotState::V3 { stage0_fwid, .. } => stage0_fwid,
+                // ugh
+                RotState::CommunicationFailed { message } => {
+                    return StepWarning::new(
+                        None,
+                        format!(
+                            "Failed to communicate with the RoT: {message}. Will not proceed with update."
+                        ),
+                    )
+                    .into();
+                }
+            },
+            // If we can't run `rot_boot_info` there's a chance we can't do
+            // antything else with stage0 either
+            Err(e) => return StepWarning::new(
+                None,
+                format!("Failed to run `rot_boot_info`: {e:?}. Will not proceed with update."),
+            )
+            .into(),
+        };
+
+        let available_artifacts = rot_bootloader.to_vec();
+        // Read the caboose of the currently running version (always 0)
+        // When updating from older stage0 we may not have a caboose so an error here
+        // need not be fatal
+        // TODO make this fatal at some point
+        let caboose = self
+            .mgs_client
+            .sp_component_caboose_get(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::STAGE0.const_as_str(),
+                0,
+            )
+            .await
+            .map(|v| v.into_inner())
+            .ok();
+
+        let artifact_to_apply = self
+            .choose_rot_artifact_to_apply(
+                &available_artifacts,
+                caboose.as_ref(),
+            )
+            .await?;
+
+        let make_result = |active_version| {
+            Some(RotInterrogation {
+                // We always update slot 1
+                slot_to_update: 1,
+                artifact_to_apply: artifact_to_apply.clone(),
+                sp: self.sp,
+                active_version,
+            })
+        };
+
+        match caboose {
+            Some(c) => {
+                let message = format!(
+                    "RoT bootloader version {} (git commit {})",
+                    c.version, c.git_commit
+                );
+
+                match c.version.parse::<ArtifactVersion>() {
+                    Ok(version) => StepSuccess::new(make_result(Some(version)))
+                        .with_message(message)
+                        .into(),
+                    Err(err) => StepWarning::new(
+                        make_result(None),
+                        format!(
+                            "{message} (failed to parse RoT bootloader version: {err})"
+                        ),
+                    )
+                    .into(),
+                }
+            }
+            None => {
+                if KNOWN_MISSING_CABOOSE.contains(&stage0_fwid.as_str()) {
+                    StepWarning::new(
+                        make_result(None),
+                        format!(
+                            "fwid {stage0_fwid} is known to be missing a caboose."
+                        ),
+                    )
+                    .into()
+                } else {
+                    StepWarning::new(
+                        None,
+                        format!(
+                            "fwid {stage0_fwid} is _not_ supposed to be missing a caboose. Will not proceed with update"
+                        ),
+                    )
+                    .into()
+                }
+            }
+        }
+    }
+
     async fn interrogate_rot(
         &self,
         rot_a: &[ArtifactIdData],
@@ -1804,20 +1975,9 @@ impl UpdateContext {
                         error: anyhow!(
                             "unexpected RoT active slot {rot_active_slot}"
                         ),
-                    })
+                    });
                 }
             };
-
-        // We already validated at repo-upload time there is at least one RoT
-        // artifact available and that all available RoT artifacts are the same
-        // version, so we can unwrap the first artifact here and assume its
-        // version matches any subsequent artifacts.
-        let available_artifacts_version = available_artifacts
-            .get(0)
-            .expect("no RoT artifacts available")
-            .id
-            .version
-            .clone();
 
         // Read the caboose of the currently-active slot.
         let caboose = self
@@ -1834,21 +1994,24 @@ impl UpdateContext {
             })?
             .into_inner();
 
+        let available_artifacts = available_artifacts.to_vec();
+        let artifact_to_apply = self
+            .choose_rot_artifact_to_apply(&available_artifacts, Some(&caboose))
+            .await?;
+
         let message = format!(
             "RoT slot {active_slot_name} version {} (git commit {})",
             caboose.version, caboose.git_commit
         );
 
-        let available_artifacts = available_artifacts.to_vec();
         let make_result = |active_version| RotInterrogation {
             slot_to_update,
-            available_artifacts,
-            available_artifacts_version,
+            artifact_to_apply: artifact_to_apply.clone(),
             sp: self.sp,
             active_version,
         };
 
-        match caboose.version.parse::<SemverVersion>() {
+        match caboose.version.parse::<ArtifactVersion>() {
             Ok(version) => StepSuccess::new(make_result(Some(version)))
                 .with_message(message)
                 .into(),
@@ -1860,6 +2023,267 @@ impl UpdateContext {
         }
     }
 
+    /// Via `client`, ask the target RoT for its CMPA/CFPA pages, then loop
+    /// through our `available_artifacts` to find one that verifies.
+    ///
+    /// For backwards compatibility with RoTs that do not know how to return
+    /// their CMPA/CFPA pages, if we fail to fetch them _and_
+    /// `available_artifacts` has exactly one item, we will return that one
+    /// item.
+    ///
+    /// This is also applicable to the RoT bootloader which follows the
+    /// same vaildation method
+    async fn choose_rot_artifact_to_apply<'a>(
+        &'a self,
+        available_artifacts: &'a Vec<ArtifactIdData>,
+        caboose: Option<&SpComponentCaboose>,
+    ) -> Result<&'a ArtifactIdData, UpdateTerminalError> {
+        let cmpa = match self
+            .mgs_client
+            .sp_rot_cmpa_get(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::ROT.const_as_str(),
+            )
+            .await
+        {
+            Ok(response) => {
+                let data = response.into_inner().base64_data;
+                self.decode_rot_page(&data).map_err(|error| {
+                    UpdateTerminalError::GetRotCmpaFailed { error }
+                })?
+            }
+            // TODO is there a better way to check the _specific_ error response
+            // we get here? We only have a couple of strings; we could check the
+            // error string contents for something like "WrongVersion", but
+            // that's pretty fragile. Instead we'll treat any error response
+            // here as a "fallback to previous behavior".
+            Err(err @ gateway_client::Error::ErrorResponse(_)) => {
+                if available_artifacts.len() == 1 {
+                    info!(
+                        self.log,
+                        "Failed to get RoT CMPA page; \
+                         using only available RoT artifact";
+                        "err" => %err,
+                    );
+                    return Ok(&available_artifacts[0]);
+                } else {
+                    error!(
+                        self.log,
+                        "Failed to get RoT CMPA; unable to choose from \
+                         multiple available RoT artifacts";
+                        "err" => %err,
+                        "num_rot_artifacts" => available_artifacts.len(),
+                    );
+                    return Err(UpdateTerminalError::GetRotCmpaFailed {
+                        error: err.into(),
+                    });
+                }
+            }
+            // For any other error (e.g., comms failures), just fail as normal.
+            Err(err) => {
+                return Err(UpdateTerminalError::GetRotCmpaFailed {
+                    error: err.into(),
+                });
+            }
+        };
+
+        // We have a CMPA; we also need the CFPA, but we don't bother checking
+        // for an `ErrorResponse` as above because succeeding in getting the
+        // CMPA means the RoT is new enough to support returning both.
+        let cfpa = self
+            .mgs_client
+            .sp_rot_cfpa_get(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::ROT.const_as_str(),
+                &gateway_client::types::GetCfpaParams {
+                    slot: RotCfpaSlot::Active,
+                },
+            )
+            .await
+            .map_err(|err| UpdateTerminalError::GetRotCfpaFailed {
+                error: err.into(),
+            })
+            .and_then(|response| {
+                let data = response.into_inner().base64_data;
+                self.decode_rot_page(&data).map_err(|error| {
+                    UpdateTerminalError::GetRotCfpaFailed { error }
+                })
+            })?;
+
+        // Loop through our possible artifacts and find the first (we only
+        // expect one!) that verifies against the RoT's CMPA/CFPA.
+        for artifact in available_artifacts {
+            let image = artifact
+                .data
+                .reader_stream()
+                .and_then(|stream| async {
+                    let mut buf = Vec::with_capacity(artifact.data.file_size());
+                    StreamReader::new(stream)
+                        .read_to_end(&mut buf)
+                        .await
+                        .context("I/O error reading extracted archive")?;
+                    Ok(buf)
+                })
+                .await
+                .map_err(|error| {
+                    UpdateTerminalError::FailedFindingSignedRotImage { error }
+                })?;
+            let archive = RawHubrisArchive::from_vec(image).map_err(|err| {
+                UpdateTerminalError::FailedFindingSignedRotImage {
+                    error: anyhow::Error::new(err).context(format!(
+                        "failed to read hubris archive for {:?}",
+                        artifact.id
+                    )),
+                }
+            })?;
+            if let Some(c) = caboose {
+                // If we get errors on any part of reading the caboose
+                // something has gone wrong and it's probably safer to
+                // bail out on updating than potentially install an
+                // incorrect image
+                let archive_caboose =
+                    archive.read_caboose().map_err(|error| {
+                        UpdateTerminalError::FailedFindingSignedRotImage {
+                            error: anyhow::Error::new(error).context(format!(
+                        "failed to read hubris archive caboose for {:?}",
+                        artifact.id
+                        )),
+                        }
+                    })?;
+
+                let archive_board = archive_caboose.board().map_err(|error| {
+                    UpdateTerminalError::FailedFindingSignedRotImage {
+                        error: anyhow::Error::new(error).context(format!(
+                        "failed to read hubris archive BORD from caboose for {:?}",
+                        artifact.id
+                        ))
+                    }
+
+                })?;
+                let archive_board = String::from_utf8(archive_board.into())
+                    .map_err(|error| {
+                        UpdateTerminalError::FailedFindingSignedRotImage {
+                            error: anyhow::Error::new(error).context(format!(
+                                "utf8 error on archive board from {:?}",
+                                artifact.id
+                            )),
+                        }
+                    })?;
+
+                if archive_board != c.board {
+                    info!(
+                        self.log, "RoT archive did not match caboose board";
+                        "artifact" => ?artifact.id,
+                        "archive_board" => ?archive_board,
+                        "expected" => ?c.board,
+                    );
+                    continue;
+                }
+            }
+            match archive.verify(&cmpa, &cfpa) {
+                Ok(()) => {
+                    info!(
+                        self.log, "RoT archive verification success";
+                        "name" => artifact.id.name.as_str(),
+                        "version" => %artifact.id.version,
+                        "kind" => ?artifact.id.kind,
+                    );
+                    return Ok(artifact);
+                }
+                Err(err) => {
+                    // We log this but don't fail - we want to continue
+                    // looking for a verifiable artifact.
+                    info!(
+                        self.log, "RoT archive verification failed";
+                        "artifact" => ?artifact.id,
+                        "err" => %DisplayErrorChain::new(&err),
+                    );
+                }
+            }
+        }
+
+        // If the loop above didn't find a verifiable image, we cannot proceed.
+        Err(UpdateTerminalError::FailedFindingSignedRotImage {
+            error: anyhow!("no RoT image found with valid CMPA/CFPA"),
+        })
+    }
+
+    /// Decode a base64-encoded RoT page we received from MGS.
+    fn decode_rot_page(
+        &self,
+        data: &str,
+    ) -> anyhow::Result<[u8; ROT_PAGE_SIZE]> {
+        // Even though we know `data` should decode to exactly
+        // `ROT_PAGE_SIZE` bytes, the base64 crate requires an output buffer
+        // of at least `decoded_len_estimate`. Allocate such a buffer here,
+        // then we'll copy to the fixed-size array we need after confirming
+        // the number of decoded bytes;
+        let mut output_buf = vec![0; base64::decoded_len_estimate(data.len())];
+
+        let n = base64::engine::general_purpose::STANDARD
+            .decode_slice(&data, &mut output_buf)
+            .with_context(|| {
+                format!("failed to decode base64 string: {data:?}")
+            })?;
+        if n != ROT_PAGE_SIZE {
+            bail!(
+                "incorrect len ({n}, expected {ROT_PAGE_SIZE}) \
+                     after decoding base64 string: {data:?}",
+            );
+        }
+        let mut page = [0; ROT_PAGE_SIZE];
+        page.copy_from_slice(&output_buf[..n]);
+        Ok(page)
+    }
+
+    /// Poll the RoT asking for its boot information. This is used to check
+    /// state after RoT bootloader updates
+    async fn wait_for_rot_boot_info(
+        &self,
+        timeout: Duration,
+    ) -> anyhow::Result<(Option<RotImageError>, Option<RotImageError>)> {
+        let mut ticker = tokio::time::interval(Duration::from_secs(1));
+
+        let start = Instant::now();
+        loop {
+            ticker.tick().await;
+            match self.get_rot_boot_info().await {
+                Ok(state) => match state {
+                    // the minimum we will ever return is 3
+                    RotState::V2 { .. } => unreachable!(),
+                    RotState::V3 { stage0_error, stage0next_error, .. } => {
+                        return Ok((stage0_error, stage0next_error));
+                    }
+                    // ugh
+                    RotState::CommunicationFailed { message } => {
+                        if start.elapsed() < timeout {
+                            warn!(
+                                self.log,
+                                "failed getting RoT boot info (will retry)";
+                                "error" => %message,
+                            );
+                        } else {
+                            return Err(anyhow!(message));
+                        }
+                    }
+                },
+                Err(error) => {
+                    if start.elapsed() < timeout {
+                        warn!(
+                            self.log,
+                            "failed getting RoT boot info (will retry)";
+                            "error" => %error,
+                        );
+                    } else {
+                        return Err(error);
+                    }
+                }
+            }
+        }
+    }
+
     /// Poll the RoT asking for its currently active slot, allowing failures up
     /// to a fixed timeout to give time for it to boot.
     ///
@@ -1867,16 +2291,14 @@ impl UpdateContext {
     async fn wait_for_rot_reboot(
         &self,
         timeout: Duration,
+        component: &str,
     ) -> anyhow::Result<u16> {
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
 
         let start = Instant::now();
         loop {
             ticker.tick().await;
-            match self
-                .get_component_active_slot(SpComponent::ROT.const_as_str())
-                .await
-            {
+            match self.get_component_active_slot(component).await {
                 Ok(slot) => return Ok(slot),
                 Err(error) => {
                     if start.elapsed() < timeout {
@@ -2020,6 +2442,22 @@ impl UpdateContext {
         StepSuccess::new(()).into()
     }
 
+    async fn get_rot_boot_info(&self) -> anyhow::Result<RotState> {
+        self.mgs_client
+            .sp_rot_boot_info(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::ROT.const_as_str(),
+                &GetRotBootInfoParams {
+                    version:
+                        gateway_messages::RotBootInfo::HIGHEST_KNOWN_VERSION,
+                },
+            )
+            .await
+            .context("failed to get RoT boot info")
+            .map(|res| res.into_inner())
+    }
+
     async fn get_component_active_slot(
         &self,
         component: &str,
@@ -2096,8 +2534,8 @@ impl UpdateContext {
                         if let Some(progress) = progress {
                             cx.send_progress(
                                 StepProgress::with_current_and_total(
-                                    progress.current as u64,
-                                    progress.total as u64,
+                                    u64::from(progress.current),
+                                    u64::from(progress.total),
                                     // The actual units here depend on the
                                     // component being updated and are a bit
                                     // hard to explain succinctly:
@@ -2131,8 +2569,8 @@ impl UpdateContext {
                         ComponentUpdateStage::InProgress => {
                             cx.send_progress(
                                 StepProgress::with_current_and_total(
-                                    bytes_received as u64,
-                                    total_bytes as u64,
+                                    u64::from(bytes_received),
+                                    u64::from(total_bytes),
                                     ProgressUnits::BYTES,
                                     Default::default(),
                                 ),
@@ -2262,6 +2700,9 @@ impl<'a> SpComponentUpdateContext<'a> {
         let update_cx = self.update_cx;
 
         let component_name = match self.component {
+            UpdateComponent::RotBootloader => {
+                SpComponent::STAGE0.const_as_str()
+            }
             UpdateComponent::Rot => SpComponent::ROT.const_as_str(),
             UpdateComponent::Sp => SpComponent::SP_ITSELF.const_as_str(),
             UpdateComponent::Host => {
@@ -2275,7 +2716,7 @@ impl<'a> SpComponentUpdateContext<'a> {
             .new_step(
                 SpComponentUpdateStepId::Sending,
                 format!("Sending data to MGS (slot {firmware_slot})"),
-                move |_cx| async move {
+                async move |_cx| {
                     let data_stream = artifact
                         .data
                         .reader_stream()
@@ -2318,7 +2759,7 @@ impl<'a> SpComponentUpdateContext<'a> {
             .new_step(
                 SpComponentUpdateStepId::Preparing,
                 format!("Preparing for update (slot {firmware_slot})"),
-                move |cx| async move {
+                async move |cx| {
                     update_cx
                         .poll_component_update(
                             cx,
@@ -2344,7 +2785,7 @@ impl<'a> SpComponentUpdateContext<'a> {
             .new_step(
                 SpComponentUpdateStepId::Writing,
                 format!("Writing update (slot {firmware_slot})"),
-                move |cx| async move {
+                async move |cx| {
                     update_cx
                         .poll_component_update(
                             cx,
@@ -2371,14 +2812,131 @@ impl<'a> SpComponentUpdateContext<'a> {
         // to stage updates for example, but for wicketd-driven recovery it's
         // fine to do this immediately.)
         match component {
+            UpdateComponent::RotBootloader => {
+                const WAIT_FOR_BOOT_TIMEOUT: Duration = Duration::from_secs(30);
+
+                // We need to reset the RoT in order to check the signature on what we just
+                // updated
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::Resetting,
+                        "Resetting the RoT to check the bootloader signature",
+                        async |_cx| {
+                            update_cx
+                                .reset_sp_component(SpComponent::ROT.const_as_str())
+                                .await
+                                .map_err(|error| {
+                                    SpComponentUpdateTerminalError::RotResetFailed {
+                                        error,
+                                    }
+                                })?;
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::Resetting,
+                        "Waiting for RoT to boot".to_string(),
+                        async move |_cx| {
+                            let (_, stage0next_error) = update_cx
+                                .wait_for_rot_boot_info(WAIT_FOR_BOOT_TIMEOUT)
+                                .await
+                                .map_err(|error| {
+                                    SpComponentUpdateTerminalError::GetRotBootInfoFailed { error }
+                                })?;
+
+                            // check that stage0next is valid before we try to set the component
+                            if let Some(error) = stage0next_error {
+                                return Err(SpComponentUpdateTerminalError::RotBootloaderError {
+                                    error: anyhow!(format!("{error:?}"))
+                                });
+                            }
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+
+                // Actually set stage0 to use the new firmware
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::SettingActiveBootSlot,
+                        format!("Setting {component_name} active slot to {firmware_slot}"),
+                        async move |_cx| {
+                            update_cx
+                                .set_component_active_slot(
+                                    component_name,
+                                    firmware_slot,
+                                    true,
+                                )
+                                .await
+                                .map_err(|error| {
+                                    SpComponentUpdateTerminalError::SetRotBootloaderActiveSlotFailed {
+                                        error,
+                                    }
+                                })?;
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+
+                // Now reset (again) to boot into the new stage0
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::Resetting,
+                        "Resetting the RoT to boot into the new bootloader",
+                        async move |_cx| {
+                            update_cx
+                                .reset_sp_component(SpComponent::ROT.const_as_str())
+                                .await
+                                .map_err(|error| {
+                                    SpComponentUpdateTerminalError::RotResetFailed {
+                                        error,
+                                    }
+                                })?;
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::Resetting,
+                        "Checking the new RoT bootloader".to_string(),
+                        async move |_cx| {
+                            let (stage0_error, stage0next_error) = update_cx
+                                .wait_for_rot_boot_info(WAIT_FOR_BOOT_TIMEOUT)
+                                .await
+                                .map_err(|error| {
+                                    SpComponentUpdateTerminalError::GetRotActiveSlotFailed { error }
+                                })?;
+
+                            // Both the active and pending slots should be valid after this spot
+                            if let Some(error) = stage0_error {
+                                return Err(SpComponentUpdateTerminalError::RotBootloaderError {
+                                    error: anyhow!(format!("{error:?}"))
+                                });
+                            }
+                            if let Some(error) = stage0next_error {
+                                return Err(SpComponentUpdateTerminalError::RotBootloaderError {
+                                    error: anyhow!(format!("{error:?}"))
+                                });
+                            }
+
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+            }
             UpdateComponent::Rot => {
                 // Prior to rebooting the RoT, we have to tell it to boot into
                 // the firmware slot we just updated.
                 registrar
                     .new_step(
                         SpComponentUpdateStepId::SettingActiveBootSlot,
-                        format!("Setting RoT active slot to {firmware_slot}"),
-                        move |_cx| async move {
+                        format!("Setting {component_name} active slot to {firmware_slot}"),
+                        async move |_cx| {
                             update_cx
                                 .set_component_active_slot(
                                     component_name,
@@ -2400,8 +2958,8 @@ impl<'a> SpComponentUpdateContext<'a> {
                 registrar
                     .new_step(
                         SpComponentUpdateStepId::Resetting,
-                        "Resetting RoT",
-                        move |_cx| async move {
+                        format!("Resetting {component_name}"),
+                        async move |_cx| {
                             update_cx
                                 .reset_sp_component(component_name)
                                 .await
@@ -2435,11 +2993,11 @@ impl<'a> SpComponentUpdateContext<'a> {
                     .new_step(
                         SpComponentUpdateStepId::Resetting,
                         format!("Waiting for RoT to boot slot {firmware_slot}"),
-                        move |_cx| async move {
+                        async move |_cx| {
                             const WAIT_FOR_BOOT_TIMEOUT: Duration =
                                 Duration::from_secs(30);
                             let active_slot = update_cx
-                                .wait_for_rot_reboot(WAIT_FOR_BOOT_TIMEOUT)
+                                .wait_for_rot_reboot(WAIT_FOR_BOOT_TIMEOUT, component_name)
                                 .await
                                 .map_err(|error| {
                                     SpComponentUpdateTerminalError::GetRotActiveSlotFailed { error }
@@ -2455,11 +3013,12 @@ impl<'a> SpComponentUpdateContext<'a> {
             }
             UpdateComponent::Sp => {
                 // Nothing special to do on the SP - just reset it.
+                // TODO fixup the SP to also set the active slot
                 registrar
                     .new_step(
                         SpComponentUpdateStepId::Resetting,
                         "Resetting SP",
-                        move |_cx| async move {
+                        async move |_cx| {
                             update_cx
                                 .reset_sp_component(component_name)
                                 .await

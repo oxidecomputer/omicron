@@ -27,15 +27,29 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
+    AsError, CompletionContext, MetadataContext, NestedSpec, StepContext,
+    StepContextPayload, StepHandle, StepSpec,
     errors::ExecutionError,
     events::{
         Event, ProgressEvent, ProgressEventKind, StepComponentSummary,
         StepEvent, StepEventKind, StepInfo, StepInfoWithMetadata, StepOutcome,
         StepProgress,
     },
-    AsError, CompletionContext, MetadataContext, NestedSpec, StepContext,
-    StepContextPayload, StepHandle, StepSpec,
 };
+
+/// Makes an MPSC channel suitable for the update engine.
+///
+/// This function is a convenience wrapper around
+/// [`tokio::sync::mpsc::channel`] that creates a channel of the appropriate
+/// size, and may aid in type inference.
+#[inline]
+pub fn channel<S: StepSpec>()
+-> (mpsc::Sender<Event<S>>, mpsc::Receiver<Event<S>>) {
+    // This is a large enough channel to handle incoming messages without
+    // stalling.
+    const CHANNEL_SIZE: usize = 256;
+    mpsc::channel(CHANNEL_SIZE)
+}
 
 /// An identifier for a particular engine execution.
 ///
@@ -86,6 +100,9 @@ pub struct UpdateEngine<'a, S: StepSpec> {
 
 impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
     /// Creates a new `UpdateEngine`.
+    ///
+    /// It is recommended that `sender` be created using the [`channel`]
+    /// function, which sets an appropriate channel size.
     pub fn new(log: &slog::Logger, sender: mpsc::Sender<Event<S>>) -> Self {
         let sender = Arc::new(DefaultSender { sender });
         Self::new_impl(log, EngineSender { sender })
@@ -420,7 +437,7 @@ pub struct ExecutionHandle<'a, S: StepSpec> {
     abort_handle: AbortHandle,
 }
 
-impl<'a, S: StepSpec> ExecutionHandle<'a, S> {
+impl<S: StepSpec> ExecutionHandle<'_, S> {
     /// Aborts this engine execution with a message.
     ///
     /// This sends the message immediately, and returns a future that can be
@@ -446,7 +463,7 @@ impl<'a, S: StepSpec> ExecutionHandle<'a, S> {
     }
 }
 
-impl<'a, S: StepSpec> Future for ExecutionHandle<'a, S> {
+impl<S: StepSpec> Future for ExecutionHandle<'_, S> {
     type Output = Result<CompletionContext<S>, ExecutionError<S>>;
 
     fn poll(
@@ -603,7 +620,7 @@ pub struct NewStep<'engine, 'a, S: StepSpec, T> {
     metadata_fn: Option<DebugIgnore<StepMetadataFn<'a, S>>>,
 }
 
-impl<'engine, 'a, S: StepSpec, T> NewStep<'engine, 'a, S, T> {
+impl<'a, S: StepSpec, T> NewStep<'_, 'a, S, T> {
     /// Adds a metadata-generating function to the step.
     ///
     /// This function is expected to produce
@@ -837,7 +854,7 @@ struct StepMetadataGen<'a, S: StepSpec> {
     metadata_fn: Option<DebugIgnore<StepMetadataFn<'a, S>>>,
 }
 
-impl<'a, S: StepSpec> StepMetadataGen<'a, S> {
+impl<S: StepSpec> StepMetadataGen<'_, S> {
     fn to_step_info(
         &self,
         index: usize,
@@ -878,7 +895,7 @@ struct StepExec<'a, S: StepSpec> {
     exec_fn: DebugIgnore<StepExecFn<'a, S>>,
 }
 
-impl<'a, S: StepSpec> StepExec<'a, S> {
+impl<S: StepSpec> StepExec<'_, S> {
     async fn execute<F: FnMut() -> usize>(
         self,
         log: &slog::Logger,
@@ -1238,7 +1255,7 @@ impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
                 component: self.step_info.info.component.clone(),
                 id: self.step_info.info.id.clone(),
                 description: self.step_info.info.description.clone(),
-                message: message,
+                message,
             },
             Err(error) => error,
         }

@@ -6,10 +6,10 @@
 
 use gateway_messages::ignition::SystemPowerState;
 use gateway_messages::ignition::SystemType;
-use omicron_gateway::http_entrypoints::SpIdentifier;
-use omicron_gateway::http_entrypoints::SpIgnitionInfo;
-use omicron_gateway::http_entrypoints::SpState;
-use omicron_gateway::http_entrypoints::SpType;
+use gateway_types::component::SpIdentifier;
+use gateway_types::component::SpState;
+use gateway_types::component::SpType;
+use gateway_types::ignition::SpIgnitionInfo;
 use sp_sim::Gimlet;
 use sp_sim::SimRack;
 use sp_sim::SimulatedSp;
@@ -54,11 +54,7 @@ pub async fn current_simulator_state(simrack: &SimRack) -> Vec<SpInfo> {
         // setup.
         slot = all_sps.last().map_or(0, |prev_info| {
             // if the type changed, reset to slot 0; otherwise increment
-            if prev_info.ignition.id.typ != typ {
-                0
-            } else {
-                slot + 1
-            }
+            if prev_info.ignition.id.typ != typ { 0 } else { slot + 1 }
         });
 
         let sp: &dyn SimulatedSp = match typ {

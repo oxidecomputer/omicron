@@ -36,9 +36,7 @@ where
         update_id: Uuid,
         discover_fn: F,
     ) -> (Self, mpsc::Sender<Event>) {
-        // Set a large enough buffer that it filling up isn't an actual problem
-        // outside of something going horribly wrong.
-        let (event_sender, event_receiver) = mpsc::channel(512);
+        let (event_sender, event_receiver) = update_engine::channel();
         let ret = Self {
             log: log.new(slog::o!("component" => "EventReporter")),
             update_id,

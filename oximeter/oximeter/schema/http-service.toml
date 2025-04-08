@@ -1,0 +1,39 @@
+format_version = 1
+
+[target]
+name = "http_service"
+description = "An Oxide HTTP server"
+authz_scope = "fleet"
+versions = [
+    { version = 1, fields = [ "name", "id" ] },
+]
+
+[[metrics]]
+name = "request_latency_histogram"
+description = "Duration for the server to handle a request"
+units = "nanoseconds"
+datum_type = "histogram_u64"
+versions = [
+    { added_in = 1, fields = [ "operation_id", "status_code" ] }
+]
+
+[fields.name]
+type = "string"
+description = "The name of the HTTP server, or program running it"
+
+[fields.id]
+type = "uuid"
+description = "UUID of the HTTP server"
+
+[fields.operation_id]
+type = "string"
+description = """\
+The identifier for the HTTP operation.\
+
+In most cases, this the OpenAPI `operationId` field that uniquely identifies the
+endpoint the request is targeted to and the HTTP method used.
+"""
+
+[fields.status_code]
+type = "u16"
+description = "HTTP status code in the server's response"

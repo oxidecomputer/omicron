@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use diesel::pg::Pg;
 use diesel::Column;
 use diesel::ExpressionMethods;
 use diesel::Selectable;
+use diesel::pg::Pg;
 use std::fmt::Debug;
 
 /// Trait to be implemented by any structs representing a collection.
@@ -152,4 +152,8 @@ pub trait DatastoreAttachTargetConfig<ResourceType>:
     type ResourceTimeDeletedColumn: Column<Table = <Self::ResourceIdColumn as Column>::Table>
         + Default
         + ExpressionMethods;
+
+    /// Controls whether a resource may be attached to a new collection without
+    /// first being explicitly detached from the previous one
+    const ALLOW_FROM_ATTACHED: bool = false;
 }

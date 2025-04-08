@@ -4,25 +4,25 @@
 
 //! Async networking used by peer.rs
 
+use super::Msg as FsmMsg;
 use super::messages::Identify;
 use super::storage::NetworkConfig;
-use super::Msg as FsmMsg;
 use crate::schemes::Hello;
 use bytes::Buf;
 use derive_more::From;
 use serde::{Deserialize, Serialize};
-use sled_hardware::Baseboard;
-use slog::{debug, error, info, o, warn, Logger};
+use sled_hardware_types::Baseboard;
+use slog::{Logger, debug, error, info, o, warn};
 use std::collections::VecDeque;
 use std::io::Cursor;
 use std::net::SocketAddrV6;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::time::{interval, sleep, Instant, MissedTickBehavior};
+use tokio::time::{Instant, MissedTickBehavior, interval, sleep};
 
 const CONN_BUF_SIZE: usize = 512 * 1024;
 const CONNECTION_RETRY_TIMEOUT: Duration = Duration::from_secs(1);
@@ -105,6 +105,9 @@ pub enum MainToConnMsg {
 // complete), or established connection (handshake complete - whether connecting
 // client or accepting server).
 pub struct PeerConnHandle {
+    // Hold onto this handle to indicate ownership (though note that dropping
+    // a Tokio handle does not cause the task to be cancelled).
+    #[allow(dead_code)]
     pub handle: JoinHandle<()>,
     pub tx: mpsc::Sender<MainToConnMsg>,
 
@@ -120,7 +123,9 @@ pub struct AcceptedConnHandle {
     pub handle: JoinHandle<()>,
     pub tx: mpsc::Sender<MainToConnMsg>,
 
-    // The canonical IP with ephemeral port of the peer
+    // The canonical IP with ephemeral port of the peer. Not currently used,
+    // but useful for debugging.
+    #[allow(dead_code)]
     pub addr: SocketAddrV6,
     // This is used to differentiate stale `ConnToMainMsg`s from cancelled tasks
     // with the same addr from each other
@@ -599,9 +604,11 @@ fn read_frame_size(buf: [u8; FRAME_HEADER_SIZE]) -> usize {
 
 #[derive(Debug, From)]
 enum HandshakeError {
-    Serialization(ciborium::ser::Error<std::io::Error>),
-    Deserialization(ciborium::de::Error<std::io::Error>),
-    Io(tokio::io::Error),
+    // Rust 1.77 warns on tuple variants not being used, but in reality these are
+    // used for their Debug impl.
+    Serialization(#[allow(dead_code)] ciborium::ser::Error<std::io::Error>),
+    Deserialization(#[allow(dead_code)] ciborium::de::Error<std::io::Error>),
+    Io(#[allow(dead_code)] tokio::io::Error),
     UnsupportedScheme,
     UnsupportedVersion,
     Timeout,

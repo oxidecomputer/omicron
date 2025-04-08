@@ -2,11 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{ByteCount, Dataset, Generation};
+use super::{CrucibleDataset, Generation};
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{dataset, zpool};
+use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_db_schema::schema::{crucible_dataset, zpool};
+use omicron_uuid_kinds::PhysicalDiskKind;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use uuid::Uuid;
 
 /// Database representation of a Pool.
@@ -25,34 +28,28 @@ pub struct Zpool {
     pub sled_id: Uuid,
 
     // The physical disk to which this Zpool is attached.
-    pub physical_disk_id: Uuid,
-
-    // TODO: In the future, we may expand this structure to include
-    // size, allocation, and health information.
-    pub total_size: ByteCount,
+    pub physical_disk_id: DbTypedUuid<PhysicalDiskKind>,
 }
 
 impl Zpool {
     pub fn new(
         id: Uuid,
         sled_id: Uuid,
-        physical_disk_id: Uuid,
-        total_size: ByteCount,
+        physical_disk_id: PhysicalDiskUuid,
     ) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
             sled_id,
-            physical_disk_id,
-            total_size,
+            physical_disk_id: physical_disk_id.into(),
         }
     }
 }
 
-impl DatastoreCollectionConfig<Dataset> for Zpool {
+impl DatastoreCollectionConfig<CrucibleDataset> for Zpool {
     type CollectionId = Uuid;
     type GenerationNumberColumn = zpool::dsl::rcgen;
     type CollectionTimeDeletedColumn = zpool::dsl::time_deleted;
-    type CollectionIdColumn = dataset::dsl::pool_id;
+    type CollectionIdColumn = crucible_dataset::dsl::pool_id;
 }

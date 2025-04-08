@@ -12,18 +12,21 @@
 //! actually serialize them to and from SQL take care of the necessary
 //! conversions.
 
-use super::schema::{saga, saga_node_event};
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
+use nexus_db_schema::schema::{saga, saga_node_event};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use std::convert::TryFrom;
 use std::io::Write;
 use std::sync::Arc;
 use uuid::Uuid;
+
+use crate::impl_enum_wrapper;
 
 /// Unique identifier for an SEC (saga execution coordinator) instance
 ///
@@ -64,6 +67,12 @@ NewtypeDebug! { () pub struct SecId(Uuid); }
 NewtypeDisplay! { () pub struct SecId(Uuid); }
 NewtypeFrom! { () pub struct SecId(Uuid); }
 
+impl From<OmicronZoneUuid> for SecId {
+    fn from(g: OmicronZoneUuid) -> Self {
+        g.into_untyped_uuid().into()
+    }
+}
+
 impl From<&SecId> for Uuid {
     fn from(g: &SecId) -> Self {
         g.0
@@ -76,7 +85,7 @@ impl From<&SecId> for Uuid {
 /// This exists because Omicron cannot implement foreign traits
 /// for foreign types.
 #[derive(
-    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd,
+    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd, Ord, Eq,
 )]
 #[diesel(sql_type = sql_types::Uuid)]
 pub struct SagaId(pub steno::SagaId);
@@ -110,7 +119,7 @@ where
 /// This exists because Omicron cannot implement foreign traits
 /// for foreign types.
 #[derive(
-    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd,
+    AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq, PartialOrd, Ord, Eq,
 )]
 #[diesel(sql_type = sql_types::BigInt)]
 pub struct SagaNodeId(pub steno::SagaNodeId);
@@ -123,7 +132,7 @@ impl ToSql<sql_types::BigInt, Pg> for SagaNodeId {
         out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
         // Diesel newtype -> steno type -> u32 -> i64 -> SQL
-        let id = u32::from(self.0) as i64;
+        let id = i64::from(u32::from(self.0));
         <i64 as ToSql<sql_types::BigInt, Pg>>::to_sql(&id, &mut out.reborrow())
     }
 }
@@ -139,49 +148,22 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, SqlType)]
-#[diesel(postgres_type(name = "saga_state"))]
-pub struct SagaCachedStateEnum;
+impl_enum_wrapper!(
+    SagaCachedStateEnum:
 
-/// Newtype wrapper around [`steno::SagaCachedState`] which implements
-/// Diesel traits.
-///
-/// This exists because Omicron cannot implement foreign traits
-/// for foreign types.
-#[derive(AsExpression, FromSqlRow, Clone, Copy, Debug, PartialEq)]
-#[diesel(sql_type = SagaCachedStateEnum)]
-pub struct SagaCachedState(pub steno::SagaCachedState);
+    #[derive(AsExpression, FromSqlRow, Clone, Copy, Debug, PartialEq)]
+    pub struct SagaCachedState(pub steno::SagaCachedState);
+
+    // Enum values
+    Running => b"running"
+    Unwinding => b"unwinding"
+    Done => b"done"
+);
 
 NewtypeFrom! { () pub struct SagaCachedState(steno::SagaCachedState); }
 
-impl ToSql<SagaCachedStateEnum, Pg> for SagaCachedState {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut serialize::Output<'a, '_, Pg>,
-    ) -> serialize::Result {
-        use steno::SagaCachedState;
-        out.write_all(match self.0 {
-            SagaCachedState::Running => b"running",
-            SagaCachedState::Unwinding => b"unwinding",
-            SagaCachedState::Done => b"done",
-        })?;
-        Ok(serialize::IsNull::No)
-    }
-}
-
-impl FromSql<SagaCachedStateEnum, Pg> for SagaCachedState {
-    fn from_sql(
-        bytes: <Pg as Backend>::RawValue<'_>,
-    ) -> deserialize::Result<Self> {
-        let bytes = <Pg as Backend>::RawValue::as_bytes(&bytes);
-        let s = std::str::from_utf8(bytes)?;
-        let state = steno::SagaCachedState::try_from(s)?;
-        Ok(Self(state))
-    }
-}
-
 /// Represents a row in the "Saga" table
-#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq)]
 #[diesel(table_name = saga)]
 pub struct Saga {
     pub id: SagaId,
@@ -222,7 +204,7 @@ impl Saga {
 }
 
 /// Represents a row in the "SagaNodeEvent" table
-#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq)]
 #[diesel(table_name = saga_node_event)]
 pub struct SagaNodeEvent {
     pub saga_id: SagaId,

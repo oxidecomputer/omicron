@@ -4,29 +4,25 @@
 
 //! Convert Omicron VPC firewall rules to OPTE firewall rules.
 
-use crate::opte::params::VpcFirewallRule;
+use super::net_to_cidr;
 use crate::opte::Vni;
 use macaddr::MacAddr6;
-use omicron_common::api::external::IpNet;
 use omicron_common::api::external::VpcFirewallRuleAction;
 use omicron_common::api::external::VpcFirewallRuleDirection;
 use omicron_common::api::external::VpcFirewallRuleProtocol;
 use omicron_common::api::external::VpcFirewallRuleStatus;
 use omicron_common::api::internal::nexus::HostIdentifier;
+use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use oxide_vpc::api::Address;
 use oxide_vpc::api::Direction;
 use oxide_vpc::api::Filters;
 use oxide_vpc::api::FirewallAction;
 use oxide_vpc::api::FirewallRule;
 use oxide_vpc::api::IpAddr;
-use oxide_vpc::api::IpCidr;
-use oxide_vpc::api::Ipv4Cidr;
-use oxide_vpc::api::Ipv4PrefixLen;
-use oxide_vpc::api::Ipv6Cidr;
-use oxide_vpc::api::Ipv6PrefixLen;
 use oxide_vpc::api::Ports;
 use oxide_vpc::api::ProtoFilter;
 use oxide_vpc::api::Protocol;
+use oxnet::IpNet;
 
 trait FromVpcFirewallRule {
     fn action(&self) -> FirewallAction;
@@ -38,7 +34,7 @@ trait FromVpcFirewallRule {
     fn protos(&self) -> Vec<ProtoFilter>;
 }
 
-impl FromVpcFirewallRule for VpcFirewallRule {
+impl FromVpcFirewallRule for ResolvedVpcFirewallRule {
     fn action(&self) -> FirewallAction {
         match self.action {
             VpcFirewallRuleAction::Allow => FirewallAction::Allow,
@@ -62,31 +58,16 @@ impl FromVpcFirewallRule for VpcFirewallRule {
 
     fn hosts(&self) -> Vec<Address> {
         match self.filter_hosts {
-            Some(ref hosts) if hosts.len() > 0 => hosts
+            Some(ref hosts) if !hosts.is_empty() => hosts
                 .iter()
                 .map(|host| match host {
-                    HostIdentifier::Ip(IpNet::V4(net))
-                        if net.prefix() == 32 =>
-                    {
-                        Address::Ip(IpAddr::Ip4(net.ip().into()))
+                    HostIdentifier::Ip(IpNet::V4(net)) if net.is_host_net() => {
+                        Address::Ip(IpAddr::Ip4(net.addr().into()))
                     }
-                    HostIdentifier::Ip(IpNet::V4(net)) => {
-                        Address::Subnet(IpCidr::Ip4(Ipv4Cidr::new(
-                            net.ip().into(),
-                            Ipv4PrefixLen::new(net.prefix()).unwrap(),
-                        )))
+                    HostIdentifier::Ip(IpNet::V6(net)) if net.is_host_net() => {
+                        Address::Ip(IpAddr::Ip6(net.addr().into()))
                     }
-                    HostIdentifier::Ip(IpNet::V6(net))
-                        if net.prefix() == 128 =>
-                    {
-                        Address::Ip(IpAddr::Ip6(net.ip().into()))
-                    }
-                    HostIdentifier::Ip(IpNet::V6(net)) => {
-                        Address::Subnet(IpCidr::Ip6(Ipv6Cidr::new(
-                            net.ip().into(),
-                            Ipv6PrefixLen::new(net.prefix()).unwrap(),
-                        )))
-                    }
+                    HostIdentifier::Ip(ip) => Address::Subnet(net_to_cidr(*ip)),
                     HostIdentifier::Vpc(vni) => {
                         Address::Vni(Vni::new(u32::from(*vni)).unwrap())
                     }
@@ -98,7 +79,7 @@ impl FromVpcFirewallRule for VpcFirewallRule {
 
     fn ports(&self) -> Ports {
         match self.filter_ports {
-            Some(ref ports) if ports.len() > 0 => Ports::PortList(
+            Some(ref ports) if !ports.is_empty() => Ports::PortList(
                 ports
                     .iter()
                     .flat_map(|range| {
@@ -117,7 +98,7 @@ impl FromVpcFirewallRule for VpcFirewallRule {
 
     fn protos(&self) -> Vec<ProtoFilter> {
         match self.filter_protocols {
-            Some(ref protos) if protos.len() > 0 => protos
+            Some(ref protos) if !protos.is_empty() => protos
                 .iter()
                 .map(|proto| {
                     ProtoFilter::Proto(match proto {
@@ -137,7 +118,7 @@ impl FromVpcFirewallRule for VpcFirewallRule {
 /// a single host address and protocol, so we must unroll rules with multiple
 /// hosts/protocols.
 pub fn opte_firewall_rules(
-    rules: &[VpcFirewallRule],
+    rules: &[ResolvedVpcFirewallRule],
     vni: &Vni,
     mac: &MacAddr6,
 ) -> Vec<FirewallRule> {

@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::ServiceKind;
-use crate::schema::certificate;
 use db_macros::Resource;
+use nexus_db_schema::schema::certificate;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
@@ -82,6 +82,13 @@ impl TryFrom<Certificate> for views::Certificate {
         Ok(Self {
             identity: cert.identity(),
             service: cert.service.try_into()?,
+            // This is expected to succeed in normal circumstances. Certificates are stored in the
+            // database with PEM encoding which are essentially bundles of Base64 encoded text.
+            // The only cases in which this conversion should fail is when our internal database
+            // representation of the certificate is invalid.
+            cert: String::from_utf8(cert.cert).map_err(|_| {
+                Error::internal_error("Certificate is not valid UTF-8")
+            })?,
         })
     }
 }

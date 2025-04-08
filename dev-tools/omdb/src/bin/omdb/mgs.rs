@@ -5,6 +5,7 @@
 //! Prototype code for collecting information from systems in the rack
 
 use crate::Omdb;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
 use clap::Args;
 use clap::Subcommand;
@@ -20,13 +21,25 @@ use gateway_client::types::SpIgnitionInfo;
 use gateway_client::types::SpIgnitionSystemType;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use internal_dns_types::names::ServiceName;
 use tabled::Tabled;
+
+mod dashboard;
+mod sensors;
+
+use dashboard::DashboardArgs;
+use sensors::SensorsArgs;
 
 /// Arguments to the "omdb mgs" subcommand
 #[derive(Debug, Args)]
 pub struct MgsArgs {
     /// URL of an MGS instance to query
-    #[clap(long, env("OMDB_MGS_URL"))]
+    #[clap(
+        long,
+        env = "OMDB_MGS_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
     mgs_url: Option<String>,
 
     #[command(subcommand)]
@@ -35,44 +48,59 @@ pub struct MgsArgs {
 
 #[derive(Debug, Subcommand)]
 enum MgsCommands {
+    /// Dashboard of SPs
+    Dashboard(DashboardArgs),
+
     /// Show information about devices and components visible to MGS
     Inventory(InventoryArgs),
+
+    /// Show information about sensors, as gleaned by MGS
+    Sensors(SensorsArgs),
 }
 
 #[derive(Debug, Args)]
 struct InventoryArgs {}
 
 impl MgsArgs {
-    pub(crate) async fn run_cmd(
+    async fn mgs_client(
         &self,
         omdb: &Omdb,
         log: &slog::Logger,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<gateway_client::Client, anyhow::Error> {
         let mgs_url = match &self.mgs_url {
             Some(cli_or_env_url) => cli_or_env_url.clone(),
             None => {
                 eprintln!(
                     "note: MGS URL not specified.  Will pick one from DNS."
                 );
-                let addrs = omdb
-                    .dns_lookup_all(
+                let addr = omdb
+                    .dns_lookup_one(
                         log.clone(),
-                        internal_dns::ServiceName::ManagementGatewayService,
+                        ServiceName::ManagementGatewayService,
                     )
                     .await?;
-                let addr = addrs.into_iter().next().expect(
-                    "expected at least one MGS address from \
-                    successful DNS lookup",
-                );
                 format!("http://{}", addr)
             }
         };
         eprintln!("note: using MGS URL {}", &mgs_url);
-        let mgs_client = gateway_client::Client::new(&mgs_url, log.clone());
+        Ok(gateway_client::Client::new(&mgs_url, log.clone()))
+    }
 
+    pub(crate) async fn run_cmd(
+        &self,
+        omdb: &Omdb,
+        log: &slog::Logger,
+    ) -> Result<(), anyhow::Error> {
         match &self.command {
-            MgsCommands::Inventory(inventory_args) => {
-                cmd_mgs_inventory(&mgs_client, inventory_args).await
+            MgsCommands::Dashboard(args) => {
+                dashboard::cmd_mgs_dashboard(omdb, log, self, args).await
+            }
+            MgsCommands::Inventory(args) => {
+                let mgs_client = self.mgs_client(omdb, log).await?;
+                cmd_mgs_inventory(&mgs_client, args).await
+            }
+            MgsCommands::Sensors(args) => {
+                sensors::cmd_mgs_sensors(omdb, log, self, args).await
             }
         }
     }
@@ -119,7 +147,7 @@ async fn cmd_mgs_inventory(
                 None
             }
         }))
-        .then(|sp_id| async move {
+        .then(async move |sp_id| {
             c.sp_get(sp_id.type_, sp_id.slot)
                 .await
                 .with_context(|| format!("fetching info about SP {:?}", sp_id))
@@ -156,6 +184,10 @@ fn sp_type_to_str(s: &SpType) -> &'static str {
     }
 }
 
+fn sp_to_string(s: &SpIdentifier) -> String {
+    format!("{} {}", sp_type_to_str(&s.type_), s.slot)
+}
+
 fn show_sp_ids(sp_ids: &[SpIdentifier]) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -165,7 +197,7 @@ fn show_sp_ids(sp_ids: &[SpIdentifier]) -> Result<(), anyhow::Error> {
         slot: u32,
     }
 
-    impl<'a> From<&'a SpIdentifier> for SpIdRow {
+    impl From<&SpIdentifier> for SpIdRow {
         fn from(id: &SpIdentifier) -> Self {
             SpIdRow { type_: sp_type_to_str(&id.type_), slot: id.slot }
         }
@@ -192,7 +224,7 @@ fn show_sps_from_ignition(
         system_type: String,
     }
 
-    impl<'a> From<&'a SpIgnitionInfo> for IgnitionRow {
+    impl From<&SpIgnitionInfo> for IgnitionRow {
         fn from(value: &SpIgnitionInfo) -> Self {
             IgnitionRow {
                 type_: sp_type_to_str(&value.id.type_),
@@ -263,10 +295,16 @@ fn show_sp_states(
                     RotState::CommunicationFailed { message } => {
                         format!("error: {}", message)
                     }
-                    RotState::Enabled { active: RotSlot::A, .. } => {
+                    RotState::V2 { active: RotSlot::A, .. } => {
                         "slot A".to_string()
                     }
-                    RotState::Enabled { active: RotSlot::B, .. } => {
+                    RotState::V2 { active: RotSlot::B, .. } => {
+                        "slot B".to_string()
+                    }
+                    RotState::V3 { active: RotSlot::A, .. } => {
+                        "slot A".to_string()
+                    }
+                    RotState::V3 { active: RotSlot::B, .. } => {
                         "slot B".to_string()
                     }
                 },
@@ -301,7 +339,7 @@ async fn show_sp_details(
         RotState::CommunicationFailed { message } => {
             println!("        error: {}", message);
         }
-        RotState::Enabled {
+        RotState::V2 {
             active,
             pending_persistent_boot_preference,
             persistent_boot_preference,
@@ -348,6 +386,85 @@ async fn show_sp_details(
                     value: slot_b_sha3_256_digest
                         .clone()
                         .unwrap_or_else(|| "-".to_string()),
+                },
+            ];
+
+            let table = tabled::Table::new(rows)
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+            println!("{}", textwrap::indent(&table.to_string(), "        "));
+            println!("");
+        }
+        RotState::V3 {
+            active,
+            pending_persistent_boot_preference,
+            persistent_boot_preference,
+            slot_a_fwid,
+            slot_b_fwid,
+            transient_boot_preference,
+            stage0_fwid,
+            stage0next_fwid,
+            slot_a_error,
+            slot_b_error,
+            stage0_error,
+            stage0next_error,
+        } => {
+            #[derive(Tabled)]
+            #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+            struct Row {
+                name: &'static str,
+                value: String,
+            }
+
+            let rows = vec![
+                Row {
+                    name: "active slot",
+                    value: format!("slot {:?}", active),
+                },
+                Row {
+                    name: "persistent boot preference",
+                    value: format!("slot {:?}", persistent_boot_preference),
+                },
+                Row {
+                    name: "pending persistent boot preference",
+                    value: pending_persistent_boot_preference
+                        .map(|s| format!("slot {:?}", s))
+                        .unwrap_or_else(|| "-".to_string()),
+                },
+                Row {
+                    name: "transient boot preference",
+                    value: transient_boot_preference
+                        .map(|s| format!("slot {:?}", s))
+                        .unwrap_or_else(|| "-".to_string()),
+                },
+                Row { name: "slot A FWID", value: slot_a_fwid.clone() },
+                Row { name: "slot B FWID", value: slot_b_fwid.clone() },
+                Row { name: "Stage0 FWID", value: stage0_fwid.clone() },
+                Row { name: "Stage0Next FWID", value: stage0next_fwid.clone() },
+                Row {
+                    name: "Slot A status",
+                    value: (*slot_a_error)
+                        .map(|x| format!("error: {:?}", x))
+                        .unwrap_or_else(|| "VALID".to_string()),
+                },
+                Row {
+                    name: "Slot B status",
+                    value: (*slot_b_error)
+                        .map(|x| format!("error: {:?}", x))
+                        .unwrap_or_else(|| "VALID".to_string()),
+                },
+                Row {
+                    name: "Stage0 status",
+                    value: (*stage0_error)
+                        .map(|x| format!("error: {:?}", x))
+                        .unwrap_or_else(|| "VALID".to_string()),
+                },
+                Row {
+                    name: "stage0next status",
+                    value: (*stage0next_error)
+                        .map(|x| format!("error: {:?}", x))
+                        .unwrap_or_else(|| "VALID".to_string()),
                 },
             ];
 

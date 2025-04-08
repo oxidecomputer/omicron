@@ -2,9 +2,10 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.25"
+#: target = "lab-2.0-opte-0.34"
 #: output_rules = [
-#:  "%/var/svc/log/oxide-sled-agent:default.log*",
+#:  "%/var/svc/log/oxide-*.log*",
+#:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/oxide-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/system-illumos-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_ntp_*/root/var/log/chrony/*.log*",
@@ -12,15 +13,14 @@
 #:  "%/pool/ext/*/crypt/debug/global/oxide-sled-agent:default.log.*",
 #:  "%/pool/ext/*/crypt/debug/oxz_*/oxide-*.log.*",
 #:  "%/pool/ext/*/crypt/debug/oxz_*/system-illumos-*.log.*",
-#:  "!/pool/ext/*/crypt/debug/oxz_propolis-server_*/*.log.*"
+#:  "!/pool/ext/*/crypt/debug/oxz_propolis-server_*/*.log.*",
+#:  "/tmp/kstat/*.kstat"
 #: ]
 #: skip_clone = true
 #:
 #: [dependencies.package]
 #: job = "helios / package"
 #:
-#: [dependencies.ci-tools]
-#: job = "helios / CI tools"
 
 set -o errexit
 set -o pipefail
@@ -31,9 +31,19 @@ set -o xtrace
 #
 _exit_trap() {
 	local status=$?
+	set +o errexit
+
+	if [[ "x$OPTE_COMMIT" != "x" ]]; then
+		pfexec cp /tmp/opteadm /opt/oxide/opte/bin/opteadm
+	fi
+
+	#
+	# Stop cron in all zones (to stop logadm log rotation)
+	#
+	pfexec svcadm -Z disable -s cron
+
 	[[ $status -eq 0 ]] && exit 0
 
-	set +o errexit
 	set -o xtrace
 	banner evidence
 	zoneadm list -civ
@@ -50,6 +60,8 @@ _exit_trap() {
 		standalone \
 		dump-state
 	pfexec /opt/oxide/opte/bin/opteadm list-ports
+	pfexec /opt/oxide/opte/bin/opteadm dump-v2b
+	pfexec /opt/oxide/opte/bin/opteadm dump-v2p
 	z_swadm link ls
 	z_swadm addr list
 	z_swadm route list
@@ -58,11 +70,15 @@ _exit_trap() {
 
 	PORTS=$(pfexec /opt/oxide/opte/bin/opteadm list-ports | tail +2 | awk '{ print $1; }')
 	for p in $PORTS; do
+		pfexec /opt/oxide/opte/bin/opteadm dump-uft -p $p
 		LAYERS=$(pfexec /opt/oxide/opte/bin/opteadm list-layers -p $p | tail +2 | awk '{ print $1; }')
 		for l in $LAYERS; do
 			pfexec /opt/oxide/opte/bin/opteadm dump-layer -p $p $l
 		done
 	done
+
+	mkdir -p /tmp/kstat
+	pfexec kstat -p xde: > /tmp/kstat/xde.kstat
 
 	pfexec zfs list
 	pfexec zpool list
@@ -81,9 +97,30 @@ _exit_trap() {
 
 	for z in $(zoneadm list -n | grep oxz_ntp); do
 		banner "${z/oxz_/}"
-		pfexec zlogin "$z" chronyc tracking
-		pfexec zlogin "$z" chronyc sources
+		pfexec zlogin "$z" chronyc -n tracking
+		pfexec zlogin "$z" chronyc -n sources -a
 		pfexec zlogin "$z" cat /etc/inet/chrony.conf
+		pfexec zlogin "$z" ping -sn oxide.computer 56 1
+		pfexec zlogin "$z" ping -sn 1.1.1.1 56 1
+		pfexec zlogin "$z" /usr/sbin/dig 0.pool.ntp.org @1.1.1.1
+		pfexec zlogin "$z" getent hosts time.cloudfare.com
+
+		# Attempt to get chrony to do some time sync from the CLI with
+		# messages being written to the terminal and with debugging
+		# enabled if the chrony package was built with that option.
+		# Since chronyd on the CLI needs to use the ports that the
+		# service will be using, stop it first (with -s to wait for it
+		# to exit).
+		pfexec /usr/sbin/svcadm -z "$z" disable -s oxide/ntp
+		# Run in dry-run one-shot mode (-Q)
+		pfexec zlogin "$z" /usr/sbin/chronyd -t 10 -ddQ
+		# Run in one-shot mode (-q) -- attempt to set the clock
+		pfexec zlogin "$z" /usr/sbin/chronyd -t 10 -ddq
+		# Run in one-shot mode (-q) but override the configuration
+		# to talk to an explicit external service. This command line is
+		# similar to that used by the pre-flight NTP checks.
+		pfexec zlogin "$z" /usr/sbin/chronyd -t 10 -ddq \
+		    "'pool time.cloudflare.com iburst maxdelay 0.1'"
 	done
 
 	pfexec zlogin sidecar_softnpu cat /var/log/softnpu.log
@@ -96,6 +133,20 @@ z_swadm () {
 	echo "== swadm $@"
 	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
 }
+
+# only set this if you want to override the version of opte/xde installed by the
+# install_opte.sh script
+OPTE_COMMIT=""
+if [[ "x$OPTE_COMMIT" != "x" ]]; then
+	curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde
+	pfexec rem_drv xde || true
+	pfexec mv xde /kernel/drv/amd64/xde
+	pfexec add_drv xde || true
+	curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/release/$OPTE_COMMIT/opteadm
+	chmod +x opteadm
+	cp opteadm /tmp/opteadm
+	pfexec mv opteadm /opt/oxide/opte/bin/opteadm
+fi
 
 #
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which
@@ -142,13 +193,9 @@ pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
-cp /input/package/work/zones/* out/
-mv out/omicron-nexus-single-sled.tar.gz out/omicron-nexus.tar.gz
-mkdir tests
-for p in /input/ci-tools/work/end-to-end-tests/*.gz; do
-	ptime -m gunzip < "$p" > "tests/$(basename "${p%.gz}")"
-	chmod a+x "tests/$(basename "${p%.gz}")"
-done
+
+# shellcheck source=/dev/null
+source .github/buildomat/ci-env.sh
 
 # Ask buildomat for the range of extra addresses that we're allowed to use, and
 # break them up into the ranges we need.
@@ -199,11 +246,16 @@ routeadm -e ipv4-forwarding -u
 PXA_START="$EXTRA_IP_START"
 PXA_END="$EXTRA_IP_END"
 
-# These variables are used by softnpu_init, so export them.
-export GATEWAY_IP GATEWAY_MAC PXA_START PXA_END
-
 pfexec zpool create -f scratch c1t1d0 c2t1d0
-ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
+
+ptime -m \
+    pfexec ./target/release/xtask virtual-hardware \
+    --vdev-dir /scratch \
+    create \
+    --gateway-ip "$GATEWAY_IP" \
+    --gateway-mac "$GATEWAY_MAC" \
+    --pxa-start "$PXA_START" \
+    --pxa-end "$PXA_END"
 
 #
 # Generate a self-signed certificate to use as the initial TLS certificate for
@@ -212,7 +264,12 @@ ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
 # real system, the certificate would come from the customer during initial rack
 # setup on the technician port.
 #
-tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml pkg/config.toml
+
+# Update the vdevs to point to where we've created them
+sed -E -i~ "s/(m2|u2)(.*\.vdev)/\/scratch\/\1\2/g" pkg/config.toml
+diff -u pkg/config.toml{~,} || true
+
 SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 
@@ -226,23 +283,21 @@ first = \"$SERVICE_IP_POOL_START\"
 		/^last/c\\
 last = \"$SERVICE_IP_POOL_END\"
 	}
-	/^\\[rack_network_config/,/^$/ {
-		/^infra_ip_first/c\\
+	/^infra_ip_first/c\\
 infra_ip_first = \"$UPLINK_IP\"
-		/^infra_ip_last/c\\
+	/^infra_ip_last/c\\
 infra_ip_last = \"$UPLINK_IP\"
-	}
 	/^\\[\\[rack_network_config.ports/,/^\$/ {
 		/^routes/c\\
 routes = \\[{nexthop = \"$GATEWAY_IP\", destination = \"0.0.0.0/0\"}\\]
 		/^addresses/c\\
-addresses = \\[\"$UPLINK_IP/32\"\\]
+addresses = \\[{address = \"$UPLINK_IP/24\"} \\]
 	}
 " pkg/config-rss.toml
 diff -u pkg/config-rss.toml{~,} || true
 
-tar rvf out/omicron-sled-agent.tar pkg/config-rss.toml
-rm -f pkg/config-rss.toml*
+tar rvf out/omicron-sled-agent.tar pkg/config-rss.toml pkg/config.toml
+rm -f pkg/config-rss.toml* pkg/config.toml*
 
 #
 # By default, OpenSSL creates self-signed certificates with "CA:true".  The TLS
@@ -281,19 +336,15 @@ rmdir pkg
 E2E_TLS_CERT="/opt/oxide/sled-agent/pkg/initial-tls-cert.pem"
 
 #
-# Image-related tests use images served by catacomb. The lab network is
-# IPv4-only; the propolis zones are IPv6-only. These steps set up tcpproxy
-# configured to proxy to catacomb via port 54321 in the global zone.
+# Download the Oxide CLI and images from catacomb.
 #
 pfexec mkdir -p /usr/oxide
-pfexec rm -f /usr/oxide/tcpproxy
-pfexec curl -sSfL -o /usr/oxide/tcpproxy \
-	http://catacomb.eng.oxide.computer:12346/tcpproxy
-pfexec chmod +x /usr/oxide/tcpproxy
-pfexec rm -f /var/svc/manifest/site/tcpproxy.xml
-pfexec curl -sSfL -o /var/svc/manifest/site/tcpproxy.xml \
-	http://catacomb.eng.oxide.computer:12346/tcpproxy.xml
-pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
+pfexec curl -sSfL -o /usr/oxide/oxide \
+	http://catacomb.eng.oxide.computer:12346/oxide-v0.1.1
+pfexec chmod +x /usr/oxide/oxide
+
+curl -sSfL -o debian-11-genericcloud-amd64.raw \
+	http://catacomb.eng.oxide.computer:12346/debian-11-genericcloud-amd64.raw
 
 #
 # The lab-netdev target is a ramdisk system that is always cleared
@@ -334,11 +385,56 @@ while [[ $(pfexec svcs -z $(zoneadm list -n | grep oxz_ntp) \
 done
 echo "Waited for chrony: ${retry}s"
 
+# Wait for at least one nexus zone to become available
+retry=0
+until zoneadm list | grep nexus; do
+	if [[ $retry -gt 300 ]]; then
+		echo "Failed to start at least one nexus zone after 300 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+done
+echo "Waited for nexus: ${retry}s"
+
 export RUST_BACKTRACE=1
 export E2E_TLS_CERT IPPOOL_START IPPOOL_END
-./tests/bootstrap
+eval "$(./target/debug/bootstrap)"
+export OXIDE_HOST OXIDE_TOKEN
 
-rm ./tests/bootstrap
+#
+# The Nexus resolved in `$OXIDE_RESOLVE` is not necessarily the same one that we
+# successfully talked to in bootstrap, so wait a bit for it to fully come online.
+#
+retry=0
+while ! curl -sSf "$OXIDE_HOST/v1/ping" --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT"; do
+	if [[ $retry -gt 60 ]]; then
+		echo "$OXIDE_RESOLVE failed to come up after 60 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+done
+
+/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
+	project create --name images --description "some images"
+/usr/oxide/oxide \
+    --resolve "$OXIDE_RESOLVE" \
+    --cacert "$E2E_TLS_CERT" \
+	disk import \
+	--path debian-11-genericcloud-amd64.raw \
+	--disk debian11-boot \
+	--project images \
+	--description "debian 11 cloud image from distros" \
+	--snapshot debian11-snapshot \
+	--image debian11 \
+	--image-description "debian 11 original base image" \
+	--image-os debian \
+	--image-version "11" \
+	--parallelism 1
+/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
+	image promote --project images --image debian11
+
 for test_bin in tests/*; do
 	./"$test_bin"
 done

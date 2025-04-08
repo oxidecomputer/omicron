@@ -4,26 +4,27 @@
 
 //! Interface for making API requests to a Sled Agent's Bootstrap API.
 
-use super::params::version;
 use super::params::Request;
 use super::params::RequestEnvelope;
-use super::params::StartSledAgentRequest;
+use super::params::version;
 use super::views::SledAgentResponse;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
+use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use sprockets_tls::client::Client as SprocketsClient;
+use sprockets_tls::keys::SprocketsConfig;
 use std::borrow::Cow;
 use std::io;
 use std::net::SocketAddrV6;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Could not connect to {addr}: {err}")]
-    Connect { addr: SocketAddrV6, err: io::Error },
+    Connect { addr: SocketAddrV6, err: sprockets_tls::Error },
 
     #[error("Failed serializing request: {0}")]
     Serialize(serde_json::Error),
@@ -55,7 +56,9 @@ pub enum Error {
     #[error("Request failed: {0}")]
     ServerFailure(String),
 
-    #[error("Bogus response from server (expected {expected} but received {received})")]
+    #[error(
+        "Bogus response from server (expected {expected} but received {received})"
+    )]
     InvalidResponse { expected: &'static str, received: &'static str },
 }
 
@@ -67,12 +70,17 @@ pub enum Error {
 /// bootstrap agent.
 pub(crate) struct Client {
     addr: SocketAddrV6,
-    _log: Logger,
+    log: Logger,
+    sprockets_conf: SprocketsConfig,
 }
 
 impl Client {
-    pub(crate) fn new(addr: SocketAddrV6, _log: Logger) -> Self {
-        Self { addr, _log }
+    pub(crate) fn new(
+        addr: SocketAddrV6,
+        sprockets_conf: SprocketsConfig,
+        log: Logger,
+    ) -> Self {
+        Self { addr, sprockets_conf, log }
     }
 
     /// Start sled agent by sending an initialization request determined from
@@ -100,10 +108,16 @@ impl Client {
         // far larger than we ever expect to see.
         const MAX_RESPONSE_LEN: u32 = 16 << 20;
 
+        let log = self.log.new(o!("component" => "SledAgentSprocketsClient"));
         // Establish connection and sprockets connection (if possible).
-        let stream = TcpStream::connect(self.addr)
-            .await
-            .map_err(|err| Error::Connect { addr: self.addr, err })?;
+        // The sprockets client loads the associated root certificates at this point.
+        let stream = SprocketsClient::connect(
+            self.sprockets_conf.clone(),
+            self.addr,
+            log.clone(),
+        )
+        .await
+        .map_err(|err| Error::Connect { addr: self.addr, err })?;
 
         let mut stream = Box::new(tokio::io::BufStream::new(stream));
 

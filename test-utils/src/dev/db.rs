@@ -5,10 +5,10 @@
 //! Facilities for managing a local database for development
 
 use crate::dev::poll;
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
-use anyhow::Context;
-use omicron_common::postgres_config::PostgresConfigWithUrl;
+use nexus_config::PostgresConfigWithUrl;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -18,9 +18,10 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
-use tempfile::tempdir;
 use tempfile::TempDir;
+use tempfile::tempdir;
 use thiserror::Error;
+use tokio::io::AsyncWriteExt;
 use tokio_postgres::config::Host;
 use tokio_postgres::config::SslMode;
 
@@ -497,11 +498,35 @@ pub enum CockroachStartError {
     )]
     TimedOut { pid: u32, time_waited: Duration },
 
+    #[error("failed to write input to cockroachdb")]
+    FailedToWrite(#[source] std::io::Error),
+
+    #[error("failed to await cockroachdb completing")]
+    FailedToWait(#[source] std::io::Error),
+
+    #[error("Invalid cockroachdb output")]
+    InvalidOutput(#[from] std::string::FromUtf8Error),
+
     #[error("unknown error waiting for cockroach to start")]
     Unknown {
         #[source]
         source: anyhow::Error,
     },
+}
+
+#[derive(Copy, Clone, Debug)]
+enum Signal {
+    Kill,
+    Terminate,
+}
+
+impl From<Signal> for libc::c_int {
+    fn from(signal: Signal) -> Self {
+        match signal {
+            Signal::Kill => libc::SIGKILL,
+            Signal::Terminate => libc::SIGTERM,
+        }
+    }
 }
 
 /// Manages a CockroachDB process running as a single-node cluster
@@ -568,7 +593,8 @@ impl CockroachInstance {
         client.cleanup().await.context("cleaning up after wipe")
     }
 
-    /// Waits for the child process to exit
+    /// Waits for the child process to exit, and cleans up its temporary
+    /// storage.
     ///
     /// Note that CockroachDB will normally run forever unless the caller
     /// arranges for it to be shutdown.
@@ -583,24 +609,43 @@ impl CockroachInstance {
                 .await;
         }
         self.child_process = None;
+
+        // It shouldn't really matter which cleanup API we use, since
+        // the child process is gone anyway.
         self.cleanup().await
     }
 
-    /// Cleans up the child process and temporary directory
+    /// Gracefully cleans up the child process and temporary directory
+    ///
+    /// If the child process is still running, it will be killed with SIGTERM and
+    /// this function will wait for it to exit.  Then the temporary directory
+    /// will be cleaned up.
+    pub async fn cleanup_gracefully(&mut self) -> Result<(), anyhow::Error> {
+        self.cleanup_inner(Signal::Terminate).await
+    }
+
+    /// Quickly cleans up the child process and temporary directory
     ///
     /// If the child process is still running, it will be killed with SIGKILL and
     /// this function will wait for it to exit.  Then the temporary directory
     /// will be cleaned up.
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
-        // SIGTERM the process and wait for it to exit so that we can remove the
+        self.cleanup_inner(Signal::Kill).await
+    }
+
+    async fn cleanup_inner(
+        &mut self,
+        signal: Signal,
+    ) -> Result<(), anyhow::Error> {
+        // Kill the process and wait for it to exit so that we can remove the
         // temporary directory that we may have used to store its data.  We
         // don't care what the result of the process was.
         if let Some(child_process) = self.child_process.as_mut() {
             let pid = child_process.id().expect("Missing child PID") as i32;
             let success =
-                0 == unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+                0 == unsafe { libc::kill(pid as libc::pid_t, signal.into()) };
             if !success {
-                bail!("Failed to send SIGTERM to DB");
+                bail!("Failed to send {signal:?} to DB");
             }
             child_process.wait().await.context("waiting for child process")?;
             self.child_process = None;
@@ -640,12 +685,56 @@ impl Drop for CockroachInstance {
                 // Do NOT clean up the temporary directory in this case.
                 let path = temp_dir.into_path();
                 eprintln!(
-                    "WARN: temporary directory leaked: {}",
-                    path.display()
+                    "WARN: temporary directory leaked: {path:?}\n\
+                     \tIf you would like to access the database for debugging, run the following:\n\n\
+                     \t# Run the database\n\
+                     \tcargo xtask db-dev run --no-populate --store-dir {data_path:?}\n\
+                     \t# Access the database. Note the port may change if you run multiple databases.\n\
+                     \tcockroach sql --host=localhost:32221 --insecure",
+                    data_path = path.join("data"),
                 );
             }
         }
     }
+}
+
+/// Uses cockroachdb to run the "sqlfmt" command.
+pub async fn format_sql(input: &str) -> Result<String, CockroachStartError> {
+    let mut cmd = tokio::process::Command::new(COCKROACHDB_BIN);
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .args(&[
+            "sqlfmt",
+            "--tab-width",
+            "2",
+            "--use-spaces",
+            "true",
+            "--print-width",
+            "100",
+        ])
+        .spawn()
+        .map_err(|source| CockroachStartError::BadCmd {
+            cmd: COCKROACHDB_BIN.to_string(),
+            source,
+        })?;
+    let stdin = child.stdin.as_mut().unwrap();
+    stdin
+        .write_all(input.as_bytes())
+        .await
+        .map_err(CockroachStartError::FailedToWrite)?;
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(CockroachStartError::FailedToWait)?;
+
+    if !output.status.success() {
+        return Err(CockroachStartError::Exited {
+            exit_code: output.status.code().unwrap_or_else(|| -1),
+        });
+    }
+
+    Ok(String::from_utf8(output.stdout)?)
 }
 
 /// Verify that CockroachDB has the correct version
@@ -819,7 +908,7 @@ fn make_pg_config(
 
     let unsupported_values =
         check_unsupported.into_iter().flatten().collect::<Vec<&'static str>>();
-    if unsupported_values.len() > 0 {
+    if !unsupported_values.is_empty() {
         bail!(
             "unsupported PostgreSQL listen URL \
             (did not expect any of these fields: {}): {:?}",
@@ -983,11 +1072,11 @@ impl Client {
 // These are more integration tests than unit tests.
 #[cfg(test)]
 mod test {
-    use super::has_omicron_schema;
-    use super::make_pg_config;
     use super::CockroachStartError;
     use super::CockroachStarter;
     use super::CockroachStarterBuilder;
+    use super::has_omicron_schema;
+    use super::make_pg_config;
     use crate::dev::db::process_exited;
     use crate::dev::poll;
     use crate::dev::process_running;
@@ -1015,10 +1104,12 @@ mod test {
         let builder = new_builder();
         let starter = builder.build().unwrap();
         let directory = starter.temp_dir().to_owned();
-        assert!(fs::metadata(&directory)
-            .await
-            .expect("temporary directory is missing")
-            .is_dir());
+        assert!(
+            fs::metadata(&directory)
+                .await
+                .expect("temporary directory is missing")
+                .is_dir()
+        );
         drop(starter);
         assert_eq!(
             libc::ENOENT,
@@ -1114,10 +1205,12 @@ mod test {
         // The child process should still be running.
         assert!(process_running(pid));
         // The temporary directory should still exist.
-        assert!(fs::metadata(&directory)
-            .await
-            .expect("temporary directory is missing")
-            .is_dir());
+        assert!(
+            fs::metadata(&directory)
+                .await
+                .expect("temporary directory is missing")
+                .is_dir()
+        );
         // Kill the child process (to clean up after ourselves).
         assert_eq!(0, unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) });
 
@@ -1256,10 +1349,12 @@ mod test {
         // At this point, our extra temporary directory should still exist.
         // This is important -- the library should not clean up a data directory
         // that was specified by the user.
-        assert!(fs::metadata(&data_dir)
-            .await
-            .expect("CockroachDB data directory is missing")
-            .is_dir());
+        assert!(
+            fs::metadata(&data_dir)
+                .await
+                .expect("CockroachDB data directory is missing")
+                .is_dir()
+        );
         // Clean it up.
         let extra_temp_dir_path = extra_temp_dir.path().to_owned();
         extra_temp_dir
@@ -1323,10 +1418,12 @@ mod test {
         // The database process should be running and the database's store
         // directory should exist.
         assert!(process_running(pid));
-        assert!(fs::metadata(data_dir.as_ref())
-            .await
-            .expect("CockroachDB data directory is missing")
-            .is_dir());
+        assert!(
+            fs::metadata(data_dir.as_ref())
+                .await
+                .expect("CockroachDB data directory is missing")
+                .is_dir()
+        );
 
         // Check the environment variables.  Doing this is platform-specific and
         // we only bother implementing it for illumos.

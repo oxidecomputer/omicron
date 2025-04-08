@@ -7,13 +7,10 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::DeviceAccessToken;
 use crate::db::model::DeviceAuthRequest;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
@@ -38,7 +35,7 @@ impl DataStore {
             )
             .await?;
 
-        use db::schema::device_auth_request::dsl;
+        use nexus_db_schema::schema::device_auth_request::dsl;
         diesel::insert_into(dsl::device_auth_request)
             .values(auth_request)
             .returning(DeviceAuthRequest::as_returning())
@@ -61,11 +58,11 @@ impl DataStore {
         opctx.authorize(authz::Action::Delete, authz_request).await?;
         opctx.authorize(authz::Action::CreateChild, authz_user).await?;
 
-        use db::schema::device_auth_request::dsl as request_dsl;
+        use nexus_db_schema::schema::device_auth_request::dsl as request_dsl;
         let delete_request = diesel::delete(request_dsl::device_auth_request)
             .filter(request_dsl::user_code.eq(authz_request.id()));
 
-        use db::schema::device_access_token::dsl as token_dsl;
+        use nexus_db_schema::schema::device_access_token::dsl as token_dsl;
         let insert_token = diesel::insert_into(token_dsl::device_access_token)
             .values(access_token)
             .returning(DeviceAccessToken::as_returning());
@@ -75,35 +72,40 @@ impl DataStore {
             RequestNotFound,
             TooManyRequests,
         }
-        type TxnError = TransactionError<TokenGrantError>;
 
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                match delete_request.execute_async(&conn).await? {
-                    0 => {
-                        Err(TxnError::CustomError(TokenGrantError::RequestNotFound))
+        let err = crate::transaction_retry::OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.transaction_retry_wrapper("device_access_token_create")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let insert_token = insert_token.clone();
+                let delete_request = delete_request.clone();
+                async move {
+                    match delete_request.execute_async(&conn).await? {
+                        0 => Err(err.bail(TokenGrantError::RequestNotFound)),
+                        1 => Ok(insert_token.get_result_async(&conn).await?),
+                        _ => Err(err.bail(TokenGrantError::TooManyRequests)),
                     }
-                    1 => Ok(insert_token.get_result_async(&conn).await?),
-                    _ => Err(TxnError::CustomError(
-                        TokenGrantError::TooManyRequests,
-                    )),
                 }
             })
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(TokenGrantError::RequestNotFound) => {
-                    Error::ObjectNotFound {
-                        type_name: ResourceType::DeviceAuthRequest,
-                        lookup_type: LookupType::ByCompositeId(
-                            authz_request.id(),
-                        ),
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        TokenGrantError::RequestNotFound => {
+                            Error::ObjectNotFound {
+                                type_name: ResourceType::DeviceAuthRequest,
+                                lookup_type: LookupType::ByCompositeId(
+                                    authz_request.id(),
+                                ),
+                            }
+                        }
+                        TokenGrantError::TooManyRequests => {
+                            Error::internal_error("unexpectedly found multiple device auth requests for the same user code")
+                        }
                     }
-                }
-                TxnError::CustomError(TokenGrantError::TooManyRequests) => {
-                    Error::internal_error("unexpectedly found multiple device auth requests for the same user code")
-                }
-                TxnError::Database(e) => {
+                } else {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
@@ -122,7 +124,7 @@ impl DataStore {
         client_id: Uuid,
         device_code: String,
     ) -> LookupResult<DeviceAccessToken> {
-        use db::schema::device_access_token::dsl;
+        use nexus_db_schema::schema::device_access_token::dsl;
         dsl::device_access_token
             .filter(dsl::client_id.eq(client_id))
             .filter(dsl::device_code.eq(device_code))

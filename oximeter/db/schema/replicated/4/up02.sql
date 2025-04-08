@@ -1,0 +1,1 @@
+ALTER TABLE oximeter.measurements_bool MODIFY COLUMN datum Nullable(UInt8)

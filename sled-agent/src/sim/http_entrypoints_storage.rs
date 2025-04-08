@@ -9,8 +9,9 @@ use crucible_agent_client::types::{
     Snapshot,
 };
 use dropshot::{
-    endpoint, ApiDescription, HttpError, HttpResponseDeleted, HttpResponseOk,
-    Path as TypedPath, RequestContext, TypedBody,
+    ApiDescription, ApiDescriptionRegisterError, HttpError,
+    HttpResponseDeleted, HttpResponseOk, Path as TypedPath, RequestContext,
+    TypedBody, endpoint,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -24,7 +25,7 @@ type CrucibleAgentApiDescription = ApiDescription<Arc<CrucibleData>>;
 pub fn api() -> CrucibleAgentApiDescription {
     fn register_endpoints(
         api: &mut CrucibleAgentApiDescription,
-    ) -> Result<(), String> {
+    ) -> Result<(), ApiDescriptionRegisterError> {
         api.register(region_list)?;
         api.register(region_create)?;
         api.register(region_get)?;
@@ -62,7 +63,7 @@ async fn region_list(
     rc: RequestContext<Arc<CrucibleData>>,
 ) -> Result<HttpResponseOk<Vec<Region>>, HttpError> {
     let crucible = rc.context();
-    Ok(HttpResponseOk(crucible.list().await))
+    Ok(HttpResponseOk(crucible.list()))
 }
 
 #[endpoint {
@@ -76,11 +77,7 @@ async fn region_create(
     let params = body.into_inner();
     let crucible = rc.context();
 
-    let region = crucible.create(params).await.map_err(|e| {
-        HttpError::for_internal_error(
-            format!("region create failure: {:?}", e,),
-        )
-    })?;
+    let region = crucible.create(params)?;
 
     Ok(HttpResponseOk(region))
 }
@@ -96,7 +93,7 @@ async fn region_get(
     let id = path.into_inner().id;
     let crucible = rc.context();
 
-    match crucible.get(id).await {
+    match crucible.get(id) {
         Some(region) => Ok(HttpResponseOk(region)),
         None => {
             Err(HttpError::for_not_found(None, "Region not found".to_string()))
@@ -117,7 +114,6 @@ async fn region_delete(
 
     crucible
         .delete(id)
-        .await
         .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?;
 
     Ok(HttpResponseDeleted())
@@ -135,16 +131,16 @@ async fn region_get_snapshots(
 
     let crucible = rc.context();
 
-    if crucible.get(id.clone()).await.is_none() {
+    if crucible.get(id.clone()).is_none() {
         return Err(HttpError::for_not_found(
             None,
             "Region not found".to_string(),
         ));
     }
 
-    let snapshots = crucible.snapshots_for_region(&id).await;
+    let snapshots = crucible.snapshots_for_region(&id);
 
-    let running_snapshots = crucible.running_snapshots_for_id(&id).await;
+    let running_snapshots = crucible.running_snapshots_for_id(&id);
 
     Ok(HttpResponseOk(GetSnapshotResponse { snapshots, running_snapshots }))
 }
@@ -166,14 +162,14 @@ async fn region_get_snapshot(
     let p = path.into_inner();
     let crucible = rc.context();
 
-    if crucible.get(p.id.clone()).await.is_none() {
+    if crucible.get(p.id.clone()).is_none() {
         return Err(HttpError::for_not_found(
             None,
             "Region not found".to_string(),
         ));
     }
 
-    for snapshot in &crucible.snapshots_for_region(&p.id).await {
+    for snapshot in &crucible.snapshots_for_region(&p.id) {
         if snapshot.name == p.name {
             return Ok(HttpResponseOk(snapshot.clone()));
         }
@@ -202,7 +198,7 @@ async fn region_delete_snapshot(
     let p = path.into_inner();
     let crucible = rc.context();
 
-    if crucible.get(p.id.clone()).await.is_none() {
+    if crucible.get(p.id.clone()).is_none() {
         return Err(HttpError::for_not_found(
             None,
             "Region not found".to_string(),
@@ -211,7 +207,6 @@ async fn region_delete_snapshot(
 
     crucible
         .delete_snapshot(&p.id, &p.name)
-        .await
         .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?;
 
     Ok(HttpResponseDeleted())
@@ -234,14 +229,14 @@ async fn region_run_snapshot(
     let p = path.into_inner();
     let crucible = rc.context();
 
-    if crucible.get(p.id.clone()).await.is_none() {
+    if crucible.get(p.id.clone()).is_none() {
         return Err(HttpError::for_not_found(
             None,
             "Region not found".to_string(),
         ));
     }
 
-    let snapshots = crucible.snapshots_for_region(&p.id).await;
+    let snapshots = crucible.snapshots_for_region(&p.id);
 
     if !snapshots.iter().any(|x| x.name == p.name) {
         return Err(HttpError::for_not_found(
@@ -250,10 +245,8 @@ async fn region_run_snapshot(
         ));
     }
 
-    let running_snapshot = crucible
-        .create_running_snapshot(&p.id, &p.name)
-        .await
-        .map_err(|e| {
+    let running_snapshot =
+        crucible.create_running_snapshot(&p.id, &p.name).map_err(|e| {
             HttpError::for_internal_error(format!(
                 "running snapshot create failure: {:?}",
                 e,
@@ -274,21 +267,14 @@ async fn region_delete_running_snapshot(
     let p = path.into_inner();
     let crucible = rc.context();
 
-    if crucible.get(p.id.clone()).await.is_none() {
+    if crucible.get(p.id.clone()).is_none() {
         return Err(HttpError::for_not_found(
             None,
             "Region not found".to_string(),
         ));
     }
 
-    if crucible.get_snapshot_for_region(&p.id, &p.name).await.is_none() {
-        return Err(HttpError::for_not_found(
-            None,
-            format!("snapshot {:?} not found", p.name),
-        ));
-    }
-
-    crucible.delete_running_snapshot(&p.id, &p.name).await.map_err(|e| {
+    crucible.delete_running_snapshot(&p.id, &p.name).map_err(|e| {
         HttpError::for_internal_error(format!(
             "running snapshot create failure: {:?}",
             e,

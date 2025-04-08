@@ -4,21 +4,22 @@
 
 //! Integration tests for operating on Ports
 
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
     BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate,
-    BgpPeerConfig, LinkConfig, LinkFec, LinkSpeed, LldpServiceConfig, Route,
-    RouteConfig, SwitchInterfaceConfig, SwitchInterfaceKind,
-    SwitchPortApplySettings, SwitchPortSettingsCreate,
+    BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
+    SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPortApplySettings,
+    SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::views::Rack;
+use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::{
-    self, AddressLotKind, IdentityMetadataCreateParams, NameOrId, SwitchPort,
-    SwitchPortSettingsView,
+    self, AddressLotKind, BgpPeer, IdentityMetadataCreateParams, LinkFec,
+    LinkSpeed, NameOrId, SwitchPort, SwitchPortSettingsView,
 };
 
 type ControlPlaneTestContext =
@@ -75,7 +76,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
 
     NexusRequest::objects_post(
         client,
-        "/v1/system/networking/bgp-announce",
+        "/v1/system/networking/bgp-announce-set",
         &announce_set,
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -92,6 +93,8 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         bgp_announce_set_id: NameOrId::Name("instances".parse().unwrap()),
         asn: 47,
         vrf: None,
+        checker: None,
+        shaper: None,
     };
 
     NexusRequest::objects_post(
@@ -113,17 +116,27 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     // links
     settings.links.insert(
         "phy0".into(),
-        LinkConfig {
+        LinkConfigCreate {
             mtu: 4700,
-            lldp: LldpServiceConfig { enabled: false, lldp_config: None },
-            fec: LinkFec::None,
+            lldp: LldpLinkConfigCreate {
+                enabled: true,
+                link_name: Some("Link Name".into()),
+                link_description: Some("link_ Dscription".into()),
+                chassis_id: Some("Chassis ID".into()),
+                system_name: Some("System Name".into()),
+                system_description: Some("System description".into()),
+                management_ip: None,
+            },
+            fec: Some(LinkFec::None),
             speed: LinkSpeed::Speed100G,
+            autoneg: false,
+            tx_eq: None,
         },
     );
     // interfaces
     settings.interfaces.insert(
         "phy0".into(),
-        SwitchInterfaceConfig {
+        SwitchInterfaceConfigCreate {
             v6_enabled: true,
             kind: SwitchInterfaceKind::Primary,
         },
@@ -136,6 +149,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 dst: "1.2.3.0/24".parse().unwrap(),
                 gw: "1.2.3.4".parse().unwrap(),
                 vid: None,
+                rib_priority: None,
             }],
         },
     );
@@ -145,6 +159,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         AddressConfig {
             addresses: vec![Address {
                 address: "203.0.113.10/24".parse().unwrap(),
+                vlan_id: None,
                 address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
             }],
         },
@@ -171,8 +186,16 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(link0.mtu, 4700);
 
     let lldp0 = &created.link_lldp[0];
-    assert_eq!(lldp0.enabled, false);
-    assert_eq!(lldp0.lldp_config_id, None);
+    assert_eq!(lldp0.enabled, true);
+    assert_eq!(lldp0.link_name, Some("Link Name".to_string()));
+    assert_eq!(lldp0.link_description, Some("Link Description".to_string()));
+    assert_eq!(lldp0.chassis_id, Some("Chassis ID".to_string()));
+    assert_eq!(lldp0.system_name, Some("System Name".to_string()));
+    assert_eq!(
+        lldp0.system_description,
+        Some("System Description".to_string())
+    );
+    assert_eq!(lldp0.management_ip, None);
 
     let ifx0 = &created.interfaces[0];
     assert_eq!(&ifx0.interface_name, "phy0");
@@ -207,8 +230,16 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(link0.mtu, 4700);
 
     let lldp0 = &roundtrip.link_lldp[0];
-    assert_eq!(lldp0.enabled, false);
-    assert_eq!(lldp0.lldp_config_id, None);
+    assert_eq!(lldp0.enabled, true);
+    assert_eq!(lldp0.link_name, Some("Link Name".to_string()));
+    assert_eq!(lldp0.link_description, Some("Link Description".to_string()));
+    assert_eq!(lldp0.chassis_id, Some("Chassis ID".to_string()));
+    assert_eq!(lldp0.system_name, Some("System Name".to_string()));
+    assert_eq!(
+        lldp0.system_description,
+        Some("System Description".to_string())
+    );
+    assert_eq!(lldp0.management_ip, None);
 
     let ifx0 = &roundtrip.interfaces[0];
     assert_eq!(&ifx0.interface_name, "phy0");
@@ -252,15 +283,26 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     settings.bgp_peers.insert(
         "phy0".into(),
         BgpPeerConfig {
-            bgp_config: NameOrId::Name("as47".parse().unwrap()), //TODO
-            bgp_announce_set: NameOrId::Name("instances".parse().unwrap()), //TODO
-            interface_name: "phy0".to_string(),
-            addr: "1.2.3.4".parse().unwrap(),
-            hold_time: 6,
-            idle_hold_time: 6,
-            delay_open: 0,
-            connect_retry: 3,
-            keepalive: 2,
+            peers: vec![BgpPeer {
+                bgp_config: NameOrId::Name("as47".parse().unwrap()),
+                interface_name: "phy0".to_string(),
+                addr: "1.2.3.4".parse().unwrap(),
+                hold_time: 6,
+                idle_hold_time: 6,
+                delay_open: 0,
+                connect_retry: 3,
+                keepalive: 2,
+                remote_asn: None,
+                min_ttl: None,
+                md5_auth_key: None,
+                multi_exit_discriminator: None,
+                communities: Vec::new(),
+                local_pref: None,
+                enforce_first_as: false,
+                allowed_export: ImportExportPolicy::NoFiltering,
+                allowed_import: ImportExportPolicy::NoFiltering,
+                vlan_id: None,
+            }],
         },
     );
     let _created: SwitchPortSettingsView = NexusRequest::objects_post(

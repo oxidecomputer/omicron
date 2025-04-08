@@ -1,0 +1,8 @@
+* DNS zone: "dummy": 
++   name: ex1                                                (records: 1)
++       A    127.0.0.1
+*   name: ex2                                                (records: 1 -> 1)
+-       A    192.168.1.4
++       A    192.168.1.3
+-   name: ex3                                                (records: 1)
+-       A    127.0.0.1

@@ -4,10 +4,11 @@
 
 //! Storage related errors
 
-use crate::dataset::{DatasetError, DatasetName};
+use crate::dataset::DatasetError;
 use crate::disk::DiskError;
 use camino::Utf8PathBuf;
 use omicron_common::api::external::ByteCountRangeError;
+use omicron_common::api::external::Generation;
 use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
@@ -23,7 +24,7 @@ pub enum Error {
     ZfsListDataset(#[from] illumos_utils::zfs::ListDatasetsError),
 
     #[error(transparent)]
-    ZfsEnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
+    ZfsEnsureDataset(#[from] illumos_utils::zfs::EnsureDatasetError),
 
     #[error(transparent)]
     ZfsSetValue(#[from] illumos_utils::zfs::SetValueError),
@@ -49,9 +50,6 @@ pub enum Error {
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
-    #[error("No U.2 Zpools found")]
-    NoU2Zpool,
-
     #[error("Failed to parse UUID from {path}: {err}")]
     ParseUuid {
         path: Utf8PathBuf,
@@ -59,8 +57,10 @@ pub enum Error {
         err: uuid::Error,
     },
 
-    #[error("Dataset {name:?} exists with a different uuid (has {old}, requested {new})")]
-    UuidMismatch { name: Box<DatasetName>, old: Uuid, new: Uuid },
+    #[error(
+        "Dataset {name} exists with a different uuid (has {old}, requested {new})"
+    )]
+    UuidMismatch { name: String, old: Uuid, new: Uuid },
 
     #[error("Error parsing pool {name}'s size: {err}")]
     BadPoolSize {
@@ -76,6 +76,73 @@ pub enum Error {
         err: uuid::Error,
     },
 
+    #[error("Not ready to manage U.2s (key manager is not ready)")]
+    KeyManagerNotReady,
+
+    #[error(
+        "Physical disk configuration changed for the same generation number: {generation}"
+    )]
+    PhysicalDiskConfigurationChanged { generation: Generation },
+
+    #[error(
+        "Physical disk configuration out-of-date (asked for {requested}, but latest is {current})"
+    )]
+    PhysicalDiskConfigurationOutdated {
+        requested: Generation,
+        current: Generation,
+    },
+
+    #[error("Invalid configuration (UUID mismatch in arguments)")]
+    ConfigUuidMismatch,
+
+    #[error(
+        "Dataset configuration out-of-date (asked for {requested}, but latest is {current})"
+    )]
+    DatasetConfigurationOutdated { requested: Generation, current: Generation },
+
+    #[error(
+        "Dataset configuration changed for the same generation number: {generation}"
+    )]
+    DatasetConfigurationChanged { generation: Generation },
+
+    #[error("Failed to update ledger in internal storage")]
+    Ledger(#[from] omicron_common::ledger::Error),
+
+    #[error("No ledger found on internal storage")]
+    LedgerNotFound,
+
     #[error("Zpool Not Found: {0}")]
     ZpoolNotFound(String),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+impl From<Error> for omicron_common::api::external::Error {
+    fn from(err: Error) -> Self {
+        use omicron_common::api::external::Error as ExternalError;
+        use omicron_common::api::external::LookupType;
+        use omicron_common::api::external::ResourceType;
+
+        match err {
+            Error::LedgerNotFound => ExternalError::ObjectNotFound {
+                type_name: ResourceType::SledLedger,
+                lookup_type: LookupType::ByOther(
+                    "Could not find record on M.2s".to_string(),
+                ),
+            },
+            Error::ZpoolNotFound(name) => ExternalError::ObjectNotFound {
+                type_name: ResourceType::Zpool,
+                lookup_type: LookupType::ByName(name),
+            },
+            Error::KeyManagerNotReady => ExternalError::ServiceUnavailable {
+                internal_message:
+                    "Not ready to manage disks, try again after trust quorum"
+                        .to_string(),
+            },
+            _ => omicron_common::api::external::Error::InternalError {
+                internal_message: err.to_string(),
+            },
+        }
+    }
 }

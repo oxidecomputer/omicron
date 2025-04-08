@@ -5,12 +5,12 @@
 //! For disks in state ImportReady, "finalize" them: detach them from their
 //! attached Pantry, and set to Detached.
 
-use super::declare_saga_actions;
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use super::SagaInitError;
-use crate::app::sagas::common_storage::call_pantry_detach_for_disk;
+use super::declare_saga_actions;
+use crate::app::sagas::common_storage::call_pantry_detach;
 use crate::app::sagas::snapshot_create;
 use crate::external_api::params;
 use nexus_db_model::Generation;
@@ -21,6 +21,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -79,7 +80,8 @@ impl NexusSaga for SagaFinalizeDisk {
                 silo_id: params.silo_id,
                 project_id: params.project_id,
                 disk_id: params.disk_id,
-                attached_instance_and_sled: None,
+                attach_instance_id: None,
+                use_the_pantry: true,
                 create_params: params::SnapshotCreate {
                     identity: external::IdentityMetadataCreateParams {
                         name: snapshot_name.clone(),
@@ -285,7 +287,19 @@ async fn sfd_call_pantry_detach_for_disk(
     let params = sagactx.saga_params::<Params>()?;
     let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
 
-    call_pantry_detach_for_disk(&log, params.disk_id, pantry_address).await
+    call_pantry_detach(
+        sagactx.user_data().nexus(),
+        &log,
+        params.disk_id,
+        pantry_address,
+    )
+    .await
+    .map_err(|e| {
+        ActionError::action_failed(format!(
+            "pantry detach failed: {}",
+            InlineErrorChain::new(&e)
+        ))
+    })
 }
 
 async fn sfd_clear_pantry_address(

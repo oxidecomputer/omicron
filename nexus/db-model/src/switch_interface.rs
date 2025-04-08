@@ -1,21 +1,21 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
-use crate::impl_enum_type;
-use crate::schema::{loopback_address, switch_vlan_interface_config};
 use crate::SqlU16;
+use crate::impl_enum_type;
 use db_macros::Asset;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::{loopback_address, switch_vlan_interface_config};
 use nexus_types::external_api::params;
 use nexus_types::identity::Asset;
 use omicron_common::api::external;
+use omicron_uuid_kinds::LoopbackAddressKind;
+use omicron_uuid_kinds::TypedUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "switch_interface_kind"))]
-    pub struct DbSwitchInterfaceKindEnum;
+    SwitchInterfaceKindEnum:
 
     #[derive(
         Clone,
@@ -27,7 +27,6 @@ impl_enum_type!(
         Serialize,
         Deserialize
     )]
-    #[diesel(sql_type = DbSwitchInterfaceKindEnum)]
     pub enum DbSwitchInterfaceKind;
 
     Primary => b"primary"
@@ -105,6 +104,7 @@ impl Into<external::SwitchVlanInterfaceConfig> for SwitchVlanInterfaceConfig {
     Deserialize,
 )]
 #[diesel(table_name = loopback_address)]
+#[asset(uuid_kind = LoopbackAddressKind)]
 pub struct LoopbackAddress {
     #[diesel(embed)]
     pub identity: LoopbackAddressIdentity,
@@ -118,7 +118,7 @@ pub struct LoopbackAddress {
 
 impl LoopbackAddress {
     pub fn new(
-        id: Option<Uuid>,
+        id: Option<TypedUuid<LoopbackAddressKind>>,
         address_lot_block_id: Uuid,
         rsvd_address_lot_block_id: Uuid,
         rack_id: Uuid,
@@ -128,7 +128,7 @@ impl LoopbackAddress {
     ) -> Self {
         Self {
             identity: LoopbackAddressIdentity::new(
-                id.unwrap_or(Uuid::new_v4()),
+                id.unwrap_or(TypedUuid::new_v4()),
             ),
             address_lot_block_id,
             rsvd_address_lot_block_id,

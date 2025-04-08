@@ -5,11 +5,11 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use super::{align_by, help_text, push_text_lines, Control, PendingScroll};
+use super::{Control, PendingScroll, align_by, help_text, push_text_lines};
 use crate::keymap::ShowPopupCmd;
 use crate::state::{
-    update_component_title, ComponentId, Inventory, UpdateItemState,
-    ALL_COMPONENT_IDS,
+    ALL_COMPONENT_IDS, ArtifactVersions, ComponentId, Inventory,
+    UpdateItemState, update_component_title,
 };
 use crate::ui::defaults::style;
 use crate::ui::widgets::{
@@ -17,26 +17,28 @@ use crate::ui::widgets::{
     PopupScrollOffset, StatusView,
 };
 use crate::ui::wrap::wrap_text;
-use crate::{Action, Cmd, Frame, State};
+use crate::{Action, Cmd, State};
 use indexmap::IndexMap;
-use omicron_common::api::internal::nexus::KnownArtifactKind;
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph,
     Row, Table,
 };
-use slog::{info, o, Logger};
+use slog::{Logger, info, o};
+use tufaceous_artifact::KnownArtifactKind;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
+use update_engine::display::ProgressRatioDisplay;
 use update_engine::{
     AbortReason, CompletionReason, ExecutionStatus, FailureReason, StepKey,
     TerminalKind, WillNotBeRunReason,
 };
+use wicket_common::inventory::RotSlot;
 use wicket_common::update_events::{
     EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
     UpdateComponent,
 };
-use wicketd_client::types::{RotSlot, SemverVersion};
 
 const MAX_COLUMN_WIDTH: u16 = 25;
 
@@ -148,8 +150,11 @@ pub struct UpdatePane {
 
     /// TODO: Move following  state into global `State` so that recorder snapshots
     /// capture all state.
-    tree_state: TreeState,
-    items: Vec<TreeItem<'static>>,
+    ///
+    /// TODO: The usize generic parameter is carried over from earlier versions
+    /// of tui-tree-widget, but there's likely a better index type.
+    tree_state: TreeState<usize>,
+    items: Vec<TreeItem<'static, usize>>,
 
     // Per-component update state that isn't serializable.
     component_state: BTreeMap<ComponentId, ComponentUpdateListState>,
@@ -174,15 +179,22 @@ pub struct UpdatePane {
 impl UpdatePane {
     pub fn new(log: &Logger) -> UpdatePane {
         let log = log.new(o!("component" => "UpdatePane"));
-        let mut tree_state = TreeState::default();
-        tree_state.select_first();
+        let tree_state = TreeState::default();
+        let items = ALL_COMPONENT_IDS
+            .iter()
+            .enumerate()
+            .map(|(index, id)| {
+                TreeItem::new(index, id.to_string_uppercase(), vec![])
+                    .expect("no children so no duplicate identifiers")
+            })
+            .collect::<Vec<_>>();
+        // `ensure_selection_matches_rack_state` will perform the initial
+        // selection on the update tree.
+
         UpdatePane {
             log,
             tree_state,
-            items: ALL_COMPONENT_IDS
-                .iter()
-                .map(|id| TreeItem::new(id.to_string_uppercase(), vec![]))
-                .collect(),
+            items,
             help: vec![
                 ("Expand", "<e>"),
                 ("Collapse", "<c>"),
@@ -826,17 +838,18 @@ impl UpdatePane {
             .update_state
             .items
             .iter()
-            .map(|(id, states)| {
+            .enumerate()
+            .map(|(index, (id, states))| {
                 let children: Vec<_> = states
                     .iter()
                     .flat_map(|(component, s)| {
-                        let target_version =
-                            artifact_version(id, component, &versions);
+                        let target_version = artifact_version(
+                            id, component, &versions, inventory,
+                        );
                         let installed_versions =
                             all_installed_versions(id, component, inventory);
-                        let contents_rect = self.contents_rect;
                         installed_versions.into_iter().map(move |v| {
-                            let spans = vec![
+                            vec![
                                 Span::styled(v.title, style::selected()),
                                 Span::styled(v.version, style::selected_line()),
                                 Span::styled(
@@ -844,17 +857,20 @@ impl UpdatePane {
                                     style::selected(),
                                 ),
                                 Span::styled(s.to_string(), s.style()),
-                            ];
-                            TreeItem::new_leaf(align_by(
-                                0,
-                                MAX_COLUMN_WIDTH,
-                                contents_rect,
-                                spans,
-                            ))
+                            ]
                         })
                     })
+                    .enumerate()
+                    .map(|(leaf_index, spans)| {
+                        let contents_rect = self.contents_rect;
+                        TreeItem::new_leaf(
+                            leaf_index,
+                            align_by(0, MAX_COLUMN_WIDTH, contents_rect, spans),
+                        )
+                    })
                     .collect();
-                TreeItem::new(id.to_string_uppercase(), children)
+                TreeItem::new(index, id.to_string_uppercase(), children)
+                    .expect("tree does not contain duplicate identifiers")
             })
             .collect();
     }
@@ -1290,11 +1306,11 @@ impl UpdatePane {
                                 // state.rack_state.selected be changed in the
                                 // meantime) so log this.
                                 slog::warn!(
-                            self.log,
-                            "currently waiting on start update response \
+                                    self.log,
+                                    "currently waiting on start update response \
                              for {} but received response for {component_id}",
-                             state.rack_state.selected
-                        );
+                                    state.rack_state.selected
+                                );
                                 None
                             }
                         }
@@ -1306,12 +1322,14 @@ impl UpdatePane {
     }
 
     // When we switch panes, we may have moved around in the rack. We want to
-    // ensure that the currently selected rack component in the  update tree
+    // ensure that the currently selected rack component in the update tree
     // matches what was selected in the rack or inventory views. We already do
     // the converse when on this pane and move around the tree.
     fn ensure_selection_matches_rack_state(&mut self, state: &State) {
-        let selected = self.tree_state.selected();
-        if state.rack_state.selected != ALL_COMPONENT_IDS[selected[0]] {
+        let tree_selected = self.tree_state.selected();
+        let should_reselect = tree_selected.is_empty()
+            || state.rack_state.selected != ALL_COMPONENT_IDS[tree_selected[0]];
+        if should_reselect {
             let index = ALL_COMPONENT_IDS
                 .iter()
                 .position(|&id| id == state.rack_state.selected)
@@ -1364,7 +1382,8 @@ impl UpdatePane {
         self.update_items(state);
 
         // Draw the contents
-        let tree = Tree::new(self.items.clone())
+        let tree = Tree::new(&self.items)
+            .expect("tree does not have duplicate identifiers")
             .block(block.clone().borders(Borders::LEFT | Borders::RIGHT))
             .style(style::plain_text())
             .highlight_style(style::highlighted());
@@ -1421,13 +1440,13 @@ impl UpdatePane {
             Constraint::Length(cell_width),
             Constraint::Length(cell_width),
         ];
-        let header_table = Table::new(std::iter::empty())
-            .header(
-                Row::new(vec!["COMPONENT", "VERSION", "TARGET", "STATUS"])
-                    .style(header_style),
-            )
-            .widths(&width_constraints)
-            .block(block.clone().title("OVERVIEW (* = active)"));
+        let header_table =
+            Table::new(std::iter::empty::<Row>(), &width_constraints)
+                .header(
+                    Row::new(vec!["COMPONENT", "VERSION", "TARGET", "STATUS"])
+                        .style(header_style),
+                )
+                .block(block.clone().title("OVERVIEW (* = active)"));
         frame.render_widget(header_table, self.table_headers_rect);
 
         // For the selected item, draw the version table.
@@ -1440,6 +1459,7 @@ impl UpdatePane {
                     &state.rack_state.selected,
                     component,
                     versions,
+                    inventory,
                 );
                 let installed_versions = all_installed_versions(
                     &state.rack_state.selected,
@@ -1458,12 +1478,11 @@ impl UpdatePane {
                     ])
                 })
             });
-        let version_table =
-            Table::new(version_rows).widths(&width_constraints).block(
-                block
-                    .clone()
-                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM),
-            );
+        let version_table = Table::new(version_rows, &width_constraints).block(
+            block
+                .clone()
+                .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM),
+        );
         frame.render_widget(version_table, self.status_view_version_rect);
 
         // Ensure the version table is connected to the table headers
@@ -1698,6 +1717,7 @@ struct ComponentForceUpdateSelectionState {
 }
 
 struct ForceUpdateSelectionState {
+    rot_bootloader: Option<ComponentForceUpdateSelectionState>,
     rot: Option<ComponentForceUpdateSelectionState>,
     sp: Option<ComponentForceUpdateSelectionState>,
 }
@@ -1709,6 +1729,7 @@ impl From<&'_ State> for ForceUpdateSelectionState {
         let inventory = &state.inventory;
         let update_item = &state.update_state.items[&component_id];
 
+        let mut rot_bootloader = None;
         let mut rot = None;
         let mut sp = None;
 
@@ -1720,10 +1741,26 @@ impl From<&'_ State> for ForceUpdateSelectionState {
             }
 
             let artifact_version =
-                artifact_version(&component_id, component, versions);
+                artifact_version(&component_id, component, versions, inventory);
             let installed_version =
                 active_installed_version(&component_id, component, inventory);
             match component {
+                UpdateComponent::RotBootloader => {
+                    assert!(
+                        rot_bootloader.is_none(),
+                        "update item contains multiple RoT bootloader entries"
+                    );
+                    if artifact_version == installed_version {
+                        rot_bootloader =
+                            Some(ComponentForceUpdateSelectionState {
+                                version: artifact_version,
+                                toggled_on: state
+                                    .force_update_state
+                                    .force_update_rot_bootloader,
+                                selected: false, // set below
+                            });
+                    }
+                }
                 UpdateComponent::Rot => {
                     assert!(
                         rot.is_none(),
@@ -1760,28 +1797,63 @@ impl From<&'_ State> for ForceUpdateSelectionState {
 
         // If we only have one force-updateable component, mark it as selected;
         // otherwise, respect the option currently selected in `State`.
-        match (rot.as_mut(), sp.as_mut()) {
-            (Some(rot), None) => rot.selected = true,
-            (None, Some(sp)) => sp.selected = true,
-            (Some(rot), Some(sp)) => {
+        match (rot_bootloader.as_mut(), rot.as_mut(), sp.as_mut()) {
+            (Some(rot_bootloader), None, None) => {
+                rot_bootloader.selected = true
+            }
+            (None, Some(rot), None) => rot.selected = true,
+            (None, None, Some(sp)) => sp.selected = true,
+            // Two selected
+            (Some(rot_bootloader), Some(rot), None) => {
+                if state.force_update_state.selected_component()
+                    == UpdateComponent::RotBootloader
+                {
+                    rot_bootloader.selected = true
+                } else {
+                    rot.selected = true
+                }
+            }
+            (None, Some(rot), Some(sp)) => {
                 if state.force_update_state.selected_component()
                     == UpdateComponent::Rot
                 {
-                    rot.selected = true;
+                    rot.selected = true
                 } else {
-                    sp.selected = true;
+                    sp.selected = true
                 }
             }
-            (None, None) => (),
+            (Some(rot_bootloader), None, Some(sp)) => {
+                if state.force_update_state.selected_component()
+                    == UpdateComponent::RotBootloader
+                {
+                    rot_bootloader.selected = true
+                } else {
+                    sp.selected = true
+                }
+            }
+            // All three
+            (Some(rot_bootloader), Some(rot), Some(sp)) => {
+                match state.force_update_state.selected_component() {
+                    UpdateComponent::Rot => rot.selected = true,
+                    UpdateComponent::Sp => sp.selected = true,
+                    UpdateComponent::RotBootloader => {
+                        rot_bootloader.selected = true
+                    }
+                    _ => (),
+                }
+            }
+            (None, None, None) => (),
         }
 
-        Self { rot, sp }
+        Self { rot_bootloader, rot, sp }
     }
 }
 
 impl ForceUpdateSelectionState {
     fn num_spans(&self) -> usize {
-        usize::from(self.rot.is_some()) + usize::from(self.sp.is_some())
+        usize::from(self.rot.is_some())
+            + usize::from(self.sp.is_some())
+            + usize::from(self.rot_bootloader.is_some())
     }
 
     fn next_component(&self, state: &mut State) {
@@ -1813,6 +1885,13 @@ impl ForceUpdateSelectionState {
             state.force_update_state.toggle(UpdateComponent::Rot);
         } else if self.sp.as_ref().map(|sp| sp.selected).unwrap_or(false) {
             state.force_update_state.toggle(UpdateComponent::Sp);
+        } else if self
+            .rot_bootloader
+            .as_ref()
+            .map(|rot_bootloader| rot_bootloader.selected)
+            .unwrap_or(false)
+        {
+            state.force_update_state.toggle(UpdateComponent::RotBootloader);
         }
     }
 
@@ -1837,6 +1916,9 @@ impl ForceUpdateSelectionState {
         }
 
         let mut spans = Vec::new();
+        if let Some(rot_bootloader) = self.rot_bootloader.as_ref() {
+            spans.push(make_spans("RoT Bootloader", rot_bootloader));
+        }
         if let Some(rot) = self.rot.as_ref() {
             spans.push(make_spans("RoT", rot));
         }
@@ -1904,9 +1986,11 @@ impl ComponentUpdateListState {
                     ));
                     status_text.push(Span::styled(
                         format!(
-                            " (step {}/{})",
-                            step_key.index + 1,
-                            summary.total_steps,
+                            " (step {})",
+                            ProgressRatioDisplay::index_and_total(
+                                step_key.index,
+                                summary.total_steps,
+                            )
                         ),
                         style::plain_text(),
                     ));
@@ -1935,9 +2019,11 @@ impl ComponentUpdateListState {
                             ));
                             status_text.push(Span::styled(
                                 format!(
-                                    " at step {}/{}",
-                                    info.step_key.index + 1,
-                                    summary.total_steps,
+                                    " at step {}",
+                                    ProgressRatioDisplay::index_and_total(
+                                        info.step_key.index,
+                                        summary.total_steps,
+                                    )
                                 ),
                                 style::plain_text(),
                             ));
@@ -1953,9 +2039,11 @@ impl ComponentUpdateListState {
                             ));
                             status_text.push(Span::styled(
                                 format!(
-                                    " at step {}/{}",
-                                    info.step_key.index + 1,
-                                    summary.total_steps,
+                                    " at step {}",
+                                    ProgressRatioDisplay::index_and_total(
+                                        info.step_key.index,
+                                        summary.total_steps,
+                                    )
                                 ),
                                 style::plain_text(),
                             ));
@@ -2001,8 +2089,9 @@ impl ComponentUpdateListState {
                         progress_event.kind.progress_counter()
                     {
                         if let Some(total) = counter.total {
-                            let percentage =
-                                (counter.current as u128 * 100) / total as u128;
+                            let percentage = (u128::from(counter.current)
+                                * 100)
+                                / u128::from(total);
                             item_spans.push(Span::styled(
                                 format!("[{:>2}%] ", percentage),
                                 style::selected(),
@@ -2187,6 +2276,10 @@ fn active_installed_version(
 ) -> String {
     let component = inventory.get_inventory(id);
     match update_component {
+        UpdateComponent::RotBootloader => component.map_or_else(
+            || "UNKNOWN".to_string(),
+            |component| component.stage0_version(),
+        ),
         UpdateComponent::Sp => component.map_or_else(
             || "UNKNOWN".to_string(),
             |component| component.sp_version_active(),
@@ -2240,6 +2333,26 @@ fn all_installed_versions(
                 ]
             },
         ),
+        UpdateComponent::RotBootloader => component.map_or_else(
+            || {
+                vec![InstalledVersion {
+                    title: base_title.into(),
+                    version: "UNKNOWN".into(),
+                }]
+            },
+            |component| {
+                vec![
+                    InstalledVersion {
+                        title: base_title.into(),
+                        version: component.stage0_version().into(),
+                    },
+                    InstalledVersion {
+                        title: format!("{base_title}_NEXT").into(),
+                        version: component.stage0next_version().into(),
+                    },
+                ]
+            },
+        ),
         UpdateComponent::Rot => component.map_or_else(
             || {
                 vec![InstalledVersion {
@@ -2283,40 +2396,90 @@ fn all_installed_versions(
 
 fn artifact_version(
     id: &ComponentId,
-    component: UpdateComponent,
-    versions: &BTreeMap<KnownArtifactKind, SemverVersion>,
+    update_component: UpdateComponent,
+    versions: &BTreeMap<KnownArtifactKind, Vec<ArtifactVersions>>,
+    inventory: &Inventory,
 ) -> String {
-    let artifact = match (id, component) {
+    let (artifact, multiple) = match (id, update_component) {
+        (ComponentId::Sled(_), UpdateComponent::RotBootloader) => {
+            (KnownArtifactKind::GimletRotBootloader, true)
+        }
         (ComponentId::Sled(_), UpdateComponent::Rot) => {
-            KnownArtifactKind::GimletRot
+            (KnownArtifactKind::GimletRot, true)
         }
         (ComponentId::Sled(_), UpdateComponent::Sp) => {
-            KnownArtifactKind::GimletSp
+            (KnownArtifactKind::GimletSp, false)
         }
         (ComponentId::Sled(_), UpdateComponent::Host) => {
-            KnownArtifactKind::Host
+            (KnownArtifactKind::Host, false)
+        }
+        (ComponentId::Switch(_), UpdateComponent::RotBootloader) => {
+            (KnownArtifactKind::SwitchRotBootloader, true)
         }
         (ComponentId::Switch(_), UpdateComponent::Rot) => {
-            KnownArtifactKind::SwitchRot
+            (KnownArtifactKind::SwitchRot, true)
         }
         (ComponentId::Switch(_), UpdateComponent::Sp) => {
-            KnownArtifactKind::SwitchSp
+            (KnownArtifactKind::SwitchSp, false)
+        }
+        (ComponentId::Psc(_), UpdateComponent::RotBootloader) => {
+            (KnownArtifactKind::PscRotBootloader, true)
         }
         (ComponentId::Psc(_), UpdateComponent::Rot) => {
-            KnownArtifactKind::PscRot
+            (KnownArtifactKind::PscRot, true)
         }
-        (ComponentId::Psc(_), UpdateComponent::Sp) => KnownArtifactKind::PscSp,
+        (ComponentId::Psc(_), UpdateComponent::Sp) => {
+            (KnownArtifactKind::PscSp, false)
+        }
 
         // Switches and PSCs do not have a host.
         (ComponentId::Switch(_), UpdateComponent::Host)
         | (ComponentId::Psc(_), UpdateComponent::Host) => {
-            return "N/A".to_string()
+            return "N/A".to_string();
         }
     };
-    versions
-        .get(&artifact)
-        .cloned()
-        .map_or_else(|| "UNKNOWN".to_string(), |v| v.to_string())
+    match versions.get(&artifact) {
+        None => "UNKNOWN".to_string(),
+        Some(artifact_versions) => {
+            let component = match inventory.get_inventory(id) {
+                Some(c) => c,
+                None => return "UNKNOWN".to_string(),
+            };
+            let cnt = artifact_versions.len();
+            // We loop through all possible artifact versions for a
+            // given artifact type. Right now only RoT artifacts
+            // will have a sign value.
+            for a in artifact_versions {
+                match (&a.sign, component.rot_sign()) {
+                    // No sign anywhere, this is for SP components
+                    (None, None) => return a.version.to_string(),
+                    // if we have a version that's tagged with sign data but
+                    // we can't read from the caboose check if we can fall
+                    // back to just returning the version. This matches
+                    // very old repositories
+                    (Some(_), None) => {
+                        if multiple && cnt > 1 {
+                            return "UNKNOWN (MISSING SIGN)".to_string();
+                        } else {
+                            return a.version.to_string();
+                        }
+                    }
+                    // If something isn't tagged with a sign just
+                    // pass on the version. This should only match
+                    // very old repositories/testing configurations
+                    (None, Some(_)) => return a.version.to_string(),
+                    // The interesting case to make sure the sign
+                    // matches both the component and the caboose
+                    (Some(s), Some(c)) => {
+                        if *s == c {
+                            return a.version.to_string();
+                        }
+                    }
+                }
+            }
+            "NO MATCH".to_string()
+        }
+    }
 }
 
 impl Control for UpdatePane {
@@ -2349,7 +2512,7 @@ impl Control for UpdatePane {
                 [
                     Constraint::Length(3),
                     Constraint::Length(3),
-                    Constraint::Length(6),
+                    Constraint::Length(8),
                     Constraint::Min(0),
                     Constraint::Length(3),
                 ]
@@ -2376,13 +2539,13 @@ impl Control for UpdatePane {
 
         match cmd {
             Cmd::Up => {
-                self.tree_state.key_up(&self.items);
+                self.tree_state.key_up();
                 let selected = self.tree_state.selected();
                 state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
                 Some(Action::Redraw)
             }
             Cmd::Down => {
-                self.tree_state.key_down(&self.items);
+                self.tree_state.key_down();
                 let selected = self.tree_state.selected();
                 state.rack_state.selected = ALL_COMPONENT_IDS[selected[0]];
                 Some(Action::Redraw)
@@ -2390,7 +2553,7 @@ impl Control for UpdatePane {
             Cmd::Collapse | Cmd::Left => {
                 // We always want something selected. If we close the root,
                 // we want to re-open it.
-                let selected = self.tree_state.selected();
+                let selected = self.tree_state.selected().to_vec();
                 self.tree_state.key_left();
                 if self.tree_state.selected().is_empty() {
                     self.tree_state.select(selected);
@@ -2418,7 +2581,7 @@ impl Control for UpdatePane {
                 Some(Action::Redraw)
             }
             Cmd::GotoBottom => {
-                self.tree_state.select_last(&self.items);
+                self.tree_state.select_last();
                 state.rack_state.selected =
                     ALL_COMPONENT_IDS[ALL_COMPONENT_IDS.len() - 1];
                 Some(Action::Redraw)

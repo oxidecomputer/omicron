@@ -3,13 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{
+    ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
+    SagaInitError,
     common_storage::{
-        call_pantry_attach_for_disk, call_pantry_detach_for_disk,
-        delete_crucible_regions, ensure_all_datasets_and_regions,
-        get_pantry_address,
+        call_pantry_attach_for_disk, call_pantry_detach, get_pantry_address,
     },
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
@@ -18,12 +16,14 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
-use rand::{rngs::StdRng, RngCore, SeedableRng};
+use omicron_uuid_kinds::VolumeUuid;
+use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
+use sled_agent_client::{CrucibleOpts, VolumeConstructionRequest};
 use std::convert::TryFrom;
 use std::net::SocketAddrV6;
+use std::{collections::VecDeque, net::SocketAddr};
 use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
@@ -137,7 +137,7 @@ async fn sdc_create_disk_record(
     // We admittedly reference the volume before it has been allocated,
     // but this should be acceptable because the disk remains in a "Creating"
     // state until the saga has completed.
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
@@ -234,10 +234,10 @@ async fn sdc_create_disk_record_undo(
 
 async fn sdc_alloc_regions(
     sagactx: NexusActionContext,
-) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
+) -> Result<Vec<(db::model::CrucibleDataset, db::model::Region)>, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
 
     // Ensure the disk is backed by appropriate regions.
     //
@@ -259,7 +259,7 @@ async fn sdc_alloc_regions(
 
     let datasets_and_regions = osagactx
         .datastore()
-        .region_allocate(
+        .disk_region_allocate(
             &opctx,
             volume_id,
             &params.create_params.disk_source,
@@ -278,7 +278,7 @@ async fn sdc_alloc_regions_undo(
     let log = osagactx.log();
 
     let region_ids = sagactx
-        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+        .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
             "datasets_and_regions",
         )?
         .into_iter()
@@ -344,17 +344,22 @@ async fn sdc_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
 /// Call out to Crucible agent and perform region creation.
 async fn sdc_regions_ensure(
     sagactx: NexusActionContext,
-) -> Result<String, ActionError> {
-    let log = sagactx.user_data().log();
+) -> Result<VolumeConstructionRequest, ActionError> {
+    let osagactx = sagactx.user_data();
+    let log = osagactx.log();
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
 
-    let datasets_and_regions = ensure_all_datasets_and_regions(
-        &log,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?,
-    )
-    .await?;
+    let datasets_and_regions = osagactx
+        .nexus()
+        .ensure_all_datasets_and_regions(
+            &log,
+            sagactx
+                .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                    "datasets_and_regions",
+                )?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
 
     let block_size = datasets_and_regions[0].1.block_size;
     let blocks_per_extent = datasets_and_regions[0].1.extent_size;
@@ -385,12 +390,15 @@ async fn sdc_regions_ensure(
                     log,
                     "grabbing snapshot {} volume {}",
                     db_snapshot.id(),
-                    db_snapshot.volume_id,
+                    db_snapshot.volume_id(),
                 );
 
                 let volume = osagactx
                     .datastore()
-                    .volume_checkout(db_snapshot.volume_id)
+                    .volume_checkout(
+                        db_snapshot.volume_id(),
+                        db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
+                    )
                     .await
                     .map_err(ActionError::action_failed)?;
 
@@ -428,12 +436,15 @@ async fn sdc_regions_ensure(
                     log,
                     "grabbing image {} volume {}",
                     image.id(),
-                    image.volume_id
+                    image.volume_id(),
                 );
 
                 let volume = osagactx
                     .datastore()
-                    .volume_checkout(image.volume_id)
+                    .volume_checkout(
+                        image.volume_id(),
+                        db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
+                    )
                     .await
                     .map_err(ActionError::action_failed)?;
 
@@ -479,18 +490,18 @@ async fn sdc_regions_ensure(
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
             blocks_per_extent,
-            extent_count: extent_count.try_into().unwrap(),
+            extent_count,
             gen: 1,
             opts: CrucibleOpts {
                 id: disk_id,
                 target: datasets_and_regions
                     .iter()
                     .map(|(dataset, region)| {
-                        dataset
-                            .address_with_port(region.port_number)
-                            .to_string()
+                        SocketAddr::V6(
+                            dataset.address_with_port(region.port_number),
+                        )
                     })
-                    .collect(),
+                    .collect::<Vec<_>>(),
 
                 lossy: false,
                 flush_timeout: None,
@@ -522,12 +533,7 @@ async fn sdc_regions_ensure(
         read_only_parent,
     };
 
-    let volume_data = serde_json::to_string(&volume_construction_request)
-        .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
-        })?;
-
-    Ok(volume_data)
+    Ok(volume_construction_request)
 }
 
 async fn sdc_regions_ensure_undo(
@@ -544,13 +550,16 @@ async fn sdc_regions_ensure_undo(
 
     warn!(log, "sdc_regions_ensure_undo: Deleting crucible regions");
 
-    let result = delete_crucible_regions(
-        log,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?,
-    )
-    .await;
+    let result = osagactx
+        .nexus()
+        .delete_crucible_regions(
+            log,
+            sagactx
+                .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                    "datasets_and_regions",
+                )?,
+        )
+        .await;
 
     match result {
         Err(e) => {
@@ -559,7 +568,11 @@ async fn sdc_regions_ensure_undo(
             // the disk that the saga created: change that disk's state to
             // Faulted here.
 
-            error!(log, "sdc_regions_ensure_undo: Deleting crucible regions failed with {}", e);
+            error!(
+                log,
+                "sdc_regions_ensure_undo: Deleting crucible regions failed with {}",
+                e
+            );
 
             let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
             let (.., authz_disk, db_disk) = LookupPath::new(&opctx, &datastore)
@@ -592,14 +605,13 @@ async fn sdc_create_volume_record(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    let volume_data = sagactx.lookup::<String>("regions_ensure")?;
-
-    let volume = db::model::Volume::new(volume_id, volume_data);
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
+    let volume_data =
+        sagactx.lookup::<VolumeConstructionRequest>("regions_ensure")?;
 
     osagactx
         .datastore()
-        .volume_create(volume)
+        .volume_create(volume_id, volume_data)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -611,14 +623,11 @@ async fn sdc_create_volume_record_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
 
-    let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
+    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
 
     // Depending on the read only parent, there will some read only resources
     // used, however this saga tracks them all.
-    osagactx
-        .datastore()
-        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
-        .await?;
+    osagactx.datastore().soft_delete_volume(volume_id).await?;
 
     osagactx.datastore().volume_hard_delete(volume_id).await?;
 
@@ -752,7 +761,13 @@ async fn sdc_call_pantry_attach_for_disk_undo(
 
     let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
 
-    call_pantry_detach_for_disk(&log, disk_id, pantry_address).await?;
+    call_pantry_detach(
+        sagactx.user_data().nexus(),
+        &log,
+        disk_id,
+        pantry_address,
+    )
+    .await?;
 
     Ok(())
 }
@@ -763,65 +778,45 @@ async fn sdc_call_pantry_attach_for_disk_undo(
 fn randomize_volume_construction_request_ids(
     input: &VolumeConstructionRequest,
 ) -> anyhow::Result<VolumeConstructionRequest> {
-    match input {
-        VolumeConstructionRequest::Volume {
-            id: _,
-            block_size,
-            sub_volumes,
-            read_only_parent,
-        } => Ok(VolumeConstructionRequest::Volume {
-            id: Uuid::new_v4(),
-            block_size: *block_size,
-            sub_volumes: sub_volumes
-                .iter()
-                .map(|subvol| -> anyhow::Result<VolumeConstructionRequest> {
-                    randomize_volume_construction_request_ids(&subvol)
-                })
-                .collect::<anyhow::Result<Vec<VolumeConstructionRequest>>>()?,
-            read_only_parent: if let Some(read_only_parent) = read_only_parent {
-                Some(Box::new(randomize_volume_construction_request_ids(
-                    read_only_parent,
-                )?))
-            } else {
-                None
-            },
-        }),
+    let mut new_vcr = input.clone();
 
-        VolumeConstructionRequest::Url { id: _, block_size, url } => {
-            Ok(VolumeConstructionRequest::Url {
-                id: Uuid::new_v4(),
-                block_size: *block_size,
-                url: url.clone(),
-            })
-        }
+    let mut parts: VecDeque<&mut VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(&mut new_vcr);
 
-        VolumeConstructionRequest::Region {
-            block_size,
-            blocks_per_extent,
-            extent_count,
-            opts,
-            gen,
-        } => {
-            let mut opts = opts.clone();
-            opts.id = Uuid::new_v4();
+    while let Some(vcr_part) = parts.pop_front() {
+        match vcr_part {
+            VolumeConstructionRequest::Volume {
+                id,
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                *id = Uuid::new_v4();
 
-            Ok(VolumeConstructionRequest::Region {
-                block_size: *block_size,
-                blocks_per_extent: *blocks_per_extent,
-                extent_count: *extent_count,
-                opts,
-                gen: *gen,
-            })
-        }
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
 
-        VolumeConstructionRequest::File { id: _, block_size, path } => {
-            Ok(VolumeConstructionRequest::File {
-                id: Uuid::new_v4(),
-                block_size: *block_size,
-                path: path.clone(),
-            })
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(read_only_parent);
+                }
+            }
+
+            VolumeConstructionRequest::Url { id, .. } => {
+                *id = Uuid::new_v4();
+            }
+
+            VolumeConstructionRequest::Region { opts, .. } => {
+                opts.id = Uuid::new_v4();
+            }
+
+            VolumeConstructionRequest::File { id, .. } => {
+                *id = Uuid::new_v4();
+            }
         }
     }
+
+    Ok(new_vcr)
 }
 
 #[cfg(test)]
@@ -830,18 +825,13 @@ pub(crate) mod test {
         app::saga::create_saga_dag, app::sagas::disk_create::Params,
         app::sagas::disk_create::SagaDiskCreate, external_api::params,
     };
-    use async_bb8_diesel::{
-        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
-    use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::{authn::saga::Serialized, db::datastore::DataStore};
-    use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -851,15 +841,11 @@ pub(crate) mod test {
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+    type DiskTest<'a> =
+        nexus_test_utils::resource_helpers::DiskTest<'a, crate::Server>;
 
     const DISK_NAME: &str = "my-disk";
     const PROJECT_NAME: &str = "springfield-squidport";
-
-    async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None).await;
-        let project = create_project(client, PROJECT_NAME).await;
-        project.identity.id
-    }
 
     pub fn new_disk_create_params() -> params::DiskCreate {
         params::DiskCreate {
@@ -886,7 +872,7 @@ pub(crate) mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
@@ -897,18 +883,15 @@ pub(crate) mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
-        let project_id = create_org_and_project(&client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
 
-        // Build the saga DAG with the provided test parameters
+        // Build the saga DAG with the provided test parameters and run it.
         let opctx = test_opctx(cptestctx);
         let params = new_test_params(&opctx, project_id);
-        let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await.unwrap();
-
+        let output =
+            nexus.sagas.saga_execute::<SagaDiskCreate>(params).await.unwrap();
         let disk = output
             .lookup_node_output::<nexus_db_queries::db::model::Disk>(
                 "created_disk",
@@ -919,7 +902,7 @@ pub(crate) mod test {
 
     async fn no_disk_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Disk;
-        use nexus_db_queries::db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
 
         dsl::disk
             .filter(dsl::time_deleted.is_null())
@@ -935,7 +918,7 @@ pub(crate) mod test {
 
     async fn no_volume_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Volume;
-        use nexus_db_queries::db::schema::volume::dsl;
+        use nexus_db_schema::schema::volume::dsl;
 
         dsl::volume
             .filter(dsl::time_deleted.is_null())
@@ -949,11 +932,39 @@ pub(crate) mod test {
             .is_none()
     }
 
+    async fn no_volume_resource_usage_records_exist(
+        datastore: &DataStore,
+    ) -> bool {
+        use nexus_db_schema::schema::volume_resource_usage::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let rows = datastore
+            .transaction_retry_wrapper("no_volume_resource_usage_records_exist")
+            .transaction(&conn, |conn| async move {
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await
+                .unwrap();
+
+                Ok(dsl::volume_resource_usage
+                    .count()
+                    .get_result_async::<i64>(&conn)
+                    .await
+                    .unwrap())
+            })
+            .await
+            .unwrap();
+
+        rows == 0
+    }
+
     async fn no_virtual_provisioning_resource_records_exist(
         datastore: &DataStore,
     ) -> bool {
         use nexus_db_queries::db::model::VirtualProvisioningResource;
-        use nexus_db_queries::db::schema::virtual_provisioning_resource::dsl;
+        use nexus_db_schema::schema::virtual_provisioning_resource::dsl;
 
         dsl::virtual_provisioning_resource
             .select(VirtualProvisioningResource::as_select())
@@ -970,29 +981,27 @@ pub(crate) mod test {
         datastore: &DataStore,
     ) -> bool {
         use nexus_db_queries::db::model::VirtualProvisioningCollection;
-        use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
+        use nexus_db_schema::schema::virtual_provisioning_collection::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         datastore
-            .pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
+            .transaction_retry_wrapper(
+                "no_virtual_provisioning_collection_records_using_storage",
+            )
+            .transaction(&conn, |conn| async move {
                 conn.batch_execute_async(
                     nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
                 )
                 .await
                 .unwrap();
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
-                    dsl::virtual_provisioning_collection
-                        .filter(dsl::virtual_disk_bytes_provisioned.ne(0))
-                        .select(VirtualProvisioningCollection::as_select())
-                        .get_results_async::<VirtualProvisioningCollection>(
-                            &conn,
-                        )
-                        .await
-                        .unwrap()
-                        .is_empty(),
-                )
+                Ok(dsl::virtual_provisioning_collection
+                    .filter(dsl::virtual_disk_bytes_provisioned.ne(0))
+                    .select(VirtualProvisioningCollection::as_select())
+                    .get_results_async::<VirtualProvisioningCollection>(&conn)
+                    .await
+                    .unwrap()
+                    .is_empty())
             })
             .await
             .unwrap()
@@ -1000,12 +1009,12 @@ pub(crate) mod test {
 
     async fn no_region_allocations_exist(
         datastore: &DataStore,
-        test: &DiskTest,
+        test: &DiskTest<'_>,
     ) -> bool {
-        for zpool in &test.zpools {
+        for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 if datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_reserved_size(dataset.id)
                     .await
                     .unwrap()
                     != 0
@@ -1017,15 +1026,12 @@ pub(crate) mod test {
         true
     }
 
-    async fn no_regions_ensured(
-        sled_agent: &SledAgent,
-        test: &DiskTest,
-    ) -> bool {
-        for zpool in &test.zpools {
+    fn no_regions_ensured(sled_agent: &SledAgent, test: &DiskTest<'_>) -> bool {
+        for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 let crucible_dataset =
-                    sled_agent.get_crucible_dataset(zpool.id, dataset.id).await;
-                if !crucible_dataset.is_empty().await {
+                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+                if !crucible_dataset.is_empty() {
                     return false;
                 }
             }
@@ -1035,10 +1041,10 @@ pub(crate) mod test {
 
     pub(crate) async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
-        test: &DiskTest,
+        test: &DiskTest<'_>,
     ) {
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let sled_agent = cptestctx.first_sled_agent();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
 
         crate::app::sagas::test_helpers::assert_no_failed_undo_steps(
             &cptestctx.logctx.log,
@@ -1047,6 +1053,7 @@ pub(crate) mod test {
         .await;
         assert!(no_disk_records_exist(datastore).await);
         assert!(no_volume_records_exist(datastore).await);
+        assert!(no_volume_resource_usage_records_exist(datastore).await);
         assert!(
             no_virtual_provisioning_resource_records_exist(datastore).await
         );
@@ -1055,7 +1062,7 @@ pub(crate) mod test {
                 .await
         );
         assert!(no_region_allocations_exist(datastore, &test).await);
-        assert!(no_regions_ensured(&sled_agent, &test).await);
+        assert!(no_regions_ensured(&sled_agent, &test));
 
         assert!(test.crucible_resources_deleted().await);
     }
@@ -1068,8 +1075,9 @@ pub(crate) mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
-        let project_id = create_org_and_project(&client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
         let opctx = test_opctx(cptestctx);
 
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
@@ -1097,8 +1105,9 @@ pub(crate) mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
-        let project_id = create_org_and_project(&client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
         let opctx = test_opctx(&cptestctx);
 
         crate::app::sagas::test_helpers::action_failure_can_unwind_idempotently::<
@@ -1114,7 +1123,7 @@ pub(crate) mod test {
     }
 
     async fn destroy_disk(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
         let disk_selector = params::DiskSelector {
             project: Some(
@@ -1137,8 +1146,9 @@ pub(crate) mod test {
         let test = DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
-        let project_id = create_org_and_project(&client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let project_id =
+            create_project(&client, PROJECT_NAME).await.identity.id;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);

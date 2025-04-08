@@ -8,6 +8,7 @@
 pub mod clickhouse;
 pub mod db;
 pub mod dendrite;
+pub mod falcon;
 pub mod maghemite;
 pub mod poll;
 #[cfg(feature = "seed-gen")]
@@ -16,10 +17,11 @@ pub mod test_cmds;
 
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
-pub use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
+pub use dropshot::test_util::LogContext;
+use omicron_common::disk::DiskIdentity;
 use slog::Logger;
 use std::io::BufReader;
 
@@ -90,9 +92,11 @@ async fn setup_database(
         StorageSource::DoNotPopulate | StorageSource::PopulateLatest { .. } => {
         }
         StorageSource::CopyFromSeed { input_tar } => {
-            info!(&log,
+            info!(
+                &log,
                 "cockroach: copying from seed tarball ({}) to storage directory ({})",
-                input_tar, starter.store_dir().to_string_lossy(),
+                input_tar,
+                starter.store_dir().to_string_lossy(),
             );
             let reader = std::fs::File::open(input_tar).with_context(|| {
                 format!("cannot open input tar {}", input_tar)
@@ -144,4 +148,14 @@ pub fn process_running(pid: u32) -> bool {
     // It should be okay to invoke this syscall with these arguments.  This
     // only checks whether the process is running.
     0 == (unsafe { libc::kill(pid as libc::pid_t, 0) })
+}
+
+/// Returns a DiskIdentity that can be passed to ensure_partition_layout when
+/// not operating on a real disk.
+pub fn mock_disk_identity() -> DiskIdentity {
+    DiskIdentity {
+        vendor: "MockVendor".to_string(),
+        serial: "MOCKSERIAL".to_string(),
+        model: "MOCKMODEL".to_string(),
+    }
 }

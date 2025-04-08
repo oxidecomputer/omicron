@@ -73,9 +73,8 @@ impl RackState {
                     ComponentId::Sled(17)
                 }
             }
-            // Skip over Psc(1) because it is always empty in currently shipping
-            // racks.
-            ComponentId::Psc(0) => ComponentId::Switch(1),
+            ComponentId::Psc(0) => ComponentId::Psc(1),
+            ComponentId::Psc(1) => ComponentId::Switch(1),
             _ => unreachable!(),
         };
     }
@@ -84,9 +83,7 @@ impl RackState {
         self.selected = match self.selected {
             ComponentId::Sled(16 | 17) => ComponentId::Switch(1),
             ComponentId::Sled(i) => ComponentId::Sled((30 + i) % 32),
-            // Skip over Psc(1) because it is always empty in currently shipping
-            // racks.
-            ComponentId::Switch(1) => ComponentId::Psc(0),
+            ComponentId::Switch(1) => ComponentId::Psc(1),
             ComponentId::Switch(0) => {
                 if self.left_column {
                     ComponentId::Sled(14)
@@ -95,6 +92,7 @@ impl RackState {
                 }
             }
             ComponentId::Psc(0) => ComponentId::Switch(0),
+            ComponentId::Psc(1) => ComponentId::Psc(0),
             _ => unreachable!(),
         };
     }
@@ -102,13 +100,8 @@ impl RackState {
     pub fn left_or_right(&mut self) {
         match self.selected {
             ComponentId::Sled(i) => {
-                if self.left_column {
-                    self.left_column = false;
-                    self.selected = ComponentId::Sled(i + 1);
-                } else {
-                    self.left_column = true;
-                    self.selected = ComponentId::Sled(i - 1);
-                }
+                self.selected = ComponentId::Sled(i ^ 1);
+                self.set_column();
             }
             _ => (),
         }
@@ -119,9 +112,8 @@ impl RackState {
             ComponentId::Sled(15) => ComponentId::Switch(0),
             ComponentId::Sled(i) => ComponentId::Sled((i + 1) % 32),
             ComponentId::Switch(0) => ComponentId::Psc(0),
-            // Skip over Psc(1) because it is always empty in currently shipping
-            // racks.
-            ComponentId::Psc(0) => ComponentId::Switch(1),
+            ComponentId::Psc(0) => ComponentId::Psc(1),
+            ComponentId::Psc(1) => ComponentId::Switch(1),
             ComponentId::Switch(1) => ComponentId::Sled(16),
             _ => unreachable!(),
         };
@@ -133,9 +125,8 @@ impl RackState {
             ComponentId::Sled(16) => ComponentId::Switch(1),
             ComponentId::Sled(0) => ComponentId::Sled(31),
             ComponentId::Sled(i) => ComponentId::Sled(i - 1),
-            // Skip over Psc(1) because it is always empty in currently shipping
-            // racks.
-            ComponentId::Switch(1) => ComponentId::Psc(0),
+            ComponentId::Switch(1) => ComponentId::Psc(1),
+            ComponentId::Psc(1) => ComponentId::Psc(0),
             ComponentId::Psc(0) => ComponentId::Switch(0),
             ComponentId::Switch(0) => ComponentId::Sled(15),
             _ => unreachable!(),
@@ -152,5 +143,55 @@ impl RackState {
 
     pub fn set_logger(&mut self, log: Logger) {
         self.log = Some(log);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::ALL_COMPONENT_IDS;
+
+    #[test]
+    fn prev_next_are_opposites() {
+        let mut state = RackState::new();
+
+        for &id in ALL_COMPONENT_IDS.iter() {
+            state.selected = id;
+            state.next();
+            state.prev();
+            assert_eq!(
+                state.selected, id,
+                "prev is not inverse of next for {id:?}"
+            );
+            state.prev();
+            state.next();
+            assert_eq!(
+                state.selected, id,
+                "next is not inverse of prev for {id:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn up_down_are_opposites() {
+        let mut state = RackState::new();
+
+        for &id in ALL_COMPONENT_IDS.iter() {
+            state.selected = id;
+            state.set_column();
+
+            state.down();
+            state.up();
+            assert_eq!(
+                state.selected, id,
+                "up is not inverse of down for {id:?}"
+            );
+            state.up();
+            state.down();
+            assert_eq!(
+                state.selected, id,
+                "down is not inverse of up for {id:?}"
+            );
+        }
     }
 }

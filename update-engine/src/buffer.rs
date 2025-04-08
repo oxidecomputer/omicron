@@ -17,11 +17,12 @@ use indexmap::IndexMap;
 use petgraph::{prelude::*, visit::Walker};
 
 use crate::{
+    ExecutionId, NestedSpec, StepSpec,
+    display::AbortMessageDisplay,
     events::{
         Event, EventReport, ProgressEvent, ProgressEventKind, StepEvent,
         StepEventKind, StepEventPriority, StepInfo, StepOutcome,
     },
-    ExecutionId, NestedSpec, StepSpec,
 };
 
 /// A receiver for events that provides a pull-based model with periodic
@@ -113,13 +114,23 @@ impl<S: StepSpec> EventBuffer<S> {
         // XXX: more efficient algorithm
         let root_execution_id = self.root_execution_id()?;
         let mut summary = self.steps().summarize();
-        summary.remove(&root_execution_id)
+        summary.swap_remove(&root_execution_id)
     }
 
     /// Returns information about each step, as currently tracked by the buffer,
     /// in order of when the events were first defined.
     pub fn steps(&self) -> EventBufferSteps<'_, S> {
         EventBufferSteps::new(&self.event_store)
+    }
+
+    /// Iterates over all known steps in the buffer in a recursive fashion.
+    ///
+    /// The iterator is depth-first and pre-order (i.e. for nested steps, the
+    /// parent step is visited before the child steps).
+    pub fn iter_steps_recursive(
+        &self,
+    ) -> impl Iterator<Item = (StepKey, &EventBufferStepData<S>)> {
+        self.event_store.event_map_value_dfs()
     }
 
     /// Returns information about the given step, as currently tracked by the
@@ -262,45 +273,59 @@ impl<S: StepSpec> EventStore<S> {
             root_event_index,
             event.total_elapsed,
         );
+
         if let Some(new_execution) = actions.new_execution {
             if new_execution.nest_level == 0 {
                 self.root_execution_id = Some(new_execution.execution_id);
             }
-            // If there's a parent key, then what's the child index?
-            let parent_key_and_child_index =
-                if let Some(parent_key) = new_execution.parent_key {
-                    match self.map.get_mut(&parent_key) {
-                        Some(parent_data) => {
-                            let child_index = parent_data.child_executions_seen;
-                            parent_data.child_executions_seen += 1;
-                            Some((parent_key, child_index))
-                        }
-                        None => {
-                            // This should never happen -- it indicates that the
-                            // parent key was unknown. This can happen if we
-                            // didn't receive an event regarding a parent
-                            // execution being started.
+
+            if let Some((first_step_key, ..)) =
+                new_execution.steps_to_add.first()
+            {
+                // Do we already know about this execution? If so, grab the parent
+                // key and child index from the first step.
+                let parent_key_and_child_index =
+                    if let Some(data) = self.map.get(first_step_key) {
+                        data.parent_key_and_child_index
+                    } else {
+                        if let Some(parent_key) = new_execution.parent_key {
+                            match self.map.get_mut(&parent_key) {
+                                Some(parent_data) => {
+                                    let child_index =
+                                        parent_data.child_executions_seen;
+                                    parent_data.child_executions_seen += 1;
+                                    Some((parent_key, child_index))
+                                }
+                                None => {
+                                    // This should never happen -- it indicates that the
+                                    // parent key was unknown. This can happen if we
+                                    // didn't receive an event regarding a parent
+                                    // execution being started.
+                                    None
+                                }
+                            }
+                        } else {
                             None
                         }
-                    }
-                } else {
-                    None
-                };
-            let total_steps = new_execution.steps_to_add.len();
-            for (new_step_key, new_step, sort_key) in new_execution.steps_to_add
-            {
-                // These are brand new steps so their keys shouldn't exist in the
-                // map. But if they do, don't overwrite them.
-                self.map.entry(new_step_key).or_insert_with(|| {
-                    EventBufferStepData::new(
-                        new_step,
-                        parent_key_and_child_index,
-                        sort_key,
-                        new_execution.nest_level,
-                        total_steps,
-                        root_event_index,
-                    )
-                });
+                    };
+
+                let total_steps = new_execution.steps_to_add.len();
+                for (new_step_key, new_step, sort_key) in
+                    new_execution.steps_to_add
+                {
+                    // These are brand new steps so their keys shouldn't exist in the
+                    // map. But if they do, don't overwrite them.
+                    self.map.entry(new_step_key).or_insert_with(|| {
+                        EventBufferStepData::new(
+                            new_step,
+                            parent_key_and_child_index,
+                            sort_key,
+                            new_execution.nest_level,
+                            total_steps,
+                            root_event_index,
+                        )
+                    });
+                }
             }
         }
 
@@ -1257,6 +1282,40 @@ impl<S: StepSpec> StepStatus<S> {
         matches!(self, Self::Running { .. })
     }
 
+    /// For completed steps, return the completion reason, otherwise None.
+    pub fn completion_reason(&self) -> Option<&CompletionReason> {
+        match self {
+            Self::Completed { reason, .. } => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// For failed steps, return the failure reason, otherwise None.
+    pub fn failure_reason(&self) -> Option<&FailureReason> {
+        match self {
+            Self::Failed { reason, .. } => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// For aborted steps, return the abort reason, otherwise None.
+    pub fn abort_reason(&self) -> Option<&AbortReason> {
+        // TODO: probably want to move last_progress into the `AbortReason`
+        // enum so that we can return it in a reasonable manner here.
+        match self {
+            Self::Aborted { reason, .. } => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// For will-not-be-run steps, return the reason, otherwise None.
+    pub fn will_not_be_run_reason(&self) -> Option<&WillNotBeRunReason> {
+        match self {
+            Self::WillNotBeRun { reason } => Some(reason),
+            _ => None,
+        }
+    }
+
     /// Returns low-priority events for this step, if any.
     ///
     /// Events are sorted by event index.
@@ -1391,6 +1450,16 @@ impl AbortReason {
             Self::StepAborted(info) => Some(info),
             Self::ParentAborted { .. } => None,
         }
+    }
+
+    /// Returns a displayer for the message.
+    ///
+    /// The buffer is used to resolve step keys to step names.
+    pub fn message_display<'a, S: StepSpec>(
+        &'a self,
+        buffer: &'a EventBuffer<S>,
+    ) -> AbortMessageDisplay<'a, S> {
+        AbortMessageDisplay::new(self, buffer)
     }
 }
 
@@ -1627,6 +1696,16 @@ pub enum TerminalKind {
     Aborted,
 }
 
+impl fmt::Display for TerminalKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Completed => write!(f, "completed"),
+            Self::Failed => write!(f, "failed"),
+            Self::Aborted => write!(f, "aborted"),
+        }
+    }
+}
+
 impl ExecutionStatus {
     /// Returns the terminal status and the total amount of time elapsed, or
     /// None if the execution has not reached a terminal state.
@@ -1670,18 +1749,14 @@ impl fmt::Display for RootEventIndex {
 mod tests {
     use std::collections::HashSet;
 
-    use anyhow::{bail, ensure, Context};
-    use futures::StreamExt;
+    use anyhow::{Context, bail, ensure};
     use indexmap::IndexSet;
     use omicron_test_utils::dev::test_setup_log;
-    use serde::{de::IntoDeserializer, Deserialize};
-    use tokio::sync::mpsc;
-    use tokio_stream::wrappers::ReceiverStream;
+    use serde::{Deserialize, de::IntoDeserializer};
 
     use crate::{
-        events::{ProgressCounter, ProgressUnits, StepProgress},
-        test_utils::TestSpec,
-        StepContext, StepSuccess, UpdateEngine,
+        events::ProgressCounter,
+        test_utils::{GenerateTestEventsKind, TestSpec, generate_test_events},
     };
 
     use super::*;
@@ -1689,108 +1764,11 @@ mod tests {
     #[tokio::test]
     async fn test_buffer() {
         let logctx = test_setup_log("test_buffer");
-        // The channel is big enough to contain all possible events.
-        let (sender, receiver) = mpsc::channel(512);
-        let engine: UpdateEngine<TestSpec> =
-            UpdateEngine::new(&logctx.log, sender);
-
-        engine
-            .new_step("foo".to_owned(), 1, "Step 1", move |_cx| async move {
-                StepSuccess::new(()).into()
-            })
-            .register();
-
-        engine
-            .new_step("bar".to_owned(), 2, "Step 2", move |cx| async move {
-                for _ in 0..20 {
-                    cx.send_progress(StepProgress::with_current_and_total(
-                        5,
-                        20,
-                        ProgressUnits::BYTES,
-                        Default::default(),
-                    ))
-                    .await;
-
-                    cx.send_progress(StepProgress::reset(
-                        Default::default(),
-                        "reset step 2",
-                    ))
-                    .await;
-
-                    cx.send_progress(StepProgress::retry("retry step 2")).await;
-                }
-                StepSuccess::new(()).into()
-            })
-            .register();
-
-        engine
-            .new_step(
-                "nested".to_owned(),
-                3,
-                "Step 3 (this is nested)",
-                move |parent_cx| async move {
-                    parent_cx
-                        .with_nested_engine(|engine| {
-                            define_nested_engine(&parent_cx, engine);
-                            Ok(())
-                        })
-                        .await
-                        .expect_err("this is expected to fail");
-
-                    StepSuccess::new(()).into()
-                },
-            )
-            .register();
-
-        let log = logctx.log.clone();
-        engine
-            .new_step(
-                "remote-nested".to_owned(),
-                20,
-                "Step 4 (remote nested)",
-                move |cx| async move {
-                    let (sender, mut receiver) = mpsc::channel(16);
-                    let mut engine = UpdateEngine::new(&log, sender);
-                    define_remote_nested_engine(&mut engine, 20);
-
-                    let mut buffer = EventBuffer::default();
-
-                    let mut execute_fut = std::pin::pin!(engine.execute());
-                    let mut execute_done = false;
-                    loop {
-                        tokio::select! {
-                            res = &mut execute_fut, if !execute_done => {
-                                res.expect("remote nested engine completed successfully");
-                                execute_done = true;
-                            }
-                            Some(event) = receiver.recv() => {
-                                // Generate complete reports to ensure deduping
-                                // happens within StepContexts.
-                                buffer.add_event(event);
-                                cx.send_nested_report(buffer.generate_report()).await?;
-                            }
-                            else => {
-                                break;
-                            }
-                        }
-                    }
-
-                    StepSuccess::new(()).into()
-                },
-            )
-            .register();
-
-        // The step index here (100) is large enough to be higher than all nested
-        // steps.
-        engine
-            .new_step("baz".to_owned(), 100, "Step 5", move |_cx| async move {
-                StepSuccess::new(()).into()
-            })
-            .register();
-
-        engine.execute().await.expect("execution successful");
-        let generated_events: Vec<_> =
-            ReceiverStream::new(receiver).collect().await;
+        let generated_events = generate_test_events(
+            &logctx.log,
+            GenerateTestEventsKind::Completed,
+        )
+        .await;
 
         let test_cx = BufferTestContext::new(generated_events);
 
@@ -1899,6 +1877,7 @@ mod tests {
     struct BufferTestContext {
         root_execution_id: ExecutionId,
         generated_events: Vec<Event<TestSpec>>,
+
         // Data derived from generated_events.
         generated_step_events: Vec<StepEvent<TestSpec>>,
     }
@@ -1976,7 +1955,94 @@ mod tests {
                     Event::Progress(_) => None,
                 })
                 .collect();
+
+            // Create two buffer and feed events.
+            // * The incremental buffer has each event fed into it one-by-one.
+            // * The "idempotent" buffer has events 0, 0..1, 0..2, 0..3, etc
+            //   fed into it one by one. The name is because this is really
+            //   testing the idempotency of the event buffer.
+
+            println!("** generating incremental and idempotent buffers **");
+            let mut incremental_buffer = EventBuffer::default();
+            let mut idempotent_buffer = EventBuffer::default();
+            for event in &generated_events {
+                incremental_buffer.add_event(event.clone());
+                let report = incremental_buffer.generate_report();
+                idempotent_buffer.add_event_report(report);
+            }
+
+            // Check that the two buffers above are similar.
+            Self::ensure_buffers_similar(
+                &incremental_buffer,
+                &idempotent_buffer,
+            )
+            .expect("idempotent buffer is similar to incremental buffer");
+
+            // Also generate a buffer with a single event report.
+            println!("** generating oneshot buffer **");
+            let mut oneshot_buffer = EventBuffer::default();
+            oneshot_buffer
+                .add_event_report(incremental_buffer.generate_report());
+
+            Self::ensure_buffers_similar(&incremental_buffer, &oneshot_buffer)
+                .expect("oneshot buffer is similar to incremental buffer");
+
             Self { root_execution_id, generated_events, generated_step_events }
+        }
+
+        fn ensure_buffers_similar<S: StepSpec>(
+            buf1: &EventBuffer<S>,
+            buf2: &EventBuffer<S>,
+        ) -> anyhow::Result<()> {
+            // The two should have the same step keys.
+            let buf1_steps = buf1.steps();
+            let buf2_steps = buf2.steps();
+
+            ensure!(
+                buf1_steps.as_slice().len() == buf2_steps.as_slice().len(),
+                "buffers have same number of steps ({} vs {})",
+                buf1_steps.as_slice().len(),
+                buf2_steps.as_slice().len()
+            );
+
+            for (ix, ((k1, data1), (k2, data2))) in buf1_steps
+                .as_slice()
+                .iter()
+                .zip(buf2_steps.as_slice().iter())
+                .enumerate()
+            {
+                ensure!(
+                    k1 == k2,
+                    "buffers have same step keys at index {} ({:?} vs {:?})",
+                    ix,
+                    k1,
+                    k2
+                );
+                ensure!(
+                    data1.sort_key() == data2.sort_key(),
+                    "buffers have same sort key at index {} ({:?} vs {:?})",
+                    ix,
+                    data1.sort_key(),
+                    data2.sort_key()
+                );
+                ensure!(
+                    data1.parent_key_and_child_index()
+                        == data2.parent_key_and_child_index(),
+                    "buffers have same parent key and child index at index {} ({:?} vs {:?})",
+                    ix,
+                    data1.parent_key_and_child_index(),
+                    data2.parent_key_and_child_index(),
+                );
+                ensure!(
+                    data1.nest_level() == data2.nest_level(),
+                    "buffers have same nest level at index {} ({:?} vs {:?})",
+                    ix,
+                    data1.nest_level(),
+                    data2.nest_level(),
+                );
+            }
+
+            Ok(())
         }
 
         /// Runs a test in a scenario where all elements should be seen.
@@ -2256,10 +2322,10 @@ mod tests {
                     ),
                     "this is the last event so ExecutionStatus must be completed"
                 );
-                // There are two nested engines.
+                // There are three nested engines.
                 ensure!(
-                    summary.len() == 3,
-                    "two nested engines must be defined"
+                    summary.len() == 4,
+                    "three nested engines (plus one root engine) must be defined"
                 );
 
                 let (_, nested_summary) = summary
@@ -2277,6 +2343,18 @@ mod tests {
                 let (_, nested_summary) = summary
                     .get_index(2)
                     .expect("this is the second nested engine");
+                ensure!(
+                    matches!(
+                        &nested_summary.execution_status,
+                        ExecutionStatus::Terminal(info)
+                            if info.kind == TerminalKind::Failed
+                    ),
+                    "for this engine, the ExecutionStatus must be failed"
+                );
+
+                let (_, nested_summary) = summary
+                    .get_index(3)
+                    .expect("this is the third nested engine");
                 ensure!(
                     matches!(
                         &nested_summary.execution_status,
@@ -2417,71 +2495,6 @@ mod tests {
         }
     }
 
-    fn define_nested_engine<'a>(
-        parent_cx: &'a StepContext<TestSpec>,
-        engine: &mut UpdateEngine<'a, TestSpec>,
-    ) {
-        engine
-            .new_step(
-                "nested-foo".to_owned(),
-                4,
-                "Nested step 1",
-                move |cx| async move {
-                    parent_cx
-                        .send_progress(StepProgress::with_current_and_total(
-                            1,
-                            3,
-                            "steps",
-                            Default::default(),
-                        ))
-                        .await;
-                    cx.send_progress(
-                        StepProgress::progress(Default::default()),
-                    )
-                    .await;
-                    StepSuccess::new(()).into()
-                },
-            )
-            .register();
-
-        engine
-            .new_step::<_, _, ()>(
-                "nested-bar".to_owned(),
-                5,
-                "Nested step 2 (fails)",
-                move |cx| async move {
-                    // This is used by NestedProgressCheck below.
-                    parent_cx
-                        .send_progress(StepProgress::with_current_and_total(
-                            2,
-                            3,
-                            "steps",
-                            Default::default(),
-                        ))
-                        .await;
-
-                    cx.send_progress(StepProgress::with_current(
-                        50,
-                        "units",
-                        Default::default(),
-                    ))
-                    .await;
-
-                    parent_cx
-                        .send_progress(StepProgress::with_current_and_total(
-                            3,
-                            3,
-                            "steps",
-                            Default::default(),
-                        ))
-                        .await;
-
-                    bail!("failing step")
-                },
-            )
-            .register();
-    }
-
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum NestedProgressCheck {
         Initial,
@@ -2529,43 +2542,5 @@ mod tests {
                 "assert_done: expected ThreeOutOfThreeSteps",
             );
         }
-    }
-
-    fn define_remote_nested_engine(
-        engine: &mut UpdateEngine<'_, TestSpec>,
-        start_id: usize,
-    ) {
-        engine
-            .new_step(
-                "nested-foo".to_owned(),
-                start_id + 1,
-                "Nested step 1",
-                move |cx| async move {
-                    cx.send_progress(
-                        StepProgress::progress(Default::default()),
-                    )
-                    .await;
-                    StepSuccess::new(()).into()
-                },
-            )
-            .register();
-
-        engine
-            .new_step::<_, _, ()>(
-                "nested-bar".to_owned(),
-                start_id + 2,
-                "Nested step 2",
-                move |cx| async move {
-                    cx.send_progress(StepProgress::with_current(
-                        20,
-                        "units",
-                        Default::default(),
-                    ))
-                    .await;
-
-                    StepSuccess::new(()).into()
-                },
-            )
-            .register();
     }
 }

@@ -10,6 +10,7 @@ use nexus_db_queries::authn::Reason;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -17,7 +18,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::UpdateResult;
-use rand::{rngs::StdRng, RngCore, SeedableRng};
+use rand::{RngCore, SeedableRng, rngs::StdRng};
 use uuid::Uuid;
 
 fn generate_session_token() -> String {
@@ -34,54 +35,13 @@ fn generate_session_token() -> String {
 }
 
 impl super::Nexus {
-    async fn login_allowed(
-        &self,
-        opctx: &OpContext,
-        silo_user_id: Uuid,
-    ) -> Result<bool, Error> {
-        // Was this silo user deleted?
-        let fetch_result = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(silo_user_id)
-            .fetch()
-            .await;
-
-        match fetch_result {
-            Err(e) => {
-                match e {
-                    Error::ObjectNotFound { type_name: _, lookup_type: _ } => {
-                        // if the silo user was deleted, they're not allowed to
-                        // log in :)
-                        return Ok(false);
-                    }
-
-                    _ => {
-                        return Err(e);
-                    }
-                }
-            }
-
-            Ok(_) => {
-                // they're allowed
-            }
-        }
-
-        Ok(true)
-    }
-
     pub(crate) async fn session_create(
         &self,
         opctx: &OpContext,
-        user_id: Uuid,
+        user: &db::model::SiloUser,
     ) -> CreateResult<db::model::ConsoleSession> {
-        if !self.login_allowed(opctx, user_id).await? {
-            return Err(Error::Unauthenticated {
-                internal_message: "User not allowed to login".to_string(),
-            });
-        }
-
         let session =
-            db::model::ConsoleSession::new(generate_session_token(), user_id);
-
+            db::model::ConsoleSession::new(generate_session_token(), user.id());
         self.db_datastore.session_create(opctx, session).await
     }
 
@@ -154,11 +114,11 @@ impl super::Nexus {
                 | Error::Forbidden
                 | Error::InternalError { .. }
                 | Error::ServiceUnavailable { .. }
-                | Error::MethodNotAllowed { .. }
+                | Error::InsufficientCapacity { .. }
                 | Error::TypeVersionMismatch { .. }
-                | Error::Conflict { .. } => {
-                    Reason::UnknownError { source: error }
-                }
+                | Error::Conflict { .. }
+                | Error::NotFound { .. }
+                | Error::Gone => Reason::UnknownError { source: error },
             })?;
         Ok(db_silo_user.silo_id)
     }

@@ -3,13 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
+use camino_tempfile::NamedUtf8TempFile;
+use camino_tempfile::Utf8PathPersistError;
+use camino_tempfile::Utf8TempPath;
 use std::io;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
-use tempfile::NamedTempFile;
-use tempfile::PathPersistError;
-use tempfile::TempPath;
 use tokio::fs::File;
 use tokio::io::AsyncWrite;
 
@@ -18,7 +18,7 @@ pub(crate) struct AsyncNamedTempFile {
     // in our `persist()` method below. This allows us to drop the temp path
     // (deleting the temporary file) if we're dropped before `persist()` is
     // called.
-    temp_path: Option<TempPath>,
+    temp_path: Option<Utf8TempPath>,
     destination: Utf8PathBuf,
     inner: File,
 }
@@ -41,7 +41,7 @@ impl AsyncNamedTempFile {
             .to_owned();
 
         let temp_file =
-            tokio::task::spawn_blocking(|| NamedTempFile::new_in(parent))
+            tokio::task::spawn_blocking(|| NamedUtf8TempFile::new_in(parent))
                 .await
                 .unwrap()?;
         let temp_path = temp_file.into_temp_path();
@@ -62,7 +62,7 @@ impl AsyncNamedTempFile {
         tokio::task::spawn_blocking(move || temp_path.persist(&destination))
             .await
             .unwrap()
-            .map_err(|PathPersistError { error, .. }| error)
+            .map_err(|Utf8PathPersistError { error, .. }| error)
     }
 }
 

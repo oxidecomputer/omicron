@@ -5,17 +5,15 @@
 //! The collection of tasks used for interacting with MGS and maintaining
 //! runtime state.
 
-use crate::{RackV1Inventory, SpInventory};
 use futures::StreamExt;
-use gateway_client::types::{SpIdentifier, SpIgnition};
-use schemars::JsonSchema;
-use serde::Serialize;
-use slog::{info, o, warn, Logger};
+use gateway_client::types::SpIgnition;
+use slog::{Logger, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 use tokio_stream::StreamMap;
+use wicket_common::inventory::{MgsV1Inventory, SpIdentifier, SpInventory};
 
 use self::inventory::{
     FetchedIgnitionState, FetchedSpData, IgnitionPresence,
@@ -35,6 +33,13 @@ const MGS_TIMEOUT: Duration = Duration::from_secs(30);
 //   * Room for some timeouts and re-requests from wicket.
 const CHANNEL_CAPACITY: usize = 8;
 
+/// Response to a request for MGS-specific inventory information.
+#[derive(Debug)]
+pub enum GetInventoryResponse {
+    Response { inventory: MgsV1Inventory, mgs_last_seen: Duration },
+    Unavailable,
+}
+
 #[derive(Debug)]
 enum MgsRequest {
     GetInventory {
@@ -50,15 +55,6 @@ enum MgsRequest {
 #[derive(Debug, Clone)]
 pub struct MgsHandle {
     tx: tokio::sync::mpsc::Sender<MgsRequest>,
-}
-
-/// The response to a `get_inventory` call: the inventory known to wicketd, or a
-/// notification that data is unavailable.
-#[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case", tag = "type", content = "data")]
-pub enum GetInventoryResponse {
-    Response { inventory: RackV1Inventory, mgs_last_seen: Duration },
-    Unavailable,
 }
 
 /// Channel errors result only from system shutdown.
@@ -266,7 +262,7 @@ impl MgsManager {
         if self.inventory.is_empty() {
             GetInventoryResponse::Unavailable
         } else {
-            let inventory = RackV1Inventory {
+            let inventory = MgsV1Inventory {
                 sps: self.inventory.values().cloned().collect(),
             };
 

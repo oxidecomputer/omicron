@@ -4,6 +4,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use slog::{Logger, info};
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
@@ -34,6 +35,7 @@ pub enum HardwareUpdate {
     TofinoUnloaded,
     DiskAdded(UnparsedDisk),
     DiskRemoved(UnparsedDisk),
+    DiskUpdated(UnparsedDisk),
 }
 
 // The type of networking 'ASIC' the Dendrite service is expected to manage
@@ -75,91 +77,75 @@ pub enum SledMode {
     Scrimlet { asic: DendriteAsic },
 }
 
-/// Describes properties that should uniquely identify a Gimlet.
-#[derive(
-    Clone,
-    Debug,
-    PartialOrd,
-    Ord,
-    PartialEq,
-    Eq,
-    Hash,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Baseboard {
-    Gimlet { identifier: String, model: String, revision: i64 },
-
-    Unknown,
-
-    Pc { identifier: String, model: String },
+/// Accounting for high watermark memory usage for various system purposes
+#[derive(Clone)]
+pub struct MemoryReservations {
+    log: Logger,
+    hardware_manager: HardwareManager,
+    /// The amount of memory expected to be used if "control plane" services all
+    /// running on this sled. "control plane" here refers to services that have
+    /// roughly fixed memory use given differing sled hardware configurations.
+    /// DNS (internal, external), Nexus, Cockroach, or ClickHouse are all
+    /// examples of "control plane" here.
+    ///
+    /// This is a pessimistic overestimate; it is unlikely
+    /// (and one might say undesirable) that all such services are colocated on
+    /// a sled, and (as described in RFD 413) the budgeting for each service's
+    /// RAM must include headroom for those services potentially forking and
+    /// bursting required swap or resident pages.
+    //
+    // XXX: This is really something we should be told by Nexus, perhaps after
+    // starting with this conservative estimate to get the sled started.
+    control_plane_earmark_bytes: u64,
+    // XXX: Crucible involves some amount of memory in support of the volumes it
+    // manages. We should collect zpool size and estimate the memory that would
+    // be used if all available storage was dedicated to Crucible volumes. For
+    // now this is part of the control plane earmark.
 }
 
-impl Baseboard {
-    #[allow(dead_code)]
-    pub fn new_gimlet(
-        identifier: String,
-        model: String,
-        revision: i64,
-    ) -> Self {
-        Self::Gimlet { identifier, model, revision }
+impl MemoryReservations {
+    pub fn new(
+        log: Logger,
+        hardware_manager: HardwareManager,
+        control_plane_earmark_mib: Option<u32>,
+    ) -> MemoryReservations {
+        const MIB: u64 = 1024 * 1024;
+        let control_plane_earmark_bytes =
+            u64::from(control_plane_earmark_mib.unwrap_or(0)) * MIB;
+
+        Self { log, hardware_manager, control_plane_earmark_bytes }
     }
 
-    pub fn new_pc(identifier: String, model: String) -> Self {
-        Self::Pc { identifier, model }
-    }
+    /// Compute the amount of physical memory that could be set aside for the
+    /// VMM reservoir.
+    ///
+    /// The actual VMM reservoir will be smaller than this amount, and is either
+    /// a fixed amount of memory specified by `ReservoirMode::Size` or
+    /// a percentage of this amount specified by `ReservoirMode::Percentage`.
+    pub fn vmm_eligible(&self) -> u64 {
+        let hardware_physical_ram_bytes =
+            self.hardware_manager.usable_physical_ram_bytes();
+        // Don't like hardcoding a struct size from the host OS here like
+        // this, maybe we shuffle some bits around before merging.. On the
+        // other hand, the last time page_t changed was illumos-gate commit
+        // a5652762e5 from 2006.
+        const PAGE_T_SIZE: u64 = 120;
+        let max_page_t_bytes =
+            self.hardware_manager.usable_physical_pages() * PAGE_T_SIZE;
 
-    // XXX This should be removed, but it requires a refactor in how devices are
-    // polled.
-    pub fn unknown() -> Self {
-        Self::Unknown
-    }
+        let vmm_eligible = hardware_physical_ram_bytes
+            - max_page_t_bytes
+            - self.control_plane_earmark_bytes;
 
-    pub fn type_string(&self) -> &str {
-        match &self {
-            Self::Gimlet { .. } => "gimlet",
-            Self::Pc { .. } => "pc",
-            Self::Unknown => "unknown",
-        }
-    }
+        info!(
+            self.log,
+            "Calculated eligible VMM reservoir size";
+            "vmm_eligible" => %vmm_eligible,
+            "physical_ram_bytes" => %hardware_physical_ram_bytes,
+            "max_page_t_bytes" => %max_page_t_bytes,
+            "control_plane_earmark_bytes" => %self.control_plane_earmark_bytes,
+        );
 
-    pub fn identifier(&self) -> &str {
-        match &self {
-            Self::Gimlet { identifier, .. } => &identifier,
-            Self::Pc { identifier, .. } => &identifier,
-            Self::Unknown => "unknown",
-        }
-    }
-
-    pub fn model(&self) -> &str {
-        match self {
-            Self::Gimlet { model, .. } => &model,
-            Self::Pc { model, .. } => &model,
-            Self::Unknown => "unknown",
-        }
-    }
-
-    pub fn revision(&self) -> i64 {
-        match self {
-            Self::Gimlet { revision, .. } => *revision,
-            Self::Pc { .. } => 0,
-            Self::Unknown => 0,
-        }
-    }
-}
-
-impl std::fmt::Display for Baseboard {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Baseboard::Gimlet { identifier, model, revision } => {
-                write!(f, "gimlet-{identifier}-{model}-{revision}")
-            }
-            Baseboard::Unknown => write!(f, "unknown"),
-            Baseboard::Pc { identifier, model } => {
-                write!(f, "pc-{identifier}-{model}")
-            }
-        }
+        vmm_eligible
     }
 }

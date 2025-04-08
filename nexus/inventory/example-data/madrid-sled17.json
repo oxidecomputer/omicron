@@ -1,0 +1,172 @@
+{
+  "generation": 5,
+  "zones": [
+    {
+      "id": "e58917eb-98cc-4b85-b851-4b46833060dc",
+      "underlay_address": "fd00:1122:3344:103::8",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:103::8]:32345",
+        "dataset": {
+          "pool_name": "oxp_c6911096-09b3-4f64-bcd6-21701ca2d6ae"
+        }
+      }
+    },
+    {
+      "id": "ae07bfa3-09a9-4b19-9721-c89f39e153fe",
+      "underlay_address": "fd00:1122:3344:103::7",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:103::7]:32345",
+        "dataset": {
+          "pool_name": "oxp_4c667609-0876-4c8c-ae60-1b30aaf236dc"
+        }
+      }
+    },
+    {
+      "id": "6e305032-a926-4c2b-a89a-0165799b9810",
+      "underlay_address": "fd00:1122:3344:103::9",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:103::9]:32345",
+        "dataset": {
+          "pool_name": "oxp_d9974711-1064-441d-ba75-0ffabfc86d27"
+        }
+      }
+    },
+    {
+      "id": "2deb45cb-7160-47fc-9180-ab14c1731427",
+      "underlay_address": "fd00:1122:3344:103::c",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:103::c]:32345",
+        "dataset": {
+          "pool_name": "oxp_e675c45a-5e1b-4d24-99af-806523ed17d5"
+        }
+      }
+    },
+    {
+      "id": "804f9ff7-0d45-465f-8820-ee0fc7c25286",
+      "underlay_address": "fd00:1122:3344:103::4",
+      "zone_type": {
+        "type": "nexus",
+        "internal_address": "[fd00:1122:3344:103::4]:12221",
+        "external_ip": "172.20.28.3",
+        "nic": {
+          "id": "3e1324f0-cad4-484e-a101-e26da2706e92",
+          "kind": {
+            "type": "service",
+            "id": "804f9ff7-0d45-465f-8820-ee0fc7c25286"
+          },
+          "name": "nexus-804f9ff7-0d45-465f-8820-ee0fc7c25286",
+          "ip": "172.30.2.6",
+          "mac": "A8:40:25:FF:A5:50",
+          "subnet": "172.30.2.0/24",
+          "vni": 100,
+          "primary": true,
+          "slot": 0
+        },
+        "external_tls": true,
+        "external_dns_servers": [
+          "1.1.1.1",
+          "9.9.9.9"
+        ]
+      }
+    },
+    {
+      "id": "c28abc48-2fb2-487b-b89a-96317c4e2df2",
+      "underlay_address": "fd00:1122:3344:103::b",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:103::b]:32345",
+        "dataset": {
+          "pool_name": "oxp_93017061-5910-4bf5-a366-4f1b2871b5c3"
+        }
+      }
+    },
+    {
+      "id": "4da2814a-7d31-4311-97cf-7648e7b64911",
+      "underlay_address": "fd00:1122:3344:103::d",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:103::d]:32345",
+        "dataset": {
+          "pool_name": "oxp_33a4881a-2b3f-4840-b252-f370024eee64"
+        }
+      }
+    },
+    {
+      "id": "a3a6216e-fdc8-47b6-8ba8-eb666629f5c2",
+      "underlay_address": "fd00:1122:3344:103::a",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:103::a]:32345",
+        "dataset": {
+          "pool_name": "oxp_844fd687-fd26-4616-91aa-441cf136c62d"
+        }
+      }
+    },
+    {
+      "id": "bd646149-3e59-4aac-b2a0-b79910b8d6a8",
+      "underlay_address": "fd00:1122:3344:103::6",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:103::6]:32345",
+        "dataset": {
+          "pool_name": "oxp_d130514f-6532-4c02-ac9f-c4958052c669"
+        }
+      }
+    },
+    {
+      "id": "8c9735b2-9097-4ba5-b783-dfea16c5e0ab",
+      "underlay_address": "fd00:1122:3344:103::5",
+      "zone_type": {
+        "type": "crucible_pantry",
+        "address": "[fd00:1122:3344:103::5]:17000"
+      }
+    },
+    {
+      "id": "8fe2fb59-5a89-4d40-b47a-6d5fcfb66ddd",
+      "underlay_address": "fd00:1122:3344:103::3",
+      "zone_type": {
+        "type": "cockroach_db",
+        "address": "[fd00:1122:3344:103::3]:32221",
+        "dataset": {
+          "pool_name": "oxp_d130514f-6532-4c02-ac9f-c4958052c669"
+        }
+      }
+    },
+    {
+      "id": "9ee036cf-88c5-4a0e-aae7-eb2849379aad",
+      "underlay_address": "fd00:1122:3344:103::e",
+      "zone_type": {
+        "type": "internal_ntp",
+        "address": "[fd00:1122:3344:103::e]:123",
+        "ntp_servers": [
+          "412bfd7b-4bf8-471d-ae4d-90bf0bdd05ff.host.control-plane.oxide.internal",
+          "d38984ac-a366-4936-b64f-d98ae3dc2035.host.control-plane.oxide.internal"
+        ],
+        "dns_servers": [
+          "fd00:1122:3344:1::1",
+          "fd00:1122:3344:2::1",
+          "fd00:1122:3344:3::1"
+        ],
+        "domain": null
+      }
+    },
+    {
+      "id": "7b006fad-d693-441b-bdd0-84cb323530e9",
+      "underlay_address": "fd00:1122:3344:3::1",
+      "zone_type": {
+        "type": "internal_dns",
+        "dataset": {
+          "pool_name": "oxp_d130514f-6532-4c02-ac9f-c4958052c669"
+        },
+        "http_address": "[fd00:1122:3344:3::1]:5353",
+        "dns_address": "[fd00:1122:3344:3::1]:53",
+        "gz_address": "fd00:1122:3344:3::2",
+        "gz_address_index": 2
+      }
+    }
+  ]
+}

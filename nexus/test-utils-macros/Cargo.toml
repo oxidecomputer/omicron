@@ -7,6 +7,9 @@ license = "MPL-2.0"
 [lib]
 proc-macro = true
 
+[lints]
+workspace = true
+
 [dependencies]
 quote.workspace = true
 syn = { workspace = true, features = [ "fold", "parsing" ] }

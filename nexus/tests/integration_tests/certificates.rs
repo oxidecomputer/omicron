@@ -4,12 +4,13 @@
 
 //! Integration tests for operating on certificates
 
-use dropshot::test_util::ClientTestContext;
+use display_error_chain::ErrorChainExt;
 use dropshot::HttpErrorResponseBody;
+use dropshot::test_util::ClientTestContext;
 use futures::TryStreamExt;
-use http::method::Method;
 use http::StatusCode;
-use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
+use http::method::Method;
+use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::load_test_config;
@@ -19,11 +20,11 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::views::Certificate;
-use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::internal::nexus::Certificate as InternalCertificate;
 use omicron_test_utils::certificates::CertificateChain;
-use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use oxide_client::ClientSessionExt;
 use oxide_client::ClientSilosExt;
 use oxide_client::ClientSystemSilosExt;
@@ -349,6 +350,7 @@ async fn test_silo_certificates() {
             &mut config,
             omicron_sled_agent::sim::SimMode::Explicit,
             Some(silo1.cert.clone()),
+            0,
         )
         .await
     };
@@ -394,6 +396,11 @@ async fn test_silo_certificates() {
                 .name(silo2.silo_name.clone())
                 .description("")
                 .discoverable(false)
+                .quotas(oxide_client::types::SiloQuotasCreate {
+                    cpus: 0,
+                    memory: oxide_client::types::ByteCount(0),
+                    storage: oxide_client::types::ByteCount(0),
+                })
                 .identity_mode(oxide_client::types::SiloIdentityMode::LocalOnly)
                 .tls_certificates(vec![silo2_cert.try_into().unwrap()]),
         )
@@ -454,6 +461,11 @@ async fn test_silo_certificates() {
                 .name(silo3.silo_name.clone())
                 .description("")
                 .discoverable(false)
+                .quotas(oxide_client::types::SiloQuotasCreate {
+                    cpus: 0,
+                    memory: oxide_client::types::ByteCount(0),
+                    storage: oxide_client::types::ByteCount(0),
+                })
                 .identity_mode(oxide_client::types::SiloIdentityMode::LocalOnly)
                 .tls_certificates(vec![silo3_cert.try_into().unwrap()]),
         )
@@ -589,11 +601,7 @@ async fn test_silo_certificates() {
         );
     if let oxide_client::Error::CommunicationError(error) = error {
         assert!(error.is_connect());
-        assert!(
-            error.to_string().contains("invalid peer certificate")
-                || error.to_string().contains("self-signed certificate")
-                || error.to_string().contains("self signed certificate")
-        );
+        assert!(error.chain().to_string().contains("self-signed certificate"));
     } else {
         panic!(
             "unexpected error connecting with wrong certificate: {:#}",
@@ -612,11 +620,7 @@ async fn test_silo_certificates() {
         );
     if let oxide_client::Error::CommunicationError(error) = error {
         assert!(error.is_connect());
-        assert!(
-            error.to_string().contains("invalid peer certificate")
-                || error.to_string().contains("self-signed certificate")
-                || error.to_string().contains("self signed certificate")
-        );
+        assert!(error.chain().to_string().contains("self-signed certificate"));
     } else {
         panic!(
             "unexpected error connecting with wrong certificate: {:#}",
@@ -635,7 +639,7 @@ struct SiloCert {
     silo_name: oxide_client::types::Name,
     dns_name: String,
     cert_name: oxide_client::types::Name,
-    cert: internal_params::Certificate,
+    cert: InternalCertificate,
 }
 
 impl SiloCert {
@@ -649,7 +653,7 @@ impl SiloCert {
                 dns_name.clone(),
             ]));
         let cert_name = format!("cert-{}", silo_name.as_str()).parse().unwrap();
-        let cert = internal_params::Certificate {
+        let cert = InternalCertificate {
             cert: chain.cert_chain_as_pem(),
             key: chain.end_cert_private_key_as_pem(),
         };

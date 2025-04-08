@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Executable that starts the HTTP-configurable DNS server used for both
-//! internal DNS (RFD 248) and extenral DNS (RFD 357) for the Oxide system
+//! internal DNS (RFD 248) and external DNS (RFD 357) for the Oxide system
 
-use anyhow::anyhow;
 use anyhow::Context;
+use anyhow::anyhow;
 use clap::Parser;
 use serde::Deserialize;
 use slog::info;

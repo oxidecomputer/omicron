@@ -6,18 +6,20 @@
 
 use anyhow::Error;
 use futures::stream::{self, StreamExt, TryStreamExt};
-use illumos_utils::dladm::Dladm;
+use illumos_utils::ExecutionError;
+use illumos_utils::dladm::Api;
 use illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME;
 use illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_VNIC_NAME;
+use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME;
 use illumos_utils::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME;
 use illumos_utils::link::LinkKind;
 use illumos_utils::opte;
 use illumos_utils::zone::IPADM;
-use illumos_utils::ExecutionError;
-use illumos_utils::{execute, PFEXEC};
-use slog::warn;
+use illumos_utils::{PFEXEC, execute};
 use slog::Logger;
+use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::process::Command;
 
 pub fn delete_underlay_addresses(log: &Logger) -> Result<(), Error> {
@@ -45,7 +47,17 @@ fn delete_addresses_matching_prefixes(
     let addrobjs = output
         .stdout
         .lines()
-        .flatten()
+        .filter_map(|line| match line {
+            Ok(line) => Some(line),
+            Err(err) => {
+                warn!(
+                    log,
+                    "ipadm show-addr returned line that wasn't valid UTF-8";
+                    InlineErrorChain::new(&err),
+                );
+                None
+            }
+        })
         .collect::<std::collections::HashSet<_>>();
 
     for addrobj in addrobjs {
@@ -92,7 +104,7 @@ pub async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
                     "vnic_name" => &vnic,
                     "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
                 );
-                Dladm::delete_vnic(&vnic)
+                Dladm::real_api().delete_vnic(&vnic)
             })
             .await
             .unwrap()

@@ -11,21 +11,22 @@ mod common;
 
 use assert_matches::assert_matches;
 use bootstore::schemes::v0::{
-    create_pkgs, ApiError, ApiOutput, Envelope, Fsm, FsmConfig,
-    LearnedSharePkg, Msg, MsgError, RackUuid, Request, RequestType, Response,
-    ResponseType, Share, SharePkg, State,
+    ApiError, ApiOutput, Envelope, Fsm, FsmConfig, LearnedSharePkg, Msg,
+    MsgError, RackUuid, Request, RequestType, Response, ResponseType, Share,
+    SharePkg, State, create_pkgs,
 };
 use bootstore::trust_quorum::RackSecret;
 use common::CommonTestState;
 use proptest::prelude::*;
 use secrecy::ExposeSecret;
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 use common::generators::{
-    arb_action, arb_config, arb_initial_member_ids, arb_learner_id, Action,
-    MAX_ACTIONS, MAX_INITIAL_MEMBERS, MIN_INITIAL_MEMBERS, TICK_TIMEOUT,
+    Action, MAX_ACTIONS, MAX_INITIAL_MEMBERS, MIN_INITIAL_MEMBERS,
+    TICK_TIMEOUT, arb_action, arb_config, arb_initial_member_ids,
+    arb_learner_id,
 };
 
 /// Actions run during the learning phase of the test
@@ -237,11 +238,12 @@ impl TestState {
         peer_id: Baseboard,
     ) -> Uuid {
         self.common.connected_peers.insert(peer_id.clone());
-        assert!(self
-            .common
-            .sut
-            .on_connected(self.common.now, peer_id.clone())
-            .is_ok());
+        assert!(
+            self.common
+                .sut
+                .on_connected(self.common.now, peer_id.clone())
+                .is_ok()
+        );
         let mut iter = self.common.sut.drain_envelopes();
         let envelope = iter.next().unwrap();
         assert_matches!(envelope,

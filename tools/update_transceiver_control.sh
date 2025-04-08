@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -o pipefail
 set -o errexit
@@ -8,7 +8,8 @@ SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 function usage {
     echo "usage: $0 [-c COMMIT] [-n]"
     echo
-    echo "  -c COMMIT   Ask to update Dendrite to a specific commit."
+    echo "  -b COMMIT   Ask to update transceiver_control to HEAD on the named branch."
+    echo "  -c COMMIT   Ask to update transceiver_control to a specific commit."
     echo "              If this is unset, Github is queried."
     echo "  -n          Dry-run"
     exit 1
@@ -53,7 +54,9 @@ function main {
       esac
     done
 
-    TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_COMMIT")
+    if [[ -z "$TARGET_COMMIT" ]]; then
+	    TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_BRANCH")
+    fi
     update_transceiver_control "$TARGET_COMMIT" "$DRY_RUN"
 }
 

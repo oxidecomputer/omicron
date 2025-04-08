@@ -1,11 +1,14 @@
 //! Common code shared between `omicron-package` and `thing-flinger` binaries.
 
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::Subcommand;
+use config::MultiPresetArg;
+use omicron_zone_package::config::{PackageName, PresetName};
 use serde::de::DeserializeOwned;
-use std::path::Path;
-use std::path::PathBuf;
 use thiserror::Error;
 
+pub mod cargo_plan;
+pub mod config;
 pub mod dot;
 pub mod target;
 
@@ -13,12 +16,12 @@ pub mod target;
 #[derive(Error, Debug)]
 pub enum ParseError {
     #[error("Error deserializing toml from {path}: {err}")]
-    Toml { path: PathBuf, err: toml::de::Error },
+    Toml { path: Utf8PathBuf, err: toml::de::Error },
     #[error("IO error: {message}: {err}")]
     Io { message: String, err: std::io::Error },
 }
 
-pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
+pub fn parse<P: AsRef<Utf8Path>, C: DeserializeOwned>(
     path: P,
 ) -> Result<C, ParseError> {
     let path = path.as_ref();
@@ -34,41 +37,48 @@ pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
 pub enum TargetCommand {
     /// Creates a new build target, and sets it as "active".
     Create {
-        #[clap(short, long, default_value = "standard")]
-        image: crate::target::Image,
+        /// The preset to use as part of the build (use `dev` for development).
+        ///
+        /// Presets are defined in the `target.preset` section of the config.
+        /// The other configurations are layered on top of the preset.
+        #[clap(short, long)]
+        preset: PresetName,
 
-        #[clap(
-            short,
-            long,
-            default_value_if("image", "standard", "non-gimlet")
-        )]
+        /// The image to use for the target.
+        ///
+        /// If specified, this configuration is layered on top of the preset.
+        #[clap(short, long)]
+        image: Option<crate::target::Image>,
+
+        /// The kind of machine to build for.
+        #[clap(short, long, help_heading = "Preset overrides")]
         machine: Option<crate::target::Machine>,
 
-        #[clap(short, long, default_value_if("image", "standard", "stub"))]
+        /// The switch to use for the target.
+        #[clap(short, long, help_heading = "Preset overrides")]
         switch: Option<crate::target::Switch>,
 
-        #[clap(
-            short,
-            long,
-            default_value_if("image", "trampoline", Some("single-sled")),
-
-            // This opt is required, and clap will enforce that even with
-            // `required = false`, since it's not an Option. But the
-            // default_value_if only works if we set `required` to false. It's
-            // jank, but it is what it is.
-            // https://github.com/clap-rs/clap/issues/4086
-            required = false
-        )]
+        #[clap(short, long, help_heading = "Preset overrides")]
         /// Specify whether nexus will run in a single-sled or multi-sled
         /// environment.
         ///
         /// Set single-sled for dev purposes when you're running a single
-        /// sled-agent. Set multi-sled if you're running with mulitple sleds.
+        /// sled-agent. Set multi-sled if you're running with multiple sleds.
         /// Currently this only affects the crucible disk allocation strategy-
         /// VM disks will require 3 distinct sleds with `multi-sled`, which will
         /// fail in a single-sled environment. `single-sled` relaxes this
         /// requirement.
-        rack_topology: crate::target::RackTopology,
+        rack_topology: Option<crate::target::RackTopology>,
+
+        #[clap(short, long, help_heading = "Preset overrides")]
+        // TODO (https://github.com/oxidecomputer/omicron/issues/4148): Remove
+        // once single-node functionality is removed.
+        /// Specify whether clickhouse will be deployed as a replicated cluster
+        /// or single-node configuration.
+        ///
+        /// Replicated cluster configuration is an experimental feature to be
+        /// used only for testing.
+        clickhouse_topology: Option<crate::target::ClickhouseTopology>,
     },
     /// List all existing targets
     List,
@@ -91,16 +101,42 @@ pub enum BuildCommand {
     },
     /// Make a `dot` graph to visualize the package tree
     Dot,
+    /// List the output packages for the current target
+    ListOutputs {
+        #[clap(long)]
+        intermediate: bool,
+    },
     /// Builds the packages specified in a manifest, and places them into an
     /// 'out' directory.
-    Package,
+    Package {
+        /// If true, disables the cache.
+        ///
+        /// By default, the cache is used.
+        #[clap(short, long)]
+        disable_cache: bool,
+        /// Limit to building only these packages
+        #[clap(long)]
+        only: Vec<PackageName>,
+        /// Do not rebuild, just repack
+        #[clap(long)]
+        no_rebuild: bool,
+    },
     /// Stamps semver versions onto packages within a manifest
     Stamp {
         /// The name of the artifact to be stamped.
-        package_name: String,
+        package_name: PackageName,
 
         /// The version to be stamped onto the package.
         version: semver::Version,
+    },
+    /// Show the Cargo commands that would be run to build the packages.
+    ShowCargoCommands {
+        /// Show cargo commands for the specified presets, or `all` for all
+        /// presets.
+        ///
+        /// If not specified, the active target's preset is used.
+        #[clap(short, long = "preset")]
+        presets: Option<MultiPresetArg>,
     },
     /// Checks the packages specified in a manifest, without building them.
     Check,
@@ -116,7 +152,7 @@ pub enum DeployCommand {
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
+        install_dir: Utf8PathBuf,
     },
     /// Unpacks the files created by `package` to an install directory.
     /// Issues the `uninstall` command.
@@ -134,7 +170,7 @@ pub enum DeployCommand {
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
+        install_dir: Utf8PathBuf,
     },
     /// Imports and starts the sled-agent illumos service
     ///
@@ -145,7 +181,7 @@ pub enum DeployCommand {
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
+        install_dir: Utf8PathBuf,
     },
     /// Deletes all Omicron zones and stops all services.
     ///
@@ -166,6 +202,6 @@ pub enum DeployCommand {
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
+        install_dir: Utf8PathBuf,
     },
 }

@@ -3,14 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Functions for querying the timeseries database.
-// Copyright 2021 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
-use crate::{
-    Error, FieldSchema, FieldSource, TimeseriesKey, TimeseriesSchema,
-    DATABASE_NAME, DATABASE_SELECT_FORMAT,
-};
+use crate::{DATABASE_NAME, Error, FieldSchema, FieldSource, TimeseriesSchema};
 use chrono::{DateTime, Utc};
 use dropshot::PaginationOrder;
+use oximeter::schema::TimeseriesKey;
 use oximeter::types::{DatumType, FieldType, FieldValue};
 use oximeter::{Metric, Target};
 use regex::Regex;
@@ -101,7 +99,7 @@ impl SelectQueryBuilder {
         let field_name = field_name.as_ref().to_string();
         let field_schema = self
             .timeseries_schema
-            .field_schema(&field_name)
+            .schema_for_field(&field_name)
             .ok_or_else(|| Error::NoSuchField {
                 timeseries_name: self
                     .timeseries_schema
@@ -110,7 +108,7 @@ impl SelectQueryBuilder {
                 field_name: field_name.clone(),
             })?;
         let field_value: FieldValue = field_value.into();
-        let expected_type = field_schema.ty;
+        let expected_type = field_schema.field_type;
         let found_type = field_value.field_type();
         if expected_type != found_type {
             return Err(Error::IncorrectFieldType {
@@ -150,7 +148,7 @@ impl SelectQueryBuilder {
     ) -> Result<Self, Error> {
         let field_schema = self
             .timeseries_schema
-            .field_schema(&selector.name)
+            .schema_for_field(&selector.name)
             .ok_or_else(|| Error::NoSuchField {
                 timeseries_name: self
                     .timeseries_schema
@@ -158,13 +156,14 @@ impl SelectQueryBuilder {
                     .to_string(),
                 field_name: selector.name.clone(),
             })?;
-        if !selector.op.valid_for_type(field_schema.ty) {
+        let field_type = field_schema.field_type;
+        if !selector.op.valid_for_type(field_type) {
             return Err(Error::InvalidFieldCmp {
                 op: format!("{:?}", selector.op),
-                ty: field_schema.ty,
+                ty: field_schema.field_type,
             });
         }
-        let field_value = match field_schema.ty {
+        let field_value = match field_type {
             FieldType::String => FieldValue::from(&selector.value),
             FieldType::I8 => parse_selector_field_value::<i8>(
                 &field_schema,
@@ -214,9 +213,9 @@ impl SelectQueryBuilder {
         let comparison =
             FieldComparison { op: selector.op, value: field_value };
         let selector = FieldSelector {
-            name: field_schema.name.clone(),
+            name: field_schema.name.to_string(),
             comparison: Some(comparison),
-            ty: field_schema.ty,
+            ty: field_type,
         };
         self.field_selectors.insert(field_schema.clone(), selector);
         Ok(self)
@@ -248,7 +247,7 @@ impl SelectQueryBuilder {
         T: Target,
         M: Metric,
     {
-        let schema = crate::model::schema_for_parts(target, metric);
+        let schema = TimeseriesSchema::new(target, metric)?;
         let mut builder = Self::new(&schema);
         let target_fields =
             target.field_names().iter().zip(target.field_values());
@@ -279,9 +278,9 @@ impl SelectQueryBuilder {
         for field in timeseries_schema.field_schema.iter() {
             let key = field.clone();
             field_selectors.entry(key).or_insert_with(|| FieldSelector {
-                name: field.name.clone(),
+                name: field.name.to_string(),
                 comparison: None,
-                ty: field.ty,
+                ty: field.field_type,
             });
         }
         SelectQuery {
@@ -295,8 +294,38 @@ impl SelectQueryBuilder {
     }
 }
 
+/// Return the name of the measurements table for a datum type.
 pub(crate) fn measurement_table_name(ty: DatumType) -> String {
-    format!("measurements_{}", ty.to_string().to_lowercase())
+    let suffix = match ty {
+        DatumType::Bool => "bool",
+        DatumType::I8 => "i8",
+        DatumType::U8 => "u8",
+        DatumType::I16 => "i16",
+        DatumType::U16 => "u16",
+        DatumType::I32 => "i32",
+        DatumType::U32 => "u32",
+        DatumType::I64 => "i64",
+        DatumType::U64 => "u64",
+        DatumType::F32 => "f32",
+        DatumType::F64 => "f64",
+        DatumType::String => "string",
+        DatumType::Bytes => "bytes",
+        DatumType::CumulativeI64 => "cumulativei64",
+        DatumType::CumulativeU64 => "cumulativeu64",
+        DatumType::CumulativeF32 => "cumulativef32",
+        DatumType::CumulativeF64 => "cumulativef64",
+        DatumType::HistogramI8 => "histogrami8",
+        DatumType::HistogramU8 => "histogramu8",
+        DatumType::HistogramI16 => "histogrami16",
+        DatumType::HistogramU16 => "histogramu16",
+        DatumType::HistogramI32 => "histogrami32",
+        DatumType::HistogramU32 => "histogramu32",
+        DatumType::HistogramI64 => "histogrami64",
+        DatumType::HistogramU64 => "histogramu64",
+        DatumType::HistogramF32 => "histogramf32",
+        DatumType::HistogramF64 => "histogramf64",
+    };
+    format!("measurements_{suffix}")
 }
 
 fn parse_selector_field_value<T>(
@@ -309,8 +338,8 @@ where
 {
     Ok(FieldValue::from(s.parse::<T>().map_err(|_| {
         Error::InvalidFieldValue {
-            field_name: field.name.clone(),
-            field_type: field.ty,
+            field_name: field.name.to_string(),
+            field_type: field.field_type,
             value: s.to_string(),
         }
     })?))
@@ -334,8 +363,23 @@ pub struct FieldSelector {
     comparison: Option<FieldComparison>,
 }
 
+/// Return the name of the field table for the provided field type.
 pub(crate) fn field_table_name(ty: FieldType) -> String {
-    format!("fields_{}", ty.to_string().to_lowercase())
+    let suffix = match ty {
+        FieldType::String => "string",
+        FieldType::I8 => "i8",
+        FieldType::U8 => "u8",
+        FieldType::I16 => "i16",
+        FieldType::U16 => "u16",
+        FieldType::I32 => "i32",
+        FieldType::U32 => "u32",
+        FieldType::I64 => "i64",
+        FieldType::U64 => "u64",
+        FieldType::IpAddr => "ipaddr",
+        FieldType::Uuid => "uuid",
+        FieldType::Bool => "bool",
+    };
+    format!("fields_{suffix}")
 }
 
 impl FieldSelector {
@@ -368,10 +412,12 @@ impl FieldSelector {
     }
 }
 
-/// A stringly-typed selector for finding fields by name and comparsion with a given value.
+/// A stringly-typed selector for finding fields by name and comparsion with a
+/// given value.
 ///
-/// This is used internally to parse comparisons written as strings, such as from the `oxdb`
-/// command-line tool or from another external source (Nexus API, for example).
+/// This is used internally to parse comparisons written as strings, such as
+/// from the `oxdb` command-line tool or from another external
+/// source (Nexus API, for example).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StringFieldSelector {
     name: String,
@@ -573,33 +619,32 @@ impl SelectQuery {
         match self.field_selectors.len() {
             0 => None,
             n => {
-                // Select timeseries key for first column, plus field name and field value for
-                // all columns.
-                const SELECTED_COLUMNS: &[&str] =
-                    &["field_name", "field_value"];
+                // Select timeseries key for first column, plus the field value
+                // for all columns, aliased to the field name.
                 const JOIN_COLUMNS: &[&str] =
                     &["timeseries_name", "timeseries_key"];
-                let mut top_level_columns =
-                    Vec::with_capacity(1 + SELECTED_COLUMNS.len() * n);
+                let mut top_level_columns = Vec::with_capacity(2 + n);
                 top_level_columns.push(String::from(
                     "filter0.timeseries_key as timeseries_key",
                 ));
                 let mut from_statements = String::new();
-                for (i, subquery) in self
+                for (i, (field_name, subquery)) in self
                     .field_selectors
-                    .values()
-                    .map(|sel| {
-                        sel.as_query(&self.timeseries_schema.timeseries_name)
+                    .iter()
+                    .map(|(field_schema, selector)| {
+                        (
+                            &field_schema.name,
+                            selector.as_query(
+                                &self.timeseries_schema.timeseries_name,
+                            ),
+                        )
                     })
                     .enumerate()
                 {
-                    for column in SELECTED_COLUMNS {
-                        top_level_columns.push(format!(
-                            "filter{i}.{column}",
-                            i = i,
-                            column = column
-                        ));
-                    }
+                    top_level_columns.push(format!(
+                        "filter{}.field_value AS {}",
+                        i, field_name,
+                    ));
 
                     if i == 0 {
                         from_statements.push_str(&format!(
@@ -621,12 +666,10 @@ impl SelectQuery {
                     concat!(
                         "SELECT {top_level_columns} ",
                         "FROM {from_statements}",
-                        "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
-                        "FORMAT {fmt};",
+                        "ORDER BY (filter0.timeseries_name, filter0.timeseries_key)",
                     ),
                     top_level_columns = top_level_columns.join(", "),
                     from_statements = from_statements,
-                    fmt = DATABASE_SELECT_FORMAT,
                 );
                 Some(query)
             }
@@ -673,7 +716,6 @@ impl SelectQuery {
                 "{timestamp_clause}",
                 "ORDER BY (timeseries_name, timeseries_key, timestamp) {order_dir}",
                 "{pagination_clause}",
-                "FORMAT {fmt};",
             ),
             db_name = DATABASE_NAME,
             table_name =
@@ -683,7 +725,6 @@ impl SelectQuery {
             timestamp_clause = self.time_range.as_query(),
             pagination_clause = pagination_clause,
             order_dir = order_dir,
-            fmt = DATABASE_SELECT_FORMAT,
         )
     }
 }
@@ -775,16 +816,22 @@ mod tests {
     fn test_select_query_builder_filter_raw() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
-                    ty: FieldType::I64,
+                    field_type: FieldType::I64,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
                 FieldSchema {
                     name: "f1".to_string(),
-                    ty: FieldType::Bool,
+                    field_type: FieldType::Bool,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
             ]
             .into_iter()
@@ -908,6 +955,10 @@ mod tests {
     fn test_select_query_builder_no_fields() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: BTreeSet::new(),
             datum_type: DatumType::I64,
             created: Utc::now(),
@@ -915,13 +966,12 @@ mod tests {
         let query = SelectQueryBuilder::new(&schema).build();
         assert!(query.field_query().is_none());
         assert_eq!(
-            query.measurement_query(&[]),
+            query.measurement_query(&[]).trim(),
             concat!(
                 "SELECT * ",
                 "FROM oximeter.measurements_i64 ",
                 "WHERE timeseries_name = 'foo:bar' ",
-                "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
-                "FORMAT JSONEachRow;"
+                "ORDER BY (timeseries_name, timeseries_key, timestamp)",
             )
         );
     }
@@ -930,6 +980,10 @@ mod tests {
     fn test_select_query_builder_limit_offset() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: BTreeSet::new(),
             datum_type: DatumType::I64,
             created: Utc::now(),
@@ -940,14 +994,13 @@ mod tests {
             .build();
         assert!(query.field_query().is_none());
         assert_eq!(
-            query.measurement_query(&[]),
+            query.measurement_query(&[]).trim(),
             concat!(
                 "SELECT * ",
                 "FROM oximeter.measurements_i64 ",
                 "WHERE timeseries_name = 'foo:bar' ",
                 "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
-                "LIMIT 10 OFFSET 5 ",
-                "FORMAT JSONEachRow;"
+                "LIMIT 10 OFFSET 5",
             )
         );
     }
@@ -981,6 +1034,7 @@ mod tests {
             "Expected an exact comparison when building a query from parts",
         );
 
+        println!("{builder:#?}");
         assert_eq!(
             builder.field_selector(FieldSource::Metric, "baz").unwrap(),
             &FieldSelector {
@@ -999,16 +1053,22 @@ mod tests {
     fn test_select_query_builder_no_selectors() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
-                    ty: FieldType::I64,
+                    field_type: FieldType::I64,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
                 FieldSchema {
                     name: "f1".to_string(),
-                    ty: FieldType::Bool,
+                    field_type: FieldType::Bool,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
             ]
             .into_iter()
@@ -1024,8 +1084,8 @@ mod tests {
             concat!(
                 "SELECT ",
                 "filter0.timeseries_key as timeseries_key, ",
-                "filter0.field_name, filter0.field_value, ",
-                "filter1.field_name, filter1.field_value ",
+                "filter0.field_value AS f0, ",
+                "filter1.field_value AS f1 ",
                 "FROM (",
                 "SELECT * FROM oximeter.fields_i64 ",
                 "WHERE timeseries_name = 'foo:bar' ",
@@ -1038,22 +1098,20 @@ mod tests {
                 ") AS filter1 ON (",
                 "filter0.timeseries_name = filter1.timeseries_name AND ",
                 "filter0.timeseries_key = filter1.timeseries_key) ",
-                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
-                "FORMAT JSONEachRow;",
+                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key)",
             )
         );
 
         let keys = &[0, 1];
         let measurement_query = query.measurement_query(keys);
         assert_eq!(
-            measurement_query,
+            measurement_query.trim(),
             concat!(
                 "SELECT * ",
                 "FROM oximeter.measurements_i64 ",
                 "WHERE timeseries_name = 'foo:bar' AND ",
                 "timeseries_key IN (0, 1) ",
-                "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
-                "FORMAT JSONEachRow;",
+                "ORDER BY (timeseries_name, timeseries_key, timestamp)",
             )
         );
     }
@@ -1062,16 +1120,22 @@ mod tests {
     fn test_select_query_builder_field_selectors() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
-                    ty: FieldType::I64,
+                    field_type: FieldType::I64,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
                 FieldSchema {
                     name: "f1".to_string(),
-                    ty: FieldType::Bool,
+                    field_type: FieldType::Bool,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
             ]
             .into_iter()
@@ -1091,8 +1155,8 @@ mod tests {
             concat!(
                 "SELECT ",
                 "filter0.timeseries_key as timeseries_key, ",
-                "filter0.field_name, filter0.field_value, ",
-                "filter1.field_name, filter1.field_value ",
+                "filter0.field_value AS f0, ",
+                "filter1.field_value AS f1 ",
                 "FROM (",
                 "SELECT * FROM oximeter.fields_i64 ",
                 "WHERE timeseries_name = 'foo:bar' AND field_name = 'f0' AND field_value = 0",
@@ -1103,8 +1167,7 @@ mod tests {
                 ") AS filter1 ON (",
                 "filter0.timeseries_name = filter1.timeseries_name AND ",
                 "filter0.timeseries_key = filter1.timeseries_key) ",
-                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
-                "FORMAT JSONEachRow;",
+                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key)",
             )
         );
     }
@@ -1113,16 +1176,22 @@ mod tests {
     fn test_select_query_builder_full() {
         let schema = TimeseriesSchema {
             timeseries_name: TimeseriesName::try_from("foo:bar").unwrap(),
+            description: Default::default(),
+            version: oximeter::schema::default_schema_version(),
+            authz_scope: oximeter::schema::AuthzScope::Fleet,
+            units: oximeter::schema::Units::Count,
             field_schema: [
                 FieldSchema {
                     name: "f0".to_string(),
-                    ty: FieldType::I64,
+                    field_type: FieldType::I64,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
                 FieldSchema {
                     name: "f1".to_string(),
-                    ty: FieldType::Bool,
+                    field_type: FieldType::Bool,
                     source: FieldSource::Target,
+                    description: String::new(),
                 },
             ]
             .into_iter()
@@ -1148,8 +1217,8 @@ mod tests {
             query.field_query().unwrap(),
             concat!(
                 "SELECT filter0.timeseries_key as timeseries_key, ",
-                "filter0.field_name, filter0.field_value, ",
-                "filter1.field_name, filter1.field_value ",
+                "filter0.field_value AS f0, ",
+                "filter1.field_value AS f1 ",
                 "FROM (",
                 "SELECT * FROM oximeter.fields_i64 ",
                 "WHERE timeseries_name = 'foo:bar' AND field_name = 'f0' AND field_value = 0",
@@ -1160,12 +1229,12 @@ mod tests {
                 ") AS filter1 ON (",
                 "filter0.timeseries_name = filter1.timeseries_name AND ",
                 "filter0.timeseries_key = filter1.timeseries_key) ",
-                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
-                "FORMAT JSONEachRow;",
-            ));
+                "ORDER BY (filter0.timeseries_name, filter0.timeseries_key)",
+            )
+        );
         let keys = &[0, 1];
         assert_eq!(
-            query.measurement_query(keys),
+            query.measurement_query(keys).trim(),
             format!(
                 concat!(
                     "SELECT * ",
@@ -1175,8 +1244,7 @@ mod tests {
                     " AND timestamp >= '{start_time}' ",
                     "AND timestamp < '{end_time}' ",
                     "ORDER BY (timeseries_name, timeseries_key, timestamp) ",
-                    "LIMIT 10 OFFSET 5 ",
-                    "FORMAT JSONEachRow;",
+                    "LIMIT 10 OFFSET 5",
                 ),
                 start_time =
                     start_time.format(crate::DATABASE_TIMESTAMP_FORMAT),

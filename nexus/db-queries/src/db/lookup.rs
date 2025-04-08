@@ -10,18 +10,21 @@ use super::identity::Resource;
 use crate::{
     authz,
     context::OpContext,
-    db,
-    db::error::{public_error_from_diesel, ErrorHandler},
+    db::error::{ErrorHandler, public_error_from_diesel},
 };
 use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
-use nexus_db_model::KnownArtifactKind;
 use nexus_db_model::Name;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::TufArtifactKind;
+use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TypedUuid;
 use uuid::Uuid;
 
 /// Look up an API resource in the database
@@ -171,6 +174,16 @@ impl<'a> LookupPath<'a> {
         Instance::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type AffinityGroup, identified by its id
+    pub fn affinity_group_id(self, id: Uuid) -> AffinityGroup<'a> {
+        AffinityGroup::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type AntiAffinityGroup, identified by its id
+    pub fn anti_affinity_group_id(self, id: Uuid) -> AntiAffinityGroup<'a> {
+        AntiAffinityGroup::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type IpPool, identified by its name
     pub fn ip_pool_name<'b, 'c>(self, name: &'b Name) -> IpPool<'c>
     where
@@ -226,9 +239,35 @@ impl<'a> LookupPath<'a> {
         VpcRouter::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type InternetGateway, identified by its id
+    pub fn internet_gateway_id(self, id: Uuid) -> InternetGateway<'a> {
+        InternetGateway::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type RouterRoute, identified by its id
     pub fn router_route_id(self, id: Uuid) -> RouterRoute<'a> {
         RouterRoute::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type InternetGatewayIpPool, identified by its id
+    pub fn internet_gateway_ip_pool_id(
+        self,
+        id: Uuid,
+    ) -> InternetGatewayIpPool<'a> {
+        InternetGatewayIpPool::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type InternetGatewayIpAddress, identified by its id
+    pub fn internet_gateway_ip_address_id(
+        self,
+        id: Uuid,
+    ) -> InternetGatewayIpAddress<'a> {
+        InternetGatewayIpAddress::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type FloatingIp, identified by its id
+    pub fn floating_ip_id(self, id: Uuid) -> FloatingIp<'a> {
+        FloatingIp::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     // Fleet-level resources
@@ -352,29 +391,19 @@ impl<'a> LookupPath<'a> {
         Zpool::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type Service, identified by its id
-    pub fn service_id(self, id: Uuid) -> Service<'a> {
-        Service::PrimaryKey(Root { lookup_root: self }, id)
-    }
-
     /// Select a resource of type Switch, identified by its id
     pub fn switch_id(self, id: Uuid) -> Switch<'a> {
         Switch::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type PhysicalDisk, identified by its id
-    pub fn physical_disk(
-        self,
-        vendor: &str,
-        serial: &str,
-        model: &str,
-    ) -> PhysicalDisk<'a> {
-        PhysicalDisk::PrimaryKey(
-            Root { lookup_root: self },
-            vendor.to_string(),
-            serial.to_string(),
-            model.to_string(),
-        )
+    pub fn physical_disk(self, id: PhysicalDiskUuid) -> PhysicalDisk<'a> {
+        PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type SupportBundle, identified by its id
+    pub fn support_bundle(self, id: SupportBundleUuid) -> SupportBundle<'a> {
+        SupportBundle::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     pub fn silo_image_id(self, id: Uuid) -> SiloImage<'a> {
@@ -426,25 +455,18 @@ impl<'a> LookupPath<'a> {
         )
     }
 
-    /// Select a resource of type UpdateArtifact, identified by its
-    /// `(name, version, kind)` tuple
-    pub fn update_artifact_tuple(
-        self,
-        name: &str,
-        version: db::model::SemverVersion,
-        kind: KnownArtifactKind,
-    ) -> UpdateArtifact<'a> {
-        UpdateArtifact::PrimaryKey(
-            Root { lookup_root: self },
-            name.to_string(),
-            version,
-            kind,
-        )
+    /// Select a resource of type TufRepo, identified by its UUID.
+    pub fn tuf_repo_id(self, id: TypedUuid<TufRepoKind>) -> TufRepo<'a> {
+        TufRepo::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type UpdateDeployment, identified by its id
-    pub fn update_deployment_id(self, id: Uuid) -> UpdateDeployment<'a> {
-        UpdateDeployment::PrimaryKey(Root { lookup_root: self }, id)
+    /// Select a resource of type UpdateArtifact, identified by its
+    /// `(name, version, kind)` tuple
+    pub fn tuf_artifact_id(
+        self,
+        id: TypedUuid<TufArtifactKind>,
+    ) -> TufArtifact<'a> {
+        TufArtifact::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`
@@ -553,7 +575,6 @@ impl<'a> Root<'a> {
 lookup_resource! {
     name = "Silo",
     ancestors = [],
-    children = [ "IdentityProvider", "SamlIdentityProvider", "Project", "SiloImage", "Certificate" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -562,7 +583,6 @@ lookup_resource! {
 lookup_resource! {
     name = "SiloUser",
     ancestors = [ "Silo" ],
-    children = [ "SshKey" ],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
@@ -572,7 +592,6 @@ lookup_resource! {
 lookup_resource! {
     name = "SiloGroup",
     ancestors = [ "Silo" ],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -581,7 +600,6 @@ lookup_resource! {
 lookup_resource! {
     name = "SiloImage",
     ancestors = [ "Silo" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -590,7 +608,6 @@ lookup_resource! {
 lookup_resource! {
     name = "IdentityProvider",
     ancestors = [ "Silo" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [
@@ -602,7 +619,6 @@ lookup_resource! {
 lookup_resource! {
     name = "IpPool",
     ancestors = [],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid }]
@@ -611,7 +627,6 @@ lookup_resource! {
 lookup_resource! {
     name = "SamlIdentityProvider",
     ancestors = [ "Silo" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [
@@ -623,7 +638,6 @@ lookup_resource! {
 lookup_resource! {
     name = "SshKey",
     ancestors = [ "Silo", "SiloUser" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -632,7 +646,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Project",
     ancestors = [ "Silo" ],
-    children = [ "Disk", "Instance", "Vpc", "Snapshot", "ProjectImage" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -641,7 +654,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Disk",
     ancestors = [ "Silo", "Project" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -650,7 +662,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Image",
     ancestors = ["Silo"],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -659,7 +670,6 @@ lookup_resource! {
 lookup_resource! {
     name = "ProjectImage",
     ancestors = [ "Silo", "Project" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -668,7 +678,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Snapshot",
     ancestors = [ "Silo", "Project" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -677,7 +686,22 @@ lookup_resource! {
 lookup_resource! {
     name = "Instance",
     ancestors = [ "Silo", "Project" ],
-    children = [ "InstanceNetworkInterface" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "AffinityGroup",
+    ancestors = [ "Silo", "Project" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "AntiAffinityGroup",
+    ancestors = [ "Silo", "Project" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -686,7 +710,6 @@ lookup_resource! {
 lookup_resource! {
     name = "InstanceNetworkInterface",
     ancestors = [ "Silo", "Project", "Instance" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -695,7 +718,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Vpc",
     ancestors = [ "Silo", "Project" ],
-    children = [ "VpcRouter", "VpcSubnet" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -704,7 +726,6 @@ lookup_resource! {
 lookup_resource! {
     name = "VpcRouter",
     ancestors = [ "Silo", "Project", "Vpc" ],
-    children = [ "RouterRoute" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -713,7 +734,6 @@ lookup_resource! {
 lookup_resource! {
     name = "RouterRoute",
     ancestors = [ "Silo", "Project", "Vpc", "VpcRouter" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -722,7 +742,38 @@ lookup_resource! {
 lookup_resource! {
     name = "VpcSubnet",
     ancestors = [ "Silo", "Project", "Vpc" ],
-    children = [ ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "InternetGateway",
+    ancestors = [ "Silo", "Project", "Vpc" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "InternetGatewayIpPool",
+    ancestors = [ "Silo", "Project", "Vpc", "InternetGateway" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "InternetGatewayIpAddress",
+    ancestors = [ "Silo", "Project", "Vpc", "InternetGateway" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "FloatingIp",
+    ancestors = [ "Silo", "Project" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -733,7 +784,6 @@ lookup_resource! {
 lookup_resource! {
     name = "ConsoleSession",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
@@ -744,7 +794,6 @@ lookup_resource! {
 lookup_resource! {
     name = "DeviceAuthRequest",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
@@ -755,7 +804,6 @@ lookup_resource! {
 lookup_resource! {
     name = "DeviceAccessToken",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
@@ -766,7 +814,6 @@ lookup_resource! {
 lookup_resource! {
     name = "RoleBuiltin",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
@@ -778,7 +825,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Rack",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -787,7 +833,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Sled",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -796,7 +841,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Zpool",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -805,25 +849,14 @@ lookup_resource! {
 lookup_resource! {
     name = "SledInstance",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
 }
 
 lookup_resource! {
-    name = "Service",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
     name = "Switch",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -832,51 +865,40 @@ lookup_resource! {
 lookup_resource! {
     name = "PhysicalDisk",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [
-        { column_name = "vendor", rust_type = String },
-        { column_name = "serial", rust_type = String },
-        { column_name = "model", rust_type = String }
-    ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = PhysicalDiskKind } ]
 }
 
 lookup_resource! {
-    name = "UpdateArtifact",
+    name = "SupportBundle",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [
-        { column_name = "name", rust_type = String },
-        { column_name = "version", rust_type = db::model::SemverVersion },
-        { column_name = "kind", rust_type = KnownArtifactKind }
-    ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = SupportBundleKind } ]
 }
 
 lookup_resource! {
-    name = "SystemUpdate",
+    name = "TufRepo",
     ancestors = [],
-    children = [],
+    // TODO: should this have TufArtifact as a child? This is a many-many
+    // relationship.
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = TufRepoKind } ]
 }
 
 lookup_resource! {
-    name = "UpdateDeployment",
+    name = "TufArtifact",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = TufArtifactKind } ]
 }
 
 lookup_resource! {
     name = "UserBuiltin",
     ancestors = [],
-    children = [],
     lookup_by_name = true,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -885,7 +907,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Certificate",
     ancestors = [ "Silo" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -893,8 +914,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "AddressLot",
-    ancestors = [],
-    children = [], // TODO: Should this include AddressLotBlock?
+    ancestors = [], // TODO: Should this include AddressLotBlock?
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -903,7 +923,6 @@ lookup_resource! {
 lookup_resource! {
     name = "LoopbackAddress",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
@@ -930,21 +949,16 @@ mod test {
     use super::Instance;
     use super::LookupPath;
     use super::Project;
-    use crate::context::OpContext;
     use crate::db::model::Name;
-    use nexus_test_utils::db::test_setup_database;
+    use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
-    use std::sync::Arc;
 
     /* This is a smoke test that things basically appear to work. */
     #[tokio::test]
     async fn test_lookup() {
         let logctx = dev::test_setup_log("test_lookup");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let project_name: Name = Name("my-project".parse().unwrap());
         let instance_name: Name = Name("my-instance".parse().unwrap());
 
@@ -968,7 +982,7 @@ mod test {
             Project::PrimaryKey(_, p)
             if *p == project_id));
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

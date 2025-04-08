@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::db_metadata;
 use crate::SemverVersion;
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::db_metadata;
 use serde::{Deserialize, Serialize};
 
 /// Internal database metadata

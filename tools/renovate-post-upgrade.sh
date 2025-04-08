@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # This script is run after Renovate upgrades dependencies or lock files.
 

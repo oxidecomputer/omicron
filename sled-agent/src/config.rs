@@ -6,15 +6,17 @@
 
 use crate::updates::ConfigUpdates;
 use camino::{Utf8Path, Utf8PathBuf};
+use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::PhysicalLink;
-use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
-use illumos_utils::zpool::ZpoolName;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
+use sled_hardware::UnparsedDisk;
 use sled_hardware::is_gimlet;
+use sprockets_tls::keys::SprocketsConfig;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -44,23 +46,44 @@ pub struct SoftPortConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Configuration for the sled agent dropshot server
+    ///
+    /// If the `bind_address` is set, it will be ignored. The remaining fields
+    /// will be respected.
+    pub dropshot: ConfigDropshot,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
     /// The sled's mode of operation (auto detect or force gimlet/scrimlet).
     pub sled_mode: SledMode,
     // TODO: Remove once this can be auto-detected.
     pub sidecar_revision: SidecarRevision,
-    /// Optional percentage of DRAM to reserve for guest memory
-    pub vmm_reservoir_percentage: Option<u8>,
+    /// Optional percentage of otherwise-unbudgeted DRAM to reserve for guest
+    /// memory, after accounting for expected host OS memory consumption and, if
+    /// set, `vmm_reservoir_size_mb`.
+    pub vmm_reservoir_percentage: Option<f32>,
     /// Optional DRAM to reserve for guest memory in MiB (mutually exclusive
-    /// option with vmm_reservoir_percentage).
+    /// option with vmm_reservoir_percentage). This can be at most the amount of
+    /// otherwise-unbudgeted memory on the slde - a setting high enough to
+    /// oversubscribe physical memory results in a `sled-agent` error at
+    /// startup.
     pub vmm_reservoir_size_mb: Option<u32>,
+    /// Amount of memory to set aside in anticipation of use for services that
+    /// will have roughly constant memory use. These are services that may have
+    /// zero to one instances on a given sled - internal DNS, MGS, Nexus,
+    /// ClickHouse, and so on. For a sled that happens to not run these kinds of
+    /// control plane services, this memory is "wasted", but ensures the sled
+    /// could run those services if reconfiguration desired it.
+    pub control_plane_memory_earmark_mb: Option<u32>,
     /// Optional swap device size in GiB
     pub swap_device_size_gb: Option<u32>,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
-    /// Optional list of zpools to be used as "discovered disks".
-    pub zpools: Option<Vec<ZpoolName>>,
+    /// Optional list of virtual devices to be used as "discovered disks".
+    pub vdevs: Option<Vec<Utf8PathBuf>>,
+    /// Optional list of real devices to be injected as observed disks during
+    /// device polling.
+    #[serde(default)]
+    pub nongimlet_observed_disks: Option<Vec<UnparsedDisk>>,
     /// Optionally skip waiting for time synchronization
     pub skip_timesync: Option<bool>,
 
@@ -91,6 +114,11 @@ pub struct Config {
     /// mode maghemite there.
     #[serde(default)]
     pub switch_zone_maghemite_links: Vec<PhysicalLink>,
+
+    /// Settings for sprockets running on the bootstrap network. Includes
+    /// root certificates and whether to use local certificate chain or
+    /// one over IPCC
+    pub sprockets: SprocketsConfig,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -105,7 +133,7 @@ pub enum ConfigError {
     Parse {
         path: Utf8PathBuf,
         #[source]
-        err: toml::de::Error,
+        err: anyhow::Error,
     },
     #[error("Loading certificate: {0}")]
     Certificate(#[source] anyhow::Error),
@@ -120,8 +148,9 @@ impl Config {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
-        let config = toml::from_str(&contents)
-            .map_err(|err| ConfigError::Parse { path: path.into(), err })?;
+        let config = toml::from_str(&contents).map_err(|err| {
+            ConfigError::Parse { path: path.into(), err: err.into() }
+        })?;
         Ok(config)
     }
 
@@ -164,8 +193,8 @@ mod test {
                     let entry = entry.unwrap();
                     if entry.file_name() == "config.toml" {
                         let path = entry.path();
-                        Config::from_file(&path).unwrap_or_else(|_| {
-                            panic!("Failed to parse config {path}")
+                        Config::from_file(&path).unwrap_or_else(|e| {
+                            panic!("Failed to parse config {path}: {e}")
                         });
                         configs_seen += 1;
                     }

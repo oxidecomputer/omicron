@@ -7,7 +7,7 @@
 use super::{
     Envelope, FsmConfig, Msg, RackUuid, Request, RequestType, Share, SharePkg,
 };
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 use uuid::Uuid;
@@ -109,7 +109,7 @@ impl RequestManager {
         let expiry = now + self.config.rack_init_timeout;
         let mut acks = InitAcks::default();
         acks.expected =
-            packages.keys().cloned().filter(|id| id != &self.id).collect();
+            packages.keys().filter(|&id| id != &self.id).cloned().collect();
         let req = TrackableRequest::InitRack {
             rack_uuid,
             packages: packages.clone(),

@@ -11,32 +11,35 @@
 #![allow(clippy::result_large_err)]
 
 use super::maghemite;
+use super::pumpkind;
 use super::server::StartError;
 use crate::config::Config;
 use crate::config::SidecarRevision;
+use crate::ddm_reconciler::DdmReconciler;
 use crate::long_running_tasks::{
-    spawn_all_longrunning_tasks, LongRunningTaskHandles,
+    LongRunningTaskHandles, spawn_all_longrunning_tasks,
 };
 use crate::services::ServiceManager;
+use crate::services::TimeSyncConfig;
 use crate::sled_agent::SledAgent;
-use crate::storage_monitor::UnderlayAccess;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
-use ddm_admin_client::Client as DdmAdminClient;
-use futures::stream;
 use futures::StreamExt;
+use futures::stream;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::zfs;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zone;
+use illumos_utils::zone::Api;
 use illumos_utils::zone::Zones;
-use omicron_common::address::Ipv6Subnet;
 use omicron_common::FileKv;
-use sled_hardware::underlay;
+use omicron_common::address::Ipv6Subnet;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
+use sled_hardware::underlay;
+use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Drain;
 use slog::Logger;
 use std::net::IpAddr;
@@ -46,52 +49,55 @@ use tokio::sync::oneshot;
 pub(super) struct BootstrapAgentStartup {
     pub(super) config: Config,
     pub(super) global_zone_bootstrap_ip: Ipv6Addr,
-    pub(super) ddm_admin_localhost_client: DdmAdminClient,
     pub(super) base_log: Logger,
     pub(super) startup_log: Logger,
     pub(super) service_manager: ServiceManager,
     pub(super) long_running_task_handles: LongRunningTaskHandles,
     pub(super) sled_agent_started_tx: oneshot::Sender<SledAgent>,
-    pub(super) underlay_available_tx: oneshot::Sender<UnderlayAccess>,
 }
 
 impl BootstrapAgentStartup {
     pub(super) async fn run(config: Config) -> Result<Self, StartError> {
         let base_log = build_logger(&config)?;
 
+        // Ensure we have a thread that automatically reaps process contracts
+        // when they become empty. See the comments in
+        // illumos-utils/src/running_zone.rs for more detail.
+        //
+        // We're going to start monitoring for hardware below, which could
+        // trigger launching the switch zone, and we need the contract reaper to
+        // exist before entering any zones.
+        illumos_utils::running_zone::ensure_contract_reaper(&base_log);
+
         let log = base_log.new(o!("component" => "BootstrapAgentStartup"));
 
         // Perform several blocking startup tasks first; we move `config` and
         // `log` into this task, and on success, it gives them back to us.
-        let (config, log, ddm_admin_localhost_client, startup_networking) =
+        let (config, log, startup_networking) =
             tokio::task::spawn_blocking(move || {
                 enable_mg_ddm(&config, &log)?;
+                pumpkind::enable_pumpkind_service(&log)?;
                 ensure_zfs_key_directory_exists(&log)?;
 
                 let startup_networking = BootstrapNetworking::setup(&config)?;
-
-                // Start trying to notify ddmd of our bootstrap address so it can
-                // advertise it to other sleds.
-                let ddmd_client = DdmAdminClient::localhost(&log)
-                    .map_err(StartError::CreateDdmAdminLocalhostClient)?;
-                ddmd_client.advertise_prefix(Ipv6Subnet::new(
-                    startup_networking.global_zone_bootstrap_ip,
-                ));
 
                 // Before we create the switch zone, we need to ensure that the
                 // necessary ZFS and Zone resources are ready. All other zones
                 // are created on U.2 drives.
                 ensure_zfs_ramdisk_dataset()?;
 
-                Ok::<_, StartError>((
-                    config,
-                    log,
-                    ddmd_client,
-                    startup_networking,
-                ))
+                Ok::<_, StartError>((config, log, startup_networking))
             })
             .await
             .unwrap()?;
+
+        // Start the DDM reconciler, giving it our bootstrap subnet to
+        // advertise to other sleds.
+        let ddm_reconciler = DdmReconciler::new(
+            Ipv6Subnet::new(startup_networking.global_zone_bootstrap_ip),
+            &base_log,
+        )
+        .map_err(StartError::CreateDdmAdminLocalhostClient)?;
 
         // Before we start monitoring for hardware, ensure we're running from a
         // predictable state.
@@ -115,7 +121,6 @@ impl BootstrapAgentStartup {
             long_running_task_handles,
             sled_agent_started_tx,
             service_manager_ready_tx,
-            underlay_available_tx,
         ) = spawn_all_longrunning_tasks(
             &base_log,
             sled_mode,
@@ -127,12 +132,18 @@ impl BootstrapAgentStartup {
         let global_zone_bootstrap_ip =
             startup_networking.global_zone_bootstrap_ip;
 
+        let time_sync = if let Some(true) = config.skip_timesync {
+            TimeSyncConfig::Skip
+        } else {
+            TimeSyncConfig::Normal
+        };
+
         let service_manager = ServiceManager::new(
             &base_log,
-            ddm_admin_localhost_client.clone(),
+            ddm_reconciler,
             startup_networking,
             sled_mode,
-            config.skip_timesync,
+            time_sync,
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
             long_running_task_handles.storage_manager.clone(),
@@ -149,13 +160,11 @@ impl BootstrapAgentStartup {
         Ok(Self {
             config,
             global_zone_bootstrap_ip,
-            ddm_admin_localhost_client,
             base_log,
             startup_log: log,
             service_manager,
             long_running_task_handles,
             sled_agent_started_tx,
-            underlay_available_tx,
         })
     }
 }
@@ -191,7 +200,7 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
     // Currently, we're removing these zones. In the future, we should
     // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
     // to leave the running Zones intact).
-    let zones = Zones::get().await.map_err(StartError::ListZones)?;
+    let zones = Zones::real_api().get().await.map_err(StartError::ListZones)?;
 
     stream::iter(zones)
         .zip(stream::iter(std::iter::repeat(log.clone())))
@@ -201,7 +210,7 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
         // the caller that this failed.
         .for_each_concurrent_then_try(None, |(zone, log)| async move {
             warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
-            Zones::halt_and_remove_logged(&log, zone.name()).await
+            Zones::real_api().halt_and_remove_logged(&log, zone.name()).await
         })
         .await
         .map_err(StartError::DeleteZone)?;
@@ -264,21 +273,18 @@ fn ensure_zfs_key_directory_exists(log: &Logger) -> Result<(), StartError> {
 }
 
 fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
-    let zoned = false;
-    let do_format = true;
-    let encryption_details = None;
-    let quota = None;
-    Zfs::ensure_filesystem(
-        zfs::ZONE_ZFS_RAMDISK_DATASET,
-        zfs::Mountpoint::Path(Utf8PathBuf::from(
+    Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
+        name: zfs::ZONE_ZFS_RAMDISK_DATASET,
+        mountpoint: zfs::Mountpoint::Path(Utf8PathBuf::from(
             zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
         )),
-        zoned,
-        do_format,
-        encryption_details,
-        quota,
-        None,
-    )
+        can_mount: zfs::CanMount::On,
+        zoned: false,
+        encryption_details: None,
+        size_details: None,
+        id: None,
+        additional_options: None,
+    })
     .map_err(StartError::EnsureZfsRamdiskDataset)
 }
 
@@ -307,10 +313,12 @@ fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
                     SidecarRevision::SoftPropolis(_) => {
                         DendriteAsic::SoftNpuPropolisDevice
                     }
-                    _ => return Err(StartError::IncorrectBuildPackaging(
-                        "sled-agent configured to run on softnpu zone but dosen't \
+                    _ => {
+                        return Err(StartError::IncorrectBuildPackaging(
+                            "sled-agent configured to run on softnpu zone but dosen't \
                          have a softnpu sidecar revision",
-                    )),
+                        ));
+                    }
                 }
             } else {
                 return Err(StartError::IncorrectBuildPackaging(
@@ -337,7 +345,7 @@ pub(crate) struct BootstrapNetworking {
 impl BootstrapNetworking {
     fn setup(config: &Config) -> Result<Self, StartError> {
         let link_for_mac = config.get_link().map_err(StartError::ConfigLink)?;
-        let global_zone_bootstrap_ip = underlay::BootstrapInterface::GlobalZone
+        let global_zone_bootstrap_ip = BootstrapInterface::GlobalZone
             .ip(&link_for_mac)
             .map_err(StartError::BootstrapLinkMac)?;
 
@@ -374,7 +382,7 @@ impl BootstrapNetworking {
                 IpAddr::V6(addr) => addr,
             };
 
-        let switch_zone_bootstrap_ip = underlay::BootstrapInterface::SwitchZone
+        let switch_zone_bootstrap_ip = BootstrapInterface::SwitchZone
             .ip(&link_for_mac)
             .map_err(StartError::BootstrapLinkMac)?;
 

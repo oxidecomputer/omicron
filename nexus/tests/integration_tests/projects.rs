@@ -2,17 +2,24 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
-use http::method::Method;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
+use http::method::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::{
-    create_disk, create_project, create_vpc, object_create, populate_ip_pool,
-    project_get, projects_list, DiskTest,
-};
+use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::resource_helpers::create_affinity_group;
+use nexus_test_utils::resource_helpers::create_anti_affinity_group;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_disk;
+use nexus_test_utils::resource_helpers::create_floating_ip;
+use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_vpc;
+use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::project_get;
+use nexus_test_utils::resource_helpers::projects_list;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
@@ -134,7 +141,7 @@ async fn test_project_deletion_with_instance(
 ) {
     let client = &cptestctx.external_client;
 
-    populate_ip_pool(&client, "default", None).await;
+    create_default_ip_pool(&client).await;
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
@@ -154,13 +161,17 @@ async fn test_project_deletion_with_instance(
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: String::from("the_host"),
+            hostname: "the-host".parse().unwrap(),
             user_data: b"none".to_vec(),
+            ssh_public_keys: Some(Vec::new()),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],
+            boot_disk: None,
             start: false,
+            auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
         },
     )
     .await;
@@ -205,6 +216,39 @@ async fn test_project_deletion_with_disk(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to delete disk");
+
+    delete_project(&url, &client).await;
+}
+
+#[nexus_test]
+async fn test_project_deletion_with_floating_ip(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _test = DiskTest::new(&cptestctx).await;
+
+    // Create a project that we'll use for testing.
+    let name = "springfield-squidport";
+    let url = format!("/v1/projects/{}", name);
+
+    create_default_ip_pool(&client).await;
+
+    create_project(&client, &name).await;
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
+    let fip = create_floating_ip(&client, "my-fip", &name, None, None).await;
+    assert_eq!(
+        "project to be deleted contains a floating ip: my-fip",
+        delete_project_expect_fail(&url, &client).await,
+    );
+    let disk_url =
+        super::external_ips::get_floating_ip_by_id_url(&fip.identity.id);
+    NexusRequest::object_delete(&client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete floating IP");
 
     delete_project(&url, &client).await;
 }
@@ -349,6 +393,70 @@ async fn test_project_deletion_with_vpc(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
     NexusRequest::object_delete(client, &vpc_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    delete_project(&project_url, &client).await;
+}
+
+#[nexus_test]
+async fn test_project_deletion_with_affinity_group(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a project that we'll use for testing.
+    let name = "springfield-squidport";
+    let project_url = format!("/v1/projects/{}", name);
+
+    create_project(&client, &name).await;
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
+
+    let group_name = "just-rainsticks";
+    create_affinity_group(&client, name, group_name).await;
+
+    assert_eq!(
+        "project to be deleted contains an affinity group: just-rainsticks",
+        delete_project_expect_fail(&project_url, &client).await,
+    );
+
+    let group_url =
+        format!("/v1/affinity-groups/{group_name}?project={}", name);
+    NexusRequest::object_delete(client, &group_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    delete_project(&project_url, &client).await;
+}
+
+#[nexus_test]
+async fn test_project_deletion_with_anti_affinity_group(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a project that we'll use for testing.
+    let name = "springfield-squidport";
+    let project_url = format!("/v1/projects/{}", name);
+
+    create_project(&client, &name).await;
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
+
+    let group_name = "just-rainsticks";
+    create_anti_affinity_group(&client, name, group_name).await;
+
+    assert_eq!(
+        "project to be deleted contains an anti affinity group: just-rainsticks",
+        delete_project_expect_fail(&project_url, &client).await,
+    );
+
+    let group_url =
+        format!("/v1/anti-affinity-groups/{group_name}?project={}", name);
+    NexusRequest::object_delete(client, &group_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await

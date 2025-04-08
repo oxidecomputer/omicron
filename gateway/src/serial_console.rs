@@ -4,21 +4,23 @@
 
 // Copyright 2022 Oxide Computer Company
 
+use crate::SpIdentifier;
 use crate::error::SpCommsError;
 use dropshot::WebsocketChannelResult;
 use dropshot::WebsocketConnection;
-use futures::stream::SplitSink;
-use futures::stream::SplitStream;
+use dropshot::WebsocketConnectionRaw;
 use futures::SinkExt;
 use futures::StreamExt;
+use futures::stream::SplitSink;
+use futures::stream::SplitStream;
 use gateway_messages::SERIAL_CONSOLE_IDLE_TIMEOUT;
 use gateway_sp_comms::AttachedSerialConsole;
 use gateway_sp_comms::AttachedSerialConsoleSend;
-use hyper::upgrade::Upgraded;
+use slog::Logger;
 use slog::error;
 use slog::info;
 use slog::warn;
-use slog::Logger;
+use slog_error_chain::SlogInlineError;
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -27,14 +29,14 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::Role;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, SlogInlineError)]
 enum SerialTaskError {
     #[error(transparent)]
     SpCommsError(#[from] SpCommsError),
@@ -43,6 +45,7 @@ enum SerialTaskError {
 }
 
 pub(crate) async fn run(
+    sp: SpIdentifier,
     console: AttachedSerialConsole,
     conn: WebsocketConnection,
     log: Logger,
@@ -80,7 +83,7 @@ pub(crate) async fn run(
     let (console_tx, mut console_rx) = console.split();
     let console_tx = DetachOnDrop::new(console_tx);
     let mut ws_recv_handle =
-        tokio::spawn(ws_recv_task(ws_stream, console_tx, log.clone()));
+        tokio::spawn(ws_recv_task(sp, ws_stream, console_tx, log.clone()));
 
     loop {
         tokio::select! {
@@ -112,7 +115,9 @@ pub(crate) async fn run(
                             Ok(()) => (),
                             Err(TrySendError::Full(data)) => {
                                 warn!(
-                                    log, "channel full; discarding serial console data from SP";
+                                    log,
+                                    "channel full; discarding serial \
+                                     console data from SP";
                                     "length" => data.len(),
                                 );
                             }
@@ -150,7 +155,7 @@ pub(crate) async fn run(
 }
 
 async fn ws_sink_task(
-    mut ws_sink: SplitSink<WebSocketStream<Upgraded>, Message>,
+    mut ws_sink: SplitSink<WebSocketStream<WebsocketConnectionRaw>, Message>,
     mut messages: mpsc::Receiver<Message>,
 ) -> Result<(), SerialTaskError> {
     while let Some(message) = messages.recv().await {
@@ -160,7 +165,8 @@ async fn ws_sink_task(
 }
 
 async fn ws_recv_task(
-    mut ws_stream: SplitStream<WebSocketStream<Upgraded>>,
+    sp: SpIdentifier,
+    mut ws_stream: SplitStream<WebSocketStream<WebsocketConnectionRaw>>,
     mut console_tx: DetachOnDrop,
     log: Logger,
 ) -> Result<(), SerialTaskError> {
@@ -175,7 +181,7 @@ async fn ws_recv_task(
                         console_tx
                             .write(data)
                             .await
-                            .map_err(SpCommsError::from)?;
+                            .map_err(|err| SpCommsError::SpCommunicationFailed { sp, err })?;
                         keepalive.reset();
                     }
                     Some(Ok(Message::Close(_))) | None => {
@@ -194,7 +200,7 @@ async fn ws_recv_task(
             }
 
             _= keepalive.tick() => {
-                console_tx.keepalive().await.map_err(SpCommsError::from)?;
+                console_tx.keepalive().await.map_err(|err| SpCommsError::SpCommunicationFailed { sp, err })?;
             }
         }
     }

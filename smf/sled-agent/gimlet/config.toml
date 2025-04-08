@@ -21,9 +21,33 @@ sidecar_revision.physical = "b"
 # $ dladm show-phys -p -o LINK
 data_link = "cxgbe0"
 
-# Percentage of usable physical DRAM to use for the VMM reservoir, which
-# guest memory is pulled from.
-vmm_reservoir_percentage = 80
+# The amount of memory held back for services which always have one instance on
+# every Gimlet.  This currently includes some additional terms reflecting OS
+# memory use under load.
+#
+# As of writing, this is the sum of the following items from RFD 413:
+# * Network buffer slush: 18 GiB
+# * Other kernel heap: 20 GiB
+# * ZFS ARC minimum: 5 GiB
+# * Sled agent: 0.5 GiB
+# * Maghemite: 0.25 GiB
+# * NTP: 0.25 GiB
+control_plane_memory_earmark_mb = 45056
+
+# Percentage of otherwise-unbudgeted physical DRAM to use for the VMM reservoir,
+# which guest memory is pulled from.
+#
+# The budget including this number is described in more detail in RFD 413. There
+# are two key details to reiterate here. First, this number is chosen so that
+# there is no change in overall VMM reservoir size on Gimlets with 1 TiB of
+# DRAM, compared to our initial budgeting strategy. Second, whatever the value
+# here, it should be at or below the percentage of memory requested by Propolis
+# even if a sled has a full complement of minimum-sized VMs. Any higher and we
+# risk swapping or OOMing under typical conditions; bad for everyone.
+#
+# We expect this should be higher, but currently a lack of long-uptime
+# varied-usage measurements leads us to be cautious.
+vmm_reservoir_percentage = 86.3
 
 # Swap device size for the system. The device is a sparsely allocated zvol on
 # the internal zpool of the M.2 that we booted from.
@@ -37,8 +61,15 @@ swap_device_size_gb = 256
 
 data_links = ["cxgbe0", "cxgbe1"]
 
+[dropshot]
+default_request_body_max_bytes = 1048576
+
 [log]
 level = "info"
 mode = "file"
 path = "/dev/stdout"
 if_exists = "append"
+
+[sprockets]
+resolve = { which = "ipcc" }
+roots = ["/usr/share/oxide/idcerts/staging.pem", "/usr/share/oxide/idcerts/production.pem"]

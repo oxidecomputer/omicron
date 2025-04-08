@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 924830db4b84d94683d81ff27010fec0df19a72155729e60fda503b58460390e # shrinks to input = _NodeDecommissionParseDoesntPanicOnArbitraryInputArgs { input: [10, 10] }

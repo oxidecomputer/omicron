@@ -4,15 +4,15 @@
 
 //! Distributable data packages containing key shares and metadata
 
-use crate::trust_quorum::{RackSecret, TrustQuorumError};
 use crate::Sha3_256Digest;
-use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, Key, KeyInit};
+use crate::trust_quorum::{RackSecret, TrustQuorumError};
+use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, aead::Aead};
 use hkdf::Hkdf;
-use rand::{rngs::OsRng, RngCore};
+use rand::{RngCore, rngs::OsRng};
 use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::collections::BTreeSet;
 use std::fmt;
 use uuid::Uuid;

@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 progenitor::generate_api!(
-    spec = "../../openapi/dns-server.json",
+    spec = "../../openapi/dns-server/dns-server-latest.json",
     inner_type = slog::Logger,
-    derives = [schemars::JsonSchema, Eq, PartialEq],
+    derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
             "method" => %request.method(),
@@ -16,22 +16,33 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
+    replace = {
+        DnsConfig = internal_dns_types::config::DnsConfig,
+        DnsConfigParams = internal_dns_types::config::DnsConfigParams,
+        DnsConfigZone = internal_dns_types::config::DnsConfigZone,
+        DnsRecord = internal_dns_types::config::DnsRecord,
+        Srv = internal_dns_types::config::Srv,
+    }
 );
+
+pub type DnsError = crate::Error<crate::types::Error>;
 
 pub const ERROR_CODE_UPDATE_IN_PROGRESS: &'static str = "UpdateInProgress";
 pub const ERROR_CODE_BAD_UPDATE_GENERATION: &'static str =
     "BadUpdateGeneration";
 
-use crate::Error as DnsConfigError;
-
 /// Returns whether an error from this client should be retried
-pub fn is_retryable(error: &DnsConfigError<crate::types::Error>) -> bool {
+pub fn is_retryable(error: &DnsError) -> bool {
     let response_value = match error {
-        DnsConfigError::CommunicationError(_) => return true,
-        DnsConfigError::InvalidRequest(_)
-        | DnsConfigError::InvalidResponsePayload(_)
-        | DnsConfigError::UnexpectedResponse(_) => return false,
-        DnsConfigError::ErrorResponse(response_value) => response_value,
+        DnsError::CommunicationError(_) => return true,
+        DnsError::InvalidRequest(_)
+        | DnsError::InvalidResponsePayload(_, _)
+        | DnsError::UnexpectedResponse(_)
+        | DnsError::InvalidUpgrade(_)
+        | DnsError::ResponseBodyError(_)
+        | DnsError::PreHookError(_)
+        | DnsError::PostHookError(_) => return false,
+        DnsError::ErrorResponse(response_value) => response_value,
     };
 
     let status_code = response_value.status();

@@ -8,37 +8,74 @@ use super::DataStore;
 use super::RunnableQuery;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
+use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
+use crate::db::error::public_error_from_diesel;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Dataset;
+use crate::db::model::CrucibleDataset;
+use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Region;
-use async_bb8_diesel::AsyncConnection;
+use crate::db::model::SqlU16;
+use crate::db::model::to_db_typed_uuid;
+use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
+use crate::db::queries::region_allocation::RegionParameters;
+use crate::db::update_and_check::UpdateAndCheck;
+use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::dsl::sql_query;
 use diesel::prelude::*;
+use nexus_config::RegionAllocationStrategy;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::backoff::{self, BackoffError};
-use omicron_common::nexus_config::RegionAllocationStrategy;
+use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::VolumeUuid;
 use slog::Logger;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
+
+pub enum RegionAllocationFor {
+    /// Allocate region(s) for a disk volume
+    DiskVolume { volume_id: VolumeUuid },
+
+    /// Allocate region(s) for a snapshot volume, which may have read-only
+    /// targets.
+    SnapshotVolume { volume_id: VolumeUuid, snapshot_id: Uuid },
+}
+
+/// Describe the region(s) to be allocated
+pub enum RegionAllocationParameters<'a> {
+    FromDiskSource {
+        disk_source: &'a params::DiskSource,
+        size: external::ByteCount,
+    },
+
+    FromRaw {
+        block_size: u64,
+        blocks_per_extent: u64,
+        extent_count: u64,
+    },
+}
 
 impl DataStore {
     pub(super) fn get_allocated_regions_query(
-        volume_id: Uuid,
-    ) -> impl RunnableQuery<(Dataset, Region)> {
-        use db::schema::dataset::dsl as dataset_dsl;
-        use db::schema::region::dsl as region_dsl;
+        volume_id: VolumeUuid,
+    ) -> impl RunnableQuery<(CrucibleDataset, Region)> {
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
         region_dsl::region
-            .filter(region_dsl::volume_id.eq(volume_id))
+            .filter(region_dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
             .inner_join(
-                dataset_dsl::dataset
+                dataset_dsl::crucible_dataset
                     .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
             )
-            .select((Dataset::as_select(), Region::as_select()))
+            .select((CrucibleDataset::as_select(), Region::as_select()))
     }
 
     /// Gets allocated regions for a disk, and the datasets to which those
@@ -48,13 +85,41 @@ impl DataStore {
     /// may be used in a context where the disk is being deleted.
     pub async fn get_allocated_regions(
         &self,
-        volume_id: Uuid,
-    ) -> Result<Vec<(Dataset, Region)>, Error> {
+        volume_id: VolumeUuid,
+    ) -> Result<Vec<(CrucibleDataset, Region)>, Error> {
         Self::get_allocated_regions_query(volume_id)
-            .get_results_async::<(Dataset, Region)>(
+            .get_results_async::<(CrucibleDataset, Region)>(
                 &*self.pool_connection_unauthorized().await?,
             )
             .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn get_region(&self, region_id: Uuid) -> Result<Region, Error> {
+        use nexus_db_schema::schema::region::dsl;
+        dsl::region
+            .filter(dsl::id.eq(region_id))
+            .select(Region::as_select())
+            .get_result_async::<Region>(
+                &*self.pool_connection_unauthorized().await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn get_region_optional(
+        &self,
+        region_id: Uuid,
+    ) -> Result<Option<Region>, Error> {
+        use nexus_db_schema::schema::region::dsl;
+        dsl::region
+            .filter(dsl::id.eq(region_id))
+            .select(Region::as_select())
+            .get_result_async::<Region>(
+                &*self.pool_connection_unauthorized().await?,
+            )
+            .await
+            .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
@@ -101,14 +166,12 @@ impl DataStore {
         size: external::ByteCount,
     ) -> (u64, u64) {
         let blocks_per_extent =
-            Self::EXTENT_SIZE / block_size.to_bytes() as u64;
+            Self::EXTENT_SIZE / u64::from(block_size.to_bytes());
 
         let size = size.to_bytes();
 
         // allocate enough extents to fit all the disk blocks, rounding up.
-        let extent_count = size / Self::EXTENT_SIZE
-            + ((size % Self::EXTENT_SIZE) + Self::EXTENT_SIZE - 1)
-                / Self::EXTENT_SIZE;
+        let extent_count = size.div_ceil(Self::EXTENT_SIZE);
 
         (blocks_per_extent, extent_count)
     }
@@ -117,32 +180,111 @@ impl DataStore {
     ///
     /// Returns the allocated regions, as well as the datasets to which they
     /// belong.
-    pub async fn region_allocate(
+    pub async fn disk_region_allocate(
         &self,
         opctx: &OpContext,
-        volume_id: Uuid,
+        volume_id: VolumeUuid,
         disk_source: &params::DiskSource,
         size: external::ByteCount,
         allocation_strategy: &RegionAllocationStrategy,
-    ) -> Result<Vec<(Dataset, Region)>, Error> {
-        let block_size =
-            self.get_block_size_from_disk_source(opctx, &disk_source).await?;
-        let (blocks_per_extent, extent_count) =
-            Self::get_crucible_allocation(&block_size, size);
+    ) -> Result<Vec<(CrucibleDataset, Region)>, Error> {
+        self.arbitrary_region_allocate(
+            opctx,
+            RegionAllocationFor::DiskVolume { volume_id },
+            RegionAllocationParameters::FromDiskSource { disk_source, size },
+            allocation_strategy,
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await
+    }
 
-        let dataset_and_regions: Vec<(Dataset, Region)> =
-            crate::db::queries::region_allocation::RegionAllocate::new(
-                volume_id,
-                block_size.to_bytes() as u64,
+    /// Idempotently allocates an arbitrary number of regions for a volume.
+    ///
+    /// For regular disk creation, this will be REGION_REDUNDANCY_THRESHOLD.
+    ///
+    /// For region replacement, it's important to allocate the *new* region for
+    /// a volume while respecting the current region allocation strategy.  This
+    /// requires setting `num_regions_required` to one more than the current
+    /// level for a volume. If a single region is allocated in isolation this
+    /// could land on the same dataset as one of the existing volume's regions.
+    ///
+    /// For allocating for snapshot volumes, it's important to take into account
+    /// `region_snapshot`s that may be used as some of the targets in the region
+    /// set, representing read-only downstairs served out of a ZFS snapshot
+    /// instead of a dataset.
+    ///
+    /// Returns the allocated regions, as well as the datasets to which they
+    /// belong.
+    pub async fn arbitrary_region_allocate(
+        &self,
+        opctx: &OpContext,
+        region_for: RegionAllocationFor,
+        region_parameters: RegionAllocationParameters<'_>,
+        allocation_strategy: &RegionAllocationStrategy,
+        num_regions_required: usize,
+    ) -> Result<Vec<(CrucibleDataset, Region)>, Error> {
+        let (volume_id, maybe_snapshot_id) = match region_for {
+            RegionAllocationFor::DiskVolume { volume_id } => (volume_id, None),
+
+            RegionAllocationFor::SnapshotVolume { volume_id, snapshot_id } => {
+                (volume_id, Some(snapshot_id))
+            }
+        };
+
+        let (block_size, blocks_per_extent, extent_count) =
+            match region_parameters {
+                RegionAllocationParameters::FromDiskSource {
+                    disk_source,
+                    size,
+                } => {
+                    let block_size = self
+                        .get_block_size_from_disk_source(opctx, &disk_source)
+                        .await?;
+
+                    let (blocks_per_extent, extent_count) =
+                        Self::get_crucible_allocation(&block_size, size);
+
+                    (
+                        u64::from(block_size.to_bytes()),
+                        blocks_per_extent,
+                        extent_count,
+                    )
+                }
+
+                RegionAllocationParameters::FromRaw {
+                    block_size,
+                    blocks_per_extent,
+                    extent_count,
+                } => (block_size, blocks_per_extent, extent_count),
+            };
+
+        let query = crate::db::queries::region_allocation::allocation_query(
+            volume_id,
+            maybe_snapshot_id,
+            RegionParameters {
+                block_size,
                 blocks_per_extent,
                 extent_count,
-                allocation_strategy,
-            )
-            .get_results_async(&*self.pool_connection_authorized(&opctx).await?)
-            .await
-            .map_err(|e| {
+                read_only: maybe_snapshot_id.is_some(),
+            },
+            allocation_strategy,
+            num_regions_required,
+        )?;
+
+        let conn = self.pool_connection_authorized(&opctx).await?;
+
+        let dataset_and_regions: Vec<(CrucibleDataset, Region)> =
+            query.get_results_async(&*conn).await.map_err(|e| {
                 crate::db::queries::region_allocation::from_diesel(e)
             })?;
+
+        info!(
+            self.log,
+            "Allocated regions for volume";
+            "volume_id" => %volume_id,
+            "maybe_snapshot_id" => ?maybe_snapshot_id,
+            "datasets_and_regions" => ?dataset_and_regions,
+        );
 
         Ok(dataset_and_regions)
     }
@@ -152,144 +294,276 @@ impl DataStore {
     /// Also updates the storage usage on their corresponding datasets.
     pub async fn regions_hard_delete(
         &self,
-        log: &Logger,
+        _log: &Logger,
         region_ids: Vec<Uuid>,
     ) -> DeleteResult {
         if region_ids.is_empty() {
             return Ok(());
         }
 
-        #[derive(Debug, thiserror::Error)]
-        enum RegionDeleteError {
-            #[error("Numeric error: {0}")]
-            NumericError(String),
-        }
-        type TxnError = TransactionError<RegionDeleteError>;
-
-        // Retry this transaction until it succeeds. It's a little heavy in that
-        // there's a for loop inside that iterates over the datasets the
-        // argument regions belong to, and it often encounters the "retry
-        // transaction" error.
-        let transaction = {
-            |region_ids: Vec<Uuid>| async {
-                self.pool_connection_unauthorized()
-                    .await?
-                    .transaction_async(|conn| async move {
-                        use db::schema::dataset::dsl as dataset_dsl;
-                        use db::schema::region::dsl as region_dsl;
-
-                        // Remove the regions, collecting datasets they're from.
-                        let datasets = diesel::delete(region_dsl::region)
-                            .filter(region_dsl::id.eq_any(region_ids))
-                            .returning(region_dsl::dataset_id)
-                            .get_results_async::<Uuid>(&conn).await?;
-
-                        // Update datasets to which the regions belonged.
-                        for dataset in datasets {
-                            let dataset_total_occupied_size: Option<
-                                diesel::pg::data_types::PgNumeric,
-                            > = region_dsl::region
-                                .filter(region_dsl::dataset_id.eq(dataset))
-                                .select(diesel::dsl::sum(
-                                    region_dsl::block_size
-                                        * region_dsl::blocks_per_extent
-                                        * region_dsl::extent_count,
-                                ))
-                                .nullable()
-                                .get_result_async(&conn).await?;
-
-                            let dataset_total_occupied_size: i64 = if let Some(
-                                dataset_total_occupied_size,
-                            ) =
-                                dataset_total_occupied_size
-                            {
-                                let dataset_total_occupied_size: db::model::ByteCount =
-                                    dataset_total_occupied_size.try_into().map_err(
-                                        |e: anyhow::Error| {
-                                            TxnError::CustomError(
-                                                RegionDeleteError::NumericError(
-                                                    e.to_string(),
-                                                ),
-                                            )
-                                        },
-                                    )?;
-
-                                dataset_total_occupied_size.into()
-                            } else {
-                                0
-                            };
-
-                            diesel::update(dataset_dsl::dataset)
-                                .filter(dataset_dsl::id.eq(dataset))
-                                .set(
-                                    dataset_dsl::size_used
-                                        .eq(dataset_total_occupied_size),
-                                )
-                                .execute_async(&conn).await?;
-                        }
-
-                        Ok(())
-                    })
-                    .await
-                    .map_err(|e: TxnError| {
-                        if e.retry_transaction() {
-                            BackoffError::transient(Error::internal_error(
-                                &format!("Retryable transaction error {:?}", e)
-                            ))
-                        } else {
-                            BackoffError::Permanent(Error::internal_error(
-                                &format!("Transaction error: {}", e)
-                            ))
-                        }
-                    })
-            }
-        };
-
-        backoff::retry_notify(
-            backoff::retry_policy_internal_service_aggressive(),
-            || async {
+        let conn = self.pool_connection_unauthorized().await?;
+        self.transaction_retry_wrapper("regions_hard_delete")
+            .transaction(&conn, |conn| {
                 let region_ids = region_ids.clone();
-                transaction(region_ids).await
-            },
-            |e: Error, delay| {
-                info!(log, "{:?}, trying again in {:?}", e, delay,);
-            },
-        )
-        .await
+                async move {
+                    use nexus_db_schema::schema::region::dsl;
+
+                    // Remove the regions
+                    diesel::delete(dsl::region)
+                        .filter(dsl::id.eq_any(region_ids))
+                        .execute_async(&conn)
+                        .await?;
+
+                    // Update datasets to which the regions belonged.
+                    sql_query(
+                        r#"
+WITH size_used_with_reservation AS (
+  SELECT
+    crucible_dataset.id AS crucible_dataset_id,
+    SUM(
+      CASE
+        WHEN block_size IS NULL THEN 0
+        ELSE
+          CASE
+            WHEN reservation_percent = '25' THEN
+              (block_size * blocks_per_extent * extent_count) / 4 +
+              (block_size * blocks_per_extent * extent_count)
+          END
+      END
+    ) AS reserved_size
+  FROM crucible_dataset
+  LEFT JOIN region ON crucible_dataset.id = region.dataset_id
+  WHERE crucible_dataset.time_deleted IS NULL
+  GROUP BY crucible_dataset.id
+)
+UPDATE crucible_dataset
+SET size_used = size_used_with_reservation.reserved_size
+FROM size_used_with_reservation
+WHERE crucible_dataset.id = size_used_with_reservation.crucible_dataset_id"#,
+                    )
+                    .execute_async(&conn)
+                    .await?;
+
+                    // Whenever a region is hard-deleted, validate invariants
+                    // for all volumes
+                    #[cfg(any(test, feature = "testing"))]
+                    Self::validate_volume_invariants(&conn).await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Return the total occupied size for a dataset
-    pub async fn regions_total_occupied_size(
+    /// Return the total reserved size for all the regions allocated to a
+    /// dataset
+    pub async fn regions_total_reserved_size(
         &self,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
     ) -> Result<u64, Error> {
-        use db::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::region::dsl;
 
-        let total_occupied_size: Option<diesel::pg::data_types::PgNumeric> =
-            region_dsl::region
-                .filter(region_dsl::dataset_id.eq(dataset_id))
-                .select(diesel::dsl::sum(
-                    region_dsl::block_size
-                        * region_dsl::blocks_per_extent
-                        * region_dsl::extent_count,
-                ))
-                .nullable()
-                .get_result_async(&*self.pool_connection_unauthorized().await?)
+        let dataset_regions: Vec<Region> = dsl::region
+            .filter(dsl::dataset_id.eq(to_db_typed_uuid(dataset_id)))
+            .select(Region::as_select())
+            .load_async(&*self.pool_connection_unauthorized().await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(dataset_regions.iter().map(|r| r.reserved_size()).sum())
+    }
+
+    /// Find read/write regions on expunged disks
+    pub async fn find_read_write_regions_on_expunged_physical_disks(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<Vec<Region>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
+
+        region_dsl::region
+            .filter(region_dsl::dataset_id.eq_any(
+                dataset_dsl::crucible_dataset
+                    .filter(dataset_dsl::time_deleted.is_null())
+                    .filter(dataset_dsl::pool_id.eq_any(
+                        zpool_dsl::zpool
+                            .filter(zpool_dsl::time_deleted.is_null())
+                            .filter(zpool_dsl::physical_disk_id.eq_any(
+                                physical_disk_dsl::physical_disk
+                                    .filter(physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
+                                    .select(physical_disk_dsl::id)
+                            ))
+                            .select(zpool_dsl::id)
+                    ))
+                    .select(dataset_dsl::id)
+            ))
+            // only return read-write regions here
+            .filter(region_dsl::read_only.eq(false))
+            .select(Region::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Find read-only regions on expunged disks
+    pub async fn find_read_only_regions_on_expunged_physical_disks(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<Vec<Region>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
+
+        region_dsl::region
+            .filter(region_dsl::dataset_id.eq_any(
+                dataset_dsl::crucible_dataset
+                    .filter(dataset_dsl::time_deleted.is_null())
+                    .filter(dataset_dsl::pool_id.eq_any(
+                        zpool_dsl::zpool
+                            .filter(zpool_dsl::time_deleted.is_null())
+                            .filter(zpool_dsl::physical_disk_id.eq_any(
+                                physical_disk_dsl::physical_disk
+                                    .filter(physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
+                                    .select(physical_disk_dsl::id)
+                            ))
+                            .select(zpool_dsl::id)
+                    ))
+                    .select(dataset_dsl::id)
+            ))
+            // only return read-only regions here
+            .filter(region_dsl::read_only.eq(true))
+            .select(Region::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn region_set_port(
+        &self,
+        region_id: Uuid,
+        region_port: u16,
+    ) -> UpdateResult<()> {
+        use nexus_db_schema::schema::region::dsl;
+
+        let conn = self.pool_connection_unauthorized().await?;
+
+        let updated = diesel::update(dsl::region)
+            .filter(dsl::id.eq(region_id))
+            .set(dsl::port.eq(Some::<SqlU16>(region_port.into())))
+            .check_if_exists::<Region>(region_id)
+            .execute_and_check(&conn)
+            .await;
+
+        match updated {
+            Ok(result) => match result.status {
+                UpdateStatus::Updated => Ok(()),
+
+                UpdateStatus::NotUpdatedButExists => {
+                    let record = result.found;
+
+                    if record.port() == Some(region_port) {
+                        Ok(())
+                    } else {
+                        Err(Error::conflict(format!(
+                            "region {region_id} port set to {:?}",
+                            record.port(),
+                        )))
+                    }
+                }
+            },
+
+            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
+        }
+    }
+
+    /// If a region's port was recorded, return its associated address,
+    /// otherwise return None.
+    pub async fn region_addr(
+        &self,
+        region_id: Uuid,
+    ) -> LookupResult<Option<SocketAddrV6>> {
+        let region = self.get_region(region_id).await?;
+
+        let Some(port) = region.port() else {
+            return Ok(None);
+        };
+
+        let dataset = self.crucible_dataset_get(region.dataset_id()).await?;
+        Ok(Some(dataset.address_with_port(port)))
+    }
+
+    pub async fn regions_missing_ports(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<Region> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut records = Vec::new();
+
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        while let Some(p) = paginator.next() {
+            use nexus_db_schema::schema::region::dsl;
+
+            let batch = paginated(dsl::region, dsl::id, &p.current_pagparams())
+                .filter(dsl::port.is_null())
+                .select(Region::as_select())
+                .load_async::<Region>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-        if let Some(total_occupied_size) = total_occupied_size {
-            let total_occupied_size: db::model::ByteCount =
-                total_occupied_size.try_into().map_err(
-                    |e: anyhow::Error| Error::internal_error(&e.to_string()),
-                )?;
-
-            Ok(total_occupied_size.to_bytes())
-        } else {
-            Ok(0)
+            paginator = p.found_batch(&batch, &|r| r.id());
+            records.extend(batch);
         }
+
+        Ok(records)
+    }
+
+    /// Find regions not on expunged disks that match a volume id
+    pub async fn find_non_expunged_regions(
+        &self,
+        opctx: &OpContext,
+        volume_id: VolumeUuid,
+    ) -> LookupResult<Vec<Region>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
+
+        region_dsl::region
+            .filter(region_dsl::dataset_id.eq_any(
+                dataset_dsl::crucible_dataset
+                    .filter(dataset_dsl::time_deleted.is_null())
+                    .filter(dataset_dsl::pool_id.eq_any(
+                        zpool_dsl::zpool
+                            .filter(zpool_dsl::time_deleted.is_null())
+                            .filter(zpool_dsl::physical_disk_id.eq_any(
+                                physical_disk_dsl::physical_disk
+                                    .filter(physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::InService))
+                                    .select(physical_disk_dsl::id)
+                            ))
+                            .select(zpool_dsl::id)
+                    ))
+                    .select(dataset_dsl::id)
+            ))
+            .filter(region_dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
+            .select(Region::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 
@@ -345,7 +619,7 @@ mod test {
         // Note that i64::MAX bytes is an invalid disk size as it's not
         // divisible by 4096. Create the maximum sized disk here.
         let max_disk_size = i64::MAX
-            - (i64::MAX % (BlockSize::AdvancedFormat.to_bytes() as i64));
+            - (i64::MAX % i64::from(BlockSize::AdvancedFormat.to_bytes()));
         let (blocks_per_extent, extent_count) =
             DataStore::get_crucible_allocation(
                 &BlockSize::AdvancedFormat,
@@ -354,16 +628,16 @@ mod test {
 
         // We should still be rounding up to the nearest extent size.
         assert_eq!(
-            extent_count as u128 * DataStore::EXTENT_SIZE as u128,
+            u128::from(extent_count) * u128::from(DataStore::EXTENT_SIZE),
             i64::MAX as u128 + 1,
         );
 
         // Assert that the regions allocated will fit this disk
         assert!(
             max_disk_size as u128
-                <= extent_count as u128
-                    * blocks_per_extent as u128
-                    * DataStore::EXTENT_SIZE as u128
+                <= u128::from(extent_count)
+                    * u128::from(blocks_per_extent)
+                    * u128::from(DataStore::EXTENT_SIZE)
         );
     }
 }

@@ -8,7 +8,8 @@
 
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
-use sled_hardware::{Baseboard, HardwareManager, HardwareUpdate};
+use sled_hardware::{HardwareManager, HardwareUpdate};
+use sled_hardware_types::Baseboard;
 use sled_storage::disk::RawDisk;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -172,14 +173,40 @@ impl HardwareMonitor {
                 }
                 HardwareUpdate::TofinoDeviceChange => {
                     if let Some(sled_agent) = &mut self.sled_agent {
-                        sled_agent.notify_nexus_about_self(&self.log);
+                        sled_agent.notify_nexus_about_self(&self.log).await;
                     }
                 }
                 HardwareUpdate::DiskAdded(disk) => {
-                    self.storage_manager.upsert_disk(disk.into()).await;
+                    // We notify the storage manager of the hardware, but do not need to
+                    // wait for the result to be fully processed.
+                    //
+                    // Here and below, we're "dropping a future" rather than
+                    // awaiting it. That's intentional - the hardware monitor
+                    // doesn't care when this work is finished, just when it's
+                    // enqueued.
+                    #[allow(clippy::let_underscore_future)]
+                    let _ = self
+                        .storage_manager
+                        .detected_raw_disk(disk.into())
+                        .await;
                 }
                 HardwareUpdate::DiskRemoved(disk) => {
-                    self.storage_manager.delete_disk(disk.into()).await;
+                    // We notify the storage manager of the hardware, but do not need to
+                    // wait for the result to be fully processed.
+                    #[allow(clippy::let_underscore_future)]
+                    let _ = self
+                        .storage_manager
+                        .detected_raw_disk_removal(disk.into())
+                        .await;
+                }
+                HardwareUpdate::DiskUpdated(disk) => {
+                    // We notify the storage manager of the hardware, but do not need to
+                    // wait for the result to be fully processed.
+                    #[allow(clippy::let_underscore_future)]
+                    let _ = self
+                        .storage_manager
+                        .detected_raw_disk_update(disk.into())
+                        .await;
                 }
             },
             Err(broadcast::error::RecvError::Lagged(count)) => {
@@ -207,7 +234,7 @@ impl HardwareMonitor {
                     )
                     .await
                 {
-                    warn!(self.log, "Failed to activate switch: {e}");
+                    error!(self.log, "Failed to activate switch"; e);
                 }
             }
             TofinoManager::NotReady { tofino_loaded } => {
@@ -234,23 +261,32 @@ impl HardwareMonitor {
     // We use this when we're monitoring hardware for the first
     // time, and if we miss notifications.
     async fn check_latest_hardware_snapshot(&mut self) {
-        let underlay_network = self.sled_agent.as_ref().map(|sled_agent| {
-            sled_agent.notify_nexus_about_self(&self.log);
-            sled_agent.switch_zone_underlay_info()
-        });
+        let underlay_network = if let Some(sled_agent) = &self.sled_agent {
+            sled_agent.notify_nexus_about_self(&self.log).await;
+            Some(sled_agent.switch_zone_underlay_info())
+        } else {
+            None
+        };
+
         info!(
             self.log, "Checking current full hardware snapshot";
             "underlay_network_info" => ?underlay_network,
+            "disks" => ?self.hardware_manager.disks(),
         );
+
         if self.hardware_manager.is_scrimlet_driver_loaded() {
             self.activate_switch().await;
         } else {
             self.deactivate_switch().await;
         }
 
-        self.storage_manager
+        // We notify the storage manager of the hardware, but do not need to
+        // wait for the result to be fully processed.
+        #[allow(clippy::let_underscore_future)]
+        let _ = self
+            .storage_manager
             .ensure_using_exactly_these_disks(
-                self.hardware_manager.disks().into_iter().map(RawDisk::from),
+                self.hardware_manager.disks().into_values().map(RawDisk::from),
             )
             .await;
     }

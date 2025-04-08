@@ -5,33 +5,35 @@
 //! Implementation of a standalone fake Nexus, simply for registering producers
 //! and collectors with one another.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 use crate::Error;
-use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
 use dropshot::HttpError;
+use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::HttpServer;
-use dropshot::HttpServerStarter;
 use dropshot::RequestContext;
+use dropshot::ServerBuilder;
 use dropshot::TypedBody;
+use dropshot::endpoint;
 use nexus_types::internal_api::params::OximeterInfo;
-use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::FileKv;
-use oximeter_client::Client;
+use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
 use rand::seq::IteratorRandom;
+use slog::Drain;
+use slog::Level;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
-use slog::Drain;
-use slog::Level;
-use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -60,6 +62,16 @@ impl Inner {
     }
 }
 
+// The period on which producers must renew their lease.
+//
+// This is different from the one we actually use in Nexus (and shorter). That's
+// fine, since this is really a testing interface more than anything.
+const PRODUCER_RENEWAL_INTERVAL: Duration = Duration::from_secs(60);
+
+const fn default_producer_response() -> ProducerRegistrationResponse {
+    ProducerRegistrationResponse { lease_duration: PRODUCER_RENEWAL_INTERVAL }
+}
+
 // A stripped-down Nexus server, with only the APIs for registering metric
 // producers and collectors.
 #[derive(Debug)]
@@ -79,10 +91,11 @@ impl StandaloneNexus {
         }
     }
 
+    /// Register an oximeter producer, returning the lease period.
     async fn register_producer(
         &self,
         info: &ProducerEndpoint,
-    ) -> Result<(), HttpError> {
+    ) -> Result<ProducerRegistrationResponse, HttpError> {
         let mut inner = self.inner.lock().await;
         let assignment = match inner.producers.get_mut(&info.id) {
             None => {
@@ -90,7 +103,7 @@ impl StandaloneNexus {
                 //
                 // Select a random collector, and assign it to the producer.
                 // We'll return the assignment from this match block.
-                let Some((collector_id, collector_info)) =
+                let Some((collector_id, _collector_info)) =
                     inner.random_collector()
                 else {
                     return Err(HttpError::for_unavail(
@@ -98,69 +111,35 @@ impl StandaloneNexus {
                         String::from("No collectors available"),
                     ));
                 };
-                let client = Client::new(
-                    format!("http://{}", collector_info.address).as_str(),
-                    self.log.clone(),
-                );
-                client.producers_post(&info.into()).await.map_err(|e| {
-                    HttpError::for_internal_error(e.to_string())
-                })?;
                 let assignment =
-                    ProducerAssignment { producer: info.clone(), collector_id };
+                    ProducerAssignment { producer: *info, collector_id };
                 assignment
             }
             Some(existing_assignment) => {
                 // We have a record, first check if it matches the assignment we
                 // have.
                 if &existing_assignment.producer == info {
-                    return Ok(());
+                    return Ok(default_producer_response());
                 }
 
                 // This appears to be a re-registration, e.g., the producer
-                // changed its IP address. Re-register it with the collector to
-                // which it's already assigned.
+                // changed its IP address. The collector will learn of this when
+                // it next fetches its list.
                 let collector_id = existing_assignment.collector_id;
-                let collector_info =
-                    inner.collectors.get(&collector_id).unwrap();
-                let client = Client::new(
-                    format!("http://{}", collector_info.address).as_str(),
-                    self.log.clone(),
-                );
-                client.producers_post(&info.into()).await.map_err(|e| {
-                    HttpError::for_internal_error(e.to_string())
-                })?;
-                ProducerAssignment { producer: info.clone(), collector_id }
+                ProducerAssignment { producer: *info, collector_id }
             }
         };
         inner.producers.insert(info.id, assignment);
-        Ok(())
+        Ok(default_producer_response())
     }
 
     async fn register_collector(
         &self,
         info: OximeterInfo,
     ) -> Result<(), HttpError> {
-        // If this is being registered again, send all its assignments again.
-        let mut inner = self.inner.lock().await;
-        if inner.collectors.insert(info.collector_id, info).is_some() {
-            let client = Client::new(
-                format!("http://{}", info.address).as_str(),
-                self.log.clone(),
-            );
-            for producer_info in
-                inner.producers.values().filter_map(|assignment| {
-                    if assignment.collector_id == info.collector_id {
-                        Some(&assignment.producer)
-                    } else {
-                        None
-                    }
-                })
-            {
-                client.producers_post(&producer_info.into()).await.map_err(
-                    |e| HttpError::for_internal_error(e.to_string()),
-                )?;
-            }
-        }
+        // No-op if this is being re-registered. It will fetch its list of
+        // producers again if needed.
+        self.inner.lock().await.collectors.insert(info.collector_id, info);
         Ok(())
     }
 }
@@ -183,13 +162,13 @@ pub fn standalone_nexus_api() -> ApiDescription<Arc<StandaloneNexus>> {
 async fn cpapi_producers_post(
     request_context: RequestContext<Arc<StandaloneNexus>>,
     producer_info: TypedBody<ProducerEndpoint>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+) -> Result<HttpResponseCreated<ProducerRegistrationResponse>, HttpError> {
     let context = request_context.context();
     let producer_info = producer_info.into_inner();
     context
         .register_producer(&producer_info)
         .await
-        .map(|_| HttpResponseUpdatedNoContent())
+        .map(HttpResponseCreated)
         .map_err(|e| HttpError::for_internal_error(e.to_string()))
 }
 
@@ -237,14 +216,14 @@ impl Server {
         let nexus = Arc::new(StandaloneNexus::new(
             log.new(slog::o!("component" => "nexus-standalone")),
         ));
-        let server = HttpServerStarter::new(
-            &ConfigDropshot { bind_address: address, ..Default::default() },
+        let server = ServerBuilder::new(
             standalone_nexus_api(),
             Arc::clone(&nexus),
-            &log,
+            log.clone(),
         )
-        .map_err(|e| Error::Server(e.to_string()))?
-        .start();
+        .config(ConfigDropshot { bind_address: address, ..Default::default() })
+        .start()
+        .map_err(|e| Error::Server(e.to_string()))?;
         info!(
             log,
             "created standalone nexus server for metric collections";

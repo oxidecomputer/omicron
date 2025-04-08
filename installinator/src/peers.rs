@@ -10,23 +10,23 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Bytes;
-use ddm_admin_client::Client as DdmAdminClient;
 use display_error_chain::DisplayErrorChain;
 use futures::{Stream, StreamExt};
-use installinator_artifact_client::ClientError;
+use installinator_client::ClientError;
 use installinator_common::{
     EventReport, InstallinatorProgressMetadata, StepContext, StepProgress,
 };
 use itertools::Itertools;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
-use omicron_common::update::ArtifactHashId;
+use omicron_ddm_admin_client::Client as DdmAdminClient;
 use reqwest::StatusCode;
-use sled_hardware::underlay::BootstrapInterface;
+use sled_hardware_types::underlay::BootstrapInterface;
 use tokio::{sync::mpsc, time::Instant};
+use tufaceous_artifact::ArtifactHashId;
 use update_engine::events::ProgressUnits;
 use uuid::Uuid;
 
@@ -110,7 +110,10 @@ impl FromStr for DiscoveryMechanism {
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Self::List(peers))
         } else {
-            bail!("invalid discovery mechanism (expected \"bootstrap\" or \"list:[::1]:8000\"): {}", s);
+            bail!(
+                "invalid discovery mechanism (expected \"bootstrap\" or \"list:[::1]:8000\"): {}",
+                s
+            );
         }
     }
 }
@@ -150,7 +153,9 @@ impl FetchedArtifact {
                     slog::warn!(
                         log,
                         "(attempt {attempt}) failed to discover peers, retrying: {}",
-                        DisplayErrorChain::new(AsRef::<dyn std::error::Error>::as_ref(&error)),
+                        DisplayErrorChain::new(
+                            AsRef::<dyn std::error::Error>::as_ref(&error)
+                        ),
                     );
                     cx.send_progress(StepProgress::retry(format!(
                         "failed to discover peers: {error}"
@@ -172,7 +177,7 @@ impl FetchedArtifact {
             );
             match peers.fetch_artifact(&cx, artifact_hash_id).await {
                 Some((addr, artifact)) => {
-                    return Ok(Self { attempt, addr, artifact })
+                    return Ok(Self { attempt, addr, artifact });
                 }
                 None => {
                     slog::warn!(

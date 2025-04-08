@@ -1,0 +1,14 @@
+[package]
+name = "nexus-macros-common"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+proc-macro2.workspace = true
+syn = { workspace = true, features = ["extra-traits"] }
+quote.workspace = true
+omicron-workspace-hack.workspace = true

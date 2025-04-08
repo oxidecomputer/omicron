@@ -5,16 +5,17 @@
 //! Error handling facilities for the management gateway.
 
 use crate::management_switch::SpIdentifier;
-use anyhow::anyhow;
 use dropshot::HttpError;
 use gateway_messages::SpError;
+use gateway_sp_comms::BindError;
 pub use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::error::UpdateError;
-use gateway_sp_comms::BindError;
+use slog_error_chain::InlineErrorChain;
+use slog_error_chain::SlogInlineError;
 use std::time::Duration;
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, SlogInlineError)]
 pub enum StartupError {
     #[error("invalid configuration file: {}", .reasons.join(", "))]
     InvalidConfig { reasons: Vec<String> },
@@ -23,116 +24,153 @@ pub enum StartupError {
     BindError(#[from] BindError),
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, SlogInlineError)]
 pub enum SpCommsError {
-    #[error("discovery process not yet complete")]
-    DiscoveryNotYetComplete,
-    #[error("location discovery failed: {reason}")]
-    DiscoveryFailed { reason: String },
-    #[error("nonexistent SP (type {:?}, slot {})", .0.typ, .0.slot)]
-    SpDoesNotExist(SpIdentifier),
-    #[error(
-        "unknown socket address for SP (type {:?}, slot {})",
-        .0.typ,
-        .0.slot,
-    )]
+    #[error(transparent)]
+    Discovery(#[from] SpLookupError),
+    #[error("unknown socket address for SP {0:?}")]
     SpAddressUnknown(SpIdentifier),
     #[error(
         "timeout ({timeout:?}) elapsed communicating with {sp:?} on port {port}"
     )]
     Timeout { timeout: Duration, port: usize, sp: Option<SpIdentifier> },
-    #[error("error communicating with SP: {0}")]
-    SpCommunicationFailed(#[from] CommunicationError),
-    #[error("updating SP failed: {0}")]
-    UpdateFailed(#[from] UpdateError),
+    #[error("error communicating with SP {sp:?}")]
+    SpCommunicationFailed {
+        sp: SpIdentifier,
+        #[source]
+        err: CommunicationError,
+    },
+    #[error("updating SP {sp:?} failed")]
+    UpdateFailed {
+        sp: SpIdentifier,
+        #[source]
+        err: UpdateError,
+    },
+}
+
+/// Errors returned by attempts to look up a SP in the management switch's
+/// discovery map.
+#[derive(Debug, Error, SlogInlineError)]
+pub enum SpLookupError {
+    #[error("discovery process not yet complete")]
+    DiscoveryNotYetComplete,
+    #[error("location discovery failed: {reason}")]
+    DiscoveryFailed { reason: String },
+    #[error("nonexistent SP {0:?}")]
+    SpDoesNotExist(SpIdentifier),
 }
 
 impl From<SpCommsError> for HttpError {
-    fn from(err: SpCommsError) -> Self {
-        match err {
-            SpCommsError::SpDoesNotExist(_) => HttpError::for_bad_request(
-                Some("InvalidSp".to_string()),
-                format!("{:#}", anyhow!(err)),
-            ),
-            SpCommsError::SpCommunicationFailed(
-                CommunicationError::SpError(
-                    SpError::SerialConsoleAlreadyAttached,
-                ),
-            ) => HttpError::for_bad_request(
+    fn from(error: SpCommsError) -> Self {
+        match error {
+            SpCommsError::Discovery(err) => HttpError::from(err),
+            SpCommsError::SpCommunicationFailed {
+                err:
+                    CommunicationError::SpError(
+                        SpError::SerialConsoleAlreadyAttached,
+                    ),
+                ..
+            } => HttpError::for_bad_request(
                 Some("SerialConsoleAttached".to_string()),
-                format!("{:#}", anyhow!(err)),
+                InlineErrorChain::new(&error).to_string(),
             ),
-            SpCommsError::SpCommunicationFailed(
-                CommunicationError::SpError(SpError::RequestUnsupportedForSp),
-            ) => HttpError::for_bad_request(
+            SpCommsError::SpCommunicationFailed {
+                err:
+                    CommunicationError::SpError(SpError::RequestUnsupportedForSp),
+                ..
+            } => HttpError::for_bad_request(
                 Some("RequestUnsupportedForSp".to_string()),
-                format!("{:#}", anyhow!(err)),
+                InlineErrorChain::new(&error).to_string(),
             ),
-            SpCommsError::SpCommunicationFailed(
-                CommunicationError::SpError(
-                    SpError::RequestUnsupportedForComponent,
-                ),
-            ) => HttpError::for_bad_request(
+            SpCommsError::SpCommunicationFailed {
+                err:
+                    CommunicationError::SpError(
+                        SpError::RequestUnsupportedForComponent,
+                    ),
+                ..
+            } => HttpError::for_bad_request(
                 Some("RequestUnsupportedForComponent".to_string()),
-                format!("{:#}", anyhow!(err)),
+                InlineErrorChain::new(&error).to_string(),
             ),
-            SpCommsError::SpCommunicationFailed(
-                CommunicationError::SpError(SpError::InvalidSlotForComponent),
-            ) => HttpError::for_bad_request(
+            SpCommsError::SpCommunicationFailed {
+                err:
+                    CommunicationError::SpError(SpError::InvalidSlotForComponent),
+                ..
+            } => HttpError::for_bad_request(
                 Some("InvalidSlotForComponent".to_string()),
-                format!("{:#}", anyhow!(err)),
+                InlineErrorChain::new(&error).to_string(),
             ),
-            SpCommsError::UpdateFailed(UpdateError::ImageTooLarge) => {
-                HttpError::for_bad_request(
-                    Some("ImageTooLarge".to_string()),
-                    format!("{:#}", anyhow!(err)),
-                )
-            }
-            SpCommsError::UpdateFailed(UpdateError::Communication(
-                CommunicationError::SpError(SpError::UpdateSlotBusy),
-            )) => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
+            SpCommsError::UpdateFailed {
+                err: UpdateError::ImageTooLarge,
+                ..
+            } => HttpError::for_bad_request(
+                Some("ImageTooLarge".to_string()),
+                InlineErrorChain::new(&error).to_string(),
+            ),
+            SpCommsError::UpdateFailed {
+                err:
+                    UpdateError::Communication(CommunicationError::SpError(
+                        SpError::UpdateSlotBusy,
+                    )),
+                ..
+            } => http_err_with_message(
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "UpdateSlotBusy",
-                format!("{:#}", anyhow!(err)),
+                InlineErrorChain::new(&error).to_string(),
             ),
-            SpCommsError::UpdateFailed(UpdateError::Communication(
-                CommunicationError::SpError(SpError::UpdateInProgress {
-                    ..
-                }),
-            )) => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
+            SpCommsError::UpdateFailed {
+                err:
+                    UpdateError::Communication(CommunicationError::SpError(
+                        SpError::UpdateInProgress { .. },
+                    )),
+                ..
+            } => http_err_with_message(
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "UpdateInProgress",
-                format!("{:#}", anyhow!(err)),
-            ),
-            SpCommsError::DiscoveryNotYetComplete => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
-                "DiscoveryNotYetComplete",
-                format!("{:#}", anyhow!(err)),
+                InlineErrorChain::new(&error).to_string(),
             ),
             SpCommsError::SpAddressUnknown(_) => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "SpAddressUnknown",
-                format!("{:#}", anyhow!(err)),
-            ),
-            SpCommsError::DiscoveryFailed { .. } => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
-                "DiscoveryFailed ",
-                format!("{:#}", anyhow!(err)),
+                InlineErrorChain::new(&error).to_string(),
             ),
             SpCommsError::Timeout { .. } => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "Timeout ",
-                format!("{:#}", anyhow!(err)),
+                InlineErrorChain::new(&error).to_string(),
             ),
-            SpCommsError::SpCommunicationFailed(_) => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
-                "SpCommunicationFailed",
-                format!("{:#}", anyhow!(err)),
-            ),
-            SpCommsError::UpdateFailed(_) => http_err_with_message(
-                http::StatusCode::SERVICE_UNAVAILABLE,
+            SpCommsError::SpCommunicationFailed { .. } => {
+                http_err_with_message(
+                    dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
+                    "SpCommunicationFailed",
+                    InlineErrorChain::new(&error).to_string(),
+                )
+            }
+            SpCommsError::UpdateFailed { .. } => http_err_with_message(
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "UpdateFailed",
-                format!("{:#}", anyhow!(err)),
+                InlineErrorChain::new(&error).to_string(),
+            ),
+        }
+    }
+}
+
+impl From<SpLookupError> for HttpError {
+    fn from(error: SpLookupError) -> Self {
+        match error {
+            SpLookupError::SpDoesNotExist(_) => HttpError::for_bad_request(
+                Some("InvalidSp".to_string()),
+                InlineErrorChain::new(&error).to_string(),
+            ),
+            SpLookupError::DiscoveryNotYetComplete => http_err_with_message(
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
+                "DiscoveryNotYetComplete",
+                InlineErrorChain::new(&error).to_string(),
+            ),
+            SpLookupError::DiscoveryFailed { .. } => http_err_with_message(
+                dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
+                "DiscoveryFailed ",
+                InlineErrorChain::new(&error).to_string(),
             ),
         }
     }
@@ -143,7 +181,7 @@ impl From<SpCommsError> for HttpError {
 // status code, we want to give our caller some information about what is going
 // wrong (e.g., we timed out waiting for an SP).
 pub(crate) fn http_err_with_message(
-    status_code: http::StatusCode,
+    status_code: dropshot::ErrorStatusCode,
     error_code: &str,
     message: String,
 ) -> HttpError {
@@ -152,5 +190,6 @@ pub(crate) fn http_err_with_message(
         error_code: Some(error_code.to_string()),
         external_message: message.clone(),
         internal_message: message,
+        headers: None,
     }
 }

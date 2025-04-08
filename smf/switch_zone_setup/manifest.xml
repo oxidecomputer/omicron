@@ -11,11 +11,22 @@
     <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
-  <exec_method type='method' name='start' exec='/opt/oxide/bin/switch_zone_setup' timeout_seconds='300' />
+  <exec_method type='method' name='start' 
+    exec='/opt/oxide/zone-setup-cli/bin/zone-setup switch-zone -i "%{config/baseboard_info}" -l %{config/link_local_links} -a %{config/bootstrap_addr} -v %{config/bootstrap_vnic} -g %{config/gz_local_link_addr}'
+    timeout_seconds='300'>
+  </exec_method>
   <exec_method type='method' name='stop' exec=':true' timeout_seconds='3' />
 
   <property_group name='startd' type='framework'>
     <propval name='duration' type='astring' value='transient' />
+  </property_group>
+
+  <property_group name="config" type="application">
+    <propval name='baseboard_info' type='astring' value='unknown' />
+    <propval name='link_local_links' type='astring' value='' />
+    <propval name='bootstrap_addr' type='astring' value='' />
+    <propval name='bootstrap_vnic' type='astring' value='' />
+    <propval name='gz_local_link_addr' type='astring' value='' />
   </property_group>
 
   <stability value='Unstable' />
