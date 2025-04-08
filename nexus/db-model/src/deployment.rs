@@ -7,24 +7,23 @@
 
 use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
-use crate::schema::{
+use crate::typed_uuid::DbTypedUuid;
+use crate::{
+    ArtifactHash, ByteCount, Generation, MacAddr, Name, SledState, SqlU8,
+    SqlU16, SqlU32, TufArtifact, impl_enum_type, ipv6,
+};
+use anyhow::{Context, Result, anyhow, bail};
+use chrono::{DateTime, Utc};
+use clickhouse_admin_types::{KeeperId, ServerId};
+use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::{
     blueprint, bp_clickhouse_cluster_config,
     bp_clickhouse_keeper_zone_id_to_node_id,
     bp_clickhouse_server_zone_id_to_node_id, bp_omicron_dataset,
     bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
     bp_sled_metadata, bp_target,
 };
-use crate::typed_uuid::DbTypedUuid;
-use crate::{
-    ByteCount, Generation, MacAddr, Name, SledState, SqlU8, SqlU16, SqlU32,
-    impl_enum_type, ipv6,
-};
-use anyhow::{Context, Result, anyhow, bail};
-use chrono::{DateTime, Utc};
-use clickhouse_admin_types::{KeeperId, ServerId};
-use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -34,6 +33,9 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::{
+    BlueprintDatasetConfig, BlueprintZoneImageVersion,
+};
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
@@ -145,9 +147,7 @@ pub struct BpSledMetadata {
 }
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "bp_physical_disk_disposition", schema = "public"))]
-    pub struct DbBpPhysicalDiskDispositionEnum;
+    BpPhysicalDiskDispositionEnum:
 
     /// This type is not actually public, because [`BlueprintPhysicalDiskDisposition`]
     /// interacts with external logic.
@@ -156,7 +156,6 @@ impl_enum_type!(
     /// type `BpPhysicalDiskDispositionEnum` in public interface`. Marking this type `pub`,
     /// without actually making it public, tricks rustc in a desirable way.
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = DbBpPhysicalDiskDispositionEnum)]
     pub enum DbBpPhysicalDiskDisposition;
 
     // Enum values
@@ -299,9 +298,7 @@ impl TryFrom<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
 }
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "bp_dataset_disposition", schema = "public"))]
-    pub struct DbBpDatasetDispositionEnum;
+    BpDatasetDispositionEnum:
 
     /// This type is not actually public, because [`BlueprintDatasetDisposition`]
     /// interacts with external logic.
@@ -310,7 +307,6 @@ impl_enum_type!(
     /// type `BpDatasetDispositionEnum` in public interface`. Marking this type `pub`,
     /// without actually making it public, tricks rustc in a desirable way.
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = DbBpDatasetDispositionEnum)]
     pub enum DbBpDatasetDisposition;
 
     // Enum values
@@ -455,6 +451,9 @@ pub struct BpOmicronZone {
 
     pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
     pub filesystem_pool: DbTypedUuid<ZpoolKind>,
+
+    pub image_source: DbBpZoneImageSource,
+    pub image_artifact_sha256: Option<ArtifactHash>,
 }
 
 impl BpOmicronZone {
@@ -474,6 +473,9 @@ impl BpOmicronZone {
             expunged_ready_for_cleanup: disposition_expunged_ready_for_cleanup,
         } = blueprint_zone.disposition.into();
 
+        let DbBpZoneImageSourceColumns { image_source, image_artifact_data } =
+            blueprint_zone.image_source.clone().into();
+
         // Create a dummy record to start, then fill in the rest
         let mut bp_omicron_zone = BpOmicronZone {
             // Fill in the known fields that don't require inspecting
@@ -487,6 +489,11 @@ impl BpOmicronZone {
             disposition_expunged_as_of_generation,
             disposition_expunged_ready_for_cleanup,
             zone_type: blueprint_zone.zone_type.kind().into(),
+            image_source,
+            // The version is not preserved here -- instead, it is looked up
+            // from the tuf_artifact table.
+            image_artifact_sha256: image_artifact_data
+                .map(|(_version, hash)| hash),
 
             // Set the remainder of the fields to a default
             primary_service_ip: "::1"
@@ -691,6 +698,7 @@ impl BpOmicronZone {
     pub fn into_blueprint_zone_config(
         self,
         nic_row: Option<BpOmicronZoneNic>,
+        image_artifact_row: Option<TufArtifact>,
     ) -> anyhow::Result<BlueprintZoneConfig> {
         // Build up a set of common fields for our `BlueprintZoneType`s
         //
@@ -877,6 +885,12 @@ impl BpOmicronZone {
                 .disposition_expunged_ready_for_cleanup,
         };
 
+        let image_source_cols = DbBpZoneImageSourceColumns::new(
+            self.image_source,
+            self.image_artifact_sha256,
+            image_artifact_row,
+        );
+
         Ok(BlueprintZoneConfig {
             disposition: disposition_cols.try_into()?,
             id: self.id.into(),
@@ -884,15 +898,13 @@ impl BpOmicronZone {
                 self.filesystem_pool.into(),
             ),
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source: image_source_cols.try_into()?,
         })
     }
 }
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "bp_zone_disposition", schema = "public"))]
-    pub struct DbBpZoneDispositionEnum;
+    BpZoneDispositionEnum:
 
     /// This type is not actually public, because [`BlueprintZoneDisposition`]
     /// interacts with external logic.
@@ -901,7 +913,6 @@ impl_enum_type!(
     /// type `BpZoneDispositionEnum` in public interface`. Marking this type `pub`,
     /// without actually making it public, tricks rustc in a desirable way.
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = DbBpZoneDispositionEnum)]
     pub enum DbBpZoneDisposition;
 
     // Enum values
@@ -963,6 +974,93 @@ impl TryFrom<DbBpZoneDispositionColumns> for BlueprintZoneDisposition {
                 value.disposition,
                 value.expunged_as_of_generation,
             )),
+        }
+    }
+}
+
+impl_enum_type!(
+    BpZoneImageSourceEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum DbBpZoneImageSource;
+
+    // Enum values
+    InstallDataset => b"install_dataset"
+    Artifact => b"artifact"
+);
+
+struct DbBpZoneImageSourceColumns {
+    image_source: DbBpZoneImageSource,
+    // image_artifact_data is Some if and only if image_source is Artifact.
+    //
+    // The BlueprintZoneImageVersion is not actually stored in bp_omicron_zone
+    // table directly, but is instead looked up from the tuf_artifact table at
+    // blueprint load time.
+    image_artifact_data: Option<(BlueprintZoneImageVersion, ArtifactHash)>,
+}
+
+impl DbBpZoneImageSourceColumns {
+    fn new(
+        image_source: DbBpZoneImageSource,
+        image_artifact_sha256: Option<ArtifactHash>,
+        image_artifact_row: Option<TufArtifact>,
+    ) -> Self {
+        // Note that artifact_row can only be Some if image_artifact_sha256 is
+        // Some.
+        let image_artifact_data = image_artifact_sha256.map(|hash| {
+            let version = match image_artifact_row {
+                Some(artifact_row) => BlueprintZoneImageVersion::Available {
+                    version: artifact_row.version.0,
+                },
+                None => BlueprintZoneImageVersion::Unknown,
+            };
+            (version, hash)
+        });
+        Self { image_source, image_artifact_data }
+    }
+}
+
+impl From<BlueprintZoneImageSource> for DbBpZoneImageSourceColumns {
+    fn from(image_source: BlueprintZoneImageSource) -> Self {
+        match image_source {
+            BlueprintZoneImageSource::InstallDataset => Self {
+                image_source: DbBpZoneImageSource::InstallDataset,
+                image_artifact_data: None,
+            },
+            BlueprintZoneImageSource::Artifact { version, hash } => Self {
+                image_source: DbBpZoneImageSource::Artifact,
+                image_artifact_data: Some((version, hash.into())),
+            },
+        }
+    }
+}
+
+impl TryFrom<DbBpZoneImageSourceColumns> for BlueprintZoneImageSource {
+    type Error = anyhow::Error;
+
+    fn try_from(
+        value: DbBpZoneImageSourceColumns,
+    ) -> Result<Self, Self::Error> {
+        match (value.image_source, value.image_artifact_data) {
+            (DbBpZoneImageSource::Artifact, Some((version, hash))) => {
+                Ok(Self::Artifact { version, hash: hash.into() })
+            }
+            (DbBpZoneImageSource::Artifact, None) => Err(anyhow!(
+                "illegal database state (CHECK constraint broken?!): \
+                 image_source {:?}, image_artifact_data None",
+                value.image_source,
+            )),
+            (DbBpZoneImageSource::InstallDataset, data @ Some(_)) => {
+                Err(anyhow!(
+                    "illegal database state (CHECK constraint broken?!): \
+                 image_source {:?}, image_artifact_data {:?}",
+                    value.image_source,
+                    data,
+                ))
+            }
+            (DbBpZoneImageSource::InstallDataset, None) => {
+                Ok(Self::InstallDataset)
+            }
         }
     }
 }

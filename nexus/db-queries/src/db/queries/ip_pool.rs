@@ -5,7 +5,6 @@
 //! Implementation of queries for operating on IP Pools.
 
 use crate::db::model::IpPoolRange;
-use crate::db::schema::ip_pool_range::dsl;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::Column;
@@ -17,6 +16,7 @@ use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::ip_pool_range::dsl;
 use uuid::Uuid;
 
 /// A query for filtering out candidate IP ranges that overlap with any

@@ -8,13 +8,13 @@
 
 use super::Name;
 use super::impl_enum_type;
-use crate::schema::affinity_group;
-use crate::schema::affinity_group_instance_membership;
-use crate::schema::anti_affinity_group;
-use crate::schema::anti_affinity_group_instance_membership;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_db_schema::schema::affinity_group;
+use nexus_db_schema::schema::affinity_group_instance_membership;
+use nexus_db_schema::schema::anti_affinity_group;
+use nexus_db_schema::schema::anti_affinity_group_instance_membership;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use omicron_common::api::external;
@@ -28,12 +28,9 @@ use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "affinity_policy", schema = "public"))]
-    pub struct AffinityPolicyEnum;
+    AffinityPolicyEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Ord, PartialOrd)]
-    #[diesel(sql_type = AffinityPolicyEnum)]
     pub enum AffinityPolicy;
 
     // Enum values
@@ -60,12 +57,9 @@ impl From<external::AffinityPolicy> for AffinityPolicy {
 }
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "failure_domain", schema = "public"))]
-    pub struct FailureDomainEnum;
+    FailureDomainEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = FailureDomainEnum)]
     pub enum FailureDomain;
 
     // Enum values

@@ -157,7 +157,7 @@ impl<'a> SiloUser<'a> {
         datastore: &DataStore,
         v0: &Uuid,
     ) -> LookupResult<(authz::SiloUser, nexus_db_model::SiloUser)> {
-        use db::schema::silo_user::dsl;
+        use ::nexus_db_schema::schema::silo_user::dsl;
         let db_row = dsl::silo_user
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(v0.clone()))

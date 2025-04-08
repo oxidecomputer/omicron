@@ -6,7 +6,6 @@ use super::DataStore;
 use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::DbConnection;
 use crate::db::TransactionError;
 use crate::db::datastore::SQL_BATCH_SIZE;
@@ -22,10 +21,13 @@ use chrono::Utc;
 use clickhouse_admin_types::{KeeperId, ServerId};
 use core::future::Future;
 use core::pin::Pin;
+use diesel::BoolExpressionMethods;
 use diesel::Column;
 use diesel::ExpressionMethods;
 use diesel::Insertable;
 use diesel::IntoSql;
+use diesel::JoinOnDsl;
+use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
@@ -49,6 +51,7 @@ use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
 use nexus_db_model::BpSledMetadata;
 use nexus_db_model::BpTarget;
+use nexus_db_model::TufArtifact;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -67,6 +70,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
+use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
 mod external_networking;
@@ -78,7 +82,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<BlueprintMetadata> {
-        use db::schema::blueprint;
+        use nexus_db_schema::schema::blueprint;
 
         opctx
             .authorize(authz::Action::ListChildren, &authz::BLUEPRINT_CONFIG)
@@ -305,7 +309,7 @@ impl DataStore {
             .transaction(&conn, |conn| async move {
             // Insert the row for the blueprint.
             {
-                use db::schema::blueprint::dsl;
+                use nexus_db_schema::schema::blueprint::dsl;
                 let _: usize = diesel::insert_into(dsl::blueprint)
                     .values(row_blueprint)
                     .execute_async(&conn)
@@ -314,7 +318,7 @@ impl DataStore {
 
             // Insert all the sled states for this blueprint.
             {
-                use db::schema::bp_sled_metadata::dsl as sled_metadata;
+                use nexus_db_schema::schema::bp_sled_metadata::dsl as sled_metadata;
 
                 let _ = diesel::insert_into(sled_metadata::bp_sled_metadata)
                     .values(sled_metadatas)
@@ -324,7 +328,7 @@ impl DataStore {
 
             // Insert all physical disks for this blueprint.
             {
-                use db::schema::bp_omicron_physical_disk::dsl as omicron_disk;
+                use nexus_db_schema::schema::bp_omicron_physical_disk::dsl as omicron_disk;
                 let _ = diesel::insert_into(omicron_disk::bp_omicron_physical_disk)
                     .values(omicron_physical_disks)
                     .execute_async(&conn)
@@ -333,7 +337,7 @@ impl DataStore {
 
             // Insert all datasets for this blueprint.
             {
-                use db::schema::bp_omicron_dataset::dsl as omicron_dataset;
+                use nexus_db_schema::schema::bp_omicron_dataset::dsl as omicron_dataset;
                 let _ = diesel::insert_into(omicron_dataset::bp_omicron_dataset)
                     .values(omicron_datasets)
                     .execute_async(&conn)
@@ -342,7 +346,7 @@ impl DataStore {
 
             // Insert all the Omicron zones for this blueprint.
             {
-                use db::schema::bp_omicron_zone::dsl as omicron_zone;
+                use nexus_db_schema::schema::bp_omicron_zone::dsl as omicron_zone;
                 let _ = diesel::insert_into(omicron_zone::bp_omicron_zone)
                     .values(omicron_zones)
                     .execute_async(&conn)
@@ -350,7 +354,7 @@ impl DataStore {
             }
 
             {
-                use db::schema::bp_omicron_zone_nic::dsl as omicron_zone_nic;
+                use nexus_db_schema::schema::bp_omicron_zone_nic::dsl as omicron_zone_nic;
                 let _ =
                     diesel::insert_into(omicron_zone_nic::bp_omicron_zone_nic)
                         .values(omicron_zone_nics)
@@ -361,21 +365,21 @@ impl DataStore {
             // Insert all clickhouse cluster related tables if necessary
             if let Some((clickhouse_cluster_config, keepers, servers)) = clickhouse_tables {
                 {
-                    use db::schema::bp_clickhouse_cluster_config::dsl;
+                    use nexus_db_schema::schema::bp_clickhouse_cluster_config::dsl;
                     let _ = diesel::insert_into(dsl::bp_clickhouse_cluster_config)
                     .values(clickhouse_cluster_config)
                     .execute_async(&conn)
                     .await?;
                 }
                 {
-                    use db::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                    use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
                     let _ = diesel::insert_into(dsl::bp_clickhouse_keeper_zone_id_to_node_id)
                     .values(keepers)
                     .execute_async(&conn)
                     .await?;
                 }
                 {
-                    use db::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
+                    use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
                     let _ = diesel::insert_into(dsl::bp_clickhouse_server_zone_id_to_node_id)
                     .values(servers)
                     .execute_async(&conn)
@@ -421,7 +425,7 @@ impl DataStore {
             creator,
             comment,
         ) = {
-            use db::schema::blueprint::dsl;
+            use nexus_db_schema::schema::blueprint::dsl;
 
             let Some(blueprint) = dsl::blueprint
                 .filter(dsl::id.eq(to_db_typed_uuid(blueprint_id)))
@@ -463,7 +467,7 @@ impl DataStore {
         // datasets maps empty (to be filled in when we query those tables
         // below).
         let mut sled_configs: BTreeMap<SledUuid, BlueprintSledConfig> = {
-            use db::schema::bp_sled_metadata::dsl;
+            use nexus_db_schema::schema::bp_sled_metadata::dsl;
 
             let mut sled_configs = BTreeMap::new();
             let mut paginator = Paginator::new(SQL_BATCH_SIZE);
@@ -507,7 +511,7 @@ impl DataStore {
         // from this set.  That way we can tell if the same NIC was used twice
         // or not used at all.
         let mut omicron_zone_nics = {
-            use db::schema::bp_omicron_zone_nic::dsl;
+            use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
 
             let mut omicron_zone_nics = BTreeMap::new();
             let mut paginator = Paginator::new(SQL_BATCH_SIZE);
@@ -543,7 +547,8 @@ impl DataStore {
 
         // Load all the zones for each sled.
         {
-            use db::schema::bp_omicron_zone::dsl;
+            use nexus_db_schema::schema::bp_omicron_zone::dsl;
+            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
 
             let mut paginator = Paginator::new(SQL_BATCH_SIZE);
             while let Some(p) = paginator.next() {
@@ -555,16 +560,30 @@ impl DataStore {
                     &p.current_pagparams(),
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
-                .select(BpOmicronZone::as_select())
-                .load_async(&*conn)
+                // Left join in case the artifact is missing from the
+                // tuf_artifact table, which is non-fatal.
+                .left_join(
+                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
+                        .eq(KnownArtifactKind::Zone.to_string())
+                        .and(
+                            tuf_artifact_dsl::sha256
+                                .nullable()
+                                .eq(dsl::image_artifact_sha256),
+                        )),
+                )
+                .select((
+                    BpOmicronZone::as_select(),
+                    Option::<TufArtifact>::as_select(),
+                ))
+                .load_async::<(BpOmicronZone, Option<TufArtifact>)>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-                paginator = p.found_batch(&batch, &|z| z.id);
+                paginator = p.found_batch(&batch, &|(z, _)| z.id);
 
-                for z in batch {
+                for (z, artifact) in batch {
                     let nic_row = z
                         .bp_nic_id
                         .map(|id| {
@@ -597,7 +616,7 @@ impl DataStore {
                             ))
                         })?;
                     let zone = z
-                        .into_blueprint_zone_config(nic_row)
+                        .into_blueprint_zone_config(nic_row, artifact)
                         .with_context(|| {
                             format!("zone {zone_id}: parse from database")
                         })
@@ -620,7 +639,7 @@ impl DataStore {
 
         // Load all the physical disks for each sled.
         {
-            use db::schema::bp_omicron_physical_disk::dsl;
+            use nexus_db_schema::schema::bp_omicron_physical_disk::dsl;
 
             let mut paginator = Paginator::new(SQL_BATCH_SIZE);
             while let Some(p) = paginator.next() {
@@ -668,7 +687,7 @@ impl DataStore {
 
         // Load all the datasets for each sled
         {
-            use db::schema::bp_omicron_dataset::dsl;
+            use nexus_db_schema::schema::bp_omicron_dataset::dsl;
 
             let mut paginator = Paginator::new(SQL_BATCH_SIZE);
             while let Some(p) = paginator.next() {
@@ -717,7 +736,7 @@ impl DataStore {
 
         // Load our `ClickhouseClusterConfig` if it exists
         let clickhouse_cluster_config: Option<ClickhouseClusterConfig> = {
-            use db::schema::bp_clickhouse_cluster_config::dsl;
+            use nexus_db_schema::schema::bp_clickhouse_cluster_config::dsl;
 
             let res = dsl::bp_clickhouse_cluster_config
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
@@ -734,7 +753,7 @@ impl DataStore {
                 Some(bp_config) => {
                     // Load our clickhouse keeper configs for the given blueprint
                     let keepers: BTreeMap<OmicronZoneUuid, KeeperId> = {
-                        use db::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                        use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
                         let mut keepers = BTreeMap::new();
                         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
                         while let Some(p) = paginator.next() {
@@ -784,7 +803,7 @@ impl DataStore {
 
                     // Load our clickhouse server configs for the given blueprint
                     let servers: BTreeMap<OmicronZoneUuid, ServerId> = {
-                        use db::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
+                        use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
                         let mut servers = BTreeMap::new();
                         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
                         while let Some(p) = paginator.next() {
@@ -936,7 +955,7 @@ impl DataStore {
 
                 // Remove the record describing the blueprint itself.
                 let nblueprints = {
-                    use db::schema::blueprint::dsl;
+                    use nexus_db_schema::schema::blueprint::dsl;
                     diesel::delete(
                         dsl::blueprint.filter(dsl::id.eq(to_db_typed_uuid(blueprint_id))),
                     )
@@ -955,7 +974,7 @@ impl DataStore {
 
                 // Remove rows associated with sled metadata.
                 let nsled_metadata = {
-                    use db::schema::bp_sled_metadata::dsl;
+                    use nexus_db_schema::schema::bp_sled_metadata::dsl;
                     diesel::delete(
                         dsl::bp_sled_metadata
                             .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
@@ -966,7 +985,7 @@ impl DataStore {
 
                 // Remove rows associated with Omicron physical disks
                 let nphysical_disks = {
-                    use db::schema::bp_omicron_physical_disk::dsl;
+                    use nexus_db_schema::schema::bp_omicron_physical_disk::dsl;
                     diesel::delete(
                         dsl::bp_omicron_physical_disk
                             .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
@@ -977,7 +996,7 @@ impl DataStore {
 
                 // Remove rows associated with Omicron datasets
                 let ndatasets = {
-                    use db::schema::bp_omicron_dataset::dsl;
+                    use nexus_db_schema::schema::bp_omicron_dataset::dsl;
                     diesel::delete(
                         dsl::bp_omicron_dataset
                             .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
@@ -988,7 +1007,7 @@ impl DataStore {
 
                 // Remove rows associated with Omicron zones
                 let nzones = {
-                    use db::schema::bp_omicron_zone::dsl;
+                    use nexus_db_schema::schema::bp_omicron_zone::dsl;
                     diesel::delete(
                         dsl::bp_omicron_zone
                             .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
@@ -998,7 +1017,7 @@ impl DataStore {
                 };
 
                 let nnics = {
-                    use db::schema::bp_omicron_zone_nic::dsl;
+                    use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
                     diesel::delete(
                         dsl::bp_omicron_zone_nic
                             .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
@@ -1008,7 +1027,7 @@ impl DataStore {
                 };
 
                 let nclickhouse_cluster_configs = {
-                    use db::schema::bp_clickhouse_cluster_config::dsl;
+                    use nexus_db_schema::schema::bp_clickhouse_cluster_config::dsl;
                     diesel::delete(
                         dsl::bp_clickhouse_cluster_config
                             .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
@@ -1018,7 +1037,7 @@ impl DataStore {
                 };
 
                 let nclickhouse_keepers = {
-                    use db::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                    use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
                     diesel::delete(dsl::bp_clickhouse_keeper_zone_id_to_node_id
                             .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
                     )
@@ -1027,7 +1046,7 @@ impl DataStore {
                 };
 
                 let nclickhouse_servers = {
-                    use db::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
+                    use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
                     diesel::delete(dsl::bp_clickhouse_server_zone_id_to_node_id
                             .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
                     )
@@ -1260,7 +1279,7 @@ impl DataStore {
         opctx: &OpContext,
         target: BlueprintTarget,
     ) -> Result<(), Error> {
-        use db::schema::bp_target::dsl;
+        use nexus_db_schema::schema::bp_target::dsl;
 
         opctx
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
@@ -1268,7 +1287,8 @@ impl DataStore {
 
         // Diesel requires us to use an alias in order to refer to the
         // `bp_target` table twice in the same query.
-        let bp_target2 = diesel::alias!(db::schema::bp_target as bp_target1);
+        let bp_target2 =
+            diesel::alias!(nexus_db_schema::schema::bp_target as bp_target1);
 
         // The following diesel produces this query:
         //
@@ -1385,7 +1405,7 @@ impl DataStore {
     async fn blueprint_current_target_only(
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<BlueprintTarget, TransactionError<Error>> {
-        use db::schema::bp_target::dsl;
+        use nexus_db_schema::schema::bp_target::dsl;
 
         let current_target = dsl::bp_target
             .order_by(dsl::version.desc())
@@ -1619,13 +1639,15 @@ impl QueryFragment<Pg> for InsertTargetQuery {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
-        use crate::db::schema::blueprint::dsl as bp_dsl;
-        use crate::db::schema::bp_target::dsl;
+        use nexus_db_schema::schema::blueprint::dsl as bp_dsl;
+        use nexus_db_schema::schema::bp_target::dsl;
 
         type FromClause<T> =
             diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
-        type BpTargetFromClause = FromClause<db::schema::bp_target::table>;
-        type BlueprintFromClause = FromClause<db::schema::blueprint::table>;
+        type BpTargetFromClause =
+            FromClause<nexus_db_schema::schema::bp_target::table>;
+        type BlueprintFromClause =
+            FromClause<nexus_db_schema::schema::blueprint::table>;
         const BP_TARGET_FROM_CLAUSE: BpTargetFromClause =
             BpTargetFromClause::new();
         const BLUEPRINT_FROM_CLAUSE: BlueprintFromClause =
@@ -1790,6 +1812,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
+    use nexus_types::deployment::BlueprintZoneImageVersion;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::PlanningInput;
@@ -1808,10 +1831,14 @@ mod tests {
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Name;
+    use omicron_common::api::external::TufArtifactMeta;
+    use omicron_common::api::external::TufRepoDescription;
+    use omicron_common::api::external::TufRepoMeta;
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::NetworkInterface;
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::update::ArtifactId;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
@@ -1837,6 +1864,8 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
+    use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact::ArtifactVersion;
 
     static EMPTY_PLANNING_INPUT: LazyLock<PlanningInput> =
         LazyLock::new(|| PlanningInputBuilder::empty_input());
@@ -1859,7 +1888,7 @@ mod tests {
 
         macro_rules! query_count {
             ($table:ident, $blueprint_id_col:ident) => {{
-                use db::schema::$table::dsl;
+                use nexus_db_schema::schema::$table::dsl;
                 let result = dsl::$table
                     .filter(
                         dsl::$blueprint_id_col
@@ -2150,6 +2179,84 @@ mod tests {
                     .unwrap(),
                 Ensure::Added
             );
+        }
+
+        const ARTIFACT_VERSION_1: ArtifactVersion =
+            ArtifactVersion::new_const("1.0.0");
+        const ARTIFACT_HASH_1: ArtifactHash = ArtifactHash([1; 32]);
+        const ARTIFACT_HASH_2: ArtifactHash = ArtifactHash([2; 32]);
+
+        // Add an artifact to the tuf_artifact table. This is used to test
+        // artifact version lookup.
+        {
+            const SYSTEM_VERSION: semver::Version =
+                semver::Version::new(0, 0, 1);
+            const SYSTEM_HASH: ArtifactHash = ArtifactHash([3; 32]);
+
+            datastore
+                .update_tuf_repo_insert(
+                    opctx,
+                    &TufRepoDescription {
+                        repo: TufRepoMeta {
+                            hash: SYSTEM_HASH,
+                            targets_role_version: 0,
+                            valid_until: Utc::now(),
+                            system_version: SYSTEM_VERSION,
+                            file_name: String::new(),
+                        },
+                        artifacts: vec![TufArtifactMeta {
+                            id: ArtifactId {
+                                name: String::new(),
+                                version: ARTIFACT_VERSION_1,
+                                kind: KnownArtifactKind::Zone.into(),
+                            },
+                            hash: ARTIFACT_HASH_1,
+                            size: 0,
+                        }],
+                    },
+                )
+                .await
+                .expect("inserted TUF repo");
+        }
+
+        // Take the first two zones and set their image sources.
+        {
+            let zone_ids: Vec<OmicronZoneUuid> = builder
+                .current_sled_zones(
+                    new_sled_id,
+                    BlueprintZoneDisposition::is_in_service,
+                )
+                .map(|zone| zone.id)
+                .take(2)
+                .collect();
+            if zone_ids.len() < 2 {
+                panic!(
+                    "expected new sled to have at least 2 zones, got {}",
+                    zone_ids.len()
+                );
+            }
+            builder
+                .sled_set_zone_source(
+                    new_sled_id,
+                    zone_ids[0],
+                    BlueprintZoneImageSource::Artifact {
+                        version: BlueprintZoneImageVersion::Available {
+                            version: ARTIFACT_VERSION_1,
+                        },
+                        hash: ARTIFACT_HASH_1,
+                    },
+                )
+                .unwrap();
+            builder
+                .sled_set_zone_source(
+                    new_sled_id,
+                    zone_ids[1],
+                    BlueprintZoneImageSource::Artifact {
+                        version: BlueprintZoneImageVersion::Unknown,
+                        hash: ARTIFACT_HASH_2,
+                    },
+                )
+                .unwrap();
         }
 
         let num_new_ntp_zones = 1;

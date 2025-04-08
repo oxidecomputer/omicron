@@ -287,7 +287,7 @@ impl DataStore {
         &self,
         sled_update: SledUpdate,
     ) -> CreateResult<(Sled, bool)> {
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
         // required for conditional upsert
         use diesel::query_dsl::methods::FilterDsl;
 
@@ -351,7 +351,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         sled_id: SledUuid,
     ) -> Result<(), TransactionError<Error>> {
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
         let sled_exists_and_in_service = diesel::select(diesel::dsl::exists(
             dsl::sled
                 .filter(dsl::time_deleted.is_null())
@@ -377,7 +377,7 @@ impl DataStore {
         sled_filter: SledFilter,
     ) -> ListResultVec<Sled> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
             .sled_filter(sled_filter)
@@ -453,7 +453,7 @@ impl DataStore {
         // This check makes this function idempotent. Beyond this point, however
         // we rely on primary key constraints in the database to prevent
         // concurrent reservations for same propolis_id.
-        use db::schema::sled_resource_vmm::dsl as resource_dsl;
+        use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
         let old_resource = resource_dsl::sled_resource_vmm
             .filter(resource_dsl::id.eq(*propolis_id.as_untyped_uuid()))
             .select(SledResourceVmm::as_select())
@@ -571,7 +571,7 @@ impl DataStore {
         opctx: &OpContext,
         vmm_id: PropolisUuid,
     ) -> DeleteResult {
-        use db::schema::sled_resource_vmm::dsl as resource_dsl;
+        use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
         diesel::delete(resource_dsl::sled_resource_vmm)
             .filter(resource_dsl::id.eq(vmm_id.into_untyped_uuid()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -653,7 +653,7 @@ impl DataStore {
                     let valid_old_policies = t.valid_old_policies();
                     let valid_old_states = t.valid_old_states();
 
-                    use db::schema::sled::dsl;
+                    use nexus_db_schema::schema::sled::dsl;
                     let query = diesel::update(dsl::sled)
                         .filter(dsl::time_deleted.is_null())
                         .filter(dsl::id.eq(sled_id));
@@ -731,7 +731,7 @@ impl DataStore {
                         }
                     };
                     if let Some(new_disk_policy) = new_disk_policy {
-                        use db::schema::physical_disk::dsl as physical_disk_dsl;
+                        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
                         diesel::update(physical_disk_dsl::physical_disk)
                             .filter(physical_disk_dsl::time_deleted.is_null())
                             .filter(physical_disk_dsl::sled_id.eq(sled_id))
@@ -792,7 +792,7 @@ impl DataStore {
         new_sled_state: SledState,
         check: ValidateTransition,
     ) -> Result<SledState, TransitionError> {
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
 
         opctx.authorize(authz::Action::Modify, authz_sled).await?;
 
@@ -888,7 +888,7 @@ impl DataStore {
                         ),
                     };
                     if let Some(new_disk_state) = new_disk_state {
-                        use db::schema::physical_disk::dsl as physical_disk_dsl;
+                        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
                         diesel::update(physical_disk_dsl::physical_disk)
                             .filter(physical_disk_dsl::time_deleted.is_null())
                             .filter(physical_disk_dsl::sled_id.eq(sled_id))
@@ -1349,7 +1349,7 @@ pub(in crate::db::datastore) mod test {
         instance_id: InstanceUuid,
     ) {
         use db::model::AntiAffinityGroupInstanceMembership;
-        use db::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
+        use nexus_db_schema::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
 
         diesel::insert_into(
             membership_dsl::anti_affinity_group_instance_membership,
@@ -1370,7 +1370,7 @@ pub(in crate::db::datastore) mod test {
         instance_id: InstanceUuid,
     ) {
         use db::model::AffinityGroupInstanceMembership;
-        use db::schema::affinity_group_instance_membership::dsl as membership_dsl;
+        use nexus_db_schema::schema::affinity_group_instance_membership::dsl as membership_dsl;
 
         diesel::insert_into(membership_dsl::affinity_group_instance_membership)
             .values(AffinityGroupInstanceMembership::new(group_id, instance_id))
@@ -2648,7 +2648,7 @@ pub(in crate::db::datastore) mod test {
         datastore: &DataStore,
         id: PhysicalDiskUuid,
     ) -> PhysicalDisk {
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         dsl::physical_disk
             .filter(dsl::id.eq(to_db_typed_uuid(id)))
             .filter(dsl::time_deleted.is_null())
@@ -3015,7 +3015,7 @@ pub(in crate::db::datastore) mod test {
         let values_to_insert: Vec<_> =
             new_sleds.into_iter().map(|s| s.into_insertable()).collect();
         let ninserted = {
-            use db::schema::sled::dsl;
+            use nexus_db_schema::schema::sled::dsl;
             diesel::insert_into(dsl::sled)
                 .values(values_to_insert)
                 .execute_async(
