@@ -7,6 +7,7 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
@@ -147,6 +148,13 @@ pub trait LocalStorage: Sync {
         dataset_name: &String,
     ) -> Result<DatasetProperties, Error>;
 
+    /// Ensure a dataset is mounted
+    async fn dyn_ensure_mounted_and_get_mountpoint(
+        &self,
+        dataset: NestedDatasetLocation,
+        mount_root: &Utf8Path,
+    ) -> Result<Utf8PathBuf, Error>;
+
     /// Returns all nested datasets within an existing dataset
     async fn dyn_nested_dataset_list(
         &self,
@@ -201,6 +209,17 @@ impl LocalStorage for StorageHandle {
         Ok(dataset)
     }
 
+    async fn dyn_ensure_mounted_and_get_mountpoint(
+        &self,
+        dataset: NestedDatasetLocation,
+        mount_root: &Utf8Path,
+    ) -> Result<Utf8PathBuf, Error> {
+        dataset
+            .ensure_mounted_and_get_mountpoint(mount_root)
+            .await
+            .map_err(Error::from)
+    }
+
     async fn dyn_nested_dataset_list(
         &self,
         name: NestedDatasetLocation,
@@ -240,6 +259,15 @@ impl LocalStorage for crate::sim::Storage {
         dataset_name: &String,
     ) -> Result<DatasetProperties, Error> {
         self.lock().dataset_get(dataset_name).map_err(|err| err.into())
+    }
+
+    async fn dyn_ensure_mounted_and_get_mountpoint(
+        &self,
+        dataset: NestedDatasetLocation,
+        mount_root: &Utf8Path,
+    ) -> Result<Utf8PathBuf, Error> {
+        // Simulated storage treats all datasets as mounted.
+        Ok(dataset.mountpoint(mount_root))
     }
 
     async fn dyn_nested_dataset_list(
@@ -489,9 +517,10 @@ impl<'a> SupportBundleManager<'a> {
             };
 
             // The dataset for a support bundle exists.
-            let support_bundle_path = dataset
-                .name
-                .ensure_mounted_and_get_mountpoint(
+            let support_bundle_path = self
+                .storage
+                .dyn_ensure_mounted_and_get_mountpoint(
+                    dataset.name,
                     &self.storage.zpool_mountpoint_root(),
                 )
                 .await?
@@ -603,8 +632,10 @@ impl<'a> SupportBundleManager<'a> {
         info!(log, "Dataset does exist for bundle");
 
         // The mounted root of the support bundle dataset
-        let support_bundle_dir = dataset
-            .ensure_mounted_and_get_mountpoint(
+        let support_bundle_dir = self
+            .storage
+            .dyn_ensure_mounted_and_get_mountpoint(
+                dataset,
                 &self.storage.zpool_mountpoint_root(),
             )
             .await?;
@@ -713,8 +744,10 @@ impl<'a> SupportBundleManager<'a> {
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
 
         // The mounted root of the support bundle dataset
-        let support_bundle_dir = dataset
-            .ensure_mounted_and_get_mountpoint(
+        let support_bundle_dir = self
+            .storage
+            .dyn_ensure_mounted_and_get_mountpoint(
+                dataset,
                 &self.storage.zpool_mountpoint_root(),
             )
             .await?;
