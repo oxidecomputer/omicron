@@ -39,12 +39,12 @@ enum Commands {
         filter: FilterArgs,
 
         /// Show log files with an `mtime` before this timestamp. May be absolute or relative,
-        /// e.g. '2025-04-01T01:01:01', '-1 hour', 'yesterday'
+        /// e.g. '2025-04-01T01:01:01', '-1 hour', '3 days ago'
         #[arg(short = 'B', long, value_parser = parse_timestamp_now)]
         before: Option<Timestamp>,
 
         /// Show log files with an `mtime` after this timestamp. May be absolute or relative,
-        /// e.g. '2025-04-01T01:01:01', '-1 hour', 'yesterday'
+        /// e.g. '2025-04-01T01:01:01', '-1 hour', '3 days ago'
         #[arg(short = 'A', long, value_parser = parse_timestamp_now)]
         after: Option<Timestamp>,
     },
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_parse_timestamp() {
-        let now = Timestamp::now();
+        let now: Timestamp = "2025-01-04 08:01:02Z".parse().unwrap();
 
         let ts = parse_timestamp(now, "2025-04-07T10:01:00Z").unwrap();
         let expected =
