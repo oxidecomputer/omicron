@@ -213,14 +213,14 @@ impl ReconfiguratorSpComponentUpdater for ReconfiguratorSpUpdater {
         mgs_clients
             .try_all_serially(log, move |mgs_client| async move {
                 debug!(log, "attempting to reset device");
-                Ok(mgs_client
+                mgs_client
                     .sp_component_reset(
                         update.sp_type,
                         update.slot_id,
                         &SpComponent::SP_ITSELF.to_string(),
                     )
-                    .await?
-                    .into_inner())
+                    .await?;
+                Ok(())
             })
             .boxed()
     }

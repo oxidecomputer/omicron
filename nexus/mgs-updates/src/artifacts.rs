@@ -64,7 +64,7 @@ impl ArtifactCache {
             return Err(ArtifactCacheError::HashMismatch {
                 nbytes,
                 found: ArtifactHash(digest.into()),
-                expected: hash.clone(),
+                expected: *hash,
             });
         }
 
