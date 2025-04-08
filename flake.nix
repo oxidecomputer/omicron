@@ -41,19 +41,21 @@
         pkg-config
       ];
 
+      extractHash = with pkgs.lib; { prefix, parts }: (line: trivial.pipe line [
+        (elemAt parts)
+        (strings.removeSuffix "\"")
+        (strings.removePrefix "${prefix}=\"")
+      ]);
+
       openAPIVersion = with pkgs.lib; path:
         let
           file = strings.fileContents path;
           parts = strings.splitString "\n" file;
-          extractHash = prefix: (line: trivial.pipe line [
-            (elemAt parts)
-            (strings.removeSuffix "\"")
-            (strings.removePrefix "${prefix}=\"")
-          ]);
+          extractHash' = prefix: extractHash { inherit prefix; inherit parts; };
         in
         {
-          commit = extractHash "COMMIT" 0;
-          sha = extractHash "SHA2" 1;
+          commit = extractHash' "COMMIT" 0;
+          sha = extractHash' "SHA2" 1;
         };
 
       downloadBuildomat =
@@ -75,18 +77,15 @@
             sha = version.sha;
           };
 
-      dendriteVersion = openAPIVersion
-        ./tools/dendrite_openapi_version;
       mgVersion = openAPIVersion
         ./tools/maghemite_mg_openapi_version;
 
-      dendriteOpenAPI = downloadOpenAPI
-        {
-          repo = "dendrite";
-          file = "dpd.json";
-          version = dendriteVersion;
-        };
-
+      dendriteCommit = with pkgs.lib;
+        let
+          file = strings.fileContents ./tools/dendrite_version;
+          parts = strings.splitString "\n" file;
+        in
+        extractHash { prefix = "COMMIT"; inherit parts; } 0;
 
       # given a list of strings of the form `PREFIX="SHA256"`, finds the string
       # starting with the provided `name` and returns the hash for that prefix.
@@ -104,7 +103,7 @@
 
       dendrite-stub = with pkgs.lib;
         let
-          commit = dendriteVersion.commit;
+          commit = dendriteCommit;
           repo = "dendrite";
           stubShas =
             let
@@ -395,7 +394,6 @@
             LIBCLANG_PATH = "${libclang.lib}/lib";
             OPENSSL_DIR = "${openssl.dev}";
             OPENSSL_LIB_DIR = "${openssl.out}/lib";
-            DPD_OPENAPI_PATH = dendriteOpenAPI;
 
             # Needed by rustfmt-wrapper, see:
             # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs

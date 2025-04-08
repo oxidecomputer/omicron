@@ -374,6 +374,7 @@ pub enum MeasurementKind {
     InputCurrent,
     InputVoltage,
     Speed,
+    CpuTctl,
 }
 
 impl From<gateway_messages::measurement::MeasurementKind> for MeasurementKind {
@@ -387,6 +388,7 @@ impl From<gateway_messages::measurement::MeasurementKind> for MeasurementKind {
             MeasurementKind::InputCurrent => Self::InputCurrent,
             MeasurementKind::InputVoltage => Self::InputVoltage,
             MeasurementKind::Speed => Self::Speed,
+            MeasurementKind::CpuTctl => Self::CpuTctl,
         }
     }
 }

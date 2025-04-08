@@ -7,14 +7,14 @@
 use crate::Name;
 use crate::collection::DatastoreCollectionConfig;
 use crate::impl_enum_type;
-use crate::schema::ip_pool;
-use crate::schema::ip_pool_range;
-use crate::schema::ip_pool_resource;
 use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::ip_pool;
+use nexus_db_schema::schema::ip_pool_range;
+use nexus_db_schema::schema::ip_pool_resource;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
@@ -77,15 +77,12 @@ impl From<params::IpPoolUpdate> for IpPoolUpdate {
 }
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy, QueryId)]
-    #[diesel(postgres_type(name = "ip_pool_resource_type"))]
-     pub struct IpPoolResourceTypeEnum;
+    IpPoolResourceTypeEnum:
 
-     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-     #[diesel(sql_type = IpPoolResourceTypeEnum)]
-     pub enum IpPoolResourceType;
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum IpPoolResourceType;
 
-     Silo => b"silo"
+    Silo => b"silo"
 );
 
 #[derive(Queryable, Insertable, Selectable, Clone, Debug)]

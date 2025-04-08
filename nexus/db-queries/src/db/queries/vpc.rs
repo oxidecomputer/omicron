@@ -10,8 +10,6 @@ use crate::db::model::Name;
 use crate::db::model::Vni;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::NextItem;
-use crate::db::schema::vpc;
-use crate::db::schema::vpc::dsl;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::Column;
@@ -22,6 +20,8 @@ use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::vpc;
+use nexus_db_schema::schema::vpc::dsl;
 use omicron_common::api::external;
 use uuid::Uuid;
 

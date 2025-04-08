@@ -991,6 +991,14 @@ impl SledAgentApi for SledAgentImpl {
         ))
     }
 
+    async fn support_nvmeadm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
+        let sa = request_context.context();
+        let res = sa.support_nvmeadm_info().await;
+        Ok(HttpResponseOk(res.get_output()))
+    }
+
     async fn support_pargs_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
@@ -1031,5 +1039,21 @@ impl SledAgentApi for SledAgentImpl {
                 .map(|cmd| cmd.get_output())
                 .collect::<Vec<_>>(),
         ))
+    }
+
+    async fn support_zfs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
+        let sa = request_context.context();
+        let res = sa.support_zfs_info().await;
+        Ok(HttpResponseOk(res.get_output()))
+    }
+
+    async fn support_zpool_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
+        let sa = request_context.context();
+        let res = sa.support_zpool_info().await;
+        Ok(HttpResponseOk(res.get_output()))
     }
 }

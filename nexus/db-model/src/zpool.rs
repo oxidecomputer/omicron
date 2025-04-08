@@ -4,10 +4,10 @@
 
 use super::{CrucibleDataset, Generation};
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{crucible_dataset, zpool};
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_db_schema::schema::{crucible_dataset, zpool};
 use omicron_uuid_kinds::PhysicalDiskKind;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use uuid::Uuid;

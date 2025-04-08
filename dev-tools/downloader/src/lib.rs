@@ -63,9 +63,6 @@ enum Target {
     /// Web console assets
     Console,
 
-    /// Dendrite OpenAPI spec
-    DendriteOpenapi,
-
     /// Stub Dendrite binary tarball
     DendriteStub,
 
@@ -138,9 +135,6 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     Target::Clickhouse => downloader.download_clickhouse().await,
                     Target::Cockroach => downloader.download_cockroach().await,
                     Target::Console => downloader.download_console().await,
-                    Target::DendriteOpenapi => {
-                        downloader.download_dendrite_openapi().await
-                    }
                     Target::DendriteStub => downloader.download_dendrite_stub().await,
                     Target::MaghemiteMgd => downloader.download_maghemite_mgd().await,
                     Target::Softnpu => downloader.download_softnpu().await,
@@ -656,31 +650,6 @@ impl Downloader<'_> {
         Ok(())
     }
 
-    async fn download_dendrite_openapi(&self) -> Result<()> {
-        let download_dir = self.output_dir.join("downloads");
-
-        let checksums_path = self.versions_dir.join("dendrite_openapi_version");
-        let [commit, checksum] =
-            get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
-
-        let url = format!(
-            "{BUILDOMAT_URL}/oxidecomputer/dendrite-os/openapi/{commit}/dpd.json"
-        );
-        let path = download_dir.join(format!("dpd-{commit}.json"));
-
-        tokio::fs::create_dir_all(&download_dir).await?;
-        download_file_and_verify(
-            &self.log,
-            &path,
-            &url,
-            ChecksumAlgorithm::Sha2,
-            &checksum,
-        )
-        .await?;
-
-        Ok(())
-    }
-
     async fn download_dendrite_stub(&self) -> Result<()> {
         let download_dir = self.output_dir.join("downloads");
         let destination_dir = self.output_dir.join("dendrite-stub");
@@ -688,11 +657,6 @@ impl Downloader<'_> {
         let stub_checksums_path =
             self.versions_dir.join("dendrite_stub_checksums");
 
-        // NOTE: This seems odd to me -- the "dendrite_openapi_version" file also
-        // contains a SHA2, but we're ignoring it?
-        //
-        // Regardless, this is currenlty the one that actually matches, regardless
-        // of host OS.
         let [sha2, dpd_sha2, swadm_sha2] = get_values_from_file(
             [
                 "CIDL_SHA256_ILLUMOS",
@@ -702,13 +666,12 @@ impl Downloader<'_> {
             &stub_checksums_path,
         )
         .await?;
-        let checksums_path = self.versions_dir.join("dendrite_openapi_version");
-        let [commit, _sha2] =
-            get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
+        let version_path = self.versions_dir.join("dendrite_version");
+        let [commit] = get_values_from_file(["COMMIT"], &version_path).await?;
 
         let tarball_file = "dendrite-stub.tar.gz";
         let tarball_path = download_dir.join(tarball_file);
-        let repo = "oxidecomputer/dendrite-os";
+        let repo = "oxidecomputer/dendrite";
         let url_base = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
 
         tokio::fs::create_dir_all(&download_dir).await?;

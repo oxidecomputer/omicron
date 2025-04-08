@@ -902,7 +902,7 @@ pub(crate) mod test {
 
     async fn no_disk_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Disk;
-        use nexus_db_queries::db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
 
         dsl::disk
             .filter(dsl::time_deleted.is_null())
@@ -918,7 +918,7 @@ pub(crate) mod test {
 
     async fn no_volume_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Volume;
-        use nexus_db_queries::db::schema::volume::dsl;
+        use nexus_db_schema::schema::volume::dsl;
 
         dsl::volume
             .filter(dsl::time_deleted.is_null())
@@ -935,7 +935,7 @@ pub(crate) mod test {
     async fn no_volume_resource_usage_records_exist(
         datastore: &DataStore,
     ) -> bool {
-        use nexus_db_queries::db::schema::volume_resource_usage::dsl;
+        use nexus_db_schema::schema::volume_resource_usage::dsl;
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
@@ -964,7 +964,7 @@ pub(crate) mod test {
         datastore: &DataStore,
     ) -> bool {
         use nexus_db_queries::db::model::VirtualProvisioningResource;
-        use nexus_db_queries::db::schema::virtual_provisioning_resource::dsl;
+        use nexus_db_schema::schema::virtual_provisioning_resource::dsl;
 
         dsl::virtual_provisioning_resource
             .select(VirtualProvisioningResource::as_select())
@@ -981,7 +981,7 @@ pub(crate) mod test {
         datastore: &DataStore,
     ) -> bool {
         use nexus_db_queries::db::model::VirtualProvisioningCollection;
-        use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
+        use nexus_db_schema::schema::virtual_provisioning_collection::dsl;
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
@@ -1014,7 +1014,7 @@ pub(crate) mod test {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 if datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_reserved_size(dataset.id)
                     .await
                     .unwrap()
                     != 0
