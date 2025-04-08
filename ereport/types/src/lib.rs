@@ -140,8 +140,9 @@ mod tests {
         let ereport_string = serde_json::to_string_pretty(&ereport)
             .expect("ereport should serialize");
         eprintln!("JSON: {ereport_string}");
-        let deserialized = dbg!(serde_json::from_str::<Ereport>(&ereport_string))
-            .expect("ereport should deserialize");
+        let deserialized =
+            dbg!(serde_json::from_str::<Ereport>(&ereport_string))
+                .expect("ereport should deserialize");
         eprintln!("EREPORT: {deserialized:#?}");
     }
 }

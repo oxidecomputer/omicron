@@ -48,6 +48,8 @@ use gateway_types::update::HostPhase2RecoveryImageId;
 use gateway_types::update::InstallinatorImageId;
 use gateway_types::update::SpUpdateStatus;
 use omicron_common::update::ArtifactHash;
+use omicron_uuid_kinds::GenericUuid;
+use std::num::NonZeroU8;
 use std::str;
 use std::sync::Arc;
 
@@ -942,28 +944,33 @@ impl GatewayApi for GatewayImpl {
         let handler = async {
             use crate::EreportError;
             use gateway_sp_comms::ereport;
-            use omicron_uuid_kinds::GenericUuid;
 
             let ereport_types::EreportQuery {
                 restart_id,
                 start_at,
                 committed,
-                // TODO(eliza)
                 limit,
             } = query.into_inner();
 
             let sp_id = path.into_inner().sp.into();
             let sp = apictx.mgmt_switch.sp(sp_id)?;
+
             let req_restart_id =
                 ereport::RestartId(restart_id.as_untyped_uuid().as_u128());
             let start_ena = start_at
                 .map(|ereport_types::Ena(e)| ereport::Ena(e))
                 .unwrap_or(ereport::Ena(0));
 
+            // If the limit is greater than 255, just clamp to that for now.
+            // TODO(eliza): eventually, we may want to request multiple tranches
+            // from the SP until we either receive an empty one or satisfy the
+            // limit requested by Nexus.
+            let limit = NonZeroU8::try_from(limit).unwrap_or(NonZeroU8::MAX);
             let committed_ena =
                 committed.map(|ereport_types::Ena(e)| ereport::Ena(e));
+
             let ereport::EreportTranche { restart_id, ereports } = sp
-                .ereports(req_restart_id, start_ena, committed_ena)
+                .ereports(req_restart_id, start_ena, limit, committed_ena)
                 .await
                 .map_err(|error| match error {
                     gateway_sp_comms::error::EreportError::Communication(
