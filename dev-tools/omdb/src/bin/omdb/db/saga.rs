@@ -10,15 +10,18 @@ use crate::db::datetime_rfc3339_concise;
 use crate::helpers::ConfirmationPrompt;
 use crate::helpers::should_colorize;
 use anyhow::Context;
+use anyhow::anyhow;
 use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use clap::Args;
 use clap::Subcommand;
 use diesel::prelude::*;
+use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_db_model::Saga;
 use nexus_db_model::SagaNodeEvent;
 use nexus_db_model::SagaState;
+use nexus_db_model::SecId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::DataStoreConnection;
@@ -35,9 +38,8 @@ use steno::ActionError;
 use steno::SagaNodeEventType;
 
 /// OMDB's SEC id, used when inserting errors into running sagas. There should
-/// be no way that regular V4 UUID creation collides with this, as the first
-/// hexidecimal digit in the third group always starts with a 4 in for that
-/// format.
+/// be no way that regular V4 UUID creation collides with this, because in a
+/// valid V4 UUID the first hex digit in the third group always starts with a 4.
 const OMDB_SEC_UUID: Uuid =
     Uuid::from_u128(0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAu128);
 
@@ -55,10 +57,36 @@ enum SagaCommands {
 
     /// Inject an error into a saga's currently running node(s)
     InjectError(SagaInjectErrorArgs),
+
+    /// Prevent new Nexus processes from resuming execution of a saga.
+    ///
+    /// On startup, and periodically thereafter, each Nexus checks the database
+    /// for sagas that are assigned to that Nexus that it is not currently
+    /// executing so that it can begin to execute them. Abandoning a saga causes
+    /// it never to appear in a recovery candidate set: it will be ignored by
+    /// any Nexus that asks for a list of sagas to resume executing.
+    ///
+    /// WARNING: It is best to use the `running` command to identify the saga's
+    /// current executor and verify that it is offline before proceeding. If the
+    /// saga's assigned Nexus is running, it can continue executing the saga and
+    /// may clobber the Abandoned state. By default, this subcommand verifies
+    /// that the saga's assigned Nexus is unreachable before proceeding, but
+    /// while all inactive Nexuses are unreachable, an unreachable Nexus is not
+    /// necessarily inactive.
+    Abandon(SagaAbandonArgs),
 }
 
 #[derive(Clone, Debug, Args)]
 struct SagaInjectErrorArgs {
+    saga_id: Uuid,
+
+    /// Skip checking if the SEC is up
+    #[clap(long, default_value_t = false)]
+    bypass_sec_check: bool,
+}
+
+#[derive(Clone, Copy, Debug, Args)]
+struct SagaAbandonArgs {
     saga_id: Uuid,
 
     /// Skip checking if the SEC is up
@@ -80,6 +108,11 @@ impl SagaArgs {
                 let token = omdb.check_allow_destructive()?;
                 cmd_sagas_inject_error(omdb, opctx, datastore, args, token)
                     .await
+            }
+
+            SagaCommands::Abandon(args) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_sagas_abandon(omdb, opctx, datastore, *args, token).await
             }
         }
     }
@@ -171,127 +204,9 @@ You should only do this if:
                 .await?
         };
 
-        match saga.current_sec {
-            None => {
-                // If there's no current SEC, then we don't need to check if
-                // it's up. Would we see this if the saga was Requested but not
-                // started?
-                let text = "warning: saga has no assigned SEC, so cannot \
-                verify that the saga is not still running! Proceed?";
-
-                if should_print_color {
-                    println!("{}", text.yellow().bold());
-                } else {
-                    println!("{text}");
-                }
-            }
-
-            Some(current_sec) => {
-                let resolver = omdb.dns_resolver(opctx.log.clone()).await?;
-                let srv = resolver.lookup_srv(ServiceName::Nexus).await?;
-
-                let Some((target, port)) = srv
-                    .iter()
-                    .find(|(name, _)| name.contains(&current_sec.to_string()))
-                else {
-                    let text = format!(
-                        "Cannot proceed: no SRV record for Nexus with id \
-                        {current_sec}, so cannot verify that it is not still \
-                        running!"
-                    );
-
-                    if should_print_color {
-                        println!("{}", text.red().bold());
-                    } else {
-                        println!("{text}");
-                    }
-
-                    bail!("dns lookup for {current_sec} found nothing");
-                };
-
-                let Some(addr) = resolver.ipv6_lookup(&target).await? else {
-                    let text = format!(
-                        "Cannot proceed: no AAAA record for Nexus with id \
-                        {current_sec}, so cannot verify that it is not still \
-                        running!"
-                    );
-
-                    if should_print_color {
-                        println!("{}", text.red().bold());
-                    } else {
-                        println!("{text}");
-                    }
-
-                    bail!("dns lookup for {target} found nothing");
-                };
-
-                let client = nexus_client::Client::new(
-                    &format!("http://[{addr}]:{port}/"),
-                    opctx.log.clone(),
-                );
-
-                match client.ping().await {
-                    Ok(_) => {
-                        let text = format!(
-                            "Cannot proceed: Nexus with id matching current \
-                            SEC responded ok to a ping, meaning it is still \
-                            running. Injecting errors into running sagas is \
-                            not safe. Please ensure the Nexus with id \
-                            {current_sec} is stopped before proceeding."
-                        );
-
-                        if should_print_color {
-                            println!("{}", text.red().bold());
-                        } else {
-                            println!("{text}");
-                        }
-
-                        bail!("{current_sec} answered a ping");
-                    }
-
-                    Err(e) => match e {
-                        nexus_client::Error::InvalidRequest(_)
-                        | nexus_client::Error::InvalidUpgrade(_)
-                        | nexus_client::Error::ErrorResponse(_)
-                        | nexus_client::Error::ResponseBodyError(_)
-                        | nexus_client::Error::InvalidResponsePayload(_, _)
-                        | nexus_client::Error::UnexpectedResponse(_)
-                        | nexus_client::Error::PreHookError(_)
-                        | nexus_client::Error::PostHookError(_) => {
-                            let text = format!(
-                                "Cannot proceed: Nexus with id matching \
-                                current SEC responded with an error to a ping, \
-                                meaning it is still running. Injecting errors \
-                                into running sagas is not safe. Please ensure \
-                                the Nexus with id {current_sec} is stopped \
-                                before proceeding."
-                            );
-
-                            if should_print_color {
-                                println!("{}", text.red().bold());
-                            } else {
-                                println!("{text}");
-                            }
-
-                            bail!("{current_sec} failed a ping with {e}");
-                        }
-
-                        nexus_client::Error::CommunicationError(e) => {
-                            // Assume communication error means that it could
-                            // not be contacted.
-                            //
-                            // Note: this could be seen if Nexus is up but
-                            // unreachable from where omdb is run!
-
-                            println!(
-                                "saw {e} when trying to ping Nexus with id \
-                                {current_sec}. Proceed?"
-                            );
-                        }
-                    },
-                }
-            }
-        }
+        let status = get_saga_sec_status(omdb, opctx, &saga).await;
+        status.display_message(should_print_color);
+        status.as_result()?;
     } else {
         let text = "Skipping check of whether the Nexus assigned to this saga \
         is running. If this Nexus is running, the control plane state managed \
@@ -406,6 +321,90 @@ You should only do this if:
     Ok(())
 }
 
+async fn cmd_sagas_abandon(
+    omdb: &Omdb,
+    opctx: &OpContext,
+    datastore: &DataStore,
+    SagaAbandonArgs { saga_id, bypass_sec_check }: SagaAbandonArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> anyhow::Result<()> {
+    use nexus_db_schema::schema::saga::dsl;
+
+    let should_print_color =
+        should_colorize(omdb.output.color, supports_color::Stream::Stdout);
+    let conn = datastore.pool_connection_for_tests().await?;
+    let saga: Saga =
+        { dsl::saga.filter(dsl::id.eq(saga_id)).first_async(&*conn).await? };
+
+    match saga.saga_state {
+        SagaState::Done => {
+            bail!("saga {saga_id} is already done executing");
+        }
+        SagaState::Abandoned => {
+            bail!("saga {saga_id} is already abandoned");
+        }
+        SagaState::Running | SagaState::Unwinding => {}
+    }
+
+    let text = r#"
+WARNING: Marking a saga as abandoned prevents it from running in the following
+circumstances:
+
+- If the saga is assigned to a Nexus that is not running, and that Nexus starts,
+  it will not resume executing the saga.
+
+- Other Nexuses will not adopt and resume the saga, even if its current assigned
+  Nexus is removed from the system.
+
+If the saga's current Nexus is actively driving it, the saga will continue to
+execute even if it is abandoned. You should only proceed if:
+
+- you've stopped the saga's assigned Nexus and are prepared to undo any changes
+  the saga may already have made to the system, or
+
+- this is a development system whose state can be wiped.
+    "#;
+
+    if should_print_color {
+        println!("{}", text.red().bold());
+    } else {
+        println!("{text}");
+    }
+
+    // Before doing anything: find the current SEC for the saga, and ping it to
+    // ensure that the Nexus is down.
+    if !bypass_sec_check {
+        let saga: Saga = {
+            dsl::saga.filter(dsl::id.eq(saga_id)).first_async(&*conn).await?
+        };
+
+        let status = get_saga_sec_status(omdb, opctx, &saga).await;
+        status.display_message(should_print_color);
+        status.as_result()?;
+    } else {
+        let text = "Skipping check of whether the Nexus assigned to this saga \
+        is running. If this Nexus is running, the saga may continue executing!";
+
+        if should_print_color {
+            println!("{}", text.red().bold());
+        } else {
+            println!("{text}");
+        }
+    }
+
+    let mut prompt = ConfirmationPrompt::new();
+    prompt.read_and_validate("y/N", "y")?;
+    drop(prompt);
+
+    diesel::update(dsl::saga)
+        .filter(dsl::id.eq(saga_id))
+        .set(dsl::saga_state.eq(SagaState::Abandoned))
+        .execute_async(&*conn)
+        .await?;
+
+    Ok(())
+}
+
 // helper functions
 
 async fn get_all_sagas_in_state(
@@ -434,4 +433,216 @@ async fn get_all_sagas_in_state(
     sagas.reverse();
 
     Ok(sagas)
+}
+
+/// The outcome of an attempt to ascertain the status of a saga's execution
+/// coordinator.
+enum SagaSecStatus {
+    NoSecAssigned,
+    DnsResolverUnavailable(anyhow::Error),
+    NexusResolutionFailed(ResolveError),
+    NoDnsServiceRecord(SecId),
+    DnsIpv6LookupFailed { target: String, error: ResolveError },
+    NoAddressFromDns(String),
+    SecAnsweredPing(SecId),
+    SecPingError { sec_id: SecId, observed_error: String },
+    SecAppearsInactive { sec_id: SecId, observed_error: String },
+}
+
+impl SagaSecStatus {
+    /// Prints to stdout a formatted (possibly even colorized!) message
+    /// describing this status.
+    fn display_message(&self, should_print_color: bool) {
+        enum Severity {
+            Info,
+            Warning,
+            Error,
+        }
+
+        let (msg, severity) = match self {
+            Self::NoSecAssigned => (
+                "warning: saga has no assigned SEC, so cannot verify that the \
+                saga is not still running! Proceed?"
+                    .to_string(),
+                Severity::Warning,
+            ),
+            Self::DnsResolverUnavailable(error) => (
+                format!(
+                    "Cannot proceed: failed to obtain DNS resolver: {error}"
+                ),
+                Severity::Error,
+            ),
+            Self::NexusResolutionFailed(error) => (
+                format!(
+                    "Cannot proceed: failed to resolve Nexus addresses via \
+                    DNS: {error}"
+                ),
+                Severity::Error,
+            ),
+            Self::NoDnsServiceRecord(id) => (
+                format!(
+                    "Cannot proceed: no SRV record for Nexus with id {id}, \
+                    so cannot verify that it is not still running!"
+                ),
+                Severity::Error,
+            ),
+            Self::DnsIpv6LookupFailed { target, error } => (
+                format!(
+                    "Cannot proceed: failed to obtain Nexus IPv6 address for \
+                    {target}: {error}"
+                ),
+                Severity::Error,
+            ),
+            Self::NoAddressFromDns(target) => (
+                format!(
+                    "Cannot proceed: no AAAA record for Nexus with id {target},
+                    so cannot verify that it is not still running!"
+                ),
+                Severity::Error,
+            ),
+            Self::SecAnsweredPing(id) => (
+                format!(
+                    "Cannot proceed: Nexus with id matching current SEC \
+                    responded ok to a ping, meaning it is still running. \
+                    Abandoning or injecting errors into a running saga is not \
+                    safe. Please ensure the Nexus with id {id} is stopped \
+                    before proceeding."
+                ),
+                Severity::Error,
+            ),
+            Self::SecPingError { sec_id: id, .. } => (
+                format!(
+                    "Cannot proceed: Nexus with id matching current SEC \
+                    responded with an error to a ping, meaning it is still \
+                    running. Abandoning or injecting errors into a running \
+                    saga is not safe. Please ensure the Nexus with id {id} is \
+                    stopped before proceeding."
+                ),
+                Severity::Error,
+            ),
+            Self::SecAppearsInactive { sec_id, observed_error } => (
+                format!(
+                    "saw {observed_error} when trying to ping Nexus with id \
+                    {sec_id}. Proceed?"
+                ),
+                Severity::Info,
+            ),
+        };
+
+        match severity {
+            Severity::Info => println!("{msg}"),
+            Severity::Warning => {
+                if should_print_color {
+                    println!("{}", msg.yellow().bold());
+                } else {
+                    println!("{msg}");
+                }
+            }
+            Severity::Error => {
+                if should_print_color {
+                    println!("{}", msg.red().bold());
+                } else {
+                    println!("{msg}");
+                }
+            }
+        }
+    }
+
+    /// If this status indicates that the relevant SEC might be active, returns
+    /// `Err`. If the relevant SEC is thought to be inactive, or the saga used
+    /// to produce this status had no SEC, returns `Ok`.
+    fn as_result(self) -> anyhow::Result<()> {
+        match self {
+            Self::DnsResolverUnavailable(error) => Err(error),
+            Self::NexusResolutionFailed(error) => Err(error.into()),
+            Self::DnsIpv6LookupFailed { error, .. } => Err(error.into()),
+            Self::NoDnsServiceRecord(id) => {
+                Err(anyhow!("dns lookup for {id} found nothing"))
+            }
+            Self::NoAddressFromDns(target) => {
+                Err(anyhow!("dns lookup for {target} found nothing"))
+            }
+            Self::SecAnsweredPing(id) => Err(anyhow!("{id} answered a ping")),
+            Self::SecPingError { sec_id, observed_error } => {
+                Err(anyhow!("{sec_id} failed a ping with {observed_error}"))
+            }
+            Self::NoSecAssigned | Self::SecAppearsInactive { .. } => Ok(()),
+        }
+    }
+}
+
+/// Attempts to determine whether the supplied `Saga` is being managed by an
+/// active saga execution coordinator.
+async fn get_saga_sec_status(
+    omdb: &Omdb,
+    opctx: &OpContext,
+    saga: &Saga,
+) -> SagaSecStatus {
+    let Some(current_sec) = saga.current_sec else {
+        return SagaSecStatus::NoSecAssigned;
+    };
+
+    let resolver = match omdb.dns_resolver(opctx.log.clone()).await {
+        Ok(resolver) => resolver,
+        Err(e) => return SagaSecStatus::DnsResolverUnavailable(e),
+    };
+    let srv = match resolver.lookup_srv(ServiceName::Nexus).await {
+        Ok(srv) => srv,
+        Err(e) => return SagaSecStatus::NexusResolutionFailed(e),
+    };
+    let Some((target, port)) =
+        srv.iter().find(|(name, _)| name.contains(&current_sec.to_string()))
+    else {
+        return SagaSecStatus::NoDnsServiceRecord(current_sec);
+    };
+
+    let addr = match resolver.ipv6_lookup(&target).await {
+        Ok(Some(addr)) => addr,
+        Ok(None) => return SagaSecStatus::NoAddressFromDns(target.clone()),
+        Err(e) => {
+            return SagaSecStatus::DnsIpv6LookupFailed {
+                target: target.clone(),
+                error: e,
+            };
+        }
+    };
+
+    let client = nexus_client::Client::new(
+        &format!("http://[{addr}]:{port}/"),
+        opctx.log.clone(),
+    );
+
+    match client.ping().await {
+        Ok(_) => {
+            return SagaSecStatus::SecAnsweredPing(current_sec);
+        }
+
+        Err(e) => match e {
+            nexus_client::Error::InvalidRequest(_)
+            | nexus_client::Error::InvalidUpgrade(_)
+            | nexus_client::Error::ErrorResponse(_)
+            | nexus_client::Error::ResponseBodyError(_)
+            | nexus_client::Error::InvalidResponsePayload(_, _)
+            | nexus_client::Error::UnexpectedResponse(_)
+            | nexus_client::Error::PreHookError(_)
+            | nexus_client::Error::PostHookError(_) => {
+                return SagaSecStatus::SecPingError {
+                    sec_id: current_sec,
+                    observed_error: e.to_string(),
+                };
+            }
+
+            nexus_client::Error::CommunicationError(_) => {
+                // Assume communication error means that it could not be
+                // contacted.
+                //
+                // Note: this could be seen if Nexus is up but
+                // unreachable from where omdb is run!
+                return SagaSecStatus::SecAppearsInactive {
+                    sec_id: current_sec,
+                    observed_error: e.to_string(),
+                };
+            }
+        },
+    }
 }
