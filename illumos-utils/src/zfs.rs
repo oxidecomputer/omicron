@@ -220,18 +220,11 @@ pub struct Zfs {}
 
 /// Describes a mountpoint for a ZFS filesystem.
 #[derive(Debug, Clone)]
-pub enum Mountpoint {
-    #[allow(dead_code)]
-    Legacy,
-    Path(Utf8PathBuf),
-}
+pub struct Mountpoint(pub Utf8PathBuf);
 
 impl fmt::Display for Mountpoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Mountpoint::Legacy => write!(f, "legacy"),
-            Mountpoint::Path(p) => write!(f, "{p}"),
-        }
+        write!(f, "{}", self.0)
     }
 }
 
@@ -927,12 +920,6 @@ impl Zfs {
 
     /// Ensures that a ZFS dataset is mounted, if it can be.
     ///
-    /// Pre-requisites to be mounted:
-    /// - The dataset exists
-    /// - The mountpoint is valid
-    /// - `can_mount` is CanMount::On
-    /// - `zoned` is false
-    ///
     /// Returns "true" if the dataset exists and is mounted
     /// Returns "false" if the dataset does not exist
     ///
@@ -940,40 +927,44 @@ impl Zfs {
     pub fn ensure_dataset_mounted_if_exists(
         name: &str,
         mountpoint: &Mountpoint,
-        can_mount: CanMount,
-        zoned: bool,
     ) -> Result<bool, EnsureDatasetError> {
-        let res = Self::ensure_dataset_mounted_if_exists_inner(
-            name, mountpoint, can_mount, zoned,
-        )
-        .map_err(|err| EnsureDatasetError { name: name.to_string(), err })?;
+        let res =
+            Self::ensure_dataset_mounted_if_exists_inner(name, mountpoint)
+                .map_err(|err| EnsureDatasetError {
+                    name: name.to_string(),
+                    err,
+                })?;
         Ok(res.exists)
     }
 
     fn ensure_dataset_mounted_if_exists_inner(
         name: &str,
         mountpoint: &Mountpoint,
-        can_mount: CanMount,
-        zoned: bool,
     ) -> Result<DatasetMountInfo, EnsureDatasetErrorRaw> {
-        let DatasetMountInfo { exists, mut mounted } =
-            Self::dataset_exists(name, mountpoint)?;
-        if !exists {
-            return Ok(DatasetMountInfo::does_not_exist());
+        let mut mount_info = Self::dataset_exists(name, mountpoint)?;
+        if !mount_info.exists {
+            return Ok(mount_info);
         }
-        if !zoned && !mounted && can_mount.wants_mounting() {
-            if let Mountpoint::Path(path) = &mountpoint {
-                ensure_empty_immutable_mountpoint(&path).map_err(|err| {
-                    EnsureDatasetErrorRaw::MountpointCreation {
-                        mountpoint: path.to_path_buf(),
-                        err,
-                    }
-                })?;
-                Self::mount_dataset(name)?;
-                mounted = true;
+
+        if !mount_info.mounted {
+            Self::ensure_dataset_mounted(name, mountpoint)?;
+            mount_info.mounted = true;
+        }
+        return Ok(mount_info);
+    }
+
+    fn ensure_dataset_mounted(
+        name: &str,
+        mountpoint: &Mountpoint,
+    ) -> Result<(), EnsureDatasetErrorRaw> {
+        ensure_empty_immutable_mountpoint(&mountpoint.0).map_err(|err| {
+            EnsureDatasetErrorRaw::MountpointCreation {
+                mountpoint: mountpoint.0.to_path_buf(),
+                err,
             }
-        }
-        return Ok(DatasetMountInfo::exists(mounted));
+        })?;
+        Self::mount_dataset(name)?;
+        Ok(())
     }
 
     /// Creates a new ZFS dataset unless one already exists.
@@ -999,21 +990,22 @@ impl Zfs {
             additional_options,
         }: DatasetEnsureArgs,
     ) -> Result<(), EnsureDatasetErrorRaw> {
-        // Determine if the dataset exists, and mount it if necessary.
-        let exists = Self::ensure_dataset_mounted_if_exists_inner(
-            name,
-            &mountpoint,
-            can_mount,
-            zoned,
-        )?
-        .exists;
-
+        let dataset_info = Self::dataset_exists(name, &mountpoint)?;
+        let wants_mounting =
+            !zoned && !dataset_info.mounted && can_mount.wants_mounting();
         let props = build_zfs_set_key_value_pairs(size_details, id);
-        if exists {
-            // If the dataset already exists: Update properties which might have
-            // changed.
+
+        if dataset_info.exists {
+            // If the dataset already exists: Update properties which might
+            // have changed, and ensure it has been mounted if it needs
+            // to be mounted.
             Self::set_values(name, props.as_slice())
                 .map_err(|err| EnsureDatasetErrorRaw::from(err.err))?;
+
+            if wants_mounting {
+                Self::ensure_dataset_mounted(name, &mountpoint)?;
+            }
+
             return Ok(());
         }
 
@@ -1027,15 +1019,14 @@ impl Zfs {
         //
         // Zoned datasets are mounted when their zones are booted, so
         // we don't do this mountpoint manipulation for them.
-        if !zoned && can_mount.wants_mounting() {
-            if let Mountpoint::Path(path) = &mountpoint {
-                ensure_empty_immutable_mountpoint(&path).map_err(|err| {
-                    EnsureDatasetErrorRaw::MountpointCreation {
-                        mountpoint: path.to_path_buf(),
-                        err,
-                    }
-                })?;
-            }
+        if wants_mounting {
+            let path = &mountpoint.0;
+            ensure_empty_immutable_mountpoint(&path).map_err(|err| {
+                EnsureDatasetErrorRaw::MountpointCreation {
+                    mountpoint: path.to_path_buf(),
+                    err,
+                }
+            })?;
         }
 
         let mut command = std::process::Command::new(PFEXEC);

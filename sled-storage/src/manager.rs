@@ -169,12 +169,9 @@ impl NestedDatasetLocation {
         mount_root: &Utf8Path,
     ) -> Result<Utf8PathBuf, Error> {
         let mountpoint = self.mountpoint(mount_root);
-        let zoned = false;
         Zfs::ensure_dataset_mounted_if_exists(
             &self.full_name(),
-            &Mountpoint::Path(mountpoint.clone()),
-            CanMount::On,
-            zoned,
+            &Mountpoint(mountpoint.clone()),
         )?;
 
         return Ok(mountpoint);
@@ -1106,7 +1103,7 @@ impl StorageManager {
         let mountpoint_path = config.name.mountpoint(mountpoint_root);
         let details = DatasetCreationDetails {
             zoned: config.name.kind().zoned(),
-            mountpoint: Mountpoint::Path(mountpoint_path),
+            mountpoint: Mountpoint(mountpoint_path),
             full_name: config.name.full_name(),
         };
 
@@ -1195,7 +1192,7 @@ impl StorageManager {
 
         let details = DatasetCreationDetails {
             zoned: false,
-            mountpoint: Mountpoint::Path(mountpoint_path),
+            mountpoint: Mountpoint(mountpoint_path),
             full_name: config.name.full_name(),
         };
 
@@ -1554,7 +1551,7 @@ impl StorageManager {
         let size_details = None;
         Zfs::ensure_dataset(DatasetEnsureArgs {
             name: fs_name,
-            mountpoint: Mountpoint::Path(Utf8PathBuf::from("/data")),
+            mountpoint: Mountpoint(Utf8PathBuf::from("/data")),
             can_mount: CanMount::On,
             zoned,
             encryption_details,
