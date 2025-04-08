@@ -1582,11 +1582,14 @@ async fn get_crucible_dataset_rows(
     for d in crucible_datasets {
         let control_plane_storage_buffer: i64 = zpools
             .get(&d.pool_id)
-            .unwrap()
+            .ok_or_else(|| anyhow::anyhow!("zpool {} not found!", d.pool_id))?
             .control_plane_storage_buffer()
             .into();
 
-        let pool_total_size = *zpool_total_size.get(&d.pool_id).unwrap();
+        let pool_total_size =
+            *zpool_total_size.get(&d.pool_id).ok_or_else(|| {
+                anyhow::anyhow!("zpool {} not part of inventory!", d.pool_id)
+            })?;
 
         result.push(CrucibleDatasetRow {
             // dataset fields
@@ -7747,11 +7750,11 @@ async fn cmd_db_zpool_list(
         control_plane_storage_buffer: i64,
     }
 
-    let rows: Vec<_> = zpools
+    let rows: Vec<ZpoolRow> = zpools
         .into_iter()
         .map(|(p, _)| {
             let zpool_id = p.id().into_untyped_uuid();
-            ZpoolRow {
+            Ok(ZpoolRow {
                 id: zpool_id,
                 time_deleted: match p.time_deleted() {
                     Some(t) => t.to_string(),
@@ -7759,13 +7762,19 @@ async fn cmd_db_zpool_list(
                 },
                 sled_id: p.sled_id,
                 physical_disk_id: p.physical_disk_id.into_untyped_uuid(),
-                total_size: *zpool_total_size.get(&zpool_id).unwrap(),
+                total_size: *zpool_total_size.get(&zpool_id).ok_or_else(
+                    || {
+                        anyhow::anyhow!(
+                            "zpool {zpool_id} not found in inventory!"
+                        )
+                    },
+                )?,
                 control_plane_storage_buffer: p
                     .control_plane_storage_buffer()
                     .into(),
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, anyhow::Error>>()?;
 
     if args.id_only {
         for row in rows {
