@@ -169,7 +169,7 @@ impl NestedDatasetLocation {
         mount_root: &Utf8Path,
     ) -> Result<Utf8PathBuf, Error> {
         let mountpoint = self.mountpoint(mount_root);
-        Zfs::ensure_dataset_mounted_if_exists(
+        Zfs::ensure_dataset_mounted_and_exists(
             &self.full_name(),
             &Mountpoint(mountpoint.clone()),
         )?;
@@ -425,6 +425,15 @@ impl StorageHandle {
         rx.await.unwrap()
     }
 
+    /// Ensures that a dataset exists, nested somewhere arbitrary within
+    /// a Nexus-controlled dataset.
+    ///
+    /// This function does mount the dataset according to `config`.
+    /// However, this dataset is not automatically mounted on reboot.
+    ///
+    /// If you're trying to access a nested dataset later, consider
+    /// using the [NestedDatasetLocation::ensure_mounted_and_get_mountpoint]
+    /// function.
     pub async fn nested_dataset_ensure(
         &self,
         config: NestedDatasetConfig,

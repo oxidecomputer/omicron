@@ -180,17 +180,25 @@ impl LocalStorage for StorageHandle {
         self.datasets_config_list().await.map_err(|err| err.into())
     }
 
-    // TODO: Should this be a part of "StorageHandle"?
     fn dyn_dataset_get(
         &self,
         dataset_name: &String,
     ) -> Result<DatasetProperties, Error> {
-        Ok(illumos_utils::zfs::Zfs::get_dataset_properties(
+        let Some(dataset) = illumos_utils::zfs::Zfs::get_dataset_properties(
             &[dataset_name.clone()],
             illumos_utils::zfs::WhichDatasets::SelfOnly,
         )
         .map_err(|err| Error::DatasetLookup(err))?
-        .remove(0))
+        .pop() else {
+            // This should not be possible, unless the "zfs get" command is
+            // behaving unpredictably. We're only asking for a single dataset,
+            // so on success, we should see the result of that dataset.
+            return Err(Error::DatasetLookup(anyhow::anyhow!(
+                "Zfs::get_dataset_properties returned an empty vec?"
+            )));
+        };
+
+        Ok(dataset)
     }
 
     async fn dyn_nested_dataset_list(
@@ -413,8 +421,11 @@ impl<'a> SupportBundleManager<'a> {
 
     // Returns a dataset that the sled has been explicitly configured to use.
     //
+    // In the context of Support Bundles, this is a "parent dataset", within
+    // which the "nested support bundle" dataset will be stored.
+    //
     // Returns an error if this dataset is not mounted.
-    async fn get_configured_dataset_if_mounted(
+    async fn get_mounted_dataset_config(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
@@ -455,10 +466,8 @@ impl<'a> SupportBundleManager<'a> {
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> Result<Vec<SupportBundleMetadata>, Error> {
-        let root = self
-            .get_configured_dataset_if_mounted(zpool_id, dataset_id)
-            .await?
-            .name;
+        let root =
+            self.get_mounted_dataset_config(zpool_id, dataset_id).await?.name;
         let dataset_location =
             NestedDatasetLocation { path: String::from(""), root };
         let datasets = self
@@ -574,10 +583,8 @@ impl<'a> SupportBundleManager<'a> {
 
         // Access the parent dataset (presumably "crypt/debug")
         // where the support bundled will be mounted.
-        let root = self
-            .get_configured_dataset_if_mounted(zpool_id, dataset_id)
-            .await?
-            .name;
+        let root =
+            self.get_mounted_dataset_config(zpool_id, dataset_id).await?.name;
         let dataset =
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
 
@@ -681,10 +688,8 @@ impl<'a> SupportBundleManager<'a> {
             "bundle_id" => support_bundle_id.to_string(),
         ));
         info!(log, "Destroying support bundle");
-        let root = self
-            .get_configured_dataset_if_mounted(zpool_id, dataset_id)
-            .await?
-            .name;
+        let root =
+            self.get_mounted_dataset_config(zpool_id, dataset_id).await?.name;
         self.storage
             .dyn_nested_dataset_destroy(NestedDatasetLocation {
                 path: support_bundle_id.to_string(),
@@ -702,10 +707,8 @@ impl<'a> SupportBundleManager<'a> {
         support_bundle_id: SupportBundleUuid,
     ) -> Result<tokio::fs::File, Error> {
         // Access the parent dataset where the support bundle is stored.
-        let root = self
-            .get_configured_dataset_if_mounted(zpool_id, dataset_id)
-            .await?
-            .name;
+        let root =
+            self.get_mounted_dataset_config(zpool_id, dataset_id).await?.name;
         let dataset =
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
 
@@ -1546,7 +1549,7 @@ mod tests {
         // a support bundle when the debug dataset exists, but has not been
         // mounted yet.
         let parent_dataset = mgr
-            .get_configured_dataset_if_mounted(harness.zpool_id, dataset_id)
+            .get_mounted_dataset_config(harness.zpool_id, dataset_id)
             .await
             .expect("Could not get parent dataset from test harness")
             .name;
@@ -1623,7 +1626,7 @@ mod tests {
         // Peek under the hood: We should be able to observe the support
         // bundle as a nested dataset.
         let root = mgr
-            .get_configured_dataset_if_mounted(harness.zpool_id, dataset_id)
+            .get_mounted_dataset_config(harness.zpool_id, dataset_id)
             .await
             .expect("Could not get parent dataset from test harness")
             .name;
@@ -1692,7 +1695,7 @@ mod tests {
         // Peek under the hood: We should be able to observe the support
         // bundle as a nested dataset.
         let root = mgr
-            .get_configured_dataset_if_mounted(harness.zpool_id, dataset_id)
+            .get_mounted_dataset_config(harness.zpool_id, dataset_id)
             .await
             .expect("Could not get parent dataset from test harness")
             .name;

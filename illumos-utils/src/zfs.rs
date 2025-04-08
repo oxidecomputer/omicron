@@ -139,6 +139,9 @@ enum EnsureDatasetErrorRaw {
     #[error("Unexpected output from ZFS commands: {0}")]
     Output(String),
 
+    #[error("Dataset does not exist")]
+    DoesNotExist,
+
     #[error("Failed to mount filesystem")]
     MountFsFailed(#[source] crate::ExecutionError),
 
@@ -918,39 +921,34 @@ impl Zfs {
         Ok(())
     }
 
-    /// Ensures that a ZFS dataset is mounted, if it can be.
-    ///
-    /// Returns "true" if the dataset exists and is mounted
-    /// Returns "false" if the dataset does not exist
+    /// Ensures that a ZFS dataset is mounted
     ///
     /// Returns an error if the dataset exists, but cannot be mounted.
-    pub fn ensure_dataset_mounted_if_exists(
+    pub fn ensure_dataset_mounted_and_exists(
         name: &str,
         mountpoint: &Mountpoint,
-    ) -> Result<bool, EnsureDatasetError> {
-        let res =
-            Self::ensure_dataset_mounted_if_exists_inner(name, mountpoint)
-                .map_err(|err| EnsureDatasetError {
-                    name: name.to_string(),
-                    err,
-                })?;
-        Ok(res.exists)
+    ) -> Result<(), EnsureDatasetError> {
+        Self::ensure_dataset_mounted_and_exists_inner(name, mountpoint)
+            .map_err(|err| EnsureDatasetError {
+                name: name.to_string(),
+                err,
+            })?;
+        Ok(())
     }
 
-    fn ensure_dataset_mounted_if_exists_inner(
+    fn ensure_dataset_mounted_and_exists_inner(
         name: &str,
         mountpoint: &Mountpoint,
-    ) -> Result<DatasetMountInfo, EnsureDatasetErrorRaw> {
-        let mut mount_info = Self::dataset_exists(name, mountpoint)?;
+    ) -> Result<(), EnsureDatasetErrorRaw> {
+        let mount_info = Self::dataset_exists(name, mountpoint)?;
         if !mount_info.exists {
-            return Ok(mount_info);
+            return Err(EnsureDatasetErrorRaw::DoesNotExist);
         }
 
         if !mount_info.mounted {
             Self::ensure_dataset_mounted(name, mountpoint)?;
-            mount_info.mounted = true;
         }
-        return Ok(mount_info);
+        return Ok(());
     }
 
     fn ensure_dataset_mounted(
