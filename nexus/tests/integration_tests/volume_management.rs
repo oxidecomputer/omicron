@@ -5134,7 +5134,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
 }
 
 async fn delete_all_volume_resource_usage_records(datastore: &DataStore) {
-    use db::schema::volume_resource_usage::dsl;
+    use nexus_db_schema::schema::volume_resource_usage::dsl;
 
     let conn = datastore.pool_connection_for_tests().await.unwrap();
 
@@ -5172,7 +5172,7 @@ async fn perform_migration(datastore: &DataStore) {
 async fn get_volume_resource_usage_records(
     datastore: &DataStore,
 ) -> HashSet<VolumeResourceUsageRecord> {
-    use db::schema::volume_resource_usage::dsl;
+    use nexus_db_schema::schema::volume_resource_usage::dsl;
 
     let mut records: Vec<VolumeResourceUsageRecord> = Vec::new();
     let mut paginator = Paginator::new(SQL_BATCH_SIZE);
@@ -6424,7 +6424,7 @@ async fn test_proper_region_sled_redundancy(
         for (_, region) in &datasets_and_regions {
             let sled_id = {
                 let dataset = {
-                    use db::schema::crucible_dataset::dsl;
+                    use nexus_db_schema::schema::crucible_dataset::dsl;
                     dsl::crucible_dataset
                         .filter(
                             dsl::id.eq(to_db_typed_uuid(region.dataset_id())),
@@ -6436,7 +6436,7 @@ async fn test_proper_region_sled_redundancy(
                 };
 
                 let zpool = {
-                    use db::schema::zpool::dsl;
+                    use nexus_db_schema::schema::zpool::dsl;
                     dsl::zpool
                         .filter(dsl::id.eq(dataset.pool_id))
                         .select(db::model::Zpool::as_select())

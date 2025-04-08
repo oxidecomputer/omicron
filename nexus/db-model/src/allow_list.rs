@@ -7,10 +7,10 @@
 //! Database representation of allowed source IP address, for implementing basic
 //! IP allowlisting.
 
-use crate::schema::allow_list;
 use chrono::DateTime;
 use chrono::Utc;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::allow_list;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use omicron_common::api::external;

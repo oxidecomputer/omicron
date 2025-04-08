@@ -629,6 +629,7 @@ pub async fn create_instance_with(
             boot_disk: None,
             start,
             auto_restart_policy,
+            anti_affinity_groups: Vec::new(),
         },
     )
     .await
@@ -1250,7 +1251,7 @@ pub struct DiskTest<'a, N: NexusServer> {
 }
 
 impl<'a, N: NexusServer> DiskTest<'a, N> {
-    pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
+    pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 16;
     pub const DEFAULT_ZPOOL_COUNT: u32 = 3;
 
     /// Creates a new [DiskTest] with default configuration.

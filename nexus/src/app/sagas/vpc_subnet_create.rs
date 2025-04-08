@@ -454,8 +454,8 @@ pub(crate) mod test {
 
     async fn one_vpc_route_exists(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::RouterRoute;
-        use nexus_db_queries::db::schema::router_route::dsl;
-        use nexus_db_queries::db::schema::vpc_router::dsl as vpc_router_dsl;
+        use nexus_db_schema::schema::router_route::dsl;
+        use nexus_db_schema::schema::vpc_router::dsl as vpc_router_dsl;
 
         dsl::router_route
             .filter(dsl::time_deleted.is_null())
@@ -482,7 +482,7 @@ pub(crate) mod test {
 
     async fn one_subnet_exists(datastore: &DataStore, vpc_id: Uuid) -> bool {
         use nexus_db_queries::db::model::VpcSubnet;
-        use nexus_db_queries::db::schema::vpc_subnet::dsl;
+        use nexus_db_schema::schema::vpc_subnet::dsl;
 
         dsl::vpc_subnet
             .filter(dsl::time_deleted.is_null())

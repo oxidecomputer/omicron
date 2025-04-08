@@ -86,6 +86,18 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
             extra_validation: None,
         },
         ManagedApiConfig {
+            title: "Ereport Reporter API",
+            versions: Versions::new_versioned(
+                ereport_api::supported_versions()
+            ),
+            description: "API for ereport producers",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                ereport_api::ereport_api_mod::stub_api_description,
+            ident: "ereport",
+            extra_validation: None,
+        },
+        ManagedApiConfig {
             title: "Installinator API",
             versions: Versions::new_lockstep(semver::Version::new(0,0,1)),
             description: "API for installinator to fetch artifacts \
@@ -98,7 +110,7 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "Oxide Region API",
-            versions: Versions::new_lockstep(semver::Version::new(20250212,0,0)),
+            versions: Versions::new_lockstep(semver::Version::new(20250409,0,0)),
             description: "API for interacting with the Oxide control plane",
             boundary: ApiBoundary::External,
             api_description:

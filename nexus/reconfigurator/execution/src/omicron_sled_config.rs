@@ -28,7 +28,7 @@ pub(crate) async fn deploy_sled_configs(
     sled_configs: &BTreeMap<SledUuid, BlueprintSledConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(sled_configs)
-        .filter_map(|(sled_id, config)| async move {
+        .filter_map(async |(sled_id, config)| {
             let log = opctx.log.new(slog::o!(
                 "sled_id" => sled_id.to_string(),
                 "generation" => i64::from(&config.sled_agent_generation),
@@ -277,7 +277,7 @@ mod tests {
         zones.insert(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(dataset_pool.clone()),
+            filesystem_pool: dataset_pool.clone(),
             zone_type: BlueprintZoneType::Oximeter(
                 blueprint_zone_type::Oximeter {
                     address: "[::1]:0".parse().unwrap(),
@@ -291,7 +291,7 @@ mod tests {
                 ready_for_cleanup: false,
             },
             id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: Some(dataset_pool.clone()),
+            filesystem_pool: dataset_pool.clone(),
             zone_type: BlueprintZoneType::Oximeter(
                 blueprint_zone_type::Oximeter {
                     address: "[::1]:0".parse().unwrap(),

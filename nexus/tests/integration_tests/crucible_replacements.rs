@@ -14,7 +14,6 @@ use nexus_db_model::ReadOnlyTargetReplacement;
 use nexus_db_model::RegionReplacementState;
 use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::region_snapshot_replacement::*;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -160,7 +159,7 @@ pub(crate) async fn wait_for_all_replacements(
                 let conn = datastore.pool_connection_for_tests().await.unwrap();
 
                 let region_replacement_left = {
-                    use db::schema::region_replacement::dsl;
+                    use nexus_db_schema::schema::region_replacement::dsl;
 
                     dsl::region_replacement
                         .filter(
@@ -174,7 +173,7 @@ pub(crate) async fn wait_for_all_replacements(
                 };
 
                 let region_snapshot_replacement_left = {
-                    use db::schema::region_snapshot_replacement::dsl;
+                    use nexus_db_schema::schema::region_snapshot_replacement::dsl;
 
                     dsl::region_snapshot_replacement
                         .filter(

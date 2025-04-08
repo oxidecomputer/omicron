@@ -1427,6 +1427,31 @@
         }
       }
     },
+    "/v1/ping": {
+      "get": {
+        "summary": "Ping API",
+        "description": "Always responds with Ok if it responds at all.",
+        "operationId": "ping",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ping"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/vmms/{propolis_id}": {
       "put": {
         "summary": "Report updated state for a VMM.",
@@ -2272,7 +2297,6 @@
             ]
           },
           "filesystem_pool": {
-            "nullable": true,
             "description": "zpool used for the zone's (transient) root filesystem",
             "allOf": [
               {
@@ -2292,6 +2316,7 @@
         },
         "required": [
           "disposition",
+          "filesystem_pool",
           "id",
           "image_source",
           "zone_type"
@@ -2379,13 +2404,52 @@
                 ]
               },
               "version": {
-                "$ref": "#/components/schemas/ArtifactVersion"
+                "$ref": "#/components/schemas/BlueprintZoneImageVersion"
               }
             },
             "required": [
               "hash",
               "type",
               "version"
+            ]
+          }
+        ]
+      },
+      "BlueprintZoneImageVersion": {
+        "description": "The version of a blueprint zone image in use.\n\nThis is used for debugging output.",
+        "oneOf": [
+          {
+            "description": "A specific version of the image is available.",
+            "type": "object",
+            "properties": {
+              "image_version": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "version": {
+                "$ref": "#/components/schemas/ArtifactVersion"
+              }
+            },
+            "required": [
+              "image_version",
+              "version"
+            ]
+          },
+          {
+            "description": "The version could not be determined. This is non-fatal.",
+            "type": "object",
+            "properties": {
+              "image_version": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "image_version"
             ]
           }
         ]
@@ -4651,6 +4715,28 @@
           "sled_id",
           "variant",
           "vendor"
+        ]
+      },
+      "Ping": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "Whether the external API is reachable. Will always be Ok if the endpoint returns anything at all.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PingStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "PingStatus": {
+        "type": "string",
+        "enum": [
+          "ok"
         ]
       },
       "PortConfigV2": {

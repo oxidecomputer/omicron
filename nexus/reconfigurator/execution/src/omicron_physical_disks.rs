@@ -40,7 +40,7 @@ async fn decommission_expunged_disks_impl(
     expunged_disks: impl Iterator<Item = (SledUuid, PhysicalDiskUuid)>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<anyhow::Error> = stream::iter(expunged_disks)
-        .filter_map(|(sled_id, disk_id)| async move {
+        .filter_map(async |(sled_id, disk_id)| {
             let log = opctx.log.new(slog::o!(
                 "sled_id" => sled_id.to_string(),
                 "disk_id" => disk_id.to_string(),
@@ -83,7 +83,6 @@ mod test {
     use nexus_db_model::Region;
     use nexus_db_model::Zpool;
     use nexus_db_queries::context::OpContext;
-    use nexus_db_queries::db;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::DiskFilter;
@@ -167,7 +166,7 @@ mod test {
             )
         };
         let conn = datastore.pool_connection_for_tests().await.unwrap();
-        use nexus_db_model::schema::region::dsl;
+        use nexus_db_schema::schema::region::dsl;
         diesel::insert_into(dsl::region)
             .values(region)
             .execute_async(&*conn)
@@ -181,7 +180,7 @@ mod test {
     ) -> Vec<ZpoolUuid> {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        use db::schema::zpool::dsl;
+        use nexus_db_schema::schema::zpool::dsl;
         dsl::zpool
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::physical_disk_id.eq(id.into_untyped_uuid()))
@@ -202,7 +201,7 @@ mod test {
     ) -> Vec<Uuid> {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        use db::schema::crucible_dataset::dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl;
         dsl::crucible_dataset
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::pool_id.eq(id.into_untyped_uuid()))
@@ -215,7 +214,7 @@ mod test {
     async fn get_regions(datastore: &DataStore, id: Uuid) -> Vec<Uuid> {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        use db::schema::region::dsl;
+        use nexus_db_schema::schema::region::dsl;
         dsl::region
             .filter(dsl::dataset_id.eq(id.into_untyped_uuid()))
             .select(dsl::id)

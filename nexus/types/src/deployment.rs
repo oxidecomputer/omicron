@@ -36,7 +36,6 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
-use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -52,6 +51,7 @@ use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use strum::EnumIter;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 
 mod blueprint_diff;
@@ -734,7 +734,7 @@ pub struct BlueprintZoneConfig {
 
     pub id: OmicronZoneUuid,
     /// zpool used for the zone's (transient) root filesystem
-    pub filesystem_pool: Option<ZpoolName>,
+    pub filesystem_pool: ZpoolName,
     pub zone_type: BlueprintZoneType,
     pub image_source: BlueprintZoneImageSource,
 }
@@ -757,14 +757,13 @@ impl BlueprintZoneConfig {
     }
 
     /// Returns the dataset used for the the zone's (transient) root filesystem.
-    pub fn filesystem_dataset(&self) -> Option<DatasetName> {
-        let pool_name = self.filesystem_pool.clone()?;
+    pub fn filesystem_dataset(&self) -> DatasetName {
         let name = illumos_utils::zone::zone_name(
             self.zone_type.kind().zone_prefix(),
             Some(self.id),
         );
         let kind = DatasetKind::TransientZone { name };
-        Some(DatasetName::new(pool_name, kind))
+        DatasetName::new(self.filesystem_pool.clone(), kind)
     }
 
     pub fn kind(&self) -> ZoneKind {
@@ -783,7 +782,7 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
         } = z;
         Self {
             id,
-            filesystem_pool,
+            filesystem_pool: Some(filesystem_pool),
             zone_type: zone_type.into(),
             image_source: image_source.into(),
         }
@@ -934,7 +933,7 @@ pub enum BlueprintZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     #[serde(rename_all = "snake_case")]
-    Artifact { version: ArtifactVersion, hash: ArtifactHash },
+    Artifact { version: BlueprintZoneImageVersion, hash: ArtifactHash },
 }
 
 impl From<BlueprintZoneImageSource> for OmicronZoneImageSource {
@@ -957,7 +956,45 @@ impl fmt::Display for BlueprintZoneImageSource {
                 write!(f, "install dataset")
             }
             BlueprintZoneImageSource::Artifact { version, hash: _ } => {
-                write!(f, "artifact: version {version}")
+                write!(f, "artifact: {version}")
+            }
+        }
+    }
+}
+
+/// The version of a blueprint zone image in use.
+///
+/// This is used for debugging output.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    Diffable,
+)]
+#[serde(tag = "image_version", rename_all = "snake_case")]
+pub enum BlueprintZoneImageVersion {
+    /// A specific version of the image is available.
+    Available { version: ArtifactVersion },
+
+    /// The version could not be determined. This is non-fatal.
+    Unknown,
+}
+
+impl fmt::Display for BlueprintZoneImageVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlueprintZoneImageVersion::Available { version } => {
+                write!(f, "version {version}")
+            }
+            BlueprintZoneImageVersion::Unknown => {
+                write!(f, "(unknown version)")
             }
         }
     }

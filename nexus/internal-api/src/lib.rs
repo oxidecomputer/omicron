@@ -17,6 +17,8 @@ use nexus_types::{
     external_api::{
         params::{PhysicalDiskPath, SledSelector, UninitializedSledId},
         shared::{ProbeInfo, UninitializedSled},
+        views::Ping,
+        views::PingStatus,
         views::SledPolicy,
     },
     internal_api::{
@@ -48,6 +50,19 @@ const RACK_INITIALIZATION_REQUEST_MAX_BYTES: usize = 10 * 1024 * 1024;
 #[dropshot::api_description]
 pub trait NexusInternalApi {
     type Context;
+
+    /// Ping API
+    ///
+    /// Always responds with Ok if it responds at all.
+    #[endpoint {
+        method = GET,
+        path = "/v1/ping",
+    }]
+    async fn ping(
+        _rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Ping>, HttpError> {
+        Ok(HttpResponseOk(Ping { status: PingStatus::Ok }))
+    }
 
     /// Return information about the given sled agent
     #[endpoint {

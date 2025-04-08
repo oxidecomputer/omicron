@@ -78,6 +78,7 @@ async fn instance_launch() -> Result<()> {
             )]),
             start: true,
             auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
         })
         .send()
         .await?;

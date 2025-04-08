@@ -37,7 +37,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (String, String)>,
     ) -> ListResultVec<RoleBuiltin> {
-        use db::schema::role_builtin::dsl;
+        use nexus_db_schema::schema::role_builtin::dsl;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -57,7 +57,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use db::schema::role_builtin::dsl;
+        use nexus_db_schema::schema::role_builtin::dsl;
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
@@ -91,7 +91,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use db::schema::role_assignment::dsl;
+        use nexus_db_schema::schema::role_assignment::dsl;
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
@@ -148,7 +148,7 @@ impl DataStore {
         opctx.authorize(authz::Action::ReadPolicy, authz_resource).await?;
         let resource_type = authz_resource.resource_type();
         let resource_id = authz_resource.resource_id();
-        use db::schema::role_assignment::dsl;
+        use nexus_db_schema::schema::role_assignment::dsl;
         dsl::role_assignment
             .filter(dsl::resource_type.eq(resource_type.to_string()))
             .filter(dsl::resource_id.eq(resource_id))
@@ -271,7 +271,7 @@ impl DataStore {
                 .cmp(&(&r2.role_name, r2.identity_id))
         });
 
-        use db::schema::role_assignment::dsl;
+        use nexus_db_schema::schema::role_assignment::dsl;
 
         let delete_old_query = diesel::delete(dsl::role_assignment)
             .filter(dsl::resource_id.eq(resource_id))

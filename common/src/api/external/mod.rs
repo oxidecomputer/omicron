@@ -11,7 +11,6 @@ mod error;
 pub mod http_pagination;
 pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
-use crate::update::ArtifactHash;
 use crate::update::ArtifactId;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -45,6 +44,7 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 // The type aliases below exist primarily to ensure consistency among return
@@ -1087,6 +1087,7 @@ pub struct IdentityMetadataUpdateParams {
     Debug,
     Deserialize,
     Eq,
+    Hash,
     Ord,
     PartialEq,
     PartialOrd,
@@ -1338,17 +1339,29 @@ pub enum FailureDomain {
 ///
 /// Membership in a group is not exclusive - members may belong to multiple
 /// affinity / anti-affinity groups.
+///
+/// Affinity Groups can contain up to 32 members.
+// See: AFFINITY_GROUP_MAX_MEMBERS
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AffinityGroupMember {
-    /// An instance belonging to this group, identified by UUID.
-    Instance(InstanceUuid),
+    /// An instance belonging to this group
+    ///
+    /// Instances can belong to up to 16 affinity groups.
+    // See: INSTANCE_MAX_AFFINITY_GROUPS
+    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
 }
 
-impl SimpleIdentity for AffinityGroupMember {
+impl SimpleIdentityOrName for AffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
-            AffinityGroupMember::Instance(id) => *id.as_untyped_uuid(),
+            AffinityGroupMember::Instance { id, .. } => *id.as_untyped_uuid(),
+        }
+    }
+
+    fn name(&self) -> &Name {
+        match self {
+            AffinityGroupMember::Instance { name, .. } => name,
         }
     }
 }
@@ -1357,17 +1370,31 @@ impl SimpleIdentity for AffinityGroupMember {
 ///
 /// Membership in a group is not exclusive - members may belong to multiple
 /// affinity / anti-affinity groups.
+///
+/// Anti-Affinity Groups can contain up to 32 members.
+// See: ANTI_AFFINITY_GROUP_MAX_MEMBERS
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AntiAffinityGroupMember {
-    /// An instance belonging to this group, identified by UUID.
-    Instance(InstanceUuid),
+    /// An instance belonging to this group
+    ///
+    /// Instances can belong to up to 16 anti-affinity groups.
+    // See: INSTANCE_MAX_ANTI_AFFINITY_GROUPS
+    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
 }
 
-impl SimpleIdentity for AntiAffinityGroupMember {
+impl SimpleIdentityOrName for AntiAffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
-            AntiAffinityGroupMember::Instance(id) => *id.as_untyped_uuid(),
+            AntiAffinityGroupMember::Instance { id, .. } => {
+                *id.as_untyped_uuid()
+            }
+        }
+    }
+
+    fn name(&self) -> &Name {
+        match self {
+            AntiAffinityGroupMember::Instance { name, .. } => name,
         }
     }
 }

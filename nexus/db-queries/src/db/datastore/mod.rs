@@ -22,10 +22,7 @@ use super::Pool;
 use super::pool::DbConnection;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::{
-    self,
-    error::{ErrorHandler, public_error_from_diesel},
-};
+use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use ::oximeter::types::ProducerRegistry;
 use anyhow::{Context, bail};
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -115,7 +112,9 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
-pub use instance::{InstanceAndActiveVmm, InstanceGestalt};
+pub use instance::{
+    InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
+};
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
 pub use oximeter::CollectorReassignment;
@@ -376,7 +375,7 @@ impl DataStore {
         opctx: &OpContext,
         sled_id: SledUuid,
     ) -> Result<Ipv6Addr, Error> {
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
         let net = diesel::update(
             dsl::sled
                 .find(sled_id.into_untyped_uuid())
@@ -411,7 +410,7 @@ impl DataStore {
 
     #[cfg(test)]
     async fn test_try_table_scan(&self, opctx: &OpContext) -> Error {
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
         let conn = self.pool_connection_authorized(opctx).await;
         if let Err(error) = conn {
             return error;
@@ -778,7 +777,7 @@ mod test {
         zpool_id: Uuid,
         sled_id: SledUuid,
     ) {
-        use db::schema::inv_zpool::dsl;
+        use nexus_db_schema::schema::inv_zpool::dsl;
 
         let inv_collection_id = CollectionUuid::new_v4();
         let time_collected = Utc::now();
@@ -1646,7 +1645,7 @@ mod test {
             explanation
         );
 
-        let subnet = db::model::VpcSubnet::new(
+        let subnet = nexus_db_model::VpcSubnet::new(
             Uuid::nil(),
             Uuid::nil(),
             external::IdentityMetadataCreateParams {
@@ -1869,7 +1868,7 @@ mod test {
     #[tokio::test]
     async fn test_deallocate_external_ip_by_instance_id_is_idempotent() {
         use crate::db::model::IpKind;
-        use crate::db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         let logctx = dev::test_setup_log(
             "test_deallocate_external_ip_by_instance_id_is_idempotent",
@@ -1936,7 +1935,7 @@ mod test {
     #[tokio::test]
     async fn test_deallocate_external_ip_is_idempotent() {
         use crate::db::model::IpKind;
-        use crate::db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         let logctx =
             dev::test_setup_log("test_deallocate_external_ip_is_idempotent");
@@ -2004,10 +2003,10 @@ mod test {
     #[tokio::test]
     async fn test_external_ip_check_constraints() {
         use crate::db::model::IpKind;
-        use crate::db::schema::external_ip::dsl;
         use diesel::result::DatabaseErrorKind::CheckViolation;
         use diesel::result::DatabaseErrorKind::UniqueViolation;
         use diesel::result::Error::DatabaseError;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         let logctx = dev::test_setup_log("test_external_ip_check_constraints");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
@@ -2079,7 +2078,7 @@ mod test {
                 } else {
                     format!("{v}-with-parent")
                 };
-                db::model::Name(Name::try_from(name).unwrap())
+                nexus_db_model::Name(Name::try_from(name).unwrap())
             });
 
             // We do name duplicate checking on the `Some` branch, don't steal the
@@ -2173,7 +2172,7 @@ mod test {
             &project_ids
         ) {
             let name_local = name.map(|v| {
-                db::model::Name(Name::try_from(v.to_string()).unwrap())
+                nexus_db_model::Name(Name::try_from(v.to_string()).unwrap())
             });
             let state = if parent_id.is_some() {
                 IpAttachState::Attached
