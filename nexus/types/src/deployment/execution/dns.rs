@@ -140,7 +140,7 @@ pub fn blueprint_internal_dns_config(
     // consumer should be careful when fetching an artifact about whether they
     // really can just pick any backend of this service or not.
     for (sled_id, sled) in sleds_by_id {
-        if sled.policy().matches(SledFilter::TufArtifactReplication) {
+        if !sled.policy().matches(SledFilter::TufArtifactReplication) {
             continue;
         }
 
