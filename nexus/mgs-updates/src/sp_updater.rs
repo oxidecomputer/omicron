@@ -146,7 +146,6 @@ impl SpComponentUpdater for SpUpdater {
     }
 }
 
-// XXX-dap replace with real impl
 pub struct ReconfiguratorSpUpdater;
 impl ReconfiguratorSpComponentUpdater for ReconfiguratorSpUpdater {
     /// Checks if the component is already updated or ready for update

@@ -30,8 +30,6 @@ pub use host_phase1_updater::HostPhase1Updater;
 pub use mgs_clients::MgsClients;
 pub use rot_updater::RotUpdater;
 pub use sp_updater::SpUpdater;
-// XXX-dap add type definitions for the map of requests?  or maybe even a
-// struct to manage this?
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum UpdateProgress {

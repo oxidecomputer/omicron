@@ -78,7 +78,6 @@ struct ReconfiguratorSpUpdater {
     dns_server: SocketAddr,
 
     /// HOST:PORT for a TUF repo depot server
-    // XXX-dap could get this by listing sleds?
     repo_depot_addr: SocketAddr,
 
     /// Color output
