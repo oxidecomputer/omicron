@@ -312,10 +312,9 @@ mod test {
 
         // The abandoned saga shouldn't show up in the output list.
         assert!(
-            observed_sagas
+            !observed_sagas
                 .iter()
-                .find(|s| s.saga_state == SagaState::Abandoned)
-                .is_none()
+                .any(|s| s.saga_state == SagaState::Abandoned)
         );
 
         // Remove the abandoned saga from the inserted set so that it can be
