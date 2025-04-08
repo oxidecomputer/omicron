@@ -32,5 +32,7 @@ zeroize.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+assert_matches.workspace = true
+omicron-test-utils.workspace = true
 proptest.workspace = true
 test-strategy.workspace = true
