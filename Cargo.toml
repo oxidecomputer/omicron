@@ -88,6 +88,7 @@ members = [
     "nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
+    "nexus/reconfigurator/cli-integration-tests",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -230,6 +231,7 @@ default-members = [
     "nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
+    "nexus/reconfigurator/cli-integration-tests",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -593,6 +595,7 @@ range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
 rayon = "1.10"
 rcgen = "0.12.1"
+reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.38.0"
 ref-cast = "1.0"
 regex = "1.11.1"
