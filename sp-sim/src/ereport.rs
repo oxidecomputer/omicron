@@ -101,10 +101,22 @@ impl EreportState {
         request: EreportRequest,
         buf: &'buf mut [u8],
     ) -> &'buf [u8] {
+        use serde::ser::Serializer;
+
         let EreportRequest::V0(req) = request;
         slog::info!(self.log, "ereport request: {req:?}");
 
-        if req.restart_id != self.restart_id {
+        let mut pos = gateway_messages::serialize(
+            buf,
+            &EreportResponseHeader::V0(ResponseHeaderV0 {
+                restart_id: self.restart_id,
+            }),
+        )
+        .expect("header must serialize");
+
+        // If we "restarted", encode the current metadata map, and start at ENA
+        // 0.
+        let (meta_map, start_ena) = if req.restart_id != self.restart_id {
             slog::info!(
                 self.log,
                 "requested restart ID is not current, pretending to have \
@@ -112,58 +124,81 @@ impl EreportState {
                 "req_restart_id" => ?req.restart_id,
                 "current_restart_id" => ?self.restart_id,
             );
-            let amt = gateway_messages::serialize(
-                buf,
-                &EreportResponseHeader::V0(ResponseHeaderV0::new_restarted(
-                    self.restart_id,
-                )),
-            )
-            .expect("serialization shouldn't fail");
-            let amt = {
-                let mut cursor = Cursor::new(&mut buf[amt..]);
-                serde_cbor::to_writer(&mut cursor, &self.meta)
-                    .expect("serializing metadata should fit in a packet...");
-                amt + cursor.position() as usize
-            };
-            return &buf[..amt];
-        }
+            (&self.meta, Ena(0))
+        } else {
+            // If we didn't "restart", we should honor the committed ENA (if the
+            // request includes one), and we should start at the requested ENA.
+            if let Some(committed_ena) = req.committed_ena() {
+                slog::debug!(
+                    self.log,
+                    "MGS committed ereports up to {committed_ena:?}"
+                );
+                let mut discarded = 0;
+                while self
+                    .ereports
+                    .front()
+                    .map(|(ena, _)| ena <= &committed_ena)
+                    .unwrap_or(false)
+                {
+                    self.ereports.pop_front();
+                    discarded += 1;
+                }
 
-        if let Some(committed_ena) = req.committed_ena() {
-            slog::debug!(
-                self.log,
-                "MGS committed ereports up to {committed_ena:?}"
-            );
-            let mut discarded = 0;
-            while self
-                .ereports
-                .front()
-                .map(|(ena, _)| ena <= &committed_ena)
-                .unwrap_or(false)
-            {
-                self.ereports.pop_front();
-                discarded += 1;
+                slog::info!(
+                    self.log,
+                    "discarded {discarded} ereports up to {committed_ena:?}"
+                );
             }
 
-            slog::info!(
-                self.log,
-                "discarded {discarded} ereports up to {committed_ena:?}"
+            (&Default::default(), req.start_ena)
+        };
+        pos += {
+            use serde::ser::SerializeMap;
+
+            let mut cursor = Cursor::new(&mut buf[pos..]);
+            // Rather than just using `serde_cbor::to_writer`, we'll manually
+            // construct a `Serializer`, so that we can call the `serialize_map`
+            // method *without* a length to force it to use the "indefinite-length"
+            // encoding.
+            let mut serializer = serde_cbor::Serializer::new(
+                serde_cbor::ser::IoWrite::new(&mut cursor),
             );
+            let mut map =
+                serializer.serialize_map(None).expect("map should start");
+            for (key, value) in meta_map {
+                map.serialize_entry(key, value)
+                    .expect("element should serialize");
+            }
+            map.end().expect("map should end");
+            cursor.position() as usize
+        };
+
+        // Is there enough remaining space for ereports? We need at least 10
+        // bytes (8 for the ENA, and at least two bytes to encode an empty CBOR
+        // list)
+        if buf[pos..].len() < 10 {
+            return &buf[..pos];
         }
 
-        let mut respondant_ereports =
-            self.ereports.iter().filter(|(ena, _)| ena.0 >= req.start_ena.0);
-        let end = if let Some((ena, ereport)) = respondant_ereports.next() {
-            let mut pos = gateway_messages::serialize(
-                buf,
-                &EreportResponseHeader::V0(
-                    ereport::ResponseHeaderV0::new_data(self.restart_id),
-                ),
-            )
-            .expect("serialization shouldn't fail");
+        let mut respondant_ereports = self
+            .ereports
+            .iter()
+            .filter(|(ena, _)| ena.0 >= start_ena.0)
+            .take(req.limit as usize);
+        if let Some((ena, ereport)) = respondant_ereports.next() {
             pos += gateway_messages::serialize(&mut buf[pos..], ena)
                 .expect("serialing ena shouldn't fail");
             buf[pos] = 0x9f; // start list
             pos += 1;
+
+            // Okay, this is a little bit goofy: we're going to encode each
+            // message to a separate Vec before writing it to the packet buffer.
+            // This is because we need to know if the *whole* ereport fits in
+            // the packet before deciding whether or not to include it.
+            //
+            // We could certainly be a bit more efficient here by reusing a
+            // dedicated encoding buffer for this, but honestly? This is the SP
+            // simulator, so I don't care enough.
             let bytes = serde_cbor::to_vec(ereport).unwrap();
             buf[pos..pos + bytes.len()].copy_from_slice(&bytes[..]);
             pos += bytes.len();
@@ -195,18 +230,9 @@ impl EreportState {
 
             buf[pos] = 0xff; // break list;
             pos += 1;
-            pos
-        } else {
-            gateway_messages::serialize(
-                buf,
-                &EreportResponseHeader::V0(ResponseHeaderV0::new_empty(
-                    req.restart_id,
-                )),
-            )
-            .expect("serialization shouldn't fail")
-        };
+        }
 
-        &buf[..end]
+        &buf[..pos]
     }
 }
 
