@@ -130,13 +130,8 @@ pub struct ConfigReconcilerInventory {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub enum ConfigReconcilerInventoryStatus {
     NotYetRun,
-    Running {
-        config: OmicronSledConfig,
-        running_for: Duration,
-    },
-    Idle {
-        ran_for: Duration,
-    },
+    Running { config: OmicronSledConfig, running_for: Duration },
+    Idle { ran_for: Duration },
 }
 
 /// Describes the role of the sled within the rack.

@@ -37,7 +37,6 @@ enum SledAgentCommands {
     /// print information about the local bootstore node
     #[clap(subcommand)]
     Bootstore(BootstoreCommands),
-
     // TODO-john add subcommand to inspect reconciler status
 }
 

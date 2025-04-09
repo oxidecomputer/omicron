@@ -1139,11 +1139,9 @@ impl SledAgent {
             zpools,
             datasets,
             ledgered_sled_config: config_reconciler.current_ledgered_config(),
-            config_reconciler: Some(self
-                .inner
-                .reconciler_state_rx
-                .current()
-                .to_inventory()),
+            config_reconciler: Some(
+                self.inner.reconciler_state_rx.current().to_inventory(),
+            ),
         })
     }
 
