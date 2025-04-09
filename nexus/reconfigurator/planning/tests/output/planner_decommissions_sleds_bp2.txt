@@ -287,6 +287,10 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     state fingerprint:::::::::::::::::   (none)
     cluster.preserve_downgrade_option:   (do not modify)
 
+ OXIMETER SETTINGS:
+    generation:   0
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   test_blueprint2
     created at:::::::::::   1970-01-01T00:00:00.000Z

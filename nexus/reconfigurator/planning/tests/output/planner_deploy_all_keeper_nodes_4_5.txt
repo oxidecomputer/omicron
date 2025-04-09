@@ -304,6 +304,10 @@ to:   blueprint 2886dab5-61a2-46b4-87af-bc7aeb44cccb
     internal DNS version:   1 (unchanged)
     external DNS version:   1 (unchanged)
 
+ OXIMETER SETTINGS:
+    generation:   0 (unchanged)
+    read from::   SingleNode (unchanged)
+
  CLICKHOUSE CLUSTER CONFIG:
 *   generation:::::::::::::::::::::::::::::::::::::   2 -> 3
     max used server id:::::::::::::::::::::::::::::   2 (unchanged)
