@@ -270,6 +270,9 @@ tar xf out/omicron-sled-agent.tar pkg/config-rss.toml pkg/config.toml
 sed -E -i~ "s/(m2|u2)(.*\.vdev)/\/scratch\/\1\2/g" pkg/config.toml
 diff -u pkg/config.toml{~,} || true
 
+EXPECTED_ZPOOL_COUNT=$(grep -c -E 'u2.*\.vdev' pkg/config.toml)
+echo "expected number of zpools is ${EXPECTED_ZPOOL_COUNT}"
+
 SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 
@@ -411,11 +414,32 @@ until grep "Handoff to Nexus is complete" /var/svc/log/oxide-sled-agent:default.
 done
 echo "Waited for handoff: ${retry}s"
 
+# Wait for the number of expected U2 zpools
+retry=0
+ACTUAL_ZPOOL_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list -i | wc -l)
+until [[ "${ACTUAL_ZPOOL_COUNT}" -eq "${EXPECTED_ZPOOL_COUNT}" ]];
+do
+	pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list
+	if [[ $retry -gt 300 ]]; then
+		echo "Failed to wait for ${EXPECTED_ZPOOL_COUNT} zpools after 300 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+	ACTUAL_ZPOOL_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list -i | wc -l)
+done
+
 # The bootstrap command creates a disk, so before that: adjust the control plane
 # storage buffer to 0 as the virtual hardware only creates 20G pools
 
-pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list -i | \
-    xargs -I{} -i pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb -w db zpool set-storage-buffer "{}" 0
+pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list
+
+for ZPOOL in $(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list -i);
+do
+	pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb -w db zpool set-storage-buffer "${ZPOOL}" 0
+done
+
+pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list
 
 export RUST_BACKTRACE=1
 export E2E_TLS_CERT IPPOOL_START IPPOOL_END
