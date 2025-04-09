@@ -42,7 +42,6 @@ use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
-use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::{
     DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
     SupportBundleUuid, ZpoolUuid,
@@ -71,6 +70,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 /// Simulates management of the control plane on a sled
@@ -157,7 +157,6 @@ impl SledAgent {
 
         let repo_depot = ArtifactStore::new(&log, SimArtifactStorage::new())
             .await
-            .unwrap()
             .start(&log, &config.dropshot);
 
         Arc::new(SledAgent {

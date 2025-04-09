@@ -33,20 +33,19 @@ use futures::{Stream, TryStreamExt};
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
 use omicron_common::ledger::Ledger;
-use omicron_common::update::ArtifactHash;
 use repo_depot_api::*;
 use sha2::{Digest, Sha256};
 use sled_agent_api::{
     ArtifactConfig, ArtifactListResponse, ArtifactPutResponse,
 };
 use sled_storage::dataset::M2_ARTIFACT_DATASET;
-use sled_storage::error::Error as StorageError;
 use sled_storage::manager::StorageHandle;
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot, watch};
+use tufaceous_artifact::ArtifactHash;
 
 // These paths are defined under the artifact storage dataset. They
 // cannot conflict with any artifact paths because all artifact paths are
@@ -87,18 +86,11 @@ pub(crate) struct ArtifactStore<T: DatasetsManager> {
 }
 
 impl<T: DatasetsManager> ArtifactStore<T> {
-    pub(crate) async fn new(
-        log: &Logger,
-        storage: T,
-    ) -> Result<ArtifactStore<T>, StartError> {
+    pub(crate) async fn new(log: &Logger, storage: T) -> ArtifactStore<T> {
         let log = log.new(slog::o!("component" => "ArtifactStore"));
 
         let mut ledger_paths = Vec::new();
-        for mountpoint in storage
-            .artifact_storage_paths()
-            .await
-            .map_err(StartError::DatasetConfig)?
-        {
+        for mountpoint in storage.artifact_storage_paths().await {
             ledger_paths.push(mountpoint.join(LEDGER_PATH));
 
             // Attempt to remove any in-progress artifacts stored in the
@@ -147,7 +139,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             done_signal,
         ));
 
-        Ok(ArtifactStore {
+        ArtifactStore {
             log,
             reqwest_client: reqwest::ClientBuilder::new()
                 .connect_timeout(Duration::from_secs(15))
@@ -160,7 +152,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
 
             #[cfg(test)]
             delete_done,
-        })
+        }
     }
 }
 
@@ -192,9 +184,6 @@ impl ArtifactStore<StorageHandle> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum StartError {
-    #[error("Error retrieving dataset configuration")]
-    DatasetConfig(#[source] sled_storage::error::Error),
-
     #[error("Dropshot error while starting Repo Depot service")]
     Dropshot(#[source] dropshot::BuildError),
 }
@@ -252,7 +241,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     ) -> Result<File, Error> {
         let sha256_str = sha256.to_string();
         let mut last_error = None;
-        for mountpoint in self.storage.artifact_storage_paths().await? {
+        for mountpoint in self.storage.artifact_storage_paths().await {
             let path = mountpoint.join(&sha256_str);
             match File::open(&path).await {
                 Ok(file) => {
@@ -287,7 +276,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             return Err(Error::NoConfig);
         };
         let mut any_datasets = false;
-        for mountpoint in self.storage.artifact_storage_paths().await? {
+        for mountpoint in self.storage.artifact_storage_paths().await {
             any_datasets = true;
             for (hash, count) in &mut response.list {
                 let path = mountpoint.join(hash.to_string());
@@ -345,7 +334,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         let mut files = Vec::new();
         let mut last_error = None;
         let mut datasets = 0;
-        for mountpoint in self.storage.artifact_storage_paths().await? {
+        for mountpoint in self.storage.artifact_storage_paths().await {
             datasets += 1;
             let temp_dir = mountpoint.join(TEMP_SUBDIR);
             if let Err(err) = tokio::fs::create_dir(&temp_dir).await {
@@ -523,18 +512,7 @@ async fn delete_reconciler<T: DatasetsManager>(
             "Starting delete reconciler";
             "generation" => &generation,
         );
-        let mountpoints = match storage.artifact_storage_paths().await {
-            Ok(iter) => iter,
-            Err(err) => {
-                error!(
-                    &log,
-                    "Error retrieving dataset configuration";
-                    "error" => InlineErrorChain::new(&err),
-                );
-                continue;
-            }
-        };
-        for mountpoint in mountpoints {
+        for mountpoint in storage.artifact_storage_paths().await {
             let mut read_dir = match tokio::fs::read_dir(&mountpoint).await {
                 Ok(read_dir) => read_dir,
                 Err(err) => {
@@ -612,23 +590,17 @@ async fn delete_reconciler<T: DatasetsManager>(
 pub(crate) trait DatasetsManager: Clone + Send + Sync + 'static {
     fn artifact_storage_paths(
         &self,
-    ) -> impl Future<
-        Output = Result<
-            impl Iterator<Item = Utf8PathBuf> + Send + '_,
-            StorageError,
-        >,
-    > + Send;
+    ) -> impl Future<Output = impl Iterator<Item = Utf8PathBuf> + Send + '_> + Send;
 }
 
 impl DatasetsManager for StorageHandle {
     async fn artifact_storage_paths(
         &self,
-    ) -> Result<impl Iterator<Item = Utf8PathBuf> + '_, StorageError> {
-        Ok(self
-            .get_latest_disks()
+    ) -> impl Iterator<Item = Utf8PathBuf> + '_ {
+        self.get_latest_disks()
             .await
             .all_m2_mountpoints(M2_ARTIFACT_DATASET)
-            .into_iter())
+            .into_iter()
     }
 }
 
@@ -934,13 +906,12 @@ mod test {
         DatasetConfig, DatasetKind, DatasetName, DatasetsConfig,
         SharedDatasetConfig,
     };
-    use omicron_common::update::ArtifactHash;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::{DatasetUuid, ZpoolUuid};
     use sled_agent_api::ArtifactConfig;
-    use sled_storage::error::Error as StorageError;
     use tokio::io::AsyncReadExt;
+    use tufaceous_artifact::ArtifactHash;
 
     use super::{ArtifactStore, DatasetsManager, Error};
 
@@ -980,16 +951,14 @@ mod test {
     impl DatasetsManager for TestBackend {
         async fn artifact_storage_paths(
             &self,
-        ) -> Result<impl Iterator<Item = camino::Utf8PathBuf> + '_, StorageError>
-        {
-            Ok(self
-                .datasets
+        ) -> impl Iterator<Item = camino::Utf8PathBuf> + '_ {
+            self.datasets
                 .datasets
                 .values()
                 .filter(|dataset| *dataset.name.kind() == DatasetKind::Update)
                 .map(|dataset| {
                     dataset.name.mountpoint(self.mountpoint_root.path())
-                }))
+                })
         }
     }
 
@@ -1024,7 +993,7 @@ mod test {
 
         let log = test_setup_log("generations");
         let backend = TestBackend::new(2);
-        let store = ArtifactStore::new(&log.log, backend).await.unwrap();
+        let store = ArtifactStore::new(&log.log, backend).await;
 
         // get_config returns None
         assert!(store.get_config().is_none());
@@ -1077,7 +1046,7 @@ mod test {
     async fn list_get_put() {
         let log = test_setup_log("list_get_put");
         let backend = TestBackend::new(2);
-        let mut store = ArtifactStore::new(&log.log, backend).await.unwrap();
+        let mut store = ArtifactStore::new(&log.log, backend).await;
 
         // get fails, because it doesn't exist yet
         assert!(matches!(
@@ -1156,8 +1125,7 @@ mod test {
         }
 
         // all datasets should have the artifact
-        for mountpoint in store.storage.artifact_storage_paths().await.unwrap()
-        {
+        for mountpoint in store.storage.artifact_storage_paths().await {
             assert_eq!(
                 tokio::fs::read(mountpoint.join(TEST_HASH.to_string()))
                     .await
@@ -1183,8 +1151,7 @@ mod test {
             Err(Error::NotFound { .. })
         ));
         // all datasets should no longer have the artifact
-        for mountpoint in store.storage.artifact_storage_paths().await.unwrap()
-        {
+        for mountpoint in store.storage.artifact_storage_paths().await {
             assert!(!mountpoint.join(TEST_HASH.to_string()).exists());
         }
 
@@ -1199,7 +1166,7 @@ mod test {
 
         let log = test_setup_log("no_dataset");
         let backend = TestBackend::new(0);
-        let store = ArtifactStore::new(&log.log, backend).await.unwrap();
+        let store = ArtifactStore::new(&log.log, backend).await;
 
         assert!(matches!(
             store.get(TEST_HASH).await,
@@ -1227,7 +1194,7 @@ mod test {
 
         let log = test_setup_log("wrong_hash");
         let backend = TestBackend::new(2);
-        let store = ArtifactStore::new(&log.log, backend).await.unwrap();
+        let store = ArtifactStore::new(&log.log, backend).await;
         let mut config = ArtifactConfig {
             generation: 1u32.into(),
             artifacts: BTreeSet::new(),

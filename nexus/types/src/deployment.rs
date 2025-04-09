@@ -36,7 +36,6 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
-use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -53,6 +52,8 @@ use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use strum::EnumIter;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactHashId;
 use tufaceous_artifact::ArtifactVersion;
 
 mod blueprint_diff;
@@ -64,7 +65,11 @@ mod planning_input;
 mod tri_map;
 mod zone_type;
 
+use crate::inventory::BaseboardId;
+pub use blueprint_diff::BlueprintDiffSummary;
+use blueprint_display::BpPendingMgsUpdates;
 pub use clickhouse::ClickhouseClusterConfig;
+use gateway_client::types::SpType;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
@@ -92,6 +97,7 @@ pub use planning_input::SledLookupError;
 pub use planning_input::SledLookupErrorKind;
 pub use planning_input::SledResources;
 pub use planning_input::ZpoolFilter;
+use std::sync::Arc;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
 pub use zone_type::blueprint_zone_type;
@@ -101,13 +107,6 @@ use blueprint_display::{
     BpTable, BpTableData, BpTableRow, KvListWithHeading, constants::*,
 };
 use id_map::{IdMap, IdMappable};
-
-use crate::inventory::BaseboardId;
-pub use blueprint_diff::BlueprintDiffSummary;
-use blueprint_display::BpPendingMgsUpdates;
-use gateway_client::types::SpType;
-use omicron_common::update::ArtifactHashId;
-use std::sync::Arc;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -975,7 +974,7 @@ pub enum BlueprintZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     #[serde(rename_all = "snake_case")]
-    Artifact { version: ArtifactVersion, hash: ArtifactHash },
+    Artifact { version: BlueprintZoneImageVersion, hash: ArtifactHash },
 }
 
 impl From<BlueprintZoneImageSource> for OmicronZoneImageSource {
@@ -998,7 +997,45 @@ impl fmt::Display for BlueprintZoneImageSource {
                 write!(f, "install dataset")
             }
             BlueprintZoneImageSource::Artifact { version, hash: _ } => {
-                write!(f, "artifact: version {version}")
+                write!(f, "artifact: {version}")
+            }
+        }
+    }
+}
+
+/// The version of a blueprint zone image in use.
+///
+/// This is used for debugging output.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    Diffable,
+)]
+#[serde(tag = "image_version", rename_all = "snake_case")]
+pub enum BlueprintZoneImageVersion {
+    /// A specific version of the image is available.
+    Available { version: ArtifactVersion },
+
+    /// The version could not be determined. This is non-fatal.
+    Unknown,
+}
+
+impl fmt::Display for BlueprintZoneImageVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlueprintZoneImageVersion::Available { version } => {
+                write!(f, "version {version}")
+            }
+            BlueprintZoneImageVersion::Unknown => {
+                write!(f, "(unknown version)")
             }
         }
     }
@@ -1080,6 +1117,9 @@ pub struct PendingMgsUpdate {
 
     /// which artifact to apply to this device
     /// (implies which component is being updated)
+    // XXX-dap remove daft(ignore) once this lands in Omicron:
+    // https://github.com/oxidecomputer/tufaceous/pull/27
+    #[daft(ignore)]
     pub artifact_hash_id: ArtifactHashId,
     pub artifact_version: ArtifactVersion,
 }

@@ -5,7 +5,7 @@
 //! Makes artifact contents available for use in updates
 
 use futures::TryStreamExt;
-use omicron_common::update::ArtifactHash;
+use tufaceous_artifact::ArtifactHash;
 use sha2::{Digest, Sha256};
 use std::sync::{
     Arc,
