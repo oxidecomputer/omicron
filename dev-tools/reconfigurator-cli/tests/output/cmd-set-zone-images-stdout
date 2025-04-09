@@ -2,6 +2,7 @@ using provided RNG seed: test_set_zone_images
 > # Load example system
 
 > load-example --nsleds 1 --ndisks-per-sled 3
+ERRO oximeter policy error: no oximeter read policy has been implemented yet. Defaulting to reading from single node, component: ExampleSystem, rng_seed: "test_set_zone_images", component: BlueprintBuilder, parent_id: 1b013011-2062-4b48-b544-a32b23bce83a
 loaded example system with:
 - collection: 0141c1ff-0f12-4bb6-b3c5-14fa3be0eaf3
 - blueprint: 971eeb12-1830-4fa0-a699-98ea0164505c
@@ -87,6 +88,10 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     state fingerprint:::::::::::::::::   (none)
     cluster.preserve_downgrade_option:   (do not modify)
 
+ OXIMETER SETTINGS:
+    generation:   0
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   test suite
     created at:::::::::::   <REDACTED_TIMESTAMP>
@@ -101,10 +106,12 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
 > # Set a couple zones' image sources to specific artifacts.
 
 > blueprint-edit 971eeb12-1830-4fa0-a699-98ea0164505c set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact 1.2.3 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+ERRO oximeter policy error: no oximeter read policy has been implemented yet. Defaulting to reading from single node, component: BlueprintBuilder, parent_id: 971eeb12-1830-4fa0-a699-98ea0164505c
 blueprint 9766ca20-38d4-4380-b005-e7c43c797e7c created from blueprint 971eeb12-1830-4fa0-a699-98ea0164505c: set sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 zone 026f8db9-b966-45ec-bf89-fb7b41a04cc9 image source to artifact: version 1.2.3
 warn: no validation is done on the requested image source
 
 > blueprint-edit 9766ca20-38d4-4380-b005-e7c43c797e7c set-zone-image 72d12821-646d-4296-a081-ef5fb3a0ca24 artifact valid-non-semver 7b4281a6bd5946bb96b332c62afe289bef275e58b9ba031085f8827655f434b3
+ERRO oximeter policy error: no oximeter read policy has been implemented yet. Defaulting to reading from single node, component: BlueprintBuilder, parent_id: 9766ca20-38d4-4380-b005-e7c43c797e7c
 blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176 created from blueprint 9766ca20-38d4-4380-b005-e7c43c797e7c: set sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 zone 72d12821-646d-4296-a081-ef5fb3a0ca24 image source to artifact: version valid-non-semver
 warn: no validation is done on the requested image source
 
@@ -190,6 +197,10 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none)
     cluster.preserve_downgrade_option:   (do not modify)
+
+ OXIMETER SETTINGS:
+    generation:   0
+    read from::   SingleNode
 
  METADATA:
     created by:::::::::::   reconfigurator-cli
@@ -289,6 +300,10 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
     internal DNS version:   1 (unchanged)
     external DNS version:   1 (unchanged)
 
+ OXIMETER SETTINGS:
+    generation:   0 (unchanged)
+    read from::   SingleNode (unchanged)
+
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
@@ -371,10 +386,12 @@ external DNS:
 > # Set these zones' image sources back to the install dataset.
 
 > blueprint-edit f714e6ea-e85a-4d7d-93c2-a018744fe176 set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 install-dataset
+ERRO oximeter policy error: no oximeter read policy has been implemented yet. Defaulting to reading from single node, component: BlueprintBuilder, parent_id: f714e6ea-e85a-4d7d-93c2-a018744fe176
 blueprint bb128f06-a2e1-44c1-8874-4f789d0ff896 created from blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176: set sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 zone 026f8db9-b966-45ec-bf89-fb7b41a04cc9 image source to install dataset
 warn: no validation is done on the requested image source
 
 > blueprint-edit bb128f06-a2e1-44c1-8874-4f789d0ff896 set-zone-image 72d12821-646d-4296-a081-ef5fb3a0ca24 install-dataset
+ERRO oximeter policy error: no oximeter read policy has been implemented yet. Defaulting to reading from single node, component: BlueprintBuilder, parent_id: bb128f06-a2e1-44c1-8874-4f789d0ff896
 blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9 created from blueprint bb128f06-a2e1-44c1-8874-4f789d0ff896: set sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 zone 72d12821-646d-4296-a081-ef5fb3a0ca24 image source to install dataset
 warn: no validation is done on the requested image source
 
@@ -458,6 +475,10 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none)
     cluster.preserve_downgrade_option:   (do not modify)
+
+ OXIMETER SETTINGS:
+    generation:   0
+    read from::   SingleNode
 
  METADATA:
     created by:::::::::::   reconfigurator-cli
@@ -556,6 +577,10 @@ to:   blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9
  METADATA:
     internal DNS version:   1 (unchanged)
     external DNS version:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   0 (unchanged)
+    read from::   SingleNode (unchanged)
 
 
 internal DNS:

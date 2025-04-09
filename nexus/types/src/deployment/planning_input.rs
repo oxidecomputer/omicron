@@ -14,6 +14,7 @@ use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
+use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use clap::ValueEnum;
@@ -171,13 +172,16 @@ impl PlanningInput {
         clickhouse_policy.mode.single_node_enabled()
     }
 
-    pub fn oximeter_read_settings(&self) -> &OximeterReadPolicy {
+    pub fn oximeter_read_settings(
+        &self,
+    ) -> anyhow::Result<&OximeterReadPolicy> {
         let Some(oximeter_read_policy) = &self.policy.oximeter_read_policy
         else {
-            // TODO-K: fix this. Do I need an option??? There's always a policy
-            panic!("CHANGE ME")
+            return Err(anyhow!(
+                "no oximeter read policy has been implemented yet"
+            ));
         };
-        oximeter_read_policy
+        Ok(oximeter_read_policy)
     }
 
     pub fn oximeter_cluster_read_enabled(&self) -> bool {

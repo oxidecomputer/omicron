@@ -688,6 +688,23 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
         });
+
+        let (oximeter_read_mode, oximeter_read_version) = match self
+            .input
+            .oximeter_read_settings()
+        {
+            Ok(p) => (p.mode.clone(), p.version),
+            Err(e) => {
+                // This should never really be reached. The policy will only be
+                // None in the `SystemDescription` testing struct.
+                error!(
+                    self.log,
+                    "oximeter policy error: {e}. Defaulting to reading from single node"
+                );
+                (OximeterReadMode::SingleNode, 0)
+            }
+        };
+
         Blueprint {
             id: blueprint_id,
             sleds,
@@ -702,16 +719,8 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
             clickhouse_cluster_config,
-            oximeter_read_version: self
-                .input
-                .oximeter_read_settings()
-                .version
-                .into(),
-            oximeter_read_mode: self
-                .input
-                .oximeter_read_settings()
-                .mode
-                .clone(),
+            oximeter_read_version: oximeter_read_version.into(),
+            oximeter_read_mode,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self
