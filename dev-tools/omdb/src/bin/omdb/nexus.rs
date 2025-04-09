@@ -389,7 +389,7 @@ struct OximeterReadPolicySetArgs {
 enum OximeterReadPolicyMode {
     /// Read from the clickhouse single node
     SingleNode,
-    // Read from the clickhouse cluster
+    /// Read from the clickhouse cluster
     Cluster,
 }
 

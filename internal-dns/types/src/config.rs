@@ -432,6 +432,8 @@ impl DnsConfigBuilder {
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(http_service, &zone, http_address.port())?;
 
+        // TODO-K: add oximeter reader? maybe not, oximeter reader could point to native instead
+        // maybe we read DB and set oximeter reader?
         self.service_backend_zone(
             ServiceName::ClickhouseNative,
             &zone,
@@ -478,6 +480,7 @@ impl DnsConfigBuilder {
         );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(http_service, &zone, http_address.port())?;
+        // TODO-K: add oximeter reader? maybe not, oximeter reader could point to native instead
         self.service_backend_zone(
             ServiceName::ClickhouseClusterNative,
             &zone,

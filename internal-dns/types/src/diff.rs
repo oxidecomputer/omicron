@@ -29,6 +29,7 @@ pub struct DnsDiff<'a> {
     all_names: BTreeSet<&'a String>,
 }
 
+// TODO-K: this is where we diff DNS records
 impl<'a> DnsDiff<'a> {
     /// Compare the DNS records contained in two DNS zones' configs
     ///

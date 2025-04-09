@@ -40,6 +40,7 @@ use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
+use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
@@ -461,6 +462,8 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             clickhouse_cluster_config: None,
+            oximeter_read_version: Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("starting blueprint with {num_sleds} empty sleds"),
@@ -699,6 +702,17 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
             clickhouse_cluster_config,
+            // TODO-K: maybe these two should be one object
+            oximeter_read_version: self
+                .input
+                .oximeter_read_settings()
+                .version
+                .into(),
+            oximeter_read_mode: self
+                .input
+                .oximeter_read_settings()
+                .mode
+                .clone(),
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self

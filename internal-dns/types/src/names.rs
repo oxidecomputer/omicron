@@ -48,6 +48,7 @@ pub enum ServiceName {
     ExternalDns,
     Nexus,
     Oximeter,
+    // TODO-K: add oximeter reader?
     ManagementGatewayService,
     Wicketd,
     Dendrite,

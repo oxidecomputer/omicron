@@ -37,6 +37,7 @@ pub enum ExecutionComponent {
     Dns,
     Cockroach,
     Clickhouse,
+    Oximeter,
 }
 
 /// Steps for reconfigurator execution.

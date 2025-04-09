@@ -37,6 +37,7 @@ use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::error;
 use std::fmt;
+use strum::Display;
 use strum::IntoEnumIterator;
 
 /// Policy and database inputs to the Reconfigurator planner
@@ -168,6 +169,15 @@ impl PlanningInput {
             return true;
         };
         clickhouse_policy.mode.single_node_enabled()
+    }
+
+    pub fn oximeter_read_settings(&self) -> &OximeterReadPolicy {
+        let Some(oximeter_read_policy) = &self.policy.oximeter_read_policy
+        else {
+            // TODO-K: fix this. Do I need an option??? There's always a policy
+            panic!("CHANGE ME")
+        };
+        oximeter_read_policy
     }
 
     pub fn oximeter_cluster_read_enabled(&self) -> bool {
@@ -929,11 +939,22 @@ pub struct Policy {
 pub struct OximeterReadPolicy {
     pub version: u32,
     pub mode: OximeterReadMode,
+    // TODO-K: Do I need time created?
     pub time_created: DateTime<Utc>,
 }
 
 /// Where oximeter should read from
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug,
+    Display,
+    Clone,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Diffable,
+)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum OximeterReadMode {
     SingleNode,

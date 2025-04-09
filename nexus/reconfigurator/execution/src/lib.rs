@@ -25,13 +25,13 @@ use tokio::sync::mpsc;
 use update_engine::StepSuccess;
 use update_engine::StepWarning;
 use update_engine::merge_anyhow_list;
-
 mod clickhouse;
 mod cockroachdb;
 mod dns;
 mod omicron_physical_disks;
 mod omicron_sled_config;
 mod omicron_zones;
+mod oximeter;
 mod sagas;
 mod sled_state;
 #[cfg(test)]
@@ -237,6 +237,12 @@ pub async fn realize_blueprint(
         &engine.for_component(ExecutionComponent::Clickhouse),
         &opctx,
         blueprint,
+    );
+
+    register_reroute_oximeter_reads_step(
+        &engine.for_component(ExecutionComponent::Oximeter),
+        &opctx,
+        datastore,
     );
 
     register_support_bundle_failure_step(
@@ -526,6 +532,7 @@ fn register_decommission_disks_step<'a>(
         .register();
 }
 
+// TODO-K: Steps for execution
 fn register_deploy_clickhouse_cluster_nodes_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
@@ -567,6 +574,24 @@ fn register_deploy_clickhouse_single_node_step<'a>(
             async move |_cx| {
                 let res =
                     clickhouse::deploy_single_node(opctx, blueprint).await;
+                Ok(map_err_to_step_warning(res))
+            },
+        )
+        .register();
+}
+
+fn register_reroute_oximeter_reads_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    datastore: &'a DataStore,
+    //    blueprint: &'a Blueprint,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Re-route oximeter to read from a single node or cluster",
+            async move |_cx| {
+                let res = oximeter::reroute_reads(opctx, datastore).await;
                 Ok(map_err_to_step_warning(res))
             },
         )

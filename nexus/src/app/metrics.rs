@@ -170,6 +170,7 @@ impl super::Nexus {
             authz_project.id()
         );
 
+        // TODO-K: change here if we check DB with every API call
         self.timeseries_client
             .oxql_query(filtered_query)
             .await

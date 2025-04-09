@@ -195,6 +195,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         Blueprint, BlueprintTarget, CockroachDbPreserveDowngrade,
+        OximeterReadMode,
     };
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -224,6 +225,8 @@ mod test {
                 external_dns_version: Generation::new(),
                 cockroachdb_fingerprint: String::new(),
                 clickhouse_cluster_config: None,
+                oximeter_read_version: Generation::new(),
+                oximeter_read_mode: OximeterReadMode::SingleNode,
                 time_created: now_db_precision(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),

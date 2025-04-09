@@ -932,6 +932,15 @@ lookup_resource! {
     ]
 }
 
+// TODO-K: only use this if I want to check everytime an API call is made
+// lookup_resource! {
+//     name = "OximeterReadPolicy",
+//     ancestors = [],
+//     lookup_by_name = false,
+//     soft_deletes = false,
+//     primary_key_columns = [ { column_name = "oximeter_read_mode", rust_type = TufArtifactKind } ]
+// }
+
 // Helpers for unifying the interfaces around images
 
 pub enum ImageLookup<'a> {

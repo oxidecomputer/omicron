@@ -180,6 +180,12 @@ pub struct Blueprint {
     #[daft(leaf)]
     pub clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
 
+    /// Oximeter read policy version when this blueprint was created
+    pub oximeter_read_version: Generation,
+
+    /// Whether oximeter should read from a single node or a cluster
+    pub oximeter_read_mode: OximeterReadMode,
+
     /// when this blueprint was generated (for debugging)
     #[daft(ignore)]
     pub time_created: chrono::DateTime<chrono::Utc>,
@@ -436,6 +442,19 @@ impl BlueprintDisplay<'_> {
         )
     }
 
+    fn make_oximeter_table(&self) -> KvListWithHeading {
+        KvListWithHeading::new_unchanged(
+            OXIMETER_HEADING,
+            vec![
+                (GENERATION, self.blueprint.oximeter_read_version.to_string()),
+                (
+                    OXIMETER_READ_FROM,
+                    self.blueprint.oximeter_read_mode.to_string(),
+                ),
+            ],
+        )
+    }
+
     fn make_metadata_table(&self) -> KvListWithHeading {
         let comment = if self.blueprint.comment.is_empty() {
             NONE_PARENS.to_string()
@@ -498,6 +517,9 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // Handled by `make_clickhouse_cluster_config_tables()`, called
             // below.
             clickhouse_cluster_config: _,
+            // Handled by `make_oximeter_table`, called below.
+            oximeter_read_version: _,
+            oximeter_read_mode: _,
             // These five fields are handled by `make_metadata_table()`, called
             // below.
             internal_dns_version: _,
@@ -569,6 +591,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
         }
 
         writeln!(f, "{}", self.make_cockroachdb_table())?;
+        writeln!(f, "{}", self.make_oximeter_table())?;
         writeln!(f, "{}", self.make_metadata_table())?;
 
         Ok(())
