@@ -12,6 +12,8 @@ use anyhow::Result;
 use anyhow::bail;
 use anyhow::ensure;
 use cargo_metadata::Metadata;
+use dev_tools_common::CargoLocation;
+use dev_tools_common::cargo_command;
 use indent_write::io::IndentWriter;
 use omicron_zone_package::config::PackageMap;
 use omicron_zone_package::config::PackageName;
@@ -128,9 +130,10 @@ impl CargoTargets<'_> {
             return None;
         }
 
-        let mut cmd = Command::new("cargo");
         // We rely on the rust-toolchain.toml file for toolchain information,
-        // rather than specifying one within the packaging tool.
+        // rather than specifying one within the packaging tool or using the
+        // `CARGO` environment variable.
+        let mut cmd = Command::from(cargo_command(CargoLocation::Fixed));
         cmd.arg(command);
         // We specify _both_ --package and --bin; --bin does not imply
         // --package, and without any --package options Cargo unifies features

@@ -30,6 +30,7 @@ members = [
     "dev-tools/clickana",
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
+    "dev-tools/common",
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
     "dev-tools/downloader",
@@ -170,6 +171,7 @@ default-members = [
     "dev-tools/clickana",
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
+    "dev-tools/common",
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
     "dev-tools/downloader",
@@ -383,6 +385,7 @@ db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.19"
 derive-where = "1.2.7"
+dev-tools-common = { path = "dev-tools/common" }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.2.8", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
