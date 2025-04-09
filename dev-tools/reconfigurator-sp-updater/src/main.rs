@@ -26,6 +26,7 @@ use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::inventory::BaseboardId;
+use qorb::resolver::Resolver;
 use reedline::{Reedline, Signal};
 use slog::{info, o, warn};
 use std::collections::BTreeMap;
@@ -132,13 +133,12 @@ impl ReconfiguratorSpUpdater {
             .context("loading inventory")?;
         info!(&log, "loaded inventory from MGS");
 
-        let repo_depot_url = format!("http://{}", self.repo_depot_addr);
-        let repo_depot_client = repo_depot_client::Client::new(
-            &repo_depot_url,
-            log.new(o!("repo_depot_url" => repo_depot_url.clone())),
-        );
-        let artifact_cache =
-            Arc::new(ArtifactCache::new_one_client(repo_depot_client));
+        let mut repo_depot_resolver =
+            internal_dns_resolver::StaticResolver::new([self.repo_depot_addr]);
+        let artifact_cache = Arc::new(ArtifactCache::new(
+            log.clone(),
+            repo_depot_resolver.monitor(),
+        ));
 
         let (requests_tx, requests_rx) =
             watch::channel(PendingMgsUpdates::new());
@@ -150,9 +150,7 @@ impl ReconfiguratorSpUpdater {
             mgs_rx,
         );
         let status_rx = driver.status_rx();
-        let driver_task = tokio::spawn(async move {
-            driver.run().await;
-        });
+        let driver_task = tokio::spawn(async move { driver.run().await });
 
         let mut updater_state =
             UpdaterState { requests_tx, status_rx, inventory };
@@ -182,6 +180,7 @@ impl ReconfiguratorSpUpdater {
 
         info!(&log, "waiting for qorb to shut down");
         mgs_resolver.terminate().await;
+        repo_depot_resolver.terminate().await;
         info!(&log, "waiting for driver task to stop");
         driver_task.await.context("waiting for driver task")?;
 

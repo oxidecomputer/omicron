@@ -24,7 +24,8 @@ use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use slog::{debug, info, o};
+use qorb::resolver::Resolver;
+use slog::{debug, info};
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::num::NonZeroU32;
@@ -196,21 +197,20 @@ impl ReconfiguratorExec {
                 .into_iter()
                 .next()
                 .ok_or_else(|| anyhow!("found no sleds with TUF artifacts"))?;
-            let repo_depot_url = format!(
-                "http://{}",
-                SocketAddrV6::new(
-                    *repo_depot_sled.ip,
-                    *repo_depot_sled.repo_depot_port,
-                    0,
-                    0
-                )
+            let repo_depot_addr = SocketAddrV6::new(
+                *repo_depot_sled.ip,
+                *repo_depot_sled.repo_depot_port,
+                0,
+                0,
             );
-            let repo_depot_client = repo_depot_client::Client::new(
-                &repo_depot_url,
-                log.new(o!("repo_depot_url" => repo_depot_url.clone())),
-            );
-            let artifact_cache =
-                Arc::new(ArtifactCache::new_one_client(repo_depot_client));
+            let mut repo_depot_resolver =
+                internal_dns_resolver::StaticResolver::new([SocketAddr::from(
+                    repo_depot_addr,
+                )]);
+            let artifact_cache = Arc::new(ArtifactCache::new(
+                log.clone(),
+                repo_depot_resolver.monitor(),
+            ));
             let (requests_tx, requests_rx) =
                 watch::channel(PendingMgsUpdates::new());
             let driver = MgsUpdateDriver::new(
@@ -223,7 +223,7 @@ impl ReconfiguratorExec {
             let driver_task = tokio::spawn(async move {
                 driver.run().await;
             });
-            (requests_tx, Some((driver_task, status_rx)))
+            (requests_tx, Some((driver_task, status_rx, repo_depot_resolver)))
         } else {
             let (mgs_updates, _rx) = watch::channel(PendingMgsUpdates::new());
             (mgs_updates, None)
@@ -267,7 +267,7 @@ impl ReconfiguratorExec {
         }
         line_display.write_event_buffer(&event_buffer)?;
 
-        if let Some((driver_task, status_rx)) = mgs {
+        if let Some((driver_task, status_rx, mut repo_depot_resolver)) = mgs {
             let nupdates = blueprint.pending_mgs_updates.len();
             info!(
                 &log,
@@ -292,6 +292,8 @@ impl ReconfiguratorExec {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             }
 
+            info!(&log, "waiting for repo depot resolver to stop");
+            repo_depot_resolver.terminate().await;
             info!(&log, "waiting for driver to stop");
             driver_task.await.context("waiting for driver to stop")?;
         }

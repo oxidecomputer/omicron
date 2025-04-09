@@ -5,14 +5,13 @@
 //! Makes artifact contents available for use in updates
 
 use futures::TryStreamExt;
-use tufaceous_artifact::ArtifactHash;
 use sha2::{Digest, Sha256};
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
+use slog::o;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use thiserror::Error;
 use tokio::{io::AsyncWriteExt, sync::watch};
+use tufaceous_artifact::ArtifactHash;
 
 // XXX-dap want omdb-based introspection, control
 // XXX-dap in an ideal world this would load everything it needs in the
@@ -24,25 +23,20 @@ use tokio::{io::AsyncWriteExt, sync::watch};
 type RepoDepotError = repo_depot_client::Error<repo_depot_client::types::Error>;
 
 pub struct ArtifactCache {
-    client_rx: watch::Receiver<Vec<Arc<repo_depot_client::Client>>>,
+    log: slog::Logger,
+    client_rx: watch::Receiver<qorb::resolver::AllBackends>,
     next: AtomicUsize,
 }
 
 impl ArtifactCache {
     pub fn new(
-        client_rx: watch::Receiver<Vec<Arc<repo_depot_client::Client>>>,
+        log: slog::Logger,
+        client_rx: watch::Receiver<qorb::resolver::AllBackends>,
     ) -> ArtifactCache {
-        ArtifactCache { client_rx, next: AtomicUsize::new(0) }
+        ArtifactCache { log, client_rx, next: AtomicUsize::new(0) }
     }
 
-    pub fn new_one_client(client: repo_depot_client::Client) -> ArtifactCache {
-        let (_, client_rx) = watch::channel(vec![Arc::new(client)]);
-        ArtifactCache::new(client_rx)
-    }
-
-    fn client(
-        &self,
-    ) -> Result<Arc<repo_depot_client::Client>, ArtifactCacheError> {
+    fn client(&self) -> Result<repo_depot_client::Client, ArtifactCacheError> {
         // It's important that we drop the borrowed value before returning so
         // that we don't keep the watch channel locked.
         //
@@ -53,7 +47,11 @@ impl ArtifactCache {
         if clients.is_empty() {
             Err(ArtifactCacheError::NoClients)
         } else {
-            Ok(clients[idx % clients.len()].clone())
+            let addresses: Vec<_> = clients.values().collect();
+            let addr = addresses[idx % addresses.len()];
+            let url = format!("http://{}", addr.address);
+            let log = self.log.new(o!("repo_depot_url" => url.clone()));
+            Ok(repo_depot_client::Client::new(&url, log))
         }
     }
 

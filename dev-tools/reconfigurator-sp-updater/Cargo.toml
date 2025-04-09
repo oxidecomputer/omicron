@@ -24,6 +24,7 @@ nexus-reconfigurator-execution.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+qorb.workspace = true
 reedline.workspace = true
 repo-depot-client.workspace = true
 serde_json.workspace = true

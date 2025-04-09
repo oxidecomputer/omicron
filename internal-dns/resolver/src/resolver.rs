@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use async_trait::async_trait;
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{
     LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
@@ -13,6 +14,8 @@ use omicron_common::address::{
 };
 use slog::{debug, error, info, trace};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::sync::Arc;
+use tokio::sync::watch;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ResolveError {
@@ -64,6 +67,38 @@ impl QorbResolver {
             config,
         ))
     }
+}
+
+// XXX-dap consider moving to qorb
+
+pub struct StaticResolver {
+    rx: watch::Receiver<qorb::resolver::AllBackends>,
+}
+
+impl StaticResolver {
+    pub fn new(addrs: impl IntoIterator<Item = SocketAddr>) -> StaticResolver {
+        let all_backends = Arc::new(
+            addrs
+                .into_iter()
+                .map(|address| {
+                    (
+                        qorb::backend::Name::new(address),
+                        qorb::backend::Backend { address },
+                    )
+                })
+                .collect(),
+        );
+        let (_, rx) = watch::channel(all_backends);
+        StaticResolver { rx }
+    }
+}
+
+#[async_trait]
+impl qorb::resolver::Resolver for StaticResolver {
+    fn monitor(&mut self) -> watch::Receiver<qorb::resolver::AllBackends> {
+        self.rx.clone()
+    }
+    async fn terminate(&mut self) {}
 }
 
 /// A wrapper around a DNS resolver, providing a way to conveniently

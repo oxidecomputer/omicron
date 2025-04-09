@@ -31,6 +31,7 @@ pub struct BlueprintExecutor {
     nexus_id: OmicronZoneUuid,
     tx: watch::Sender<usize>,
     saga_recovery: Activator,
+    mgs_update_tx: watch::Sender<PendingMgsUpdates>,
 }
 
 impl BlueprintExecutor {
@@ -42,6 +43,7 @@ impl BlueprintExecutor {
         >,
         nexus_id: OmicronZoneUuid,
         saga_recovery: Activator,
+        mgs_update_tx: watch::Sender<PendingMgsUpdates>,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
         BlueprintExecutor {
@@ -51,6 +53,7 @@ impl BlueprintExecutor {
             nexus_id,
             tx,
             saga_recovery,
+            mgs_update_tx,
         }
     }
 
@@ -101,8 +104,6 @@ impl BlueprintExecutor {
             event_buffer.generate_report()
         });
 
-        // XXX-dap
-        let (mgs_updates, _rx) = watch::channel(PendingMgsUpdates::new());
         let result = nexus_reconfigurator_execution::realize_blueprint(
             RequiredRealizeArgs {
                 opctx,
@@ -111,7 +112,7 @@ impl BlueprintExecutor {
                 creator: self.nexus_id,
                 blueprint,
                 sender,
-                mgs_updates,
+                mgs_updates: self.mgs_update_tx.clone(),
             }
             .as_nexus(self.nexus_id),
         )
@@ -360,12 +361,14 @@ mod test {
         }
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
+        let (dummy_tx, _dummy_rx) = watch::channel(PendingMgsUpdates::new());
         let mut task = BlueprintExecutor::new(
             datastore.clone(),
             resolver.clone(),
             blueprint_rx,
             OmicronZoneUuid::new_v4(),
             Activator::new(),
+            dummy_tx,
         );
 
         // Now we're ready.
