@@ -6806,18 +6806,22 @@ fn inv_collection_print_sleds(collection: &Collection) {
             println!("        reservation: {reservation:?}, quota: {quota:?}");
         }
 
+        let Some(ledgered_sled_config) = sled.ledgered_sled_config.as_ref()
+        else {
+            println!("    no ledgered sled config");
+            continue;
+        };
+
         println!(
-            "    zones generation: {} (count: {})",
-            sled.omicron_zones.generation,
-            sled.omicron_zones.zones.len(),
+            "    legered config generation: {}",
+            ledgered_sled_config.generation,
         );
 
-        if sled.omicron_zones.zones.is_empty() {
-            continue;
-        }
-
-        println!("    ZONES FOUND");
-        for z in &sled.omicron_zones.zones {
+        println!(
+            "    zones in ledgered config: {}",
+            ledgered_sled_config.zones.len()
+        );
+        for z in &ledgered_sled_config.zones {
             println!(
                 "      zone {} (type {})",
                 z.id,

@@ -18,14 +18,14 @@ pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
 pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
@@ -165,10 +165,14 @@ impl Collection {
     }
 
     /// Iterate over all the Omicron zones in the collection
-    pub fn all_omicron_zones(
+    pub fn all_ledgered_omicron_zones(
         &self,
     ) -> impl Iterator<Item = &OmicronZoneConfig> {
-        self.sled_agents.values().flat_map(|sa| sa.omicron_zones.zones.iter())
+        self.sled_agents.values().flat_map(|sa| {
+            sa.ledgered_sled_config
+                .iter()
+                .flat_map(|config| config.zones.iter())
+        })
     }
 
     /// Iterate over the sled ids of sleds identified as Scrimlets
@@ -517,17 +521,11 @@ pub struct SledAgent {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
-    pub omicron_zones: OmicronZonesConfig,
     pub disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
     pub datasets: Vec<Dataset>,
-    /// As part of reconfigurator planning we need to know the control plane
-    /// disks configuration that the sled-agent has seen last. Specifically,
-    /// this allows the planner to know if a disk expungement has been seen by
-    /// the sled-agent, so that the planner can decommission the expunged disk.
-    ///
-    /// This field corresponds to the `generation` field in
-    /// `OmicronPhysicalDisksConfig` that is stored in the blueprint and sent to
-    /// the sled-agent via the executor over the internal API.
-    pub omicron_physical_disks_generation: Generation,
+    pub ledgered_sled_config: Option<OmicronSledConfig>,
+    // TODO-john this is optional for backwards compatibility - can we make it
+    // non-optional?
+    pub config_reconciler: Option<ConfigReconcilerInventory>,
 }

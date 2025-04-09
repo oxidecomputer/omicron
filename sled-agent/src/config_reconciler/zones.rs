@@ -15,6 +15,7 @@ use illumos_utils::zone::Api as _;
 use illumos_utils::zone::DeleteAddressError;
 use illumos_utils::zone::Zones;
 use illumos_utils::zpool::ZpoolName;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::address::Ipv6Subnet;
@@ -103,7 +104,7 @@ pub struct ZoneMap {
 impl ZoneMap {
     pub(super) fn to_inventory(
         &self,
-    ) -> BTreeMap<OmicronZoneUuid, Result<(), String>> {
+    ) -> BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult> {
         self.zones
             .iter()
             .map(|zone| {
@@ -118,7 +119,7 @@ impl ZoneMap {
                         InlineErrorChain::new(&err)
                     )),
                 };
-                (zone.config.id, result)
+                (zone.config.id, result.into())
             })
             .collect()
     }

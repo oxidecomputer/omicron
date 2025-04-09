@@ -6355,6 +6355,7 @@ dependencies = [
  "daft",
  "id-map",
  "illumos-utils",
+ "itertools 0.14.0",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",

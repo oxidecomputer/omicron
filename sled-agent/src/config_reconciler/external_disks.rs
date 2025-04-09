@@ -6,6 +6,7 @@ use id_map::IdMap;
 use id_map::IdMappable;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use omicron_common::disk::DiskManagementError;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
@@ -64,7 +65,7 @@ impl ExternalDiskMap {
 
     pub(super) fn to_inventory(
         &self,
-    ) -> BTreeMap<PhysicalDiskUuid, Result<(), String>> {
+    ) -> BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult> {
         self.disks
             .iter()
             .map(|disk| {
@@ -74,7 +75,7 @@ impl ExternalDiskMap {
                         Err(InlineErrorChain::new(&err).to_string())
                     }
                 };
-                (disk.config.id, result)
+                (disk.config.id, result.into())
             })
             .collect()
     }

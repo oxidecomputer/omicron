@@ -24,9 +24,8 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
-    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus, Inventory,
-    InventoryDataset, InventoryDisk, InventoryZpool, OmicronSledConfig,
-    OmicronZonesConfig, SledRole,
+    ConfigReconcilerInventory, Inventory, InventoryDataset, InventoryDisk,
+    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -739,37 +738,10 @@ impl SledAgent {
 
         let storage = self.storage.lock();
         let sled_config = self.sled_config.lock().unwrap().clone();
-        let config_reconciler = ConfigReconcilerInventory {
-            last_reconciled_config: sled_config.clone(),
-            external_disks: sled_config
-                .iter()
-                .flat_map(|config| {
-                    config.disks.keys().map(|&disk_id| (disk_id, Ok(())))
-                })
-                .collect(),
-            datasets: sled_config
-                .iter()
-                .flat_map(|config| {
-                    config
-                        .datasets
-                        .keys()
-                        .map(|&dataset_id| (dataset_id, Ok(())))
-                })
-                .collect(),
-            zones: sled_config
-                .iter()
-                .flat_map(|config| {
-                    config.zones.keys().map(|&zone_id| (zone_id, Ok(())))
-                })
-                .collect(),
-            status: if sled_config.is_some() {
-                ConfigReconcilerInventoryStatus::Idle {
-                    ran_for: Duration::from_secs(1),
-                }
-            } else {
-                ConfigReconcilerInventoryStatus::NotYetRun
-            },
-        };
+        let config_reconciler =
+            ConfigReconcilerInventory::assume_reconciliation_success(
+                sled_config.clone(),
+            );
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,

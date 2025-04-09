@@ -17,9 +17,7 @@ use nexus_db_model::Ipv4NatValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-};
+use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
 use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
@@ -127,12 +125,13 @@ impl BackgroundTask for ServiceZoneNatTracker {
 
                 let sled_address = oxnet::Ipv6Net::host_net(*sled.ip);
 
-                let zones_config: OmicronZonesConfig = sa.omicron_zones;
-                let zones: Vec<OmicronZoneConfig> = zones_config.zones;
+                let zones = sa
+                    .config_reconciler
+                    .iter()
+                    .flat_map(|c| c.running_omicron_zones());
 
                 for zone in zones {
-                    let zone_type: OmicronZoneType = zone.zone_type;
-                    match zone_type {
+                    match &zone.zone_type {
                         OmicronZoneType::BoundaryNtp {
                             nic, snat_cfg, ..
                         } => {
@@ -181,7 +180,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
                             };
 
                             let external_address =
-                                oxnet::Ipv4Net::new(external_ip, 32)
+                                oxnet::Ipv4Net::new(*external_ip, 32)
                                     .unwrap();
 
                             let nat_value = Ipv4NatValues {

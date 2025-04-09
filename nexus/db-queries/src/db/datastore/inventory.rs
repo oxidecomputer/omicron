@@ -60,6 +60,8 @@ use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
 use nexus_db_schema::enums::SledRoleEnum;
 use nexus_db_schema::enums::SpTypeEnum;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
@@ -175,14 +177,19 @@ impl DataStore {
             })
             .collect::<Vec<_>>();
 
+        // TODO-john this only records ledgered configs! we also need to record
+        // the reconciled state
+
         // Pull Omicron zones out of all sled agents.
         let omicron_zones: Vec<_> = collection
             .sled_agents
             .iter()
             .flat_map(|(sled_id, sled_agent)| {
-                sled_agent.omicron_zones.zones.iter().map(|zone| {
-                    InvOmicronZone::new(collection_id, *sled_id, zone)
-                        .map_err(|e| Error::internal_error(&e.to_string()))
+                sled_agent.ledgered_sled_config.iter().flat_map(|config| {
+                    config.zones.iter().map(|zone| {
+                        InvOmicronZone::new(collection_id, *sled_id, zone)
+                            .map_err(|e| Error::internal_error(&e.to_string()))
+                    })
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -243,11 +250,17 @@ impl DataStore {
             .sled_agents
             .values()
             .flat_map(|sled_agent| {
-                sled_agent.omicron_zones.zones.iter().filter_map(|found_zone| {
-                    InvOmicronZoneNic::new(collection_id, found_zone)
-                        .with_context(|| format!("zone {:?}", found_zone.id))
-                        .map_err(|e| Error::internal_error(&format!("{:#}", e)))
-                        .transpose()
+                sled_agent.ledgered_sled_config.iter().flat_map(|config| {
+                    config.zones.iter().filter_map(|found_zone| {
+                        InvOmicronZoneNic::new(collection_id, found_zone)
+                            .with_context(|| {
+                                format!("zone {:?}", found_zone.id)
+                            })
+                            .map_err(|e| {
+                                Error::internal_error(&format!("{:#}", e))
+                            })
+                            .transpose()
+                    })
                 })
             })
             .collect::<Result<Vec<InvOmicronZoneNic>, _>>()?;
@@ -892,10 +905,6 @@ impl DataStore {
                                 sled_agent.reservoir_size,
                             )
                             .into_sql::<diesel::sql_types::Int8>(),
-                            nexus_db_model::Generation(
-                                sled_agent.omicron_physical_disks_generation,
-                            )
-                            .into_sql::<diesel::sql_types::Int8>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -921,7 +930,6 @@ impl DataStore {
                                 sa_dsl::usable_hardware_threads,
                                 sa_dsl::usable_physical_ram,
                                 sa_dsl::reservoir_size,
-                                sa_dsl::omicron_physical_disks_generation,
                             ))
                             .execute_async(&conn)
                             .await?;
@@ -2345,6 +2353,14 @@ impl DataStore {
                 continue;
             };
 
+            // TODO-john this is extremely wrong
+            let ledgered_sled_config = Some(OmicronSledConfig {
+                generation: omicron_zones.generation,
+                disks: Default::default(),
+                datasets: Default::default(),
+                zones: omicron_zones.zones.into_iter().collect(),
+            });
+
             let sled_agent = nexus_types::inventory::SledAgent {
                 time_collected: s.time_collected,
                 source: s.source,
@@ -2360,7 +2376,6 @@ impl DataStore {
                 usable_hardware_threads: u32::from(s.usable_hardware_threads),
                 usable_physical_ram: s.usable_physical_ram.into(),
                 reservoir_size: s.reservoir_size.into(),
-                omicron_zones,
                 // For disks, zpools, and datasets, the map for a sled ID is
                 // only populated if there is at least one disk/zpool/dataset
                 // for that sled. The `unwrap_or_default` calls cover the case
@@ -2377,9 +2392,13 @@ impl DataStore {
                     .get(sled_id.as_untyped_uuid())
                     .map(|datasets| datasets.to_vec())
                     .unwrap_or_default(),
-                omicron_physical_disks_generation: s
-                    .omicron_physical_disks_generation
-                    .into(),
+                ledgered_sled_config: ledgered_sled_config.clone(),
+                // TODO-john also extremely wrong
+                config_reconciler: Some(
+                    ConfigReconcilerInventory::assume_reconciliation_success(
+                        ledgered_sled_config,
+                    ),
+                ),
             };
             sled_agents.insert(sled_id, sled_agent);
         }

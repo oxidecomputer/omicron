@@ -12,6 +12,7 @@ use std::{
 
 use daft::Diffable;
 use id_map::{IdMap, IdMappable};
+use itertools::Either;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
@@ -118,16 +119,92 @@ pub struct Inventory {
 
 /// Describes the status of the internal process to reconcile the current sled
 /// config against the actual state of the sled.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub struct ConfigReconcilerInventory {
     pub last_reconciled_config: Option<OmicronSledConfig>,
-    pub external_disks: BTreeMap<PhysicalDiskUuid, Result<(), String>>,
-    pub datasets: BTreeMap<DatasetUuid, Result<(), String>>,
-    pub zones: BTreeMap<OmicronZoneUuid, Result<(), String>>,
+    pub external_disks:
+        BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
+    pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
+    pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     pub status: ConfigReconcilerInventoryStatus,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+impl ConfigReconcilerInventory {
+    pub fn running_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = &OmicronZoneConfig> {
+        let Some(config) = &self.last_reconciled_config else {
+            return Either::Left(std::iter::empty());
+        };
+        Either::Right(self.zones.iter().filter_map(|(zone_id, result)| {
+            if *result != ConfigReconcilerInventoryResult::Ok {
+                return None;
+            }
+            config.zones.get(zone_id)
+        }))
+    }
+
+    // TODO-john comments! This is just for tests and simulators
+    pub fn assume_reconciliation_success(
+        sled_config: Option<OmicronSledConfig>,
+    ) -> Self {
+        let external_disks = sled_config
+            .iter()
+            .flat_map(|config| {
+                config.disks.keys().map(|&disk_id| (disk_id, Ok(()).into()))
+            })
+            .collect();
+        let datasets = sled_config
+            .iter()
+            .flat_map(|config| {
+                config
+                    .datasets
+                    .keys()
+                    .map(|&dataset_id| (dataset_id, Ok(()).into()))
+            })
+            .collect();
+        let zones = sled_config
+            .iter()
+            .flat_map(|config| {
+                config.zones.keys().map(|&zone_id| (zone_id, Ok(()).into()))
+            })
+            .collect();
+        let status = if sled_config.is_some() {
+            ConfigReconcilerInventoryStatus::Idle {
+                ran_for: Duration::from_secs(1),
+            }
+        } else {
+            ConfigReconcilerInventoryStatus::NotYetRun
+        };
+        Self {
+            last_reconciled_config: sled_config.clone(),
+            external_disks,
+            datasets,
+            zones,
+            status,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum ConfigReconcilerInventoryResult {
+    Ok,
+    Err { message: String },
+}
+
+impl From<Result<(), String>> for ConfigReconcilerInventoryResult {
+    fn from(result: Result<(), String>) -> Self {
+        match result {
+            Ok(()) => Self::Ok,
+            Err(message) => Self::Err { message },
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
 pub enum ConfigReconcilerInventoryStatus {
     NotYetRun,
     Running { config: OmicronSledConfig, running_for: Duration },

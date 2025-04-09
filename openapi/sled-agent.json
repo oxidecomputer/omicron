@@ -2934,6 +2934,141 @@
           }
         ]
       },
+      "ConfigReconcilerInventory": {
+        "description": "Describes the status of the internal process to reconcile the current sled config against the actual state of the sled.",
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          },
+          "external_disks": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          },
+          "last_reconciled_config": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronSledConfig"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/ConfigReconcilerInventoryStatus"
+          },
+          "zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          }
+        },
+        "required": [
+          "datasets",
+          "external_disks",
+          "status",
+          "zones"
+        ]
+      },
+      "ConfigReconcilerInventoryResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              }
+            },
+            "required": [
+              "result"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "result"
+            ]
+          }
+        ]
+      },
+      "ConfigReconcilerInventoryStatus": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "not_yet_run"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "config": {
+                "$ref": "#/components/schemas/OmicronSledConfig"
+              },
+              "running_for": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "config",
+              "running_for",
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ran_for": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "idle"
+                ]
+              }
+            },
+            "required": [
+              "ran_for",
+              "status"
+            ]
+          }
+        ]
+      },
       "DatasetConfig": {
         "description": "Configuration information necessary to request a single dataset.\n\nThese datasets are tracked directly by Nexus.",
         "type": "object",
@@ -3993,6 +4128,14 @@
           "baseboard": {
             "$ref": "#/components/schemas/Baseboard"
           },
+          "config_reconciler": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConfigReconcilerInventory"
+              }
+            ]
+          },
           "datasets": {
             "type": "array",
             "items": {
@@ -4005,11 +4148,13 @@
               "$ref": "#/components/schemas/InventoryDisk"
             }
           },
-          "omicron_physical_disks_generation": {
-            "$ref": "#/components/schemas/Generation"
-          },
-          "omicron_zones": {
-            "$ref": "#/components/schemas/OmicronZonesConfig"
+          "ledgered_sled_config": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronSledConfig"
+              }
+            ]
           },
           "reservoir_size": {
             "$ref": "#/components/schemas/ByteCount"
@@ -4042,8 +4187,6 @@
           "baseboard",
           "datasets",
           "disks",
-          "omicron_physical_disks_generation",
-          "omicron_zones",
           "reservoir_size",
           "sled_agent_address",
           "sled_id",
@@ -4990,31 +5133,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "OmicronZonesConfig": {
-        "description": "Describes the set of Omicron-managed zones running on a sled",
-        "type": "object",
-        "properties": {
-          "generation": {
-            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "zones": {
-            "description": "list of running zones",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OmicronZoneConfig"
-            }
-          }
-        },
-        "required": [
-          "generation",
-          "zones"
         ]
       },
       "PortConfigV2": {

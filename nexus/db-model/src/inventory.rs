@@ -790,7 +790,6 @@ pub struct InvSledAgent {
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
-    pub omicron_physical_disks_generation: Generation,
 }
 
 impl InvSledAgent {
@@ -834,9 +833,6 @@ impl InvSledAgent {
                     sled_agent.usable_physical_ram,
                 ),
                 reservoir_size: ByteCount::from(sled_agent.reservoir_size),
-                omicron_physical_disks_generation: Generation::from(
-                    sled_agent.omicron_physical_disks_generation,
-                ),
             })
         }
     }
@@ -1186,7 +1182,12 @@ impl InvSledOmicronZones {
             time_collected: sled_agent.time_collected,
             source: sled_agent.source.clone(),
             sled_id: sled_agent.sled_id.into(),
-            generation: Generation(sled_agent.omicron_zones.generation),
+            // TODO-john this is wrongish? Should we just do 6770?
+            generation: sled_agent
+                .ledgered_sled_config
+                .as_ref()
+                .map(|c| c.generation.into())
+                .unwrap_or_else(Generation::new),
         }
     }
 }

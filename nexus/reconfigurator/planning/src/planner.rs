@@ -218,7 +218,11 @@ impl<'a> Planner<'a> {
             .inventory
             .sled_agents
             .get(&sled_id)
-            .map(|sa| sa.omicron_physical_disks_generation)
+            // TODO-john is this correct? Can we decommission based on just the
+            // ledgered config instead of the reconciled config?
+            .and_then(|sa| sa.config_reconciler.as_ref())
+            .and_then(|inv| inv.last_reconciled_config.as_ref())
+            .map(|config| config.generation)
         else {
             // There is no current inventory for the sled agent, so we cannot
             // decommission any disks.
@@ -418,14 +422,18 @@ impl<'a> Planner<'a> {
                     as_of_generation,
                     ready_for_cleanup,
                 } if !ready_for_cleanup => {
-                    if sled_inv.omicron_zones.generation >= as_of_generation
-                        && !sled_inv
-                            .omicron_zones
-                            .zones
-                            .iter()
-                            .any(|z| z.id == zone.id)
-                    {
-                        zones_ready_for_cleanup.push(zone.id);
+                    if let Some(reconciled) = &sled_inv.config_reconciler {
+                        if let Some(gen) = reconciled
+                            .last_reconciled_config
+                            .as_ref()
+                            .map(|c| c.generation)
+                        {
+                            if gen >= as_of_generation
+                                && !reconciled.zones.contains_key(&zone.id)
+                            {
+                                zones_ready_for_cleanup.push(zone.id);
+                            }
+                        }
                     }
                 }
                 BlueprintZoneDisposition::InService
@@ -564,9 +572,9 @@ impl<'a> Planner<'a> {
                 .get(&sled_id)
                 .map(|sled_agent| {
                     sled_agent
-                        .omicron_zones
-                        .zones
+                        .config_reconciler
                         .iter()
+                        .flat_map(|inv| inv.running_omicron_zones())
                         .any(|z| z.zone_type.is_ntp())
                 })
                 .unwrap_or(false);
