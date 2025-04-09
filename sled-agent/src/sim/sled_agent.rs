@@ -24,8 +24,9 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronSledConfig, OmicronZonesConfig, SledRole,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus, Inventory,
+    InventoryDataset, InventoryDisk, InventoryZpool, OmicronSledConfig,
+    OmicronZonesConfig, SledRole,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -103,6 +104,7 @@ pub struct SledAgent {
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
+    sled_config: Mutex<Option<OmicronSledConfig>>,
     pub bootstore_network_config: Mutex<EarlyNetworkConfig>,
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
@@ -186,6 +188,7 @@ impl SledAgent {
                 generation: Generation::new(),
                 zones: vec![],
             }),
+            sled_config: Mutex::new(None),
             instance_ensure_state_error: Mutex::new(None),
             repo_depot,
             log,
@@ -735,6 +738,38 @@ impl SledAgent {
         };
 
         let storage = self.storage.lock();
+        let sled_config = self.sled_config.lock().unwrap().clone();
+        let config_reconciler = ConfigReconcilerInventory {
+            last_reconciled_config: sled_config.clone(),
+            external_disks: sled_config
+                .iter()
+                .flat_map(|config| {
+                    config.disks.keys().map(|&disk_id| (disk_id, Ok(())))
+                })
+                .collect(),
+            datasets: sled_config
+                .iter()
+                .flat_map(|config| {
+                    config
+                        .datasets
+                        .keys()
+                        .map(|&dataset_id| (dataset_id, Ok(())))
+                })
+                .collect(),
+            zones: sled_config
+                .iter()
+                .flat_map(|config| {
+                    config.zones.keys().map(|&zone_id| (zone_id, Ok(())))
+                })
+                .collect(),
+            status: if sled_config.is_some() {
+                ConfigReconcilerInventoryStatus::Idle {
+                    ran_for: Duration::from_secs(1),
+                }
+            } else {
+                ConfigReconcilerInventoryStatus::NotYetRun
+            },
+        };
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
@@ -749,7 +784,6 @@ impl SledAgent {
                 self.config.hardware.reservoir_ram,
             )
             .context("reservoir_size")?,
-            omicron_zones: self.fake_zones.lock().unwrap().clone(),
             disks: storage
                 .physical_disks()
                 .values()
@@ -797,7 +831,8 @@ impl SledAgent {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_else(|_| vec![]),
-            omicron_physical_disks_generation: Generation::new(),
+            ledgered_sled_config: sled_config,
+            config_reconciler: Some(config_reconciler),
         })
     }
 
@@ -905,27 +940,31 @@ impl SledAgent {
         &self,
         config: OmicronSledConfig,
     ) -> Result<(), HttpError> {
-        // TODO We should ledger and operate on OmicronSledConfig directly, but
-        // we don't yet; for now break this out into three separate configs.
-        // Tracked by https://github.com/oxidecomputer/omicron/issues/7774
+        // TODO Update the simulator to work on `OmicronSledConfig` instead of
+        // the three separate legacy configs
         let disks_config = OmicronPhysicalDisksConfig {
             generation: config.generation,
-            disks: config.disks.into_iter().collect(),
+            disks: config.disks.iter().cloned().collect(),
         };
         let datasets_config = DatasetsConfig {
             generation: config.generation,
-            datasets: config.datasets.into_iter().map(|d| (d.id, d)).collect(),
+            datasets: config
+                .datasets
+                .iter()
+                .cloned()
+                .map(|d| (d.id, d))
+                .collect(),
         };
         let zones_config = OmicronZonesConfig {
             generation: config.generation,
-            zones: config.zones.into_iter().collect(),
+            zones: config.zones.iter().cloned().collect(),
         };
 
         let mut storage = self.storage.lock();
-        // TODO-john clean up the simulator?
         let _ = storage.omicron_physical_disks_ensure(disks_config)?;
         let _ = storage.datasets_ensure(datasets_config)?;
         *self.fake_zones.lock().unwrap() = zones_config;
+        *self.sled_config.lock().unwrap() = Some(config);
 
         Ok(())
     }

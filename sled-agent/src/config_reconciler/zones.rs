@@ -25,6 +25,7 @@ use sled_agent_types::zone_bundle::ZoneBundleCause;
 use sled_storage::config::MountConfig;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::str::FromStr as _;
@@ -100,6 +101,28 @@ pub struct ZoneMap {
 }
 
 impl ZoneMap {
+    pub(super) fn to_inventory(
+        &self,
+    ) -> BTreeMap<OmicronZoneUuid, Result<(), String>> {
+        self.zones
+            .iter()
+            .map(|zone| {
+                let result = match &zone.state {
+                    ZoneState::Running(_) => Ok(()),
+                    ZoneState::PartiallyShutDown { err, .. } => Err(format!(
+                        "failed to shut down: {}",
+                        InlineErrorChain::new(&err)
+                    )),
+                    ZoneState::FailedToStart(err) => Err(format!(
+                        "failed to start: {}",
+                        InlineErrorChain::new(&err)
+                    )),
+                };
+                (zone.config.id, result)
+            })
+            .collect()
+    }
+
     pub(super) fn has_zone_with_retryable_error(&self) -> bool {
         self.zones.iter().any(|zone| match &zone.state {
             ZoneState::Running(_) => false,

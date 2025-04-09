@@ -18,6 +18,7 @@ use sled_storage::disk::DiskError;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -59,6 +60,23 @@ impl ExternalDiskMap {
             DiskState::Managed(disk) => Some(disk.zpool_name()),
             DiskState::FailedToStartManaging(_) => None,
         })
+    }
+
+    pub(super) fn to_inventory(
+        &self,
+    ) -> BTreeMap<PhysicalDiskUuid, Result<(), String>> {
+        self.disks
+            .iter()
+            .map(|disk| {
+                let result = match &*disk.state {
+                    DiskState::Managed(_) => Ok(()),
+                    DiskState::FailedToStartManaging(err) => {
+                        Err(InlineErrorChain::new(&err).to_string())
+                    }
+                };
+                (disk.config.id, result)
+            })
+            .collect()
     }
 
     pub(super) fn mount_config(&self) -> &Arc<MountConfig> {

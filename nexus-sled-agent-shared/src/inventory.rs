@@ -4,7 +4,11 @@
 
 //! Inventory types shared between Nexus and sled-agent.
 
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::{
+    collections::BTreeMap,
+    net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6},
+    time::Duration,
+};
 
 use daft::Diffable;
 use id_map::{IdMap, IdMappable};
@@ -17,7 +21,7 @@ use omicron_common::{
     ledger::Ledgerable,
     zpool_name::ZpoolName,
 };
-use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
+use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid};
 use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -103,11 +107,36 @@ pub struct Inventory {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
-    pub omicron_zones: OmicronZonesConfig,
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
     pub datasets: Vec<InventoryDataset>,
-    pub omicron_physical_disks_generation: Generation,
+    pub ledgered_sled_config: Option<OmicronSledConfig>,
+    // TODO-john this is optional for backwards compatibility - can we make it
+    // non-optional?
+    pub config_reconciler: Option<ConfigReconcilerInventory>,
+}
+
+/// Describes the status of the internal process to reconcile the current sled
+/// config against the actual state of the sled.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct ConfigReconcilerInventory {
+    pub last_reconciled_config: Option<OmicronSledConfig>,
+    pub external_disks: BTreeMap<PhysicalDiskUuid, Result<(), String>>,
+    pub datasets: BTreeMap<DatasetUuid, Result<(), String>>,
+    pub zones: BTreeMap<OmicronZoneUuid, Result<(), String>>,
+    pub status: ConfigReconcilerInventoryStatus,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub enum ConfigReconcilerInventoryStatus {
+    NotYetRun,
+    Running {
+        config: OmicronSledConfig,
+        running_for: Duration,
+    },
+    Idle {
+        ran_for: Duration,
+    },
 }
 
 /// Describes the role of the sled within the rack.

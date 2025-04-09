@@ -10,9 +10,8 @@ use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
 use crate::config_reconciler::{
-    ConfigReconcilerHandle, DatasetTaskSupportBundleHandle,
-    InternalDisksReceiver, LedgerTaskError, ReconcilerStateReceiver,
-    TimeSyncStatus,
+    ConfigReconcilerHandle, DatasetTaskHandle, InternalDisksReceiver,
+    LedgerTaskError, ReconcilerStateReceiver, TimeSyncStatus,
 };
 use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
@@ -36,14 +35,12 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, OmicronZonesConfig, SledRole,
+    Inventory, OmicronSledConfig, SledRole,
 };
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
 };
-use omicron_common::api::external::{
-    ByteCount, ByteCountRangeError, Generation, Vni,
-};
+use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
@@ -336,7 +333,7 @@ struct SledAgentInner {
     // TODO-john comments
     config_reconciler: Arc<ConfigReconcilerHandle>,
     reconciler_state_rx: ReconcilerStateReceiver,
-    support_bundle_dataset_task_handle: DatasetTaskSupportBundleHandle,
+    dataset_task_handle: DatasetTaskHandle,
 
     // Component of Sled Agent responsible for storage and dataset management.
     //storage: StorageHandle,
@@ -641,8 +638,8 @@ impl SledAgent {
                 start_request: request,
                 config_reconciler,
                 reconciler_state_rx,
-                support_bundle_dataset_task_handle: long_running_task_handles
-                    .support_bundle_dataset_task_handle
+                dataset_task_handle: long_running_task_handles
+                    .dataset_task_handle
                     .clone(),
                 instances,
                 hardware: long_running_task_handles.hardware_manager.clone(),
@@ -681,10 +678,7 @@ impl SledAgent {
 
     /// Accesses the [SupportBundleManager] API.
     pub(crate) fn as_support_bundle_storage(&self) -> SupportBundleManager<'_> {
-        SupportBundleManager::new(
-            &self.log,
-            &self.inner.support_bundle_dataset_task_handle,
-        )
+        SupportBundleManager::new(&self.log, &self.inner.dataset_task_handle)
     }
 
     pub(crate) fn switch_zone_underlay_info(
@@ -1129,66 +1123,9 @@ impl SledAgent {
         let sled_role =
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
 
-        // TODO-john wrong
-        let disks = vec![];
-        let zpools = vec![];
-        let datasets = vec![];
-        /*
-        let (all_disks, omicron_zones) = tokio::join!(
-            self.storage().get_latest_disks(),
-            self.inner.services.omicron_zones_list()
-        );
-        for (identity, variant, slot, firmware) in all_disks.iter_all() {
-            disks.push(InventoryDisk {
-                identity: identity.clone(),
-                variant,
-                slot,
-                active_firmware_slot: firmware.active_slot(),
-                next_active_firmware_slot: firmware.next_active_slot(),
-                number_of_firmware_slots: firmware.number_of_slots(),
-                slot1_is_read_only: firmware.slot1_read_only(),
-                slot_firmware_versions: firmware.slots().to_vec(),
-            });
-        }
-        for zpool in all_disks.all_u2_zpools() {
-            let info =
-                match illumos_utils::zpool::Zpool::get_info(&zpool.to_string())
-                {
-                    Ok(info) => info,
-                    Err(err) => {
-                        warn!(
-                            self.log,
-                            "Failed to access zpool info";
-                            "zpool" => %zpool,
-                            "err" => %err
-                        );
-                        continue;
-                    }
-                };
-
-            zpools.push(InventoryZpool {
-                id: zpool.id(),
-                total_size: ByteCount::try_from(info.size())?,
-            });
-
-            let inv_props =
-                match self.storage().datasets_list(zpool.clone()).await {
-                    Ok(props) => props
-                        .into_iter()
-                        .map(|prop| InventoryDataset::from(prop)),
-                    Err(err) => {
-                        warn!(
-                            self.log,
-                            "Failed to access dataset info within zpool";
-                            "zpool" => %zpool,
-                            "err" => %err
-                        );
-                        continue;
-                    }
-                };
-            datasets.extend(inv_props);
-        }
-        */
+        let config_reconciler = &self.inner.config_reconciler;
+        let (zpools, datasets) =
+            config_reconciler.current_zpool_and_dataset_inventory().await;
 
         Ok(Inventory {
             sled_id,
@@ -1198,16 +1135,15 @@ impl SledAgent {
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
-            // TODO-john wrong
-            omicron_zones: OmicronZonesConfig {
-                generation: Generation::new(),
-                zones: vec![],
-            },
-            disks,
+            disks: config_reconciler.current_raw_disks_inventory(),
             zpools,
             datasets,
-            // TODO-john wrong
-            omicron_physical_disks_generation: Generation::new(),
+            ledgered_sled_config: config_reconciler.current_ledgered_config(),
+            config_reconciler: Some(self
+                .inner
+                .reconciler_state_rx
+                .current()
+                .to_inventory()),
         })
     }
 

@@ -20,9 +20,15 @@ use id_map::IdMap;
 use id_map::IdMappable as _;
 use illumos_utils::dladm::EtherstubVnic;
 use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+use nexus_sled_agent_shared::inventory::InventoryDataset;
+use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DiskIdentity;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawDisk;
@@ -43,7 +49,6 @@ use crate::services::ServiceManager;
 use crate::services::TimeSyncConfig;
 
 use self::datasets::DatasetMap;
-use self::datasets::DatasetTaskReconcilerHandle;
 use self::external_disks::ExternalDiskMap;
 use self::internal_disks::InternalDisksTask;
 use self::ledger::LedgerTask;
@@ -52,7 +57,7 @@ use self::zones::ZoneMap;
 
 pub(crate) use self::datasets::DatasetTask;
 pub(crate) use self::datasets::DatasetTaskError;
-pub(crate) use self::datasets::DatasetTaskSupportBundleHandle;
+pub(crate) use self::datasets::DatasetTaskHandle;
 pub(crate) use self::internal_disks::InternalDisksReceiver;
 pub(crate) use self::ledger::LedgerTaskError;
 pub(crate) use self::zones::TimeSyncStatus;
@@ -124,8 +129,11 @@ impl ReconcilerStateReceiver {
 
 #[derive(Debug)]
 pub struct ConfigReconcilerHandle {
+    raw_disks_rx: watch::Receiver<IdMap<RawDisk>>,
     reconciler_state_rx: watch::Receiver<Arc<ReconcilerTaskState>>,
     internal_disks_rx: InternalDisksReceiver,
+    current_config_rx: watch::Receiver<CurrentConfig>,
+    dataset_task_handle: DatasetTaskHandle,
     ledger_task: LedgerTaskHandle,
     hold_while_waiting_for_sled_agent:
         Mutex<Option<ReconcilerTaskDependenciesHeldUntilSledAgentStarted>>,
@@ -135,10 +143,7 @@ pub struct ConfigReconcilerHandle {
 #[derive(Debug)]
 struct ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
     reconciler_state_tx: watch::Sender<Arc<ReconcilerTaskState>>,
-    current_config_rx: watch::Receiver<CurrentConfig>,
-    raw_disks_rx: watch::Receiver<IdMap<RawDisk>>,
     key_requester: StorageKeyRequester,
-    dataset_task_handle: DatasetTaskReconcilerHandle,
     time_sync_config: TimeSyncConfig,
     log: Logger,
 }
@@ -146,7 +151,7 @@ struct ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
 impl ConfigReconcilerHandle {
     pub(crate) fn new(
         key_requester: StorageKeyRequester,
-        dataset_task_handle: DatasetTaskReconcilerHandle,
+        dataset_task_handle: DatasetTaskHandle,
         time_sync_config: TimeSyncConfig,
         base_log: &Logger,
     ) -> (Self, RawDisksSender) {
@@ -169,10 +174,7 @@ impl ConfigReconcilerHandle {
         let hold_while_waiting_for_sled_agent = Mutex::new(Some(
             ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
                 reconciler_state_tx,
-                current_config_rx,
-                raw_disks_rx,
                 key_requester,
-                dataset_task_handle,
                 time_sync_config,
                 log: base_log.new(slog::o!("component" => "ReconcilerTask")),
             },
@@ -183,8 +185,11 @@ impl ConfigReconcilerHandle {
 
         (
             Self {
+                raw_disks_rx,
                 reconciler_state_rx,
                 internal_disks_rx,
+                current_config_rx,
+                dataset_task_handle,
                 ledger_task,
                 hold_while_waiting_for_sled_agent,
                 log,
@@ -225,22 +230,19 @@ impl ConfigReconcilerHandle {
             };
         let ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
             reconciler_state_tx,
-            current_config_rx,
-            raw_disks_rx,
             key_requester,
-            dataset_task_handle,
             time_sync_config,
             log,
         } = deps;
 
         let reconciler_task = ReconcilerTask {
             state: reconciler_state_tx,
-            current_config_rx,
-            raw_disks_rx,
+            current_config_rx: self.current_config_rx.clone(),
+            raw_disks_rx: self.raw_disks_rx.clone(),
             time_sync_config,
             service_manager,
             key_requester,
-            dataset_task_handle,
+            dataset_task_handle: self.dataset_task_handle.clone(),
             metrics_queue,
             underlay_vnic,
             log,
@@ -254,6 +256,99 @@ impl ConfigReconcilerHandle {
         new_config: OmicronSledConfig,
     ) -> Result<(), LedgerTaskError> {
         self.ledger_task.set_new_config(new_config).await
+    }
+
+    pub fn current_ledgered_config(&self) -> Option<OmicronSledConfig> {
+        match self.current_config_rx.borrow().clone() {
+            CurrentConfig::WaitingForInternalDisks
+            | CurrentConfig::WaitingForRackSetup => None,
+            CurrentConfig::Ledgered(config) => Some(config),
+        }
+    }
+
+    pub fn current_raw_disks_inventory(&self) -> Vec<InventoryDisk> {
+        self.raw_disks_rx
+            .borrow()
+            .iter()
+            .map(|disk| {
+                let firmware = disk.firmware();
+                InventoryDisk {
+                    identity: disk.identity().clone(),
+                    variant: disk.variant(),
+                    slot: disk.slot(),
+                    active_firmware_slot: firmware.active_slot(),
+                    next_active_firmware_slot: firmware.next_active_slot(),
+                    number_of_firmware_slots: firmware.number_of_slots(),
+                    slot1_is_read_only: firmware.slot1_read_only(),
+                    slot_firmware_versions: firmware.slots().to_vec(),
+                }
+            })
+            .collect()
+    }
+
+    pub async fn current_zpool_and_dataset_inventory(
+        &self,
+    ) -> (Vec<InventoryZpool>, Vec<InventoryDataset>) {
+        let state = Arc::clone(&*self.reconciler_state_rx.borrow());
+        let zpool_names = state
+            .all_managed_external_disk_pools()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let inv_zpool_futures = zpool_names
+            .iter()
+            .map(|zpool_name| (zpool_name.id(), zpool_name.to_string()))
+            .map(|(zpool_id, zpool_name)| async move {
+                let name = zpool_name.clone();
+                let result =
+                    tokio::task::spawn_blocking(move || Zpool::get_info(&name))
+                        .await
+                        .expect("task did not panic");
+                let info = match result {
+                    Ok(info) => info,
+                    Err(err) => {
+                        warn!(
+                            self.log, "Failed to access zpool info";
+                            "zpool" => zpool_name,
+                            InlineErrorChain::new(&err),
+                        );
+                        return None;
+                    }
+                };
+                let total_size = match ByteCount::try_from(info.size()) {
+                    Ok(n) => n,
+                    Err(err) => {
+                        warn!(
+                            self.log, "Failed to parse zpool size";
+                            "zpool" => zpool_name,
+                            "raw_size" => info.size(),
+                            InlineErrorChain::new(&err),
+                        );
+                        return None;
+                    }
+                };
+                Some(InventoryZpool { id: zpool_id, total_size })
+            });
+
+        let inv_zpool_futures = future::join_all(inv_zpool_futures);
+        let datasets_futures = self.dataset_task_handle.inventory(zpool_names);
+
+        let (inv_zpools, datasets_result) =
+            tokio::join!(inv_zpool_futures, datasets_futures);
+
+        let inv_zpools = inv_zpools.into_iter().flatten().collect();
+        let datasets = match datasets_result {
+            Ok(datasets) => datasets,
+            Err(err) => {
+                warn!(
+                    self.log, "Failed to list dataset properties";
+                    InlineErrorChain::new(&err),
+                );
+                Vec::new()
+            }
+        };
+
+        (inv_zpools, datasets)
     }
 }
 
@@ -273,19 +368,13 @@ enum CurrentConfig {
 pub(crate) enum ReconcilerTaskStatus {
     WaitingForInternalDisks,
     WaitingForRackSetup,
-    PerformingReconciliation {
-        config: OmicronSledConfig,
-        started: Instant,
-    },
-    Idle {
-        last_reconciled_config: OmicronSledConfig,
-        completed: Instant,
-        elapsed: Duration,
-    },
+    PerformingReconciliation { config: OmicronSledConfig, started: Instant },
+    Idle { completed: Instant, elapsed: Duration },
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct ReconcilerTaskState {
+    last_reconciled_config: Option<OmicronSledConfig>,
     external_disks: ExternalDiskMap,
     datasets: DatasetMap,
     zones: ZoneMap,
@@ -296,6 +385,7 @@ pub(crate) struct ReconcilerTaskState {
 impl ReconcilerTaskState {
     fn new(mount_config: Arc<MountConfig>) -> Self {
         Self {
+            last_reconciled_config: None,
             external_disks: ExternalDiskMap::new(mount_config),
             datasets: DatasetMap::default(),
             zones: ZoneMap::default(),
@@ -335,6 +425,33 @@ impl ReconcilerTaskState {
         self.datasets
             .all_mounted_debug_datasets(self.external_disks.mount_config())
     }
+
+    pub(crate) fn to_inventory(&self) -> ConfigReconcilerInventory {
+        use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus as InvStatus;
+        ConfigReconcilerInventory {
+            last_reconciled_config: self.last_reconciled_config.clone(),
+            external_disks: self.external_disks.to_inventory(),
+            datasets: self.datasets.to_inventory(),
+            zones: self.zones.to_inventory(),
+            status: match &self.status {
+                ReconcilerTaskStatus::WaitingForInternalDisks
+                | ReconcilerTaskStatus::WaitingForRackSetup => {
+                    InvStatus::NotYetRun
+                }
+                ReconcilerTaskStatus::PerformingReconciliation {
+                    config,
+                    started,
+                    ..
+                } => InvStatus::Running {
+                    config: config.clone(),
+                    running_for: started.elapsed(),
+                },
+                ReconcilerTaskStatus::Idle { elapsed, .. } => {
+                    InvStatus::Idle { ran_for: *elapsed }
+                }
+            },
+        }
+    }
 }
 
 struct ReconcilerTask {
@@ -344,7 +461,7 @@ struct ReconcilerTask {
     time_sync_config: TimeSyncConfig,
     service_manager: ServiceManager,
     key_requester: StorageKeyRequester,
-    dataset_task_handle: DatasetTaskReconcilerHandle,
+    dataset_task_handle: DatasetTaskHandle,
     metrics_queue: MetricsRequestQueue,
     underlay_vnic: EtherstubVnic,
     log: Logger,
@@ -510,8 +627,8 @@ impl ReconcilerTask {
 
         // Notify any receivers of our post-reconciliation state. We always
         // update the `status`, and may or may not have updated other fields.
+        current_state.last_reconciled_config = Some(sled_config);
         current_state.status = ReconcilerTaskStatus::Idle {
-            last_reconciled_config: sled_config,
             completed: Instant::now(),
             elapsed: started.elapsed(),
         };

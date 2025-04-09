@@ -39,7 +39,7 @@ use tufaceous_artifact::ArtifactHash;
 use zip::result::ZipError;
 
 use crate::config_reconciler::DatasetTaskError;
-use crate::config_reconciler::DatasetTaskSupportBundleHandle;
+use crate::config_reconciler::DatasetTaskHandle;
 
 // The final name of the bundle, as it is stored within the dedicated
 // datasets.
@@ -169,7 +169,7 @@ pub trait LocalStorage: Sync {
 
 /// This implementation is effectively a pass-through to the real methods
 #[async_trait]
-impl LocalStorage for DatasetTaskSupportBundleHandle {
+impl LocalStorage for DatasetTaskHandle {
     async fn dyn_get_configured_dataset(
         &self,
         _zpool_id: ZpoolUuid,

@@ -18,7 +18,7 @@ use crate::bootstrap::bootstore_setup::{
 use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
 use crate::config::Config;
 use crate::config_reconciler::{
-    ConfigReconcilerHandle, DatasetTask, DatasetTaskSupportBundleHandle,
+    ConfigReconcilerHandle, DatasetTask, DatasetTaskHandle,
     InternalDisksReceiver, RawDisksSender,
 };
 use crate::hardware_monitor::HardwareMonitor;
@@ -43,7 +43,7 @@ use tokio::sync::oneshot;
 pub struct LongRunningTaskHandles {
     /// TODO-john comments
     pub config_reconciler: Arc<ConfigReconcilerHandle>,
-    pub support_bundle_dataset_task_handle: DatasetTaskSupportBundleHandle,
+    pub dataset_task_handle: DatasetTaskHandle,
 
     /// A mechanism for interacting with the hardware device tree
     pub hardware_manager: HardwareManager,
@@ -68,8 +68,7 @@ pub async fn spawn_all_longrunning_tasks(
 ) {
     let storage_key_requester = spawn_key_manager(log);
 
-    let (reconciler_dataset_task_handle, support_bundle_dataset_task_handle) =
-        DatasetTask::spawn(MountConfig::default(), log);
+    let dataset_task_handle = DatasetTask::spawn(MountConfig::default(), log);
 
     let time_sync_config = if let Some(true) = config.skip_timesync {
         TimeSyncConfig::Skip
@@ -79,17 +78,10 @@ pub async fn spawn_all_longrunning_tasks(
 
     let (config_reconciler, raw_disks_tx) = ConfigReconcilerHandle::new(
         storage_key_requester,
-        reconciler_dataset_task_handle,
+        dataset_task_handle.clone(),
         time_sync_config,
         log,
     );
-    /*
-    let mut storage_manager =
-        spawn_storage_manager(log, storage_key_requester.clone());
-
-    let storage_monitor_handle =
-        spawn_storage_monitor(log, storage_manager.clone());
-        */
     spawn_storage_monitor(log, &config_reconciler);
 
     let nongimlet_observed_disks =
@@ -125,7 +117,7 @@ pub async fn spawn_all_longrunning_tasks(
     (
         LongRunningTaskHandles {
             config_reconciler: Arc::new(config_reconciler),
-            support_bundle_dataset_task_handle,
+            dataset_task_handle,
             hardware_manager,
             bootstore,
             zone_bundler,

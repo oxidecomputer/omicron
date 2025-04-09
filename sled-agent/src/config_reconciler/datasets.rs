@@ -14,13 +14,16 @@ use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::ZpoolName;
 use illumos_utils::zpool::ZpoolOrRamdisk;
+use nexus_sled_agent_shared::inventory::InventoryDataset;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::CRYPT_DATASET;
 use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::NestedDatasetConfig;
@@ -40,8 +43,8 @@ use tokio::sync::oneshot;
 pub enum DatasetTaskError {
     #[error("cannot perform dataset operations: waiting for key manager")]
     WaitingForKeyManager,
-    #[error("failed to list nested dataset properties")]
-    NestedDatasetListProperties(#[source] anyhow::Error),
+    #[error("failed to list dataset properties")]
+    DatasetListProperties(#[source] anyhow::Error),
     #[error("dataset task busy; cannot service new requests")]
     Busy,
     #[error("internal error: dataset task exited!")]
@@ -52,6 +55,38 @@ pub enum DatasetTaskError {
 pub struct DatasetMap(IdMap<OmicronDataset>);
 
 impl DatasetMap {
+    pub(super) fn to_inventory(
+        &self,
+    ) -> BTreeMap<DatasetUuid, Result<(), String>> {
+        self.0
+            .iter()
+            .map(|dataset| {
+                let result = match &dataset.state {
+                    DatasetState::Mounted => Ok(()),
+                    DatasetState::FailedToMount(err) => Err(format!(
+                        "failed to create or mount: {}",
+                        InlineErrorChain::new(&err)
+                    )),
+                    DatasetState::UuidMismatch { old, new, .. } => Err(
+                        format!("UUID mismatch: expected {new} but got {old}"),
+                    ),
+                    DatasetState::ZpoolNotFound => Err(format!(
+                        "zpool not found: {}",
+                        dataset.config.name.pool()
+                    )),
+                    DatasetState::ParentMissingFromConfig => {
+                        Err("parent dataset missing from sled config"
+                            .to_string())
+                    }
+                    DatasetState::ParentFailedToMount => {
+                        Err("parent dataset failed to mount".to_string())
+                    }
+                };
+                (dataset.config.id, result)
+            })
+            .collect()
+    }
+
     pub(super) fn has_dataset_with_retryable_error(&self) -> bool {
         self.0.iter().any(|dataset| match &dataset.state {
             // Mounted datasets are not in an error state.
@@ -141,13 +176,13 @@ enum DatasetState {
     ParentFailedToMount,
 }
 
-#[derive(Debug)]
-pub struct DatasetTaskReconcilerHandle {
-    tx: mpsc::Sender<ReconcilerRequest>,
+#[derive(Debug, Clone)]
+pub struct DatasetTaskHandle {
+    tx: mpsc::Sender<DatasetTaskRequest>,
     mount_config: Arc<MountConfig>,
 }
 
-impl DatasetTaskReconcilerHandle {
+impl DatasetTaskHandle {
     pub fn mount_config(&self) -> &Arc<MountConfig> {
         &self.mount_config
     }
@@ -159,7 +194,7 @@ impl DatasetTaskReconcilerHandle {
         all_managed_u2_pools: BTreeSet<ZpoolUuid>,
     ) -> Result<DatasetMap, DatasetTaskError> {
         let (tx, rx) = oneshot::channel();
-        let req = ReconcilerRequest::DatasetsEnsure {
+        let req = DatasetTaskRequest::DatasetsEnsure {
             dataset_configs,
             mount_config,
             all_managed_u2_pools,
@@ -167,17 +202,14 @@ impl DatasetTaskReconcilerHandle {
         };
         try_send_wrapper(&self.tx, req, rx).await
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct DatasetTaskSupportBundleHandle {
-    tx: mpsc::Sender<SupportBundleRequest>,
-    mount_config: Arc<MountConfig>,
-}
-
-impl DatasetTaskSupportBundleHandle {
-    pub fn mount_config(&self) -> &Arc<MountConfig> {
-        &self.mount_config
+    pub(super) async fn inventory(
+        &self,
+        zpools: Vec<ZpoolName>,
+    ) -> Result<Vec<InventoryDataset>, DatasetTaskError> {
+        let (tx, rx) = oneshot::channel();
+        let req = DatasetTaskRequest::Inventory { zpools, tx: DebugIgnore(tx) };
+        try_send_wrapper(&self.tx, req, rx).await?
     }
 
     pub async fn get_configured_dataset(
@@ -193,7 +225,7 @@ impl DatasetTaskSupportBundleHandle {
         config: NestedDatasetConfig,
     ) -> Result<(), DatasetTaskError> {
         let (tx, rx) = oneshot::channel();
-        let req = SupportBundleRequest::NestedDatasetEnsure {
+        let req = DatasetTaskRequest::NestedDatasetEnsure {
             config,
             tx: DebugIgnore(tx),
         };
@@ -205,7 +237,7 @@ impl DatasetTaskSupportBundleHandle {
         name: NestedDatasetLocation,
     ) -> Result<(), DatasetTaskError> {
         let (tx, rx) = oneshot::channel();
-        let req = SupportBundleRequest::NestedDatasetDestroy {
+        let req = DatasetTaskRequest::NestedDatasetDestroy {
             name,
             tx: DebugIgnore(tx),
         };
@@ -218,7 +250,7 @@ impl DatasetTaskSupportBundleHandle {
         options: NestedDatasetListOptions,
     ) -> Result<Vec<NestedDatasetConfig>, DatasetTaskError> {
         let (tx, rx) = oneshot::channel();
-        let req = SupportBundleRequest::NestedDatasetList {
+        let req = DatasetTaskRequest::NestedDatasetList {
             name,
             options,
             tx: DebugIgnore(tx),
@@ -246,17 +278,19 @@ async fn try_send_wrapper<Req, Resp>(
 }
 
 #[derive(Debug)]
-enum ReconcilerRequest {
+enum DatasetTaskRequest {
     DatasetsEnsure {
         dataset_configs: IdMap<DatasetConfig>,
         mount_config: Arc<MountConfig>,
         all_managed_u2_pools: BTreeSet<ZpoolUuid>,
         tx: DebugIgnore<oneshot::Sender<DatasetMap>>,
     },
-}
-
-#[derive(Debug)]
-enum SupportBundleRequest {
+    Inventory {
+        zpools: Vec<ZpoolName>,
+        tx: DebugIgnore<
+            oneshot::Sender<Result<Vec<InventoryDataset>, DatasetTaskError>>,
+        >,
+    },
     NestedDatasetEnsure {
         config: NestedDatasetConfig,
         tx: DebugIgnore<oneshot::Sender<()>>,
@@ -276,8 +310,7 @@ enum SupportBundleRequest {
 
 pub struct DatasetTask {
     datasets: DatasetMap,
-    reconciler_rx: mpsc::Receiver<ReconcilerRequest>,
-    support_bundle_rx: mpsc::Receiver<SupportBundleRequest>,
+    request_rx: mpsc::Receiver<DatasetTaskRequest>,
     log: Logger,
 }
 
@@ -285,7 +318,7 @@ impl DatasetTask {
     pub fn spawn(
         mount_config: MountConfig,
         base_log: &Logger,
-    ) -> (DatasetTaskReconcilerHandle, DatasetTaskSupportBundleHandle) {
+    ) -> DatasetTaskHandle {
         let log = base_log.new(slog::o!("component" => "DatasetTask"));
         Self::spawn_impl(mount_config, log, RealZfs)
     }
@@ -294,79 +327,46 @@ impl DatasetTask {
         mount_config: MountConfig,
         log: Logger,
         zfs_impl: T,
-    ) -> (DatasetTaskReconcilerHandle, DatasetTaskSupportBundleHandle) {
+    ) -> DatasetTaskHandle {
         let mount_config = Arc::new(mount_config);
 
-        // The Reconciler never sends concurrent requests, so this channel size
-        // can be tiny.
-        let (reconciler_tx, reconciler_rx) = mpsc::channel(1);
-
-        // Support bundle requests come in from Nexus. We can allow some small
-        // number of queued requests, but don't want to allow too many to avoid
-        // many blocked HTTP requests if we go out to lunch somehow.
-        let (support_bundle_tx, support_bundle_rx) = mpsc::channel(8);
+        // We don't expect too many concurrent requests to this task, and want
+        // to detect "the task is wedged" pretty quickly. Common operations:
+        //
+        // 1. Reconciler wants to ensure datasets (at most 1 at a time)
+        // 2. Inventory requests from Nexus (likely at most 3 at a time)
+        // 3. Support bundle operations (unlikely to be multiple concurrently)
+        //
+        // so we'll pick a number that allows all of those plus a little
+        // overhead.
+        let (request_tx, request_rx) = mpsc::channel(16);
 
         tokio::spawn(async move {
-            Self {
-                datasets: DatasetMap::default(),
-                reconciler_rx,
-                support_bundle_rx,
-                log,
-            }
-            .run(&zfs_impl)
-            .await;
+            Self { datasets: DatasetMap::default(), request_rx, log }
+                .run(&zfs_impl)
+                .await;
         });
 
-        (
-            DatasetTaskReconcilerHandle {
-                tx: reconciler_tx,
-                mount_config: Arc::clone(&mount_config),
-            },
-            DatasetTaskSupportBundleHandle {
-                tx: support_bundle_tx,
-                mount_config,
-            },
-        )
-    }
-
-    async fn run<T: ZfsImpl>(mut self, zfs: &T) {
-        loop {
-            tokio::select! {
-                // Cancel-safe, per docs on `recv()`.
-                req = self.reconciler_rx.recv(),
-                    if !self.reconciler_rx.is_closed() =>
-                {
-                    if let Some(req) = req {
-                        self.handle_reconciler_request(zfs, req).await;
-                    }
-                }
-
-                // Cancel-safe, per docs on `recv()`.
-                req = self.support_bundle_rx.recv(),
-                    if !self.support_bundle_rx.is_closed() =>
-                {
-                    if let Some(req) = req {
-                        self.handle_support_bundle_request(req, zfs).await;
-                    }
-                }
-
-                else => {
-                    // This should never happen in production, but may happen in
-                    // tests.
-                    warn!(self.log, "all handles closed; exiting dataset task");
-                    return;
-                }
-            }
+        DatasetTaskHandle {
+            tx: request_tx,
+            mount_config: Arc::clone(&mount_config),
         }
     }
 
-    async fn handle_reconciler_request<T: ZfsImpl>(
+    async fn run<T: ZfsImpl>(mut self, zfs: &T) {
+        while let Some(req) = self.request_rx.recv().await {
+            self.handle_request(zfs, req).await;
+        }
+        warn!(self.log, "all request handles closed; exiting dataset task");
+    }
+
+    async fn handle_request<T: ZfsImpl>(
         &mut self,
         zfs: &T,
-        req: ReconcilerRequest,
+        req: DatasetTaskRequest,
     ) {
         match req {
-            ReconcilerRequest::DatasetsEnsure {
+            DatasetTaskRequest::DatasetsEnsure {
                 dataset_configs: config,
                 mount_config,
                 all_managed_u2_pools,
@@ -381,7 +381,53 @@ impl DatasetTask {
                 .await;
                 _ = tx.0.send(self.datasets.clone());
             }
+            DatasetTaskRequest::Inventory { zpools, tx } => {
+                _ = tx.0.send(self.inventory(zfs, &zpools).await);
+            }
+            DatasetTaskRequest::NestedDatasetEnsure { .. } => {
+                unimplemented!()
+            }
+            DatasetTaskRequest::NestedDatasetDestroy { .. } => {
+                unimplemented!()
+            }
+            DatasetTaskRequest::NestedDatasetList { name, options, tx } => {
+                _ = tx
+                    .0
+                    .send(self.nested_dataset_list(name, options, zfs).await);
+            }
         }
+    }
+
+    async fn inventory<T: ZfsImpl>(
+        &self,
+        zfs: &T,
+        zpools: &[ZpoolName],
+    ) -> Result<Vec<InventoryDataset>, DatasetTaskError> {
+        let datasets_of_interest = zpools
+            .iter()
+            .flat_map(|zpool| {
+                [
+                    // We care about the zpool itself, and all direct children.
+                    zpool.to_string(),
+                    // Likewise, we care about the encrypted dataset, and all
+                    // direct children.
+                    format!("{zpool}/{CRYPT_DATASET}"),
+                    // The zone dataset gives us additional context on "what
+                    // zones have datasets provisioned".
+                    format!("{zpool}/{ZONE_DATASET}"),
+                ]
+            })
+            .collect::<Vec<_>>();
+
+        let props = zfs
+            .get_dataset_properties(
+                &datasets_of_interest,
+                WhichDatasets::SelfAndChildren,
+            )
+            .await
+            .map_err(DatasetTaskError::DatasetListProperties)?;
+
+        Ok(props.into_iter().map(From::from).collect())
     }
 
     async fn datasets_ensure<T: ZfsImpl>(
@@ -702,26 +748,6 @@ impl DatasetTask {
         return Some(DatasetState::Mounted);
     }
 
-    async fn handle_support_bundle_request<T: ZfsImpl>(
-        &self,
-        req: SupportBundleRequest,
-        zfs: &T,
-    ) {
-        match req {
-            SupportBundleRequest::NestedDatasetEnsure { .. } => {
-                unimplemented!()
-            }
-            SupportBundleRequest::NestedDatasetDestroy { .. } => {
-                unimplemented!()
-            }
-            SupportBundleRequest::NestedDatasetList { name, options, tx } => {
-                _ = tx
-                    .0
-                    .send(self.nested_dataset_list(name, options, zfs).await);
-            }
-        }
-    }
-
     async fn nested_dataset_list<T: ZfsImpl>(
         &self,
         name: NestedDatasetLocation,
@@ -742,7 +768,7 @@ impl DatasetTask {
         let properties = match get_properties_result {
             Ok(properties) => properties,
             Err(err) => {
-                let err = DatasetTaskError::NestedDatasetListProperties(err);
+                let err = DatasetTaskError::DatasetListProperties(err);
                 warn!(
                     log,
                     "Failed to access nested dataset";
@@ -892,7 +918,7 @@ mod tests {
             )
             .await
         {
-            Err(DatasetTaskError::NestedDatasetListProperties(err))
+            Err(DatasetTaskError::DatasetListProperties(err))
                 if err.to_string() == expected_err => {}
             Err(err) => panic!("unexpected error: {err:#}"),
             Ok(props) => panic!("unexpected success: {props:?}"),
