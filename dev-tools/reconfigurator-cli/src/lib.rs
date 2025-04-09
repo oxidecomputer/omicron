@@ -34,6 +34,9 @@ use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::views::SledProvisionPolicy;
+use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
@@ -1082,7 +1085,11 @@ fn make_sleds_by_id(
         .map(|(sled_id, sled_agent_info)| {
             let sled = execution::Sled::new(
                 *sled_id,
+                SledPolicy::InService {
+                    provision_policy: SledProvisionPolicy::Provisionable,
+                },
                 sled_agent_info.sled_agent_address,
+                REPO_DEPOT_PORT,
                 sled_agent_info.sled_role,
             );
             (*sled_id, sled)

@@ -149,7 +149,9 @@ impl From<Sled> for execution::Sled {
     fn from(sled: Sled) -> Self {
         Self::new(
             SledUuid::from_untyped_uuid(sled.id()),
+            sled.policy(),
             sled.address(),
+            *sled.repo_depot_port,
             if sled.is_scrimlet {
                 SledRole::Scrimlet
             } else {

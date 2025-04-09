@@ -309,6 +309,21 @@ impl RackInitRequestBuilder {
             .expect("Failed to set up DNS for {kind}");
     }
 
+    fn add_gz_service_to_dns(
+        &mut self,
+        sled_id: SledUuid,
+        address: SocketAddrV6,
+        service_name: ServiceName,
+    ) {
+        let sled = self
+            .internal_dns_config
+            .host_sled(sled_id, *address.ip())
+            .expect("Failed to set up DNS for GZ service");
+        self.internal_dns_config
+            .service_backend_sled(service_name, &sled, address.port())
+            .expect("Failed to set up DNS for GZ service");
+    }
+
     // Special handling of ClickHouse, which has multiple SRV records for its
     // single zone.
     fn add_clickhouse_to_dns(
@@ -1037,6 +1052,17 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         )
         .await
         .expect("Failed to start sled agent");
+
+        // Add a DNS entry for the TUF Repo Depot on this simulated sled agent.
+        let SocketAddr::V6(server_addr_v6) = sled_agent.repo_depot_address
+        else {
+            panic!("expected sim sled agent to be listening on IPv6");
+        };
+        self.rack_init_builder.add_gz_service_to_dns(
+            sled_id,
+            server_addr_v6,
+            ServiceName::RepoDepot,
+        );
 
         self.sled_agents.push(ControlPlaneTestContextSledAgent {
             _storage: tempdir,
