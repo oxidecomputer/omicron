@@ -5,7 +5,6 @@
 use crate::config::Ereport;
 use crate::config::EreportConfig;
 use crate::config::EreportRestart;
-use gateway_messages::ereport;
 use gateway_messages::ereport::Ena;
 use gateway_messages::ereport::EreportRequest;
 use gateway_messages::ereport::EreportResponseHeader;
