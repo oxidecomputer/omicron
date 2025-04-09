@@ -9,8 +9,8 @@ use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
-    ByteCount, Generation, MacAddr, Name, SledState, SqlU8, SqlU16, SqlU32,
-    impl_enum_type, ipv6,
+    ByteCount, DbOximeterReadMode, Generation, MacAddr, Name, SledState, SqlU8,
+    SqlU16, SqlU32, impl_enum_type, ipv6,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
@@ -21,10 +21,9 @@ use nexus_db_schema::schema::{
     bp_clickhouse_keeper_zone_id_to_node_id,
     bp_clickhouse_server_zone_id_to_node_id, bp_omicron_dataset,
     bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_sled_metadata, bp_target,
+    bp_oximeter_read_policy, bp_sled_metadata, bp_target,
 };
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -34,6 +33,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::{BlueprintDatasetConfig, OximeterReadMode};
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
@@ -1107,5 +1107,27 @@ impl BpClickhouseServerZoneIdToNodeId {
                 .try_into()
                 .context("more than 2^63 IDs in use")?,
         })
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_oximeter_read_policy)]
+pub struct BpOximeterReadPolicy {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub version: Generation,
+    pub oximeter_read_mode: DbOximeterReadMode,
+}
+
+impl BpOximeterReadPolicy {
+    pub fn new(
+        blueprint_id: BlueprintUuid,
+        version: Generation,
+        read_mode: &OximeterReadMode,
+    ) -> BpOximeterReadPolicy {
+        BpOximeterReadPolicy {
+            blueprint_id: blueprint_id.into(),
+            version,
+            oximeter_read_mode: DbOximeterReadMode::from(read_mode),
+        }
     }
 }

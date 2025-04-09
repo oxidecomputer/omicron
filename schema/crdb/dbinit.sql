@@ -4123,6 +4123,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_clickhouse_server_zone_id_to_node_i
     PRIMARY KEY (blueprint_id, omicron_zone_id, server_id)
 );
 
+-- Blueprint information related to which ClickHouse installation
+-- oximeter is reading from.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_oximeter_read_policy (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID PRIMARY KEY,
+
+    -- TODO-K: REMOVE THIS I DON'T THINK IT'S NECESSARY?
+    version INT8 NOT NULL,
+
+    -- Which clickhouse installation should oximeter read from.
+    oximeter_read_mode omicron.public.oximeter_read_mode NOT NULL
+);
 
 -- Mapping of Omicron zone ID to CockroachDB node ID. This isn't directly used
 -- by the blueprint tables above, but is used by the more general Reconfigurator

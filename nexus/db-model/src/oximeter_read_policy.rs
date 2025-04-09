@@ -22,6 +22,19 @@ impl_enum_type!(
     Cluster => b"cluster"
 );
 
+impl From<DbOximeterReadMode> for nexus_types::deployment::OximeterReadMode {
+    fn from(value: DbOximeterReadMode) -> Self {
+        match value {
+            DbOximeterReadMode::SingleNode => {
+                nexus_types::deployment::OximeterReadMode::SingleNode
+            }
+            DbOximeterReadMode::Cluster => {
+                nexus_types::deployment::OximeterReadMode::Cluster
+            }
+        }
+    }
+}
+
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = oximeter_read_policy)]
 pub struct OximeterReadPolicy {

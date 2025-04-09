@@ -1660,7 +1660,9 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
             };
 
             ($member:ident, $label:expr, $display:expr) => {
-                if self.summary.diff.$member.before == self.summary.diff.$member.after {
+                if self.summary.diff.$member.before
+                    == self.summary.diff.$member.after
+                {
                     KvPair::new(
                         BpDiffState::Unchanged,
                         $label,
@@ -1681,15 +1683,13 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
             };
         }
 
-        [
-            KvListWithHeading::new(
-                OXIMETER_HEADING,
-                vec![
-                    diff_row!(oximeter_read_version, GENERATION),
-                    diff_row!(oximeter_read_mode, OXIMETER_READ_FROM),
-                ],
-            ),
-        ]
+        [KvListWithHeading::new(
+            OXIMETER_HEADING,
+            vec![
+                diff_row!(oximeter_read_version, GENERATION),
+                diff_row!(oximeter_read_mode, OXIMETER_READ_FROM),
+            ],
+        )]
     }
 
     pub fn make_clickhouse_cluster_config_diff_tables(

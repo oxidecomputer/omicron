@@ -15,7 +15,6 @@ pub(crate) async fn reroute_reads(
     datastore: &DataStore,
     // blueprint: &Blueprint,
 ) -> anyhow::Result<()> {
-
     // TODO-K: Instead of checking the database should I get it from the blueprint?
     // let policy = blueprint.oximeter_read_policy
 

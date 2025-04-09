@@ -1855,6 +1855,14 @@ table! {
 }
 
 table! {
+    bp_oximeter_read_policy (blueprint_id) {
+        blueprint_id -> Uuid,
+        version -> Int8,
+        oximeter_read_mode -> crate::enums::OximeterReadModeEnum,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
