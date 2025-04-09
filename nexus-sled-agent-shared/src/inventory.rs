@@ -13,10 +13,7 @@ use omicron_common::{
         external::{ByteCount, Generation},
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
-    disk::{
-        DatasetConfig, DatasetManagementStatus, DiskManagementStatus,
-        DiskVariant, OmicronPhysicalDiskConfig,
-    },
+    disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
     ledger::Ledgerable,
     zpool_name::ZpoolName,
 };
@@ -151,14 +148,6 @@ impl Ledgerable for OmicronSledConfig {
         // Generation bumps must only ever come from nexus and will be encoded
         // in the struct itself
     }
-}
-
-/// Result of the currently-synchronous `omicron_config_put` endpoint.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[must_use = "this `DatasetManagementResult` may contain errors, which should be handled"]
-pub struct OmicronSledConfigResult {
-    pub disks: Vec<DiskManagementStatus>,
-    pub datasets: Vec<DatasetManagementStatus>,
 }
 
 /// Describes the set of Omicron-managed zones running on a sled

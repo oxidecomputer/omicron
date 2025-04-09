@@ -127,7 +127,6 @@ use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::time_sync::TimeSync;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
-use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet, btree_map};
 use std::collections::{HashMap, HashSet};
 use std::iter;
@@ -372,86 +371,9 @@ impl ServiceInner {
                 "datasets" => ?sled_config.datasets,
                 "zones" => ?sled_config.zones,
             );
-            let result = client.omicron_config_put(&sled_config).await;
-            let error = match result {
-                Ok(response) => {
-                    let response = response.into_inner();
-
-                    // An HTTP OK may contain _partial_ success: check whether
-                    // we got any individual disk failures, and split those out
-                    // into transient/permanent cases based on whether they
-                    // indicate we should retry.
-                    let disk_errors =
-                        response.disks.into_iter().filter_map(|status| {
-                            status.err.map(|err| (status.identity, err))
-                        });
-                    let mut transient_errors = Vec::new();
-                    let mut permanent_errors = Vec::new();
-                    for (identity, error) in disk_errors {
-                        if error.retryable() {
-                            transient_errors.push(format!(
-                                "Retryable error initializing disk \
-                                 {} / {} / {}: {}",
-                                identity.vendor,
-                                identity.model,
-                                identity.serial,
-                                InlineErrorChain::new(&error)
-                            ));
-                        } else {
-                            permanent_errors.push(format!(
-                                "Non-retryable error initializing disk \
-                                 {} / {} / {}: {}",
-                                identity.vendor,
-                                identity.model,
-                                identity.serial,
-                                InlineErrorChain::new(&error)
-                            ));
-                        }
-                    }
-                    if !permanent_errors.is_empty() {
-                        return Err(BackoffError::permanent(
-                            SetupServiceError::DiskInitializationPermanent {
-                                permanent_errors,
-                            },
-                        ));
-                    }
-                    if !transient_errors.is_empty() {
-                        return Err(BackoffError::transient(
-                            SetupServiceError::DiskInitializationTransient {
-                                transient_errors,
-                            },
-                        ));
-                    }
-
-                    // No individual disk errors reported; all disks were
-                    // initialized. Check for any dataset errors; these are not
-                    // retryable.
-                    let dataset_errors = response
-                        .datasets
-                        .into_iter()
-                        .filter_map(|status| {
-                            status.err.map(|err| {
-                                format!(
-                                    "Error initializing dataset {}: {err}",
-                                    status.dataset_name.full_name()
-                                )
-                            })
-                        })
-                        .collect::<Vec<_>>();
-                    if !dataset_errors.is_empty() {
-                        return Err(BackoffError::permanent(
-                            SetupServiceError::DatasetInitialization {
-                                errors: dataset_errors,
-                            },
-                        ));
-                    }
-
-                    // No individual dataset errors reported. We don't get
-                    // status for individual zones (any failure there results in
-                    // an HTTP-level error), so everything is good.
-                    return Ok(());
-                }
-                Err(error) => error,
+            let Err(error) = client.omicron_config_put(&sled_config).await
+            else {
+                return Ok(());
             };
 
             if let sled_agent_client::Error::ErrorResponse(response) = &error {
@@ -541,6 +463,8 @@ impl ServiceInner {
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
+
+                // TODO-john wait until sled has reconciled config!
 
                 Ok::<(), SetupServiceError>(())
             }),
