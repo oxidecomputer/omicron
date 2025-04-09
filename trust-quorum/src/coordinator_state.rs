@@ -111,7 +111,8 @@ impl CoordinatorState {
         configuration: Configuration,
         op: CoordinatorOperation,
     ) -> CoordinatorState {
-        let retry_deadline = now + reconfigure_msg.retry_timeout();
+        // We want to send any pending messages immediately
+        let retry_deadline = now;
         CoordinatorState {
             start_time: now,
             reconfigure_msg,
@@ -137,21 +138,25 @@ impl CoordinatorState {
     // This method is "in progress" - allow unused parameters for now
     #[allow(unused)]
     pub fn send_msgs(&mut self, now: Instant, outbox: &mut Vec<Envelope>) {
-        match &self.op {
-            CoordinatorOperation::CollectShares {
-                epoch,
-                members,
-                collected_shares,
-                ..
-            } => {}
-            CoordinatorOperation::CollectLrtqShares { members, shares } => {}
-            CoordinatorOperation::Prepare { prepares, prepare_acks } => {
-                for (platform_id, prepare) in prepares.clone().into_iter() {
-                    outbox.push(Envelope {
-                        to: platform_id,
-                        from: self.reconfigure_msg.coordinator_id().clone(),
-                        msg: PeerMsg::Prepare(prepare),
-                    });
+        if now >= self.retry_deadline {
+            self.retry_deadline = now + self.reconfigure_msg.retry_timeout();
+            match &self.op {
+                CoordinatorOperation::CollectShares {
+                    epoch,
+                    members,
+                    collected_shares,
+                    ..
+                } => {}
+                CoordinatorOperation::CollectLrtqShares { members, shares } => {
+                }
+                CoordinatorOperation::Prepare { prepares, prepare_acks } => {
+                    for (platform_id, prepare) in prepares.clone().into_iter() {
+                        outbox.push(Envelope {
+                            to: platform_id,
+                            from: self.reconfigure_msg.coordinator_id().clone(),
+                            msg: PeerMsg::Prepare(prepare),
+                        });
+                    }
                 }
             }
         }

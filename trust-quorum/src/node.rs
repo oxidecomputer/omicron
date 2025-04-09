@@ -76,6 +76,14 @@ impl Node {
         Ok(persistent_state)
     }
 
+    /// Process a timer tick
+    ///
+    /// Ticks are issued by the caller in order to move the protocol forward.
+    /// The current time is passed in to make the calls deterministic.
+    pub fn tick(&mut self, now: Instant, outbox: &mut Vec<Envelope>) {
+        self.send_coordinator_msgs(now, outbox);
+    }
+
     // Send any required messages as a reconfiguration coordinator
     fn send_coordinator_msgs(
         &mut self,

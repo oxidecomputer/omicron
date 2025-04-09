@@ -38,7 +38,7 @@ pub use persistent_state::{PersistentState, PersistentStateSummary};
     Deserialize,
     Display,
 )]
-pub struct Epoch(u64);
+pub struct Epoch(pub u64);
 
 /// The number of shares required to reconstruct the rack secret
 ///
