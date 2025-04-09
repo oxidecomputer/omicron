@@ -702,7 +702,6 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
             clickhouse_cluster_config,
-            // TODO-K: maybe these two should be one object
             oximeter_read_version: self
                 .input
                 .oximeter_read_settings()

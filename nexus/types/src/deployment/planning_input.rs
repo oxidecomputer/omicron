@@ -939,7 +939,6 @@ pub struct Policy {
 pub struct OximeterReadPolicy {
     pub version: u32,
     pub mode: OximeterReadMode,
-    // TODO-K: Do I need time created?
     pub time_created: DateTime<Utc>,
 }
 

@@ -68,7 +68,7 @@ impl<'a> BlueprintDiffSummary<'a> {
             cockroachdb_fingerprint: _,
             cockroachdb_setting_preserve_downgrade: _,
             oximeter_read_version: _,
-            oximeter_read_mode: _,
+            oximeter_read_mode,
             creator: _,
             comment: _,
         } = &self.diff;
@@ -86,10 +86,10 @@ impl<'a> BlueprintDiffSummary<'a> {
             return true;
         }
 
-        // TODO-K: did oximeter read policy change. Is this necessary?
-        //if oximeter_read_mode.before != oximeter_read_mode.after {
-        //    return true;
-        //}
+        // Did oximeter read policy change?
+        if oximeter_read_mode.before != oximeter_read_mode.after {
+            return true;
+        }
 
         // All fields checked or ignored; if we get here, there are no
         // meaningful changes.

@@ -4129,7 +4129,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_oximeter_read_policy (
     -- Foreign key into the `blueprint` table
     blueprint_id UUID PRIMARY KEY,
 
-    -- TODO-K: REMOVE THIS I DON'T THINK IT'S NECESSARY?
+    -- Generation number.
     version INT8 NOT NULL,
 
     -- Which clickhouse installation should oximeter read from.

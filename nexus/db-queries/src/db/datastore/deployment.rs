@@ -889,24 +889,6 @@ impl DataStore {
             }
         };
 
-        // TODO-K: This is wrong, it show show the current blueprint,
-        // not what the new policy is (what's in the DB)
-        // Load oximeter read policy
-        //        let oximeter_policy = self
-        //            .oximeter_read_policy_get_latest(opctx)
-        //            .await
-        //            .map_err(|e| {
-        //                Error::internal_error(&format!(
-        //                    "could not retrieve oximeter read policy information: {}",
-        //                    e
-        //                ))
-        //                // TODO-K: Get rid of unwrap
-        //            })?
-        //            .unwrap();
-        //
-        //        let oximeter_read_version: Generation = oximeter_policy.version.into();
-        //        let oximeter_read_mode = oximeter_policy.mode;
-
         let (oximeter_read_version, oximeter_read_mode) = {
             use nexus_db_schema::schema::bp_oximeter_read_policy::dsl;
 
