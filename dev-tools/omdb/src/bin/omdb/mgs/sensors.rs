@@ -782,10 +782,7 @@ fn sp_data_csv<R: std::io::Read + std::io::Seek>(
                 if let Some(ids) = metadata.sensors_by_sensor.get_vec(&sensor) {
                     for id in ids {
                         let (_, _, d) = metadata.sensors_by_id.get(id).unwrap();
-                        let value = match record[d.field()].parse::<f32>() {
-                            Ok(value) => Some(value),
-                            _ => None,
-                        };
+                        let value = record[d.field()].parse::<f32>().ok();
 
                         values.insert(*id, value);
                     }
