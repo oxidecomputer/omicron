@@ -1103,10 +1103,10 @@ mod test {
                     DNS_ZONE
                 ),
                 recovery_user_id: "test-user".parse().unwrap(),
-                // empty string password
-                recovery_user_password_hash: "$argon2id$v=19$m=98304,t=13,\
-                p=1$d2t2UHhOdWt3NkYyY1l3cA$pIvmXrcTk/\
-                nsUzWvBQIeuMJk96ijye/oIXHCj15xg+M"
+                // Generated via `cargo run --example argon2 -- --input ""`.
+                recovery_user_password_hash: "$argon2id$v=19$m=98304,t=23,\
+                    p=1$E4DE+f6Yduuy0nSubo5qtg$57JDYGov3SZoEZnLyZZBHOACH95s\
+                    8aOpG22zBoWZ2S4"
                     .parse()
                     .unwrap(),
                 dns_update: DnsVersionUpdateBuilder::new(

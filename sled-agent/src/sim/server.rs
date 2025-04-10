@@ -518,10 +518,14 @@ pub async fn run_standalone_server(
         // individuals running this program who then want to log in as this
         // user.  For more on what's supported, see the API docs for this
         // type and the specific constraints in the nexus-passwords crate.
-        user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
-        RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
-            .parse()
-            .unwrap(),
+        //
+        // The hash was generated via:
+        // `cargo run --example argon2 -- --input oxide`.
+        user_password_hash:
+            "$argon2id$v=19$m=98304,t=23,p=1$Effh/p6M2ZKdnpJFeGqtGQ$\
+             ZtUwcVODAvUAVK6EQ5FJMv+GMlUCo9PQQsy9cagL+EU"
+                .parse()
+                .unwrap(),
     };
 
     let mut crucible_datasets = vec![];

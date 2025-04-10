@@ -197,6 +197,7 @@ mod test {
         CockroachDbPreserveDowngrade, PendingMgsUpdates, blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
+    use omicron_common::api::external;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -464,6 +465,7 @@ mod test {
                 pool_id.into_untyped_uuid(),
                 sled_id.into_untyped_uuid(),
                 PhysicalDiskUuid::new_v4(),
+                external::ByteCount::from(0).into(),
             );
             datastore
                 .zpool_insert(&opctx, zpool)
