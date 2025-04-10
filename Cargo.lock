@@ -9694,9 +9694,9 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.2.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac55d5c7e6acb2b6b1a248b70d08ed437613eb8c05f833de3a5c9397d368fc71"
+checksum = "7161fa1fa51fab06e6458e5f58c0548d10e0ed6c80436be364ced0b775bb65a9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9704,9 +9704,9 @@ dependencies = [
  "derive-where",
  "futures",
  "hickory-resolver",
- "rand 0.8.5",
+ "rand 0.9.0",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
  "tracing",
