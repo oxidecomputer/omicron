@@ -2444,9 +2444,9 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.2.8"
+version = "2.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "470eb10efc8646313634c99bb1593f402a6434cbd86e266770c6e39219adb86a"
+checksum = "34d3950690ba3a6910126162b47e775e203006d4242a15de912bec6c0a695153"
 dependencies = [
  "bitflags 2.9.0",
  "byteorder",
@@ -3245,9 +3245,9 @@ checksum = "b3ea1ec5f8307826a5b71094dd91fc04d4ae75d5709b20ad351c7fb4815c86ec"
 
 [[package]]
 name = "flate2"
-version = "1.1.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11faaf5a5236997af9848be0bef4db95824b1d534ebc64d0f0c6cf3e67bd38dc"
+checksum = "7ced92e76e966ca2fd84c8f7aa01a4aea65b0eb6648d72f7c8f3e2764a67fece"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
@@ -6232,6 +6232,36 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+]
+
+[[package]]
+name = "nexus-reconfigurator-cli-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "camino-tempfile",
+ "clap",
+ "nexus-client",
+ "nexus-db-queries",
+ "nexus-reconfigurator-preparation",
+ "nexus-test-utils",
+ "nexus-test-utils-macros",
+ "nexus-types",
+ "omicron-common",
+ "omicron-nexus",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "reconfigurator-cli",
+ "serde",
+ "serde_json",
+ "slog",
+ "subprocess",
+ "swrite",
+ "tokio",
 ]
 
 [[package]]
@@ -9987,19 +10017,13 @@ dependencies = [
  "indent_write",
  "internal-dns-types",
  "itertools 0.14.0",
- "nexus-client",
- "nexus-db-queries",
  "nexus-inventory",
  "nexus-reconfigurator-blippy",
  "nexus-reconfigurator-planning",
- "nexus-reconfigurator-preparation",
  "nexus-reconfigurator-simulation",
  "nexus-sled-agent-shared",
- "nexus-test-utils",
- "nexus-test-utils-macros",
  "nexus-types",
  "omicron-common",
- "omicron-nexus",
  "omicron-repl-utils",
  "omicron-rpaths",
  "omicron-test-utils",

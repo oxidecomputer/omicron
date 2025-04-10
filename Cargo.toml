@@ -90,6 +90,7 @@ members = [
     "nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
+    "nexus/reconfigurator/cli-integration-tests",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -234,6 +235,7 @@ default-members = [
     "nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
+    "nexus/reconfigurator/cli-integration-tests",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -388,7 +390,7 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.19"
 derive-where = "1.2.7"
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.8", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.2.9", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
@@ -403,7 +405,7 @@ ereport-types = { path = "ereport/types" }
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
-flate2 = "1.1.0"
+flate2 = "1.1.1"
 float-ord = "0.3.2"
 flume = "0.11.1"
 foreign-types = "0.3.2"
@@ -598,6 +600,7 @@ range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
 rayon = "1.10"
 rcgen = "0.12.1"
+reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.38.0"
 ref-cast = "1.0"
 regex = "1.11.1"
