@@ -38,10 +38,7 @@ struct ActivationResults {
     error_count: usize,
 }
 
-const MAX_BATCH: NonZeroU32 = unsafe {
-    // Safety: last time I checked, 100 was greater than zero.
-    NonZeroU32::new_unchecked(100)
-};
+const MAX_BATCH: NonZeroU32 = NonZeroU32::new(100).unwrap();
 
 impl DecommissionedDiskCleaner {
     pub fn new(datastore: Arc<DataStore>, disable: bool) -> Self {
