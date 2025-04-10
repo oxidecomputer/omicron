@@ -25,7 +25,7 @@ Options:
   -h, --help                   Print help (see more with '--help')
 
 Connection Options:
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -69,7 +69,7 @@ Options:
           Print help (see a summary with '-h')
 
 Connection Options:
-      --dns-server <DNS_SERVER>
+  --dns-server <DNS_SERVER>
           [env: OMDB_DNS_SERVER=]
 
 Safety Options:
@@ -148,14 +148,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
+                               [default: 500]
+  --include-deleted            whether to include soft-deleted records when enumerating objects that
+                               can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -204,14 +204,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
+                               [default: 500]
+  --include-deleted            whether to include soft-deleted records when enumerating objects that
+                               can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -240,14 +240,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
+                               [default: 500]
+  --include-deleted            whether to include soft-deleted records when enumerating objects that
+                               can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -274,14 +274,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
+                               [default: 500]
+  --include-deleted            whether to include soft-deleted records when enumerating objects that
+                               can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -336,14 +336,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
+                               [default: 500]
+  --include-deleted            whether to include soft-deleted records when enumerating objects that
+                               can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -369,14 +369,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
+                               [default: 500]
+  --include-deleted            whether to include soft-deleted records when enumerating objects that
+                               can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -419,14 +419,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
+                               [default: 500]
+  --include-deleted            whether to include soft-deleted records when enumerating objects that
+                               can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -447,14 +447,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
+                               [default: 500]
+  --include-deleted            whether to include soft-deleted records when enumerating objects that
+                               can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -478,14 +478,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
+                               [default: 500]
+  --include-deleted            whether to include soft-deleted records when enumerating objects that
+                               can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -535,22 +535,22 @@ Options:
           Print help (see a summary with '-h')
 
 Connection Options:
-      --db-url <DB_URL>
+  --db-url <DB_URL>
           URL of the database SQL interface
           
           [env: OMDB_DB_URL=]
 
-      --dns-server <DNS_SERVER>
+  --dns-server <DNS_SERVER>
           [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>
+  --fetch-limit <FETCH_LIMIT>
           limit to apply to queries that fetch rows
           
           [env: OMDB_FETCH_LIMIT=]
           [default: 500]
 
-      --include-deleted
+  --include-deleted
           whether to include soft-deleted records when enumerating objects that can be soft-deleted
 
 Safety Options:
@@ -580,14 +580,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
+                               [default: 500]
+  --include-deleted            whether to include soft-deleted records when enumerating objects that
+                               can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -613,14 +613,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
+                               [default: 500]
+  --include-deleted            whether to include soft-deleted records when enumerating objects that
+                               can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -647,14 +647,14 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Database Options:
-      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
-                                   OMDB_FETCH_LIMIT=] [default: 500]
-      --include-deleted            whether to include soft-deleted records when enumerating objects
-                                   that can be soft-deleted
+  --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env: OMDB_FETCH_LIMIT=]
+                               [default: 500]
+  --include-deleted            whether to include soft-deleted records when enumerating objects that
+                               can be soft-deleted
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -681,8 +681,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --mgs-url <MGS_URL>        URL of an MGS instance to query [env: OMDB_MGS_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --mgs-url <MGS_URL>        URL of an MGS instance to query [env: OMDB_MGS_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -711,9 +711,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+  --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
+  --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -742,9 +741,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+  --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
+  --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -781,12 +779,12 @@ Options:
           Print help (see a summary with '-h')
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>
+  --nexus-internal-url <NEXUS_INTERNAL_URL>
           URL of the Nexus internal API
           
           [env: OMDB_NEXUS_URL=]
 
-      --dns-server <DNS_SERVER>
+  --dns-server <DNS_SERVER>
           [env: OMDB_DNS_SERVER=]
 
 Safety Options:
@@ -821,9 +819,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+  --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
+  --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -850,9 +847,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+  --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
+  --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -889,9 +885,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env:
-                                                 OMDB_NEXUS_URL=]
-      --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
+  --nexus-internal-url <NEXUS_INTERNAL_URL>  URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
+  --dns-server <DNS_SERVER>                  [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -919,8 +914,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
-      --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
+  --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
+  --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -945,8 +940,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
-      --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
+  --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
+  --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -971,8 +966,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
-      --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
+  --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]
+  --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -996,9 +991,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --oximeter-url <OXIMETER_URL>  URL of the oximeter collector to query [env:
-                                     OMDB_OXIMETER_URL=]
-      --dns-server <DNS_SERVER>      [env: OMDB_DNS_SERVER=]
+  --oximeter-url <OXIMETER_URL>  URL of the oximeter collector to query [env: OMDB_OXIMETER_URL=]
+  --dns-server <DNS_SERVER>      [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -1021,10 +1015,9 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --clickhouse-url <CLICKHOUSE_URL>
-          URL of the ClickHouse server to connect to [env: OMDB_CLICKHOUSE_URL=]
-      --dns-server <DNS_SERVER>
-          [env: OMDB_DNS_SERVER=]
+  --clickhouse-url <CLICKHOUSE_URL>  URL of the ClickHouse server to connect to [env:
+                                     OMDB_CLICKHOUSE_URL=]
+  --dns-server <DNS_SERVER>          [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
@@ -1041,7 +1034,7 @@ error: unexpected argument '--summarizes' found
 
   tip: a similar argument exists: '--summaries'
 
-Usage: omdb oxql <--clickhouse-url <CLICKHOUSE_URL>|--summaries|--elapsed>
+Usage: omdb oxql --summaries
 
 For more information, try '--help'.
 =============================================
@@ -1068,8 +1061,8 @@ Options:
   -h, --help                   Print help
 
 Connection Options:
-      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
-      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+  --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+  --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
 
 Safety Options:
   -w, --destructive  Allow potentially-destructive subcommands
