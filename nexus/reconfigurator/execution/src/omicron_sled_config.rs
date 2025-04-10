@@ -68,10 +68,7 @@ pub(crate) async fn deploy_sled_configs(
                     Some(error)
                 }
                 Ok(result) => {
-                    match parse_config_result(result.into_inner(), &log) {
-                        Ok(()) => None,
-                        Err(err) => Some(err),
-                    }
+                    parse_config_result(result.into_inner(), &log).err()
                 }
             }
         })

@@ -162,7 +162,7 @@ impl SimInstanceInner {
                 MonitorChange::PropolisState(state) => Some(state),
                 _ => None,
             })
-            .last()
+            .next_back()
             .copied()
     }
 
