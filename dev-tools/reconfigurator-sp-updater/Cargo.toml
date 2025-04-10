@@ -8,7 +8,6 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-# XXX-dap Review all of these
 anyhow.workspace = true
 clap.workspace = true
 chrono.workspace = true
