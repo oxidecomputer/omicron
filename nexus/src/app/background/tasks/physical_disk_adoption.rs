@@ -11,6 +11,7 @@
 //!
 //! In the future, this may become more explicitly operator-controlled.
 
+use crate::app::CONTROL_PLANE_STORAGE_BUFFER;
 use crate::app::background::BackgroundTask;
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -138,7 +139,8 @@ impl BackgroundTask for PhysicalDiskAdoption {
                 let zpool = Zpool::new(
                     Uuid::new_v4(),
                     inv_disk.sled_id.into_untyped_uuid(),
-                    disk.id()
+                    disk.id(),
+                    CONTROL_PLANE_STORAGE_BUFFER.into(),
                 );
 
                 let result = self.datastore.physical_disk_and_zpool_insert(

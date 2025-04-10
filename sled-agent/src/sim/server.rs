@@ -77,6 +77,8 @@ pub struct Server {
     pub http_server: dropshot::HttpServer<Arc<SledAgent>>,
     /// simulated pantry server
     pub pantry_server: Option<PantryServer>,
+    /// address of repo depot server
+    pub repo_depot_address: SocketAddr,
 }
 
 impl Server {
@@ -127,7 +129,8 @@ impl Server {
         // TODO-robustness if this returns a 400 error, we probably want to
         // return a permanent error from the `notify_nexus` closure.
         let sa_address = http_server.local_addr();
-        let repo_depot_port = sled_agent.repo_depot.local_addr().port();
+        let repo_depot_address = sled_agent.repo_depot.local_addr();
+        let repo_depot_port = repo_depot_address.port();
         let config_clone = config.clone();
         let log_clone = log.clone();
         let task = tokio::spawn(async move {
@@ -230,6 +233,7 @@ impl Server {
             sled_agent,
             http_server,
             pantry_server: None,
+            repo_depot_address,
         })
     }
 
@@ -514,10 +518,14 @@ pub async fn run_standalone_server(
         // individuals running this program who then want to log in as this
         // user.  For more on what's supported, see the API docs for this
         // type and the specific constraints in the nexus-passwords crate.
-        user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
-        RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
-            .parse()
-            .unwrap(),
+        //
+        // The hash was generated via:
+        // `cargo run --example argon2 -- --input oxide`.
+        user_password_hash:
+            "$argon2id$v=19$m=98304,t=23,p=1$Effh/p6M2ZKdnpJFeGqtGQ$\
+             ZtUwcVODAvUAVK6EQ5FJMv+GMlUCo9PQQsy9cagL+EU"
+                .parse()
+                .unwrap(),
     };
 
     let mut crucible_datasets = vec![];

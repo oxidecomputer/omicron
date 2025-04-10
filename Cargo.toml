@@ -88,6 +88,7 @@ members = [
     "nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
+    "nexus/reconfigurator/cli-integration-tests",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -230,6 +231,7 @@ default-members = [
     "nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
+    "nexus/reconfigurator/cli-integration-tests",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -376,7 +378,7 @@ crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "da
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
-daft = { version = "0.1.2", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
+daft = { version = "0.1.3", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
@@ -384,7 +386,7 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.19"
 derive-where = "1.2.7"
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.8", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.2.9", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
@@ -399,7 +401,7 @@ ereport-types = { path = "ereport/types" }
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
-flate2 = "1.1.0"
+flate2 = "1.1.1"
 float-ord = "0.3.2"
 flume = "0.11.1"
 foreign-types = "0.3.2"
@@ -415,8 +417,8 @@ gateway-client = { path = "clients/gateway-client" }
 # is "fine", because SP/MGS communication maintains forwards and backwards
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "9bbac475dcaac88286c07a20b6bd3e94fc81d7f0", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "9bbac475dcaac88286c07a20b6bd3e94fc81d7f0" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "f9566e68e0a0ccb7c3eeea081ae1cea279c11b2a", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "f9566e68e0a0ccb7c3eeea081ae1cea279c11b2a" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
@@ -463,6 +465,7 @@ itertools = "0.14.0"
 internet-checksum = "0.2"
 ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
+jiff = "0.2.6"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
 libc = "0.2.170"
@@ -592,6 +595,7 @@ range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
 rayon = "1.10"
 rcgen = "0.12.1"
+reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.38.0"
 ref-cast = "1.0"
 regex = "1.11.1"
@@ -705,8 +709,7 @@ wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
 xshell = "0.2.7"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
-# NOTE: Avoid upgrading zip until https://github.com/zip-rs/zip2/issues/231 is resolved
-zip = { version = "=2.1.3", default-features = false, features = ["deflate","bzip2"] }
+zip = { version = "2.6.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
 
 # newtype-uuid is set to default-features = false because we don't want to

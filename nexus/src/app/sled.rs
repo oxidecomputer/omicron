@@ -19,6 +19,7 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -330,6 +331,9 @@ impl super::Nexus {
             request.id,
             request.sled_id,
             request.physical_disk_id,
+            // This function is only called from tests, so it does not need a
+            // real value here.
+            ByteCount::from_gibibytes_u32(0).into(),
         );
         self.db_datastore.zpool_insert(&opctx, zpool).await?;
         Ok(())

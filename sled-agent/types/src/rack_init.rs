@@ -486,7 +486,12 @@ mod tests {
             recovery_silo: RecoverySiloConfig {
                 silo_name: "recovery".parse().unwrap(),
                 user_name: "recovery".parse().unwrap(),
-                user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
+                // Generated via `cargo run --example argon2 -- --input oxide`.
+                user_password_hash:
+                    "$argon2id$v=19$m=98304,t=23,p=1$Effh/p6M2ZKdnpJFeGqtGQ$\
+                     ZtUwcVODAvUAVK6EQ5FJMv+GMlUCo9PQQsy9cagL+EU"
+                        .parse()
+                        .unwrap(),
             },
             rack_network_config: RackNetworkConfig {
                 rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
@@ -607,11 +612,11 @@ mod tests {
                 user_name: "dummy".parse().unwrap(),
                 // This is a hash for the password "oxide".  It doesn't matter,
                 // though; it's not used.
-                user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
-                    RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/\
-                    ek3GL0el/oProgTwWpHJZ8lsQQoY"
-                    .parse()
-                    .unwrap(),
+                user_password_hash:
+                    "$argon2id$v=19$m=98304,t=23,p=1$Effh/p6M2ZKdnpJFeGqtGQ$\
+                     ZtUwcVODAvUAVK6EQ5FJMv+GMlUCo9PQQsy9cagL+EU"
+                        .parse()
+                        .unwrap(),
             },
             rack_network_config: RackNetworkConfig {
                 rack_subnet: Ipv6Net::new(
