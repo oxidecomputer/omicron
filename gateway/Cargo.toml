@@ -28,6 +28,7 @@ ipcc.workspace = true
 omicron-common.workspace = true
 schemars.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 signal-hook.workspace = true
 signal-hook-tokio.workspace = true
 slog.workspace = true
