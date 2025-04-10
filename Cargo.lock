@@ -7477,39 +7477,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "omicron-reconfigurator-sp-updater"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "camino",
- "chrono",
- "clap",
- "dropshot 0.16.0",
- "futures",
- "gateway-client",
- "humantime",
- "internal-dns-resolver",
- "internal-dns-types",
- "nexus-mgs-updates",
- "nexus-reconfigurator-execution",
- "nexus-types",
- "omicron-common",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "qorb",
- "reedline",
- "repo-depot-client",
- "serde_json",
- "slog",
- "slog-error-chain",
- "supports-color",
- "tokio",
- "tufaceous",
- "tufaceous-artifact",
- "uuid",
-]
-
-[[package]]
 name = "omicron-releng"
 version = "0.1.0"
 dependencies = [
@@ -7538,6 +7505,17 @@ dependencies = [
  "toml 0.8.20",
  "tufaceous-artifact",
  "tufaceous-lib",
+]
+
+[[package]]
+name = "omicron-repl-utils"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "omicron-workspace-hack",
+ "reedline",
 ]
 
 [[package]]
@@ -10022,12 +10000,12 @@ dependencies = [
  "nexus-types",
  "omicron-common",
  "omicron-nexus",
+ "omicron-repl-utils",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pq-sys",
- "reedline",
  "semver 1.0.25",
  "serde",
  "serde_json",
@@ -10040,6 +10018,30 @@ dependencies = [
  "tokio",
  "tufaceous-artifact",
  "uuid",
+]
+
+[[package]]
+name = "reconfigurator-sp-updater"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "dropshot 0.16.0",
+ "futures",
+ "gateway-client",
+ "humantime",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "nexus-mgs-updates",
+ "nexus-types",
+ "omicron-repl-utils",
+ "omicron-workspace-hack",
+ "qorb",
+ "serde_json",
+ "slog",
+ "tokio",
+ "tufaceous-artifact",
 ]
 
 [[package]]

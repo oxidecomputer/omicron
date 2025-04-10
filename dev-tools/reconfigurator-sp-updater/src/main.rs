@@ -6,12 +6,9 @@
 
 use anyhow::Context;
 use anyhow::anyhow;
-use anyhow::bail;
 use chrono::SecondsFormat;
 use clap::Args;
 use clap::ColorChoice;
-use clap::CommandFactory;
-use clap::FromArgMatches;
 use clap::Parser;
 use clap::Subcommand;
 use clap::ValueEnum;
@@ -26,9 +23,9 @@ use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::inventory::BaseboardId;
+use omicron_repl_utils::run_repl_on_stdin;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
-use reedline::{Reedline, Signal};
 use slog::{info, o, warn};
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -156,28 +153,9 @@ impl ReconfiguratorSpUpdater {
         let mut updater_state =
             UpdaterState { requests_tx, status_rx, inventory };
 
-        let mut ed = Reedline::create();
-        let prompt = reedline::DefaultPrompt::new(
-            reedline::DefaultPromptSegment::Empty,
-            reedline::DefaultPromptSegment::Empty,
-        );
-        loop {
-            match ed.read_line(&prompt) {
-                Ok(Signal::Success(buffer)) => {
-                    match process_entry(&mut updater_state, buffer) {
-                        LoopResult::Continue => (),
-                        LoopResult::Bail(error) => return Err(error),
-                    }
-                }
-                Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => break,
-                Err(error) => {
-                    bail!(
-                        "reconfigurator-sp-updater: unexpected error: {:#}",
-                        error
-                    );
-                }
-            }
-        }
+        run_repl_on_stdin(&mut |cmd: TopLevelArgs| {
+            process_cmd(&mut updater_state, cmd)
+        })?;
 
         info!(&log, "waiting for qorb to shut down");
         mgs_resolver.terminate().await;
@@ -277,81 +255,17 @@ impl Inventory {
     }
 }
 
-// XXX-dap a lot of this is duplicated from reconfigurator-cli
-
-/// Describes next steps after evaluating one "line" of user input
-///
-/// This could just be `Result`, but it's easy to misuse that here because
-/// _commands_ might fail all the time without needing to bail out of the REPL.
-/// We use a separate type for clarity about what success/failure actually
-/// means.
-enum LoopResult {
-    /// Show the prompt and accept another command
-    Continue,
-
-    /// Exit the REPL with a fatal error
-    Bail(anyhow::Error),
-}
-
 /// Processes one "line" of user input.
-fn process_entry(
+fn process_cmd(
     updater_state: &mut UpdaterState,
-    entry: String,
-) -> LoopResult {
-    // Strip everything after '#' as a comment.
-    let entry = match entry.split_once('#') {
-        Some((real, _comment)) => real,
-        None => &entry,
-    };
-
-    // If no input was provided, take another lap (print the prompt and accept
-    // another line).  This gets handled specially because otherwise clap would
-    // treat this as a usage error and print a help message, which isn't what we
-    // want here.
-    if entry.trim().is_empty() {
-        return LoopResult::Continue;
-    }
-
-    // Parse the line of input as a REPL command.
-    //
-    // Using `split_whitespace()` like this is going to be a problem if we ever
-    // want to support arguments with whitespace in them (using quotes).  But
-    // it's good enough for now.
-    let parts = entry.split_whitespace();
-    let parsed_command = TopLevelArgs::command()
-        .multicall(true)
-        .try_get_matches_from(parts)
-        .and_then(|matches| TopLevelArgs::from_arg_matches(&matches));
-    let command = match parsed_command {
-        Err(error) => {
-            // We failed to parse the command.  Print the error.
-            return match error.print() {
-                // Assuming that worked, just take another lap.
-                Ok(_) => LoopResult::Continue,
-                // If we failed to even print the error, that itself is a fatal
-                // error.
-                Err(error) => LoopResult::Bail(
-                    anyhow!(error).context("printing previous error"),
-                ),
-            };
-        }
-        Ok(TopLevelArgs { command }) => command,
-    };
-
-    // Dispatch to the command's handler.
-    let cmd_result = match command {
+    cmd: TopLevelArgs,
+) -> anyhow::Result<Option<String>> {
+    let TopLevelArgs { command } = cmd;
+    match command {
         Commands::Status => cmd_status(updater_state),
         Commands::Set(args) => cmd_set(updater_state, args),
         Commands::Delete(args) => cmd_delete(updater_state, args),
-    };
-
-    match cmd_result {
-        Err(error) => println!("error: {:#}", error),
-        Ok(Some(s)) => println!("{}", s),
-        Ok(None) => (),
     }
-
-    LoopResult::Continue
 }
 
 // clap configuration for the REPL commands

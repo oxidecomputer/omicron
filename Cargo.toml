@@ -46,6 +46,7 @@ members = [
     "dev-tools/reconfigurator-exec-unsafe",
     "dev-tools/reconfigurator-sp-updater",
     "dev-tools/releng",
+    "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
     "dev-tools/xtask",
     "dns-server",
@@ -187,6 +188,7 @@ default-members = [
     "dev-tools/reconfigurator-exec-unsafe",
     "dev-tools/reconfigurator-sp-updater",
     "dev-tools/releng",
+    "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
@@ -523,6 +525,7 @@ omicron-omdb = { path = "dev-tools/omdb" }
 omicron-package = { path = "package" }
 omicron-passwords = { path = "passwords" }
 omicron-pins = { path = "dev-tools/pins" }
+omicron-repl-utils = { path = "dev-tools/repl-utils" }
 omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
