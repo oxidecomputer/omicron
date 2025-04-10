@@ -13,56 +13,35 @@ use thiserror::Error;
 use tokio::{io::AsyncWriteExt, sync::watch};
 use tufaceous_artifact::ArtifactHash;
 
-// XXX-dap want omdb-based introspection, control
-// XXX-dap in an ideal world this would load everything it needs in the
-// background.  Maybe this should go into a background task?
-// XXX-dap actually cache
-// XXX-dap want a mechanism to avoid fetching multiple times
-// concurrently.
-
 type RepoDepotError = repo_depot_client::Error<repo_depot_client::types::Error>;
 
+/// Makes update artifact contents available to consumers that need it
+// This implementation is currently very minimal.  It doesn't actually cache and
+// doesn't avoid concurrent fetches for the same object.
 pub struct ArtifactCache {
     log: slog::Logger,
-    client_rx: watch::Receiver<qorb::resolver::AllBackends>,
+    repo_depot_backends: watch::Receiver<qorb::resolver::AllBackends>,
     next: AtomicUsize,
 }
 
 impl ArtifactCache {
     pub fn new(
         log: slog::Logger,
-        client_rx: watch::Receiver<qorb::resolver::AllBackends>,
+        repo_depot_backends: watch::Receiver<qorb::resolver::AllBackends>,
     ) -> ArtifactCache {
-        ArtifactCache { log, client_rx, next: AtomicUsize::new(0) }
+        ArtifactCache { log, repo_depot_backends, next: AtomicUsize::new(0) }
     }
 
-    fn client(&self) -> Result<repo_depot_client::Client, ArtifactCacheError> {
-        // It's important that we drop the borrowed value before returning so
-        // that we don't keep the watch channel locked.
-        //
-        // "next" is used to try to avoid re-using the same client every time.
-        // But it's not critical that we go in any particular order.
-        let idx = self.next.fetch_add(1, Ordering::SeqCst);
-        let clients = self.client_rx.borrow();
-        if clients.is_empty() {
-            Err(ArtifactCacheError::NoClients)
-        } else {
-            let addresses: Vec<_> = clients.values().collect();
-            let addr = addresses[idx % addresses.len()];
-            let url = format!("http://{}", addr.address);
-            let log = self.log.new(o!("repo_depot_url" => url.clone()));
-            Ok(repo_depot_client::Client::new(&url, log))
-        }
-    }
-
+    /// Retrieve the entire contents of the artifact identified by `hash`
+    ///
+    /// Since this will buffer the whole artifact in memory, this should only be
+    /// used for artifacts known to be relatively small.
     pub async fn artifact_contents(
         &self,
         hash: &ArtifactHash,
     ) -> Result<Vec<u8>, ArtifactCacheError> {
         let client = self.client()?;
         let writer = std::io::Cursor::new(Vec::new());
-        // XXX-dap is there a better way to do this?  This is cribbed from
-        // sled-agent.
         let byte_stream = client
             .artifact_get_by_sha256(&hash.to_string())
             .await?
@@ -95,6 +74,25 @@ impl ArtifactCache {
         }
 
         Ok(buffer)
+    }
+
+    fn client(&self) -> Result<repo_depot_client::Client, ArtifactCacheError> {
+        // It's important that we drop the borrowed value before returning so
+        // that we don't keep the watch channel locked.
+        //
+        // "next" is used to try to avoid re-using the same client every time.
+        // But it's not critical that we go in any particular order.
+        let idx = self.next.fetch_add(1, Ordering::SeqCst);
+        let clients = self.repo_depot_backends.borrow();
+        if clients.is_empty() {
+            Err(ArtifactCacheError::NoClients)
+        } else {
+            let addresses: Vec<_> = clients.values().collect();
+            let addr = addresses[idx % addresses.len()];
+            let url = format!("http://{}", addr.address);
+            let log = self.log.new(o!("repo_depot_url" => url.clone()));
+            Ok(repo_depot_client::Client::new(&url, log))
+        }
     }
 }
 
