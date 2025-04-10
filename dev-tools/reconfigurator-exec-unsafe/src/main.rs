@@ -25,6 +25,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use qorb::resolver::Resolver;
+use qorb::resolvers::fixed::FixedResolver;
 use slog::{debug, info};
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -204,9 +205,7 @@ impl ReconfiguratorExec {
                 0,
             );
             let mut repo_depot_resolver =
-                internal_dns_resolver::StaticResolver::new([SocketAddr::from(
-                    repo_depot_addr,
-                )]);
+                FixedResolver::new([SocketAddr::from(repo_depot_addr)]);
             let artifact_cache = Arc::new(ArtifactCache::new(
                 log.clone(),
                 repo_depot_resolver.monitor(),

@@ -4877,7 +4877,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
- "async-trait",
  "dns-server",
  "dns-service-client",
  "dropshot 0.16.0",
@@ -5299,7 +5298,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -9716,8 +9715,7 @@ dependencies = [
 [[package]]
 name = "qorb"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac55d5c7e6acb2b6b1a248b70d08ed437613eb8c05f833de3a5c9397d368fc71"
+source = "git+https://github.com/oxidecomputer/qorb?branch=dap%2Fstatic-resolver#5446106a4a06f67a5f2cbb4be5459adf85277ef5"
 dependencies = [
  "anyhow",
  "async-trait",

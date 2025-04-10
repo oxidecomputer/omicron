@@ -8,7 +8,6 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-async-trait.workspace = true
 futures.workspace = true
 hickory-resolver.workspace = true
 internal-dns-types.workspace = true
@@ -18,7 +17,6 @@ qorb.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 slog.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true

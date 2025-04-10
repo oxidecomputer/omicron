@@ -27,6 +27,7 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::inventory::BaseboardId;
 use qorb::resolver::Resolver;
+use qorb::resolvers::fixed::FixedResolver;
 use reedline::{Reedline, Signal};
 use slog::{info, o, warn};
 use std::collections::BTreeMap;
@@ -134,7 +135,7 @@ impl ReconfiguratorSpUpdater {
         info!(&log, "loaded inventory from MGS");
 
         let mut repo_depot_resolver =
-            internal_dns_resolver::StaticResolver::new([self.repo_depot_addr]);
+            FixedResolver::new([self.repo_depot_addr]);
         let artifact_cache = Arc::new(ArtifactCache::new(
             log.clone(),
             repo_depot_resolver.monitor(),

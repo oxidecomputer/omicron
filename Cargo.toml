@@ -877,7 +877,9 @@ opt-level = 3
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
-# [patch.crates-io]
+# XXX-dap
+[patch.crates-io]
+qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "dap/static-resolver" }
 # diesel = { path = "../../diesel/diesel" }
 # dropshot = { path = "../dropshot/dropshot" }
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
