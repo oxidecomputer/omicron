@@ -343,6 +343,8 @@ mod test {
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
@@ -353,6 +355,7 @@ mod test {
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::RACK_PREFIX;
+    use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::address::get_sled_address;
     use omicron_common::address::get_switch_zone_address;
@@ -733,7 +736,11 @@ mod test {
             .map(|(i, (sled_id, subnet))| {
                 let sled_info = Sled::new(
                     *sled_id,
+                    SledPolicy::InService {
+                        provision_policy: SledProvisionPolicy::Provisionable,
+                    },
                     get_sled_address(Ipv6Subnet::new(subnet.network())),
+                    REPO_DEPOT_PORT,
                     // The first two of these (arbitrarily) will be marked
                     // Scrimlets.
                     if i < 2 { SledRole::Scrimlet } else { SledRole::Gimlet },
@@ -759,7 +766,8 @@ mod test {
         //
         // 2. Every SRV record that we find should have a "target" that points
         //    to another name within the DNS configuration, and that name should
-        //    be one of the ones with a AAAA record pointing to an Omicron zone.
+        //    be one of the ones with a AAAA record pointing to either an
+        //    Omicron zone or a global zone.
         //
         // 3. There is at least one SRV record for each service that we expect
         //    to appear in the representative system that we're working with.
@@ -784,7 +792,7 @@ mod test {
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
 
-        // Check to see that the out-of-service zone was actually excluded
+        // Check to see that the out-of-service zone was actually excluded.
         assert!(
             omicron_zones_by_ip.values().all(|id| *id != out_of_service_id)
         );
@@ -802,6 +810,17 @@ mod test {
                 } else {
                     None
                 }
+            })
+            .collect();
+
+        // We also want a mapping from underlay IP to each sled global zone.
+        // In this case, the value is the sled id.
+        let mut all_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
+            .keys()
+            .map(|sled_id| {
+                let sled_subnet = sleds_by_id.get(sled_id).unwrap().subnet();
+                let global_zone_ip = *get_sled_address(sled_subnet).ip();
+                (global_zone_ip, *sled_id)
             })
             .collect();
 
@@ -872,9 +891,23 @@ mod test {
                     continue;
                 }
 
+                if let Some(sled_id) = all_sleds_by_ip.remove(addr) {
+                    println!(
+                        "IP {} found in DNS corresponds with global zone \
+                        for sled {}",
+                        addr, sled_id
+                    );
+                    expected_srv_targets.insert(format!(
+                        "{}.{}",
+                        name, blueprint_dns_zone.zone_name
+                    ));
+                    continue;
+                }
+
                 println!(
                     "note: found IP ({}) not corresponding to any \
-                    Omicron zone or switch zone (name {:?})",
+                    Omicron zone, switch zone, or global zone \
+                    (name {:?})",
                     addr, name
                 );
             }
@@ -924,6 +957,7 @@ mod test {
             ServiceName::CruciblePantry,
             ServiceName::BoundaryNtp,
             ServiceName::InternalNtp,
+            ServiceName::RepoDepot,
         ]);
 
         for (name, records) in &blueprint_dns_zone.records {

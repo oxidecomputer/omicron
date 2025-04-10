@@ -22,7 +22,7 @@ use nexus_types::deployment::{
 };
 use omicron_common::address::{
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT,
-    NEXUS_INTERNAL_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
+    NEXUS_INTERNAL_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, REPO_DEPOT_PORT,
     RSS_RESERVED_ADDRESSES, ReservedRackSubnet, SLED_PREFIX, get_sled_address,
     get_switch_zone_address,
 };
@@ -296,6 +296,20 @@ impl Plan {
     ) -> Result<Self, PlanError> {
         let mut dns_builder = DnsConfigBuilder::new();
         let mut svc_port_builder = ServicePortBuilder::new(config);
+
+        // All sleds get a DNS entry for Repo Depot.
+        for sled in sled_info.iter() {
+            let dns_sled = dns_builder
+                .host_sled(sled.sled_id, *sled.sled_address.ip())
+                .unwrap();
+            dns_builder
+                .service_backend_sled(
+                    ServiceName::RepoDepot,
+                    &dns_sled,
+                    REPO_DEPOT_PORT,
+                )
+                .unwrap();
+        }
 
         // Scrimlets get DNS records for running Dendrite.
         let scrimlets: Vec<_> =
