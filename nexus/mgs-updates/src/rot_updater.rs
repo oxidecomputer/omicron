@@ -9,7 +9,6 @@ use super::SpComponentUpdateError;
 use super::UpdateProgress;
 use super::common_sp_update::SpComponentUpdater;
 use super::common_sp_update::deliver_update;
-use crate::ReconfiguratorSpComponentUpdater;
 use gateway_client::SpComponent;
 use gateway_client::types::RotSlot;
 use gateway_client::types::SpComponentFirmwareSlot;
@@ -193,10 +192,3 @@ impl SpComponentUpdater for RotUpdater {
         &self.log
     }
 }
-
-// XXX-dap replace with real impl
-// XXX-dap we'll also need something here that cracks open the artifact we've
-// been pointed to and extracts just the thing that we care about.  (The RoT
-// artifact is a composite artifact.)
-pub struct ReconfiguratorRotUpdater;
-impl ReconfiguratorSpComponentUpdater for ReconfiguratorRotUpdater {}

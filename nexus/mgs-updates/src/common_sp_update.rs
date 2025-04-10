@@ -89,10 +89,7 @@ pub trait ReconfiguratorSpComponentUpdater {
         _log: &'a slog::Logger,
         _mgs_clients: &'a mut MgsClients,
         _update: &'a PendingMgsUpdate,
-    ) -> BoxFuture<'a, Result<VersionStatus, GatewayClientError>> {
-        // XXX-dap remove these default impls
-        todo!();
-    }
+    ) -> BoxFuture<'a, Result<VersionStatus, GatewayClientError>>;
 
     /// Attempts once to perform any post-update actions (e.g., reset the
     /// device)
@@ -101,10 +98,7 @@ pub trait ReconfiguratorSpComponentUpdater {
         _log: &'a slog::Logger,
         _mgs_clients: &'a mut MgsClients,
         _update: &'a PendingMgsUpdate,
-    ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
-        // XXX-dap remove these default impls
-        todo!();
-    }
+    ) -> BoxFuture<'a, Result<(), GatewayClientError>>;
 }
 
 pub enum VersionStatus {

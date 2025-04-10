@@ -8,7 +8,6 @@ use crate::common_sp_update::ReconfiguratorSpComponentUpdater;
 use crate::common_sp_update::STATUS_POLL_INTERVAL;
 use crate::common_sp_update::VersionStatus;
 use crate::mgs_clients::GatewayClientError;
-use crate::rot_updater::ReconfiguratorRotUpdater;
 use crate::sp_updater::ReconfiguratorSpUpdater;
 use crate::{ArtifactCache, ArtifactCacheError, MgsClients};
 use futures::FutureExt;
@@ -337,16 +336,13 @@ impl MgsUpdateDriver {
             KnownArtifactKind::GimletRot
             | KnownArtifactKind::PscRot
             | KnownArtifactKind::SwitchRot => {
-                let sp_update = SpComponentUpdate {
-                    log: log.clone(),
-                    component: SpComponent::ROT,
-                    target_sp_type: update.sp_type,
-                    target_sp_slot: update.slot_id,
-                    firmware_slot: update.firmware_slot,
-                    update_id,
-                };
-
-                (sp_update, Box::new(ReconfiguratorRotUpdater {}))
+                error!(
+                    &log,
+                    "ignoring update requested for unsupported artifact \
+                     kind: {:?}",
+                    known_kind,
+                );
+                return None;
             }
 
             // XXX-dap should we have checked this earlier?
