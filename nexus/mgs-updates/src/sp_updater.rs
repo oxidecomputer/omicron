@@ -8,6 +8,7 @@ use crate::MgsClients;
 use crate::ReconfiguratorSpComponentUpdater;
 use crate::SpComponentUpdateError;
 use crate::UpdateProgress;
+use crate::common_sp_update::FoundVersion;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::SpComponentUpdater;
@@ -16,7 +17,9 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
 use gateway_client::types::SpType;
+use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdateDetails;
 use slog::Logger;
 use slog::{debug, info};
 use tokio::sync::watch;
@@ -192,7 +195,7 @@ impl ReconfiguratorSpComponentUpdater for ReconfiguratorSpUpdater {
                 })
                 .await?
                 .into_inner();
-            debug!(log, "found caboose"; "caboose" => ?caboose);
+            debug!(log, "found active slot caboose"; "caboose" => ?caboose);
 
             // If the version in the currently active slot matches the one we're
             // trying to set, then there's nothing to do.
@@ -200,10 +203,78 @@ impl ReconfiguratorSpComponentUpdater for ReconfiguratorSpUpdater {
                 return Ok(PrecheckStatus::UpdateComplete);
             }
 
-            // XXX-dap verify the precondition related to the *other*
-            // slot.  there's an XXX-dap elsewhere about how this is
-            // important so that an instance that's behind won't try to
-            // undo a subsequent update.
+            // Otherwise, if the version in the currently active slot does not
+            // match what we expect to find, bail out.  It may be that somebody
+            // else has come along and completed a subsequent update and we
+            // don't want to roll that back.  (If for some reason we *do* want
+            // to do this update, the planner will have to notice that what's
+            // here is wrong and update the blueprint.)
+            let PendingMgsUpdateDetails::Sp {
+                expected_active_version,
+                expected_inactive_version,
+            } = &update.details;
+            if caboose.version != expected_active_version.to_string() {
+                return Err(PrecheckError::WrongActiveVersion {
+                    expected: expected_active_version.clone(),
+                    found: caboose.version,
+                });
+            }
+
+            // For the same reason, check that the version in the inactive slot
+            // matches what we expect to find.
+            // TODO It's important for us to detect the condition that a caboose
+            // is invalid because this can happen when devices are programmed
+            // with a bad image.  Unfortunately, MGS currently reports this as a
+            // 503.  Besides being annoying for us to look for, this causes
+            // `try_all_serially()` to try the other MGS.  That's pointless
+            // here, but not a big deal.
+            let found_inactive_caboose_result = mgs_clients
+                .try_all_serially(log, move |mgs_client| async move {
+                    mgs_client
+                        .sp_component_caboose_get(
+                            update.sp_type,
+                            update.slot_id,
+                            &SpComponent::SP_ITSELF.to_string(),
+                            1,
+                        )
+                        .await
+                })
+                .await;
+            let found_version = match found_inactive_caboose_result {
+                Ok(version) => {
+                    FoundVersion::Version(version.into_inner().version)
+                }
+                Err(error) => {
+                    if format!("{error:?}")
+                        .contains("the image caboose does not contain")
+                    {
+                        FoundVersion::MissingVersion
+                    } else {
+                        return Err(PrecheckError::from(error));
+                    }
+                }
+            };
+            match (&expected_inactive_version, &found_version) {
+                // expected garbage, found garbage
+                (
+                    ExpectedVersion::NoValidVersion,
+                    FoundVersion::MissingVersion,
+                ) => (),
+                // expected a specific version and found it
+                (
+                    ExpectedVersion::Version(artifact_version),
+                    FoundVersion::Version(found_version),
+                ) if artifact_version.to_string() == *found_version => (),
+                // anything else is a mismatch
+                (ExpectedVersion::NoValidVersion, FoundVersion::Version(_))
+                | (ExpectedVersion::Version(_), FoundVersion::MissingVersion)
+                | (ExpectedVersion::Version(_), FoundVersion::Version(_)) => {
+                    return Err(PrecheckError::WrongInactiveVersion {
+                        expected: expected_inactive_version.clone(),
+                        found: found_version,
+                    });
+                }
+            };
 
             Ok(PrecheckStatus::ReadyForUpdate)
         }

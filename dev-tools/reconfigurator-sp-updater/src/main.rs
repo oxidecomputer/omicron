@@ -11,16 +11,16 @@ use clap::Args;
 use clap::ColorChoice;
 use clap::Parser;
 use clap::Subcommand;
-use clap::ValueEnum;
 use futures::StreamExt;
-use gateway_client::SpComponent;
 use gateway_client::types::SpIgnition;
 use gateway_client::types::SpType;
 use internal_dns_types::names::ServiceName;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::DriverStatus;
 use nexus_mgs_updates::MgsUpdateDriver;
+use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::inventory::BaseboardId;
 use omicron_repl_utils::run_repl_on_stdin;
@@ -335,21 +335,21 @@ fn cmd_status(
 struct SetArgs {
     /// serial number to update
     serial: String,
-    /// component to update
-    component: Component,
-    /// slot to update (RoT only)
-    #[arg(long)]
-    firmware_slot: Option<u8>,
     /// artifact hash id
     artifact_hash: ArtifactHash,
     /// version
     version: String,
+    /// component to update
+    #[command(subcommand)]
+    component: Component,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Debug, Subcommand)]
 enum Component {
-    Sp,
-    Rot,
+    Sp {
+        expected_active_version: ArtifactVersion,
+        expected_inactive_version: ExpectedVersion,
+    },
 }
 
 fn cmd_set(
@@ -358,13 +358,10 @@ fn cmd_set(
 ) -> anyhow::Result<Option<String>> {
     let serial = &args.serial;
     let info = updater_state.inventory.info_for_serial(serial)?;
-    let known_artifact_kind = match (args.component, info.sp_type) {
-        (Component::Sp, SpType::Sled) => KnownArtifactKind::GimletSp,
-        (Component::Sp, SpType::Power) => KnownArtifactKind::PscSp,
-        (Component::Sp, SpType::Switch) => KnownArtifactKind::SwitchSp,
-        (Component::Rot, SpType::Sled) => KnownArtifactKind::GimletRot,
-        (Component::Rot, SpType::Power) => KnownArtifactKind::PscRot,
-        (Component::Rot, SpType::Switch) => KnownArtifactKind::SwitchRot,
+    let known_artifact_kind = match (&args.component, info.sp_type) {
+        (Component::Sp { .. }, SpType::Sled) => KnownArtifactKind::GimletSp,
+        (Component::Sp { .. }, SpType::Power) => KnownArtifactKind::PscSp,
+        (Component::Sp { .. }, SpType::Switch) => KnownArtifactKind::SwitchSp,
     };
     let artifact_kind = ArtifactKind::from_known(known_artifact_kind);
     let artifact_hash_id =
@@ -373,11 +370,15 @@ fn cmd_set(
         baseboard_id: info.baseboard_id.clone(),
         sp_type: info.sp_type,
         slot_id: info.sp_slot_id,
-        component: match args.component {
-            Component::Sp => SpComponent::SP_ITSELF.to_string(),
-            Component::Rot => SpComponent::ROT.to_string(),
+        details: match args.component {
+            Component::Sp {
+                expected_active_version,
+                expected_inactive_version,
+            } => PendingMgsUpdateDetails::Sp {
+                expected_active_version,
+                expected_inactive_version,
+            },
         },
-        firmware_slot: u16::from(args.firmware_slot.unwrap_or(0)),
         artifact_hash_id,
         artifact_version: ArtifactVersion::new(args.version)
             .context("parsing artifact version")?,

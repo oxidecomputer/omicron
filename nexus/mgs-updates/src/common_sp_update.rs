@@ -10,12 +10,14 @@ use super::UpdateProgress;
 use futures::future::BoxFuture;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
+use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use slog::Logger;
 use slog::{debug, error, info, warn};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
+use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
 /// How frequently do we poll MGS for the update progress?
@@ -252,18 +254,18 @@ pub trait ReconfiguratorSpComponentUpdater {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
         &'a self,
-        _log: &'a slog::Logger,
-        _mgs_clients: &'a mut MgsClients,
-        _update: &'a PendingMgsUpdate,
+        log: &'a slog::Logger,
+        mgs_clients: &'a mut MgsClients,
+        update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<PrecheckStatus, PrecheckError>>;
 
     /// Attempts once to perform any post-update actions (e.g., reset the
     /// device)
     fn post_update<'a>(
         &'a self,
-        _log: &'a slog::Logger,
-        _mgs_clients: &'a mut MgsClients,
-        _update: &'a PendingMgsUpdate,
+        log: &'a slog::Logger,
+        mgs_clients: &'a mut MgsClients,
+        update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), GatewayClientError>>;
 }
 
@@ -291,4 +293,20 @@ pub enum PrecheckError {
         found_part: String,
         found_serial: String,
     },
+
+    #[error(
+        "expected to find active version {expected:?}, but found {found:?}"
+    )]
+    WrongActiveVersion { expected: ArtifactVersion, found: String },
+
+    #[error(
+        "expected to find inactive version {expected:?}, but found {found:?}"
+    )]
+    WrongInactiveVersion { expected: ExpectedVersion, found: FoundVersion },
+}
+
+#[derive(Debug)]
+pub enum FoundVersion {
+    MissingVersion,
+    Version(String),
 }

@@ -378,7 +378,6 @@ impl MgsUpdateDriver {
         };
         let update = update.clone();
         let future = async move {
-            // XXX-dap clones
             let result =
                 apply_update(artifacts, &sp_update, &*updater, mgs_rx, &update)
                     .await;
@@ -563,11 +562,6 @@ async fn wait_for_delivery(
     }
 }
 
-// XXX-dap oh no what if somebody else updated it in a newer blueprint
-// maybe one solution here is that PendingMgsUpdate records the expected current
-// version?  that way if it's changed, we won't proceed.  requires extra
-// blueprint work in planner to fix up if things do change.
-
 #[derive(Clone, Debug)]
 pub enum ApplyUpdateResult {
     /// the update was completed successfully
@@ -598,11 +592,8 @@ pub enum ApplyUpdateError {
     FetchArtifact(#[from] ArtifactCacheError),
     #[error("error communicating with MGS")]
     MgsCommunication(#[from] GatewayClientError),
-    #[error(
-        "component found in indeterminate state (neither old version nor \
-         new version)"
-    )]
-    Indeterminate,
+    #[error("waiting for update to finish")]
+    WaitError(PrecheckError),
 }
 
 impl From<DeliveryWaitError> for ApplyUpdateError {
@@ -792,8 +783,8 @@ pub async fn apply_update(
                 warn!(log, "update takeover: sending reset");
                 true
             }
-            Err(UpdateWaitError::Indeterminate) => {
-                return Err(ApplyUpdateError::Indeterminate);
+            Err(UpdateWaitError::Indeterminate(error)) => {
+                return Err(ApplyUpdateError::WaitError(error));
             }
         }
     };
@@ -827,8 +818,8 @@ pub async fn apply_update(
         // We did not specify a timeout so it should not time out.
         Err(UpdateWaitError::Timeout(_)) => unreachable!(),
         Ok(()) => Ok(ApplyUpdateResult::Completed),
-        Err(UpdateWaitError::Indeterminate) => {
-            Err(ApplyUpdateError::Indeterminate)
+        Err(UpdateWaitError::Indeterminate(error)) => {
+            Err(ApplyUpdateError::WaitError(error))
         }
     }
 
@@ -840,8 +831,8 @@ pub async fn apply_update(
 enum UpdateWaitError {
     #[error("timed out after {0:?}")]
     Timeout(Duration),
-    #[error("found to be running neither previous version nor old version")]
-    Indeterminate,
+    #[error("found unexpected state while waiting for update")]
+    Indeterminate(PrecheckError),
 }
 
 /// Waits for the specified update to finish (by polling)
@@ -866,11 +857,16 @@ async fn wait_for_update_done(
     // error or the caller wants to give up due to a timeout.
 
     loop {
-        // XXX-dap come back to this once I've implemented precondition
-        // checking?
         match updater.precheck(log, mgs_clients, update).await {
+            // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
-            Err(_) | Ok(PrecheckStatus::ReadyForUpdate) => {
+
+            // An incorrect version in the "inactive" slot is normal during the
+            // upgrade.  We have no reason to think this won't converge so we
+            // proceed with waiting.
+            Err(PrecheckError::GatewayClientError(_))
+            | Err(PrecheckError::WrongInactiveVersion { .. })
+            | Ok(PrecheckStatus::ReadyForUpdate) => {
                 match timeout {
                     Some(timeout) if before.elapsed() >= timeout => {
                         return Err(UpdateWaitError::Timeout(timeout));
@@ -880,6 +876,13 @@ async fn wait_for_update_done(
                         continue;
                     }
                 };
+            }
+
+            Err(error @ PrecheckError::WrongDevice { .. })
+            | Err(error @ PrecheckError::WrongActiveVersion { .. }) => {
+                // Stop trying to make this update happen.  It's not going to
+                // happen.
+                return Err(UpdateWaitError::Indeterminate(error));
             }
         }
     }
