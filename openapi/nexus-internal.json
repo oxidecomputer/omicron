@@ -2033,9 +2033,9 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
-          "sleds",
           "oximeter_read_mode",
           "oximeter_read_version",
+          "sleds",
           "time_created"
         ]
       },
