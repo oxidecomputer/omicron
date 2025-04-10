@@ -9693,9 +9693,9 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53f49e3c6be8e449a5fdf683ecca1e5e14d3f8e7977d1bf9c61dcc2e871537f0"
+checksum = "7161fa1fa51fab06e6458e5f58c0548d10e0ed6c80436be364ced0b775bb65a9"
 dependencies = [
  "anyhow",
  "async-trait",

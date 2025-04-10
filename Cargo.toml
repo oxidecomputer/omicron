@@ -585,7 +585,7 @@ propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e5
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
 # NOTE: see above!
 proptest = "1.6.0"
-qorb = "0.3.0"
+qorb = "0.3.1"
 quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
