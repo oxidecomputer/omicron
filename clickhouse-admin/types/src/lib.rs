@@ -548,7 +548,7 @@ impl RaftConfig {
             let Some(address) = split_info.next() else {
                 bail!("Returned None while attempting to retrieve address")
             };
-            let Some(port) = address.split(':').next_back() else {
+            let Some(port) = address.split(':').last() else {
                 bail!("A port could not be extracted from {address}")
             };
             let raft_port = match u16::from_str(port) {

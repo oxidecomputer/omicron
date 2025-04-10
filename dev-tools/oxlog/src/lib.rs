@@ -25,7 +25,7 @@ fn get_uuid_dir(result: io::Result<Utf8DirEntry>) -> Option<Uuid> {
         return None;
     }
     let file_name = entry.file_name();
-    file_name.parse().ok()
+    if let Ok(uuid) = file_name.parse() { Some(uuid) } else { None }
 }
 
 #[derive(Debug)]

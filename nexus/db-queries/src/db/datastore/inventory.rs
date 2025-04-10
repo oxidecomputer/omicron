@@ -84,7 +84,7 @@ use uuid::Uuid;
 /// We use a [`Paginator`] to guard against single queries returning an
 /// unchecked number of rows.
 // unsafe: `new_unchecked` is only unsound if the argument is 0.
-const SQL_BATCH_SIZE: NonZeroU32 = NonZeroU32::new(1000).unwrap();
+const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
 
 impl DataStore {
     /// Store a complete inventory collection into the database
