@@ -75,7 +75,7 @@ impl OxqlArgs {
             log,
             self.clickhouse_url.as_deref(),
             // TODO-K: change this to oximeter reader?
-            ServiceName::ClickhouseNative,
+            ServiceName::OximeterReader,
         )
         .await
     }

@@ -321,6 +321,7 @@ impl RackInitRequestBuilder {
                 zone_id,
                 ServiceName::Clickhouse,
                 address,
+                true,
             )
             .expect("Failed to setup ClickHouse DNS");
     }

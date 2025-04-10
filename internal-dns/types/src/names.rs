@@ -48,7 +48,9 @@ pub enum ServiceName {
     ExternalDns,
     Nexus,
     Oximeter,
-    // TODO-K: add oximeter reader?
+    /// Determines whether to read from a replicated cluster or single-node
+    /// ClickHouse installation.
+    OximeterReader,
     ManagementGatewayService,
     Wicketd,
     Dendrite,
@@ -80,6 +82,7 @@ impl ServiceName {
             ServiceName::InternalDns => "nameservice",
             ServiceName::Nexus => "nexus",
             ServiceName::Oximeter => "oximeter",
+            ServiceName::OximeterReader => "oximeter-reader",
             ServiceName::ManagementGatewayService => "mgs",
             ServiceName::Wicketd => "wicketd",
             ServiceName::Dendrite => "dendrite",
@@ -111,6 +114,7 @@ impl ServiceName {
             | ServiceName::ExternalDns
             | ServiceName::Nexus
             | ServiceName::Oximeter
+            | ServiceName::OximeterReader
             | ServiceName::ManagementGatewayService
             | ServiceName::Wicketd
             | ServiceName::Dendrite

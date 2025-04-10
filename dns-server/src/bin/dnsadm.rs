@@ -181,6 +181,7 @@ async fn main() -> Result<()> {
             client.dns_config_put(&new_config).await.context("updating DNS")?;
         }
 
+        // TODO-K: example of updating records
         SubCommand::AddSRV(cmd) => {
             let old_config = client.dns_config_get().await?.into_inner();
             let new_config = add_record(

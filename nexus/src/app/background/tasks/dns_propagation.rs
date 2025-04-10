@@ -153,6 +153,7 @@ async fn dns_propagate_one(
     let log = log.new(o!("dns_server_url" => url.clone()));
     let client = dns_service_client::Client::new(&url, log.clone());
 
+    // TODO-K: This is how we put a new DNS config
     let result = client.dns_config_put(dns_config).await.with_context(|| {
         format!(
             "failed to propagate DNS generation {} to server {}",

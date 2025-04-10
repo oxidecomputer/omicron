@@ -584,6 +584,7 @@ fn register_reroute_oximeter_reads_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
     datastore: &'a DataStore,
+    // TODO-K: do I need the blueprint?
     //    blueprint: &'a Blueprint,
 ) {
     registrar

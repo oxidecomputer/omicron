@@ -24,7 +24,6 @@ pub(crate) async fn reroute_reads(
         .context("failed to retrieve oximeter read policy")?;
 
     info!(opctx.log, "OXIMETER POLICY {:?}", oximeter_policy);
-    println!("OXIMETER POLICY {:?}", oximeter_policy);
 
     Ok(())
 }

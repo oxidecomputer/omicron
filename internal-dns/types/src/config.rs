@@ -423,6 +423,7 @@ impl DnsConfigBuilder {
         zone_id: OmicronZoneUuid,
         http_service: ServiceName,
         http_address: SocketAddrV6,
+        read_policy_enabled: bool,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             http_service == ServiceName::Clickhouse,
@@ -434,6 +435,18 @@ impl DnsConfigBuilder {
 
         // TODO-K: add oximeter reader? maybe not, oximeter reader could point to native instead
         // maybe we read DB and set oximeter reader?
+
+        // We initially point the oximeter-reader to the single node installation
+        // as that is the default functionality. When the oximeter-read-policy
+        // is set to point to the replicated cluster, the oximeter-reader will
+        // point to it.
+        if read_policy_enabled {
+            self.service_backend_zone(
+                ServiceName::OximeterReader,
+                &zone,
+                CLICKHOUSE_TCP_PORT,
+            )?;
+        };
         self.service_backend_zone(
             ServiceName::ClickhouseNative,
             &zone,
@@ -472,6 +485,7 @@ impl DnsConfigBuilder {
         zone_id: OmicronZoneUuid,
         http_service: ServiceName,
         http_address: SocketAddrV6,
+        read_policy_enabled: bool,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             http_service == ServiceName::ClickhouseServer,
@@ -480,7 +494,13 @@ impl DnsConfigBuilder {
         );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(http_service, &zone, http_address.port())?;
-        // TODO-K: add oximeter reader? maybe not, oximeter reader could point to native instead
+        if read_policy_enabled {
+            self.service_backend_zone(
+                ServiceName::OximeterReader,
+                &zone,
+                CLICKHOUSE_TCP_PORT,
+            )?;
+        };
         self.service_backend_zone(
             ServiceName::ClickhouseClusterNative,
             &zone,
@@ -887,12 +907,14 @@ mod test {
                 zone_clickhouse_uuid,
                 ServiceName::Clickhouse,
                 SocketAddrV6::new(ZONE_CLICKHOUSE_IP, 0, 0, 0),
+                true,
             )
             .unwrap();
             b.host_zone_clickhouse_cluster(
                 zone_clickhouse_server_uuid,
                 ServiceName::ClickhouseServer,
                 SocketAddrV6::new(ZONE_CLICKHOUSE_SERVER_IP, 0, 0, 0),
+                false,
             )
             .unwrap();
 
