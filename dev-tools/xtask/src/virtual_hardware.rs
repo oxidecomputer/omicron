@@ -554,7 +554,7 @@ fn destroy_vdevs(
                 .starts_with(Utf8PathBuf::from(ZVOL_ROOT).join(&zpool))
             {
                 println!("Removing {swap_device} from {zpool}");
-                swap_delete(&swap_device)?;
+                swap_delete(swap_device)?;
             }
         }
 
