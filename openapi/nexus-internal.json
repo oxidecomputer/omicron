@@ -1987,6 +1987,22 @@
               }
             ]
           },
+          "oximeter_read_mode": {
+            "description": "Whether oximeter should read from a single node or a cluster",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OximeterReadMode"
+              }
+            ]
+          },
+          "oximeter_read_version": {
+            "description": "Oximeter read policy version when this blueprint was created",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "parent_blueprint_id": {
             "nullable": true,
             "description": "which blueprint this blueprint is based on",
@@ -2018,6 +2034,8 @@
           "id",
           "internal_dns_version",
           "sleds",
+          "oximeter_read_mode",
+          "oximeter_read_version",
           "time_created"
         ]
       },
