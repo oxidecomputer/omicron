@@ -2404,6 +2404,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dev-tools-common"
+version = "0.1.0"
+
+[[package]]
 name = "dhcproto"
 version = "0.13.0-alpha"
 source = "git+https://github.com/bluecatengineering/dhcproto.git?rev=120da6fcd8a7be84d417d372634ead84ce07e6da#120da6fcd8a7be84d417d372634ead84ce07e6da"
@@ -7404,6 +7408,7 @@ dependencies = [
  "camino",
  "cargo_metadata 0.19.2",
  "clap",
+ "dev-tools-common",
  "expectorate",
  "futures",
  "hex",
@@ -14331,6 +14336,7 @@ dependencies = [
  "cargo_metadata 0.19.2",
  "cargo_toml",
  "clap",
+ "dev-tools-common",
  "fs-err",
  "macaddr",
  "serde",
