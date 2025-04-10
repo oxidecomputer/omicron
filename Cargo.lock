@@ -14321,11 +14321,16 @@ dependencies = [
  "fs-err",
  "macaddr",
  "serde",
+ "serde_json",
+ "sha2",
+ "shell-words",
  "swrite",
  "tabled 0.15.0",
  "textwrap",
  "toml 0.8.20",
  "usdt",
+ "walkdir",
+ "xshell",
 ]
 
 [[package]]

@@ -50,7 +50,7 @@ pub(crate) fn cargo_command() -> Command {
 }
 
 #[derive(Debug)]
-struct SanitizedEnvVars {
+pub(crate) struct SanitizedEnvVars {
     // At the moment we only ban some prefixes, but we may also want to ban env
     // vars by exact name in the future.
     prefixes: &'static [&'static str],
@@ -71,9 +71,10 @@ impl SanitizedEnvVars {
         Self { prefixes }
     }
 
-    fn matches(&self, key: &str) -> bool {
+    pub(crate) fn matches(&self, key: &str) -> bool {
         self.prefixes.iter().any(|prefix| key.starts_with(prefix))
     }
 }
 
-static SANITIZED_ENV_VARS: SanitizedEnvVars = SanitizedEnvVars::new();
+pub(crate) static SANITIZED_ENV_VARS: SanitizedEnvVars =
+    SanitizedEnvVars::new();
