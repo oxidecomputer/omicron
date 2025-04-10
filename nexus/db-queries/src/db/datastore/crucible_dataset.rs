@@ -245,6 +245,44 @@ impl DataStore {
 
         Ok(physical_disk.disk_policy == PhysicalDiskPolicy::InService)
     }
+
+    pub async fn mark_crucible_dataset_not_provisionable(
+        &self,
+        opctx: &OpContext,
+        dataset_id: DatasetUuid,
+    ) -> Result<(), Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::crucible_dataset::dsl;
+
+        diesel::update(dsl::crucible_dataset)
+            .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::no_provision.eq(true))
+            .execute_async(&*conn)
+            .await
+            .map(|_| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn mark_crucible_dataset_provisionable(
+        &self,
+        opctx: &OpContext,
+        dataset_id: DatasetUuid,
+    ) -> Result<(), Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::crucible_dataset::dsl;
+
+        diesel::update(dsl::crucible_dataset)
+            .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::no_provision.eq(false))
+            .execute_async(&*conn)
+            .await
+            .map(|_| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[cfg(test)]
@@ -255,6 +293,7 @@ mod test {
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
+    use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -293,6 +332,7 @@ mod test {
             *zpool_id.as_untyped_uuid(),
             *sled_id.as_untyped_uuid(),
             PhysicalDiskUuid::new_v4(),
+            ByteCount::from(0).into(),
         );
         datastore
             .zpool_insert(opctx, zpool)

@@ -44,14 +44,11 @@ uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+# To keep test iterations fast, please avoid a dependency on omicron-nexus or
+# its database code here. Instead, put those tests inside
+# nexus/reconfigurator/cli-integration-tests.
 camino-tempfile.workspace = true
 expectorate.workspace = true
-nexus-client.workspace = true
-nexus-db-queries.workspace = true
-nexus-reconfigurator-preparation.workspace = true
-nexus-test-utils.workspace = true
-nexus-test-utils-macros.workspace = true
-omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
 serde.workspace = true
 subprocess.workspace = true

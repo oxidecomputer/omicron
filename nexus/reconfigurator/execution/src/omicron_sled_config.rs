@@ -159,7 +159,10 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::blueprint_zone_type;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
+    use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::CompressionAlgorithm;
@@ -194,7 +197,11 @@ mod tests {
             sim_sled_agent.id,
             Sled::new(
                 sim_sled_agent.id,
+                SledPolicy::InService {
+                    provision_policy: SledProvisionPolicy::Provisionable,
+                },
                 sim_sled_agent_addr,
+                REPO_DEPOT_PORT,
                 SledRole::Scrimlet,
             ),
         )]);
