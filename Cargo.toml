@@ -883,7 +883,7 @@ opt-level = 3
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
-# XXX-dap
+# XXX-dap update once https://github.com/oxidecomputer/omicron/pull/7955 lands
 [patch.crates-io]
 qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "dap/static-resolver" }
 # diesel = { path = "../../diesel/diesel" }

@@ -1117,9 +1117,6 @@ pub struct PendingMgsUpdate {
 
     /// which artifact to apply to this device
     /// (implies which component is being updated)
-    // XXX-dap remove daft(ignore) once this lands in Omicron:
-    // https://github.com/oxidecomputer/tufaceous/pull/27
-    #[daft(ignore)]
     pub artifact_hash_id: ArtifactHashId,
     pub artifact_version: ArtifactVersion,
 }

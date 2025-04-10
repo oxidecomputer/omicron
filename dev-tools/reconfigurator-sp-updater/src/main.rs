@@ -342,7 +342,7 @@ struct SetArgs {
     firmware_slot: Option<u8>,
     /// artifact hash id
     artifact_hash: ArtifactHash,
-    /// version // XXX-dap remove this
+    /// version
     version: String,
 }
 
