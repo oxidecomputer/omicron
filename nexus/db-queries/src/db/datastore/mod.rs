@@ -145,8 +145,7 @@ pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
 /// This value is chosen to be small enough to avoid any queries being too
 /// expensive.
 // unsafe: `new_unchecked` is only unsound if the argument is 0.
-pub const SQL_BATCH_SIZE: NonZeroU32 =
-    unsafe { NonZeroU32::new_unchecked(1000) };
+pub const SQL_BATCH_SIZE: NonZeroU32 = NonZeroU32::new(1000).unwrap();
 
 // Represents a query that is ready to be executed.
 //

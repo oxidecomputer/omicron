@@ -918,10 +918,10 @@ impl Drop for ClickHouseProcess {
 }
 
 /// Number of data replicas in our test cluster.
-pub const N_REPLICAS: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(2) };
+pub const N_REPLICAS: NonZeroU8 = NonZeroU8::new(2).unwrap();
 
 /// Number of ClickHouse Keepers in our test cluster.
-pub const N_KEEPERS: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(3) };
+pub const N_KEEPERS: NonZeroU8 = NonZeroU8::new(3).unwrap();
 
 /// A `ClickHouseCluster` is used to start and manage a 2 replica 3 keeper ClickHouse cluster.
 #[derive(Debug)]
@@ -1230,7 +1230,7 @@ fn find_port_after_needle(
             return line[address_start..]
                 .trim()
                 .split(':')
-                .last()
+                .next_back()
                 .ok_or_else(|| ClickHouseError::InvalidAddress)?
                 .parse()
                 .map_err(|_| ClickHouseError::InvalidPort);

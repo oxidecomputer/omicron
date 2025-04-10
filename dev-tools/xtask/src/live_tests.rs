@@ -106,7 +106,7 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     ]
     .join("\n");
     let text = textwrap::wrap(
-        &raw,
+        raw,
         textwrap::Options::new(160)
             .initial_indent("     e.g., ")
             .subsequent_indent("              "),
@@ -120,7 +120,7 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     ]
     .join("\n");
     let text = textwrap::wrap(
-        &raw,
+        raw,
         textwrap::Options::new(160)
             .initial_indent("     e.g., ")
             .subsequent_indent("              "),
@@ -148,7 +148,7 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     ]
     .join("\n");
     let text = textwrap::wrap(
-        &raw,
+        raw,
         textwrap::Options::new(160)
             .initial_indent("     ")
             .subsequent_indent("         "),
