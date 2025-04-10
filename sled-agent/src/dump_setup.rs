@@ -1085,10 +1085,15 @@ impl DumpSetupWorker {
         // find dir with oldest average time of files that must be deleted
         // to achieve desired threshold, and reclaim that space.
         dir_info.sort();
-        'outer: for (dir_info, dir) in dir_info {
+        'next_debug_dir: for (dir_info, dir) in dir_info {
             let CleanupDirInfo { average_time: _, num_to_delete, file_list } =
                 dir_info;
             for (_time, _bytes, path) in &file_list[..num_to_delete as usize] {
+                info!(
+                    self.log,
+                    "Removing file on debug dataset to make space";
+                    "path" => path.to_string_lossy().to_string()
+                );
                 // if we are unable to remove a file, we cannot guarantee
                 // that we will reach our target size threshold, and suspect
                 // the i/o error *may* be an issue with the underlying disk, so
@@ -1099,7 +1104,7 @@ impl DumpSetupWorker {
                         self.log,
                         "Couldn't delete {path:?} from debug dataset, skipping {dir:?}. {err:?}"
                     );
-                    continue 'outer;
+                    continue 'next_debug_dir;
                 }
             }
             // we made it through all the files we planned to remove, thereby
@@ -1129,13 +1134,49 @@ impl DumpSetupWorker {
         for path in
             glob::glob(debug_dir.as_ref().join("**/*").as_str())?.flatten()
         {
-            let meta = tokio::fs::metadata(&path).await?;
+            let meta = match tokio::fs::metadata(&path).await {
+                Ok(meta) => meta,
+                // "Not found" errors could be caused by TOCTTOU -- observing a
+                // file which gets renamed, removed, etc. We'll ignore these
+                // files.
+                Err(err)
+                    if matches!(err.kind(), std::io::ErrorKind::NotFound) =>
+                {
+                    continue;
+                }
+                // Other errors get propagated.
+                Err(err) => return Err(err.into()),
+            };
+
+            if !meta.is_file() {
+                // Ignore non-files (e.g. directories, symlinks)
+                continue;
+            }
+
+            // Confirm that the file name is "safe to delete".
+            //
+            // This list may expand as we continue using the Debug dataset.
+            let Some(file_name) = path.file_name().and_then(|n| n.to_str())
+            else {
+                continue;
+            };
+            // Ignore support bundles
+            if file_name == crate::support_bundle::storage::BUNDLE_FILE_NAME {
+                continue;
+            }
+            // Ignore support bundle "temp files" as they're being created.
+            if file_name.ends_with(
+                crate::support_bundle::storage::BUNDLE_TMP_FILE_NAME_SUFFIX,
+            ) {
+                continue;
+            }
+
             // we need this to be a Duration rather than SystemTime so we can
             // do math to it later.
             let time = meta.modified()?.duration_since(UNIX_EPOCH)?;
             let size = meta.len();
 
-            file_list.push((time, size, path))
+            file_list.push((time, size, path));
         }
         file_list.sort();
 
@@ -1200,6 +1241,8 @@ struct CleanupDirInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use camino::Utf8Path;
+    use camino_tempfile::Utf8TempDir;
     use illumos_utils::dumpadm::{
         DF_VALID, DUMP_MAGIC, DUMP_OFFSET, DUMP_VERSION,
     };
@@ -1223,10 +1266,8 @@ mod tests {
     struct FakeCoreDumpAdm {}
     #[derive(Default)]
     struct FakeZfs {
-        pub zpool_props: HashMap<
-            &'static str,
-            HashMap<&'static str, Result<String, ZfsGetError>>,
-        >,
+        pub zpool_props:
+            HashMap<String, HashMap<&'static str, Result<String, ZfsGetError>>>,
     }
     #[derive(Default)]
     struct FakeZone {
@@ -1317,7 +1358,7 @@ mod tests {
             Box::<FakeCoreDumpAdm>::default(),
             Box::new(FakeZfs {
                 zpool_props: [(
-                    NOT_MOUNTED_INTERNAL,
+                    NOT_MOUNTED_INTERNAL.to_string(),
                     [("mounted", Ok("no".to_string()))].into_iter().collect(),
                 )]
                 .into_iter()
@@ -1372,13 +1413,13 @@ mod tests {
             Box::new(FakeZfs {
                 zpool_props: [
                     (
-                        NOT_MOUNTED_INTERNAL,
+                        NOT_MOUNTED_INTERNAL.to_string(),
                         [("mounted", Ok("no".to_string()))]
                             .into_iter()
                             .collect(),
                     ),
                     (
-                        MOUNTED_INTERNAL,
+                        MOUNTED_INTERNAL.to_string(),
                         [
                             ("mounted", Ok("yes".to_string())),
                             ("mountpoint", Ok(ZPOOL_MNT.to_string())),
@@ -1387,7 +1428,7 @@ mod tests {
                         .collect(),
                     ),
                     (
-                        ERROR_INTERNAL,
+                        ERROR_INTERNAL.to_string(),
                         [(
                             "mounted",
                             Err("asdf".parse::<u32>().unwrap_err().into()),
@@ -1527,7 +1568,7 @@ mod tests {
             Box::<FakeCoreDumpAdm>::default(),
             Box::new(FakeZfs {
                 zpool_props: [(
-                    MOUNTED_EXTERNAL,
+                    MOUNTED_EXTERNAL.to_string(),
                     [
                         ("mounted", Ok("yes".to_string())),
                         ("mountpoint", Ok(ZPOOL_MNT.to_string())),
@@ -1590,7 +1631,7 @@ mod tests {
             Box::new(FakeZfs {
                 zpool_props: [
                     (
-                        MOUNTED_INTERNAL,
+                        MOUNTED_INTERNAL.to_string(),
                         [
                             ("mounted", Ok("yes".to_string())),
                             ("mountpoint", Ok(tempdir_path.clone())),
@@ -1599,7 +1640,7 @@ mod tests {
                         .collect(),
                     ),
                     (
-                        MOUNTED_EXTERNAL,
+                        MOUNTED_EXTERNAL.to_string(),
                         [
                             ("mounted", Ok("yes".to_string())),
                             ("mountpoint", Ok(tempdir_path)),
@@ -1659,6 +1700,438 @@ mod tests {
         assert!(!zone_logs.join(LOG_NAME).is_file());
         assert!(debug_dir.join(CORE_NAME).is_file());
         assert!(!core_dir.join(CORE_NAME).is_file());
+        logctx.cleanup_successful();
+    }
+
+    fn create_test_file(path: &Utf8Path, size: u64, time: SystemTime) {
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent)
+                    .expect("Cannot create parent directories");
+            }
+        }
+        let file = std::fs::File::create(path).expect("Cannot create file");
+        file.set_len(size).expect("Failed to set file size");
+        file.set_modified(time).expect("Failed to set mtime");
+    }
+
+    fn assert_all_files_exist(paths: &[&Utf8Path]) {
+        for path in paths {
+            assert!(path.exists(), "Expected {path} to exist");
+        }
+    }
+
+    fn assert_all_files_do_not_exist(paths: &[&Utf8Path]) {
+        for path in paths {
+            assert!(!path.exists(), "Expected {path} not to exist");
+        }
+    }
+
+    // Utility to help with testing "debug dataset file cleanup".
+    struct TestDebugFileHarness {
+        log: Logger,
+        tempdir: Utf8TempDir,
+
+        debug_path: Utf8PathBuf,
+        mtime: SystemTime,
+        files: Vec<TestFile>,
+    }
+
+    impl TestDebugFileHarness {
+        // Creates a new test file harness within a particular debug directory
+        async fn new(log: &Logger) -> Self {
+            let tempdir = Utf8TempDir::new().unwrap();
+            let debug_dir = tempdir.path().join(DUMP_DATASET);
+            tokio::fs::create_dir_all(&debug_dir).await.unwrap();
+
+            Self {
+                log: log.clone(),
+                tempdir,
+                debug_path: debug_dir.to_path_buf(),
+                mtime: SystemTime::now(),
+                files: vec![],
+            }
+        }
+
+        async fn new_dump_setup_worker(
+            &self,
+            used: u64,
+            available: u64,
+        ) -> DumpSetupWorker {
+            let tempdir_path = self.tempdir.path().to_string();
+            const MOUNTED_EXTERNAL: &str =
+                "oxp_446f6e74-4469-6557-6f6e-646572696e67";
+            let mut worker = DumpSetupWorker::new(
+                Box::<FakeCoreDumpAdm>::default(),
+                Box::new(FakeZfs {
+                    zpool_props: [
+                        (
+                            MOUNTED_EXTERNAL.to_string(),
+                            [
+                                ("mounted", Ok("yes".to_string())),
+                                ("mountpoint", Ok(tempdir_path)),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                        (
+                            self.debug_path.to_string(),
+                            [
+                                ("mounted", Ok("yes".to_string())),
+                                ("mountpoint", Ok(self.debug_path.to_string())),
+                                ("used", Ok(used.to_string())),
+                                ("available", Ok(available.to_string())),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                }),
+                Box::new(FakeZone { zones: vec![] }),
+                self.log.clone(),
+                tokio::sync::mpsc::channel(1).1,
+            );
+
+            let mounted_debug_zpool = DebugZpool {
+                mount_config: MountConfig::default(),
+                name: ZpoolName::from_str(MOUNTED_EXTERNAL).unwrap(),
+            };
+
+            worker.update_disk_loadout(
+                vec![],
+                vec![mounted_debug_zpool],
+                vec![],
+            );
+            worker.reevaluate_choices().await;
+            worker
+        }
+
+        // Plans to add a new file with a path inside the debug directory
+        //
+        // Not actually created until "Self::create_all" is invoked.
+        fn add_file(&mut self, path: impl AsRef<Utf8Path>) -> &mut TestFile {
+            assert!(
+                path.as_ref().is_relative(),
+                "We need to put this file inside a debug dir, it should be relative"
+            );
+
+            self.files.push(TestFile::new(
+                self.debug_path.join(path.as_ref()),
+                self.mtime,
+            ));
+            self.files.as_mut_slice().last_mut().unwrap()
+        }
+
+        // Validate that, against a particular capacity size, we think the
+        // deletion of all "Marked for deletion" files will just barely cause
+        // us to drop below the expected threshold size.
+        fn confirm_that_deleting_marked_files_will_drop_below_capacity(
+            &self,
+            used: u64,
+            capacity: u64,
+        ) {
+            let mut sizes_to_be_removed = self
+                .files
+                .iter()
+                .filter_map(|f| {
+                    if f.should_be_deleted { Some(f.size) } else { None }
+                })
+                .collect::<Vec<u64>>();
+            sizes_to_be_removed.sort_by_key(|&s| std::cmp::Reverse(s));
+
+            let mut cumulative_space_removed = 0;
+            for file_size in sizes_to_be_removed {
+                assert!(
+                    used - cumulative_space_removed
+                        > capacity * DATASET_USAGE_PERCENT_CHOICE / 100,
+                    "Deleting files from largest -> smallest might clear dataset usage threshold unexpectedly early",
+                );
+
+                cumulative_space_removed += file_size;
+            }
+            assert!(
+                used - cumulative_space_removed
+                    < capacity * DATASET_USAGE_PERCENT_CHOICE / 100,
+                "Deleting marked files won't reduce space usage below threshold",
+            );
+        }
+
+        // Actually create all files (and their parent directories)
+        fn create_all(&self) {
+            for file in &self.files {
+                create_test_file(&file.path, file.size, file.mtime);
+            }
+        }
+
+        fn check_all_files_exist(&self) {
+            let all_paths: Vec<_> =
+                self.files.iter().map(|f| f.path.as_path()).collect();
+            assert_all_files_exist(all_paths.as_slice());
+        }
+
+        fn check_expected_files_removed(&self) {
+            let (should_be_deleted, should_still_exist): (Vec<_>, Vec<_>) =
+                self.files.iter().partition(|f| f.should_be_deleted);
+            let should_be_deleted = should_be_deleted
+                .iter()
+                .map(|f| f.path.as_path())
+                .collect::<Vec<_>>();
+            let should_still_exist = should_still_exist
+                .iter()
+                .map(|f| f.path.as_path())
+                .collect::<Vec<_>>();
+
+            assert_all_files_exist(should_still_exist.as_slice());
+            assert_all_files_do_not_exist(should_be_deleted.as_slice());
+        }
+    }
+
+    struct TestFile {
+        path: Utf8PathBuf,
+        size: u64,
+        mtime: SystemTime,
+
+        should_be_deleted: bool,
+    }
+
+    impl TestFile {
+        fn new(path: Utf8PathBuf, mtime: SystemTime) -> Self {
+            Self { path, size: 0, mtime, should_be_deleted: false }
+        }
+
+        // Set the size of the file length, once it gets created.
+        fn set_size(&mut self, size: u64) -> &mut Self {
+            self.size = size;
+            self
+        }
+
+        // Pushes the timestamp back behind the baseline system time.
+        //
+        // This causes the file to appear more viable for deletion.
+        fn make_older(&mut self) -> &mut Self {
+            self.mtime -= Duration::from_secs(10);
+            self
+        }
+
+        // Pushes the timestamp back far behind the baseline system time.
+        //
+        // This causes the file to appear more viable for deletion.
+        fn make_much_older(&mut self) -> &mut Self {
+            self.mtime -= Duration::from_secs(100);
+            self
+        }
+
+        // Identifies that we THINK this file will be deleted when cleanup runs.
+        //
+        // This is used purely to validate the input / output files.
+        // This information is not communicated to the cleanup function.
+        fn should_be_deleted(&mut self) -> &mut Self {
+            self.should_be_deleted = true;
+            self
+        }
+    }
+
+    #[tokio::test]
+    async fn test_debug_dir_not_cleaned_under_threshold() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_debug_dir_not_cleaned_under_threshold",
+        );
+
+        const USED: u64 = 1024;
+        const AVAILABLE: u64 = 1024;
+
+        let mut files = TestDebugFileHarness::new(&logctx.log).await;
+
+        files.add_file("test1.log").set_size(512);
+        files.add_file("test2.log").set_size(512);
+        files.create_all();
+
+        // This is an assertion that "the test expectations are valid", before
+        // we actually try to do any cleanup.
+        //
+        // In this test in particular, it's also a bit of a no-op -- we aren't
+        // planning on deleting any files, because we're already below the
+        // threshold -- but it'll flag loudly if that threshold changes.
+        const CAPACITY: u64 = USED + AVAILABLE;
+        files.confirm_that_deleting_marked_files_will_drop_below_capacity(
+            USED, CAPACITY,
+        );
+
+        let worker = files.new_dump_setup_worker(USED, AVAILABLE).await;
+
+        // Before we cleanup: All files in "debug" exist
+        files.check_all_files_exist();
+        worker.cleanup().await.unwrap();
+
+        // After cleanup: All files still exist
+        files.check_all_files_exist();
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_debug_dir_cleaned_over_threshold() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_debug_dir_cleaned_over_threshold",
+        );
+
+        const USED: u64 = 1024;
+        const AVAILABLE: u64 = 0;
+
+        // Create some test files.
+        //
+        // Their sizes sum to "USED".
+
+        let mut files = TestDebugFileHarness::new(&logctx.log).await;
+        files.add_file("test-1.log").set_size(256);
+        files.add_file("test-2.log").set_size(256);
+        files
+            .add_file("test-3.log")
+            .set_size(512)
+            .make_older()
+            .should_be_deleted();
+        files.create_all();
+
+        // This is an assertion that "the test expectations are valid", before
+        // we actually try to do any cleanup.
+        const CAPACITY: u64 = USED + AVAILABLE;
+        files.confirm_that_deleting_marked_files_will_drop_below_capacity(
+            USED, CAPACITY,
+        );
+
+        let worker = files.new_dump_setup_worker(USED, AVAILABLE).await;
+
+        // Before we cleanup: All files in "debug" exist
+        files.check_all_files_exist();
+        worker.cleanup().await.unwrap();
+
+        // After we cleanup: The files we marked as "should_be_deleted" are
+        // removed, but the rest still exist.
+        files.check_expected_files_removed();
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_debug_dir_cleaned_over_threshold_many_files() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_debug_dir_cleaned_over_threshold_many_files",
+        );
+
+        const USED: u64 = 1000;
+        const AVAILABLE: u64 = 0;
+
+        // Create some test files.
+        //
+        // Their sizes sum to "USED".
+
+        let mut files = TestDebugFileHarness::new(&logctx.log).await;
+
+        // 650 bytes "to be kept"
+        files.add_file("global/test.log").set_size(300);
+        files.add_file("foo-zone/test.log").set_size(300);
+        files.add_file("bar-zone/test.log").set_size(50);
+
+        // 350 bytes "to be removed"
+        files
+            .add_file("global/test-archived.log")
+            .set_size(100)
+            .make_older()
+            .should_be_deleted();
+        files
+            .add_file("foo-zone/test-archived.log")
+            .set_size(150)
+            .make_older()
+            .should_be_deleted();
+        files
+            .add_file("bar-zone/nested/test-archived.log")
+            .set_size(100)
+            .make_older()
+            .should_be_deleted();
+        files.create_all();
+
+        // This is an assertion that "the test expectations are valid", before
+        // we actually try to do any cleanup.
+        const CAPACITY: u64 = USED + AVAILABLE;
+        files.confirm_that_deleting_marked_files_will_drop_below_capacity(
+            USED, CAPACITY,
+        );
+
+        let worker = files.new_dump_setup_worker(USED, AVAILABLE).await;
+
+        // Before we cleanup: All files in "debug" exist
+        files.check_all_files_exist();
+        worker.cleanup().await.unwrap();
+
+        // After we cleanup: The files we marked as "should_be_deleted" are
+        // removed, but the rest still exist.
+        files.check_expected_files_removed();
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_debug_dir_cleanup_ignores_support_bundles() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_debug_dir_cleanup_ignores_support_bundles",
+        );
+
+        const USED: u64 = 1000;
+        const AVAILABLE: u64 = 0;
+
+        // Create some test files.
+        //
+        // Their sizes sum to "USED".
+
+        let mut files = TestDebugFileHarness::new(&logctx.log).await;
+
+        // Make 200 bytes of support bundles.
+        //
+        // Make them really old, so they look "attractive to remove".
+        files
+            .add_file("cb1be051-9748-4e7e-9195-a222956e6d59/bundle.zip")
+            .set_size(100)
+            .make_much_older();
+        files
+            .add_file(
+                "c4640fac-c67c-4480-b736-5d9a7fe336ba/abcd-bundle.zip.tmp",
+            )
+            .set_size(100)
+            .make_much_older();
+
+        // 400 bytes of other data "to be kept"
+        files.add_file("global/test.log").set_size(100);
+        files.add_file("foo-zone/test.log").set_size(100);
+        files.add_file("bar-zone/test.log").set_size(200);
+
+        // 400 bytes of data that seems reasonable to delete.
+        files
+            .add_file("bar-zone/test-archived.log")
+            .set_size(400)
+            .make_older()
+            .should_be_deleted();
+
+        files.create_all();
+
+        // This is an assertion that "the test expectations are valid", before
+        // we actually try to do any cleanup.
+        const CAPACITY: u64 = USED + AVAILABLE;
+        files.confirm_that_deleting_marked_files_will_drop_below_capacity(
+            USED, CAPACITY,
+        );
+
+        let worker = files.new_dump_setup_worker(USED, AVAILABLE).await;
+
+        // Before we cleanup: All files in "debug" exist
+        files.check_all_files_exist();
+        worker.cleanup().await.unwrap();
+
+        // After we cleanup: The files we marked as "should_be_deleted" are
+        // removed, but the rest still exist.
+        files.check_expected_files_removed();
+
         logctx.cleanup_successful();
     }
 }
