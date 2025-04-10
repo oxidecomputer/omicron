@@ -4,9 +4,10 @@
 
 //! Drive one or more in-progress MGS-managed updates
 
+use crate::common_sp_update::PrecheckError;
+use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::ReconfiguratorSpComponentUpdater;
 use crate::common_sp_update::STATUS_POLL_INTERVAL;
-use crate::common_sp_update::VersionStatus;
 use crate::mgs_clients::GatewayClientError;
 use crate::sp_updater::ReconfiguratorSpUpdater;
 use crate::{ArtifactCache, ArtifactCacheError, MgsClients};
@@ -38,6 +39,9 @@ const PROGRESS_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// How long to wait between failed attempts to reset the device
 const RESET_DELAY_INTERVAL: Duration = Duration::from_secs(10);
+///
+/// How long to wait between poll attempts on update status
+const PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Drive one or more MGS-managed updates
 ///
@@ -571,7 +575,7 @@ pub enum ApplyUpdateResult {
     /// the update could not be completed because it assumed a precondition that
     /// wasn't true (e.g., the device was currently running from a different
     /// slot than expected)
-    PreconditionFailed, // XXX-dap more details
+    PreconditionFailed(Arc<PrecheckError>),
     /// the update we tried to complete was aborted (possibly by a different
     /// Nexus instance)
     Aborted(Uuid),
@@ -682,14 +686,14 @@ pub async fn apply_update(
     // sp_component_caboose_get() + caboose parse (with some logic around other
     // stuff)
     // e.g., for host OS it's: unclear?
-    match updater.version_status(log, &mut mgs_clients, update).await? {
-        VersionStatus::UpdateComplete => {
+    match updater.precheck(log, &mut mgs_clients, update).await {
+        Ok(PrecheckStatus::ReadyForUpdate) => (),
+        Ok(PrecheckStatus::UpdateComplete) => {
             return Ok(ApplyUpdateResult::Completed);
         }
-        VersionStatus::NotReadyForUpdate => {
-            return Ok(ApplyUpdateResult::PreconditionFailed);
+        Err(error) => {
+            return Ok(ApplyUpdateResult::PreconditionFailed(Arc::new(error)));
         }
-        VersionStatus::ReadyForUpdate => (),
     };
     debug!(log, "ready to start update");
 
@@ -862,19 +866,17 @@ async fn wait_for_update_done(
     // error or the caller wants to give up due to a timeout.
 
     loop {
-        match updater.version_status(log, mgs_clients, update).await {
-            Ok(VersionStatus::UpdateComplete) => return Ok(()),
-            Ok(VersionStatus::NotReadyForUpdate) => {
-                return Err(UpdateWaitError::Indeterminate);
-            }
-            Err(_) | Ok(VersionStatus::ReadyForUpdate) => {
+        // XXX-dap come back to this once I've implemented precondition
+        // checking?
+        match updater.precheck(log, mgs_clients, update).await {
+            Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
+            Err(_) | Ok(PrecheckStatus::ReadyForUpdate) => {
                 match timeout {
                     Some(timeout) if before.elapsed() >= timeout => {
                         return Err(UpdateWaitError::Timeout(timeout));
                     }
                     _ => {
-                        // XXX-dap constant name
-                        tokio::time::sleep(RESET_DELAY_INTERVAL).await;
+                        tokio::time::sleep(PROGRESS_POLL_INTERVAL).await;
                         continue;
                     }
                 };

@@ -4,13 +4,14 @@
 
 //! Module containing types for updating SPs via MGS.
 
-use super::MgsClients;
-use super::SpComponentUpdateError;
-use super::UpdateProgress;
-use super::common_sp_update::SpComponentUpdater;
-use super::common_sp_update::deliver_update;
+use crate::MgsClients;
 use crate::ReconfiguratorSpComponentUpdater;
-use crate::common_sp_update::VersionStatus;
+use crate::SpComponentUpdateError;
+use crate::UpdateProgress;
+use crate::common_sp_update::PrecheckError;
+use crate::common_sp_update::PrecheckStatus;
+use crate::common_sp_update::SpComponentUpdater;
+use crate::common_sp_update::deliver_update;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
@@ -149,57 +150,64 @@ impl SpComponentUpdater for SpUpdater {
 pub struct ReconfiguratorSpUpdater;
 impl ReconfiguratorSpComponentUpdater for ReconfiguratorSpUpdater {
     /// Checks if the component is already updated or ready for update
-    fn version_status<'a>(
+    fn precheck<'a>(
         &'a self,
         log: &'a slog::Logger,
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
-    ) -> BoxFuture<'a, Result<VersionStatus, GatewayClientError>> {
-        mgs_clients
-            .try_all_serially(log, move |mgs_client| async move {
-                let state = mgs_client
-                    .sp_get(update.sp_type, update.slot_id)
-                    .await?
-                    .into_inner();
-                debug!(log, "found SP state"; "state" => ?state);
-                if state.model != update.baseboard_id.part_number
-                    || state.serial_number != update.baseboard_id.serial_number
-                {
-                    // XXX-dap need to communicate the specific failure back
-                    return Ok(VersionStatus::NotReadyForUpdate);
-                }
+    ) -> BoxFuture<'a, Result<PrecheckStatus, PrecheckError>> {
+        async move {
+            // Verify that the device is the one we think it is.
+            let state = mgs_clients
+                .try_all_serially(log, move |mgs_client| async move {
+                    mgs_client.sp_get(update.sp_type, update.slot_id).await
+                })
+                .await?
+                .into_inner();
+            debug!(log, "found SP state"; "state" => ?state);
+            if state.model != update.baseboard_id.part_number
+                || state.serial_number != update.baseboard_id.serial_number
+            {
+                return Err(PrecheckError::WrongDevice {
+                    sp_type: update.sp_type,
+                    slot_id: update.slot_id,
+                    expected_part: update.baseboard_id.part_number.clone(),
+                    expected_serial: update.baseboard_id.serial_number.clone(),
+                    found_part: state.model,
+                    found_serial: state.serial_number,
+                });
+            }
 
-                let caboose = mgs_client
-                    .sp_component_caboose_get(
-                        update.sp_type,
-                        update.slot_id,
-                        &SpComponent::SP_ITSELF.to_string(),
-                        0,
-                    )
-                    .await?
-                    .into_inner();
-                debug!(log, "found caboose"; "caboose" => ?caboose);
+            // Fetch the caboose from the currently active slot.
+            let caboose = mgs_clients
+                .try_all_serially(log, move |mgs_client| async move {
+                    mgs_client
+                        .sp_component_caboose_get(
+                            update.sp_type,
+                            update.slot_id,
+                            &SpComponent::SP_ITSELF.to_string(),
+                            0,
+                        )
+                        .await
+                })
+                .await?
+                .into_inner();
+            debug!(log, "found caboose"; "caboose" => ?caboose);
 
-                if caboose.version == update.artifact_version.as_str() {
-                    // XXX-dap should we check if there's an update in
-                    // progress?  If so it seems like we'll be saying "we're
-                    // done" even though it might be about to get un-done or
-                    // otherwise changed.
-                    return Ok(VersionStatus::UpdateComplete);
-                }
+            // If the version in the currently active slot matches the one we're
+            // trying to set, then there's nothing to do.
+            if caboose.version == update.artifact_version.as_str() {
+                return Ok(PrecheckStatus::UpdateComplete);
+            }
 
-                // XXX-dap verify the precondition related to the *other*
-                // slot.  there's an XXX-dap elsewhere about how this is
-                // important so that an instance that's behind won't try to
-                // undo a subsequent update.
+            // XXX-dap verify the precondition related to the *other*
+            // slot.  there's an XXX-dap elsewhere about how this is
+            // important so that an instance that's behind won't try to
+            // undo a subsequent update.
 
-                // XXX-dap verify the board from the caboose, too Do we
-                // really want the caboose from the artifact that we're
-                // trying to deploy available here?  That would obviate the
-                // need to put artifact_version in PendingMgsUpdate, too.
-                Ok(VersionStatus::ReadyForUpdate)
-            })
-            .boxed()
+            Ok(PrecheckStatus::ReadyForUpdate)
+        }
+        .boxed()
     }
 
     /// Attempts once to perform any post-update actions (e.g., reset the

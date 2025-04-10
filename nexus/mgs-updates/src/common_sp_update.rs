@@ -14,6 +14,7 @@ use nexus_types::deployment::PendingMgsUpdate;
 use slog::Logger;
 use slog::{debug, error, info, warn};
 use std::time::Duration;
+use thiserror::Error;
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -50,6 +51,11 @@ pub enum SpComponentUpdateError {
     UpdateFailedWithMessage(String),
 }
 
+/// Describes an update to a component for which the SP drives the update
+///
+/// This trait is essentially historical at this point.  We maintain impls so
+/// that we have tested reference implementations.  But these will eventually be
+/// migrated to `ReconfiguratorSpComponentUpdater` instead.
 pub trait SpComponentUpdater {
     /// The target component.
     ///
@@ -80,31 +86,6 @@ pub trait SpComponentUpdater {
 
     /// Logger to use while performing this update.
     fn logger(&self) -> &Logger;
-}
-
-pub trait ReconfiguratorSpComponentUpdater {
-    /// Checks if the component is already updated or ready for update
-    fn version_status<'a>(
-        &'a self,
-        _log: &'a slog::Logger,
-        _mgs_clients: &'a mut MgsClients,
-        _update: &'a PendingMgsUpdate,
-    ) -> BoxFuture<'a, Result<VersionStatus, GatewayClientError>>;
-
-    /// Attempts once to perform any post-update actions (e.g., reset the
-    /// device)
-    fn post_update<'a>(
-        &'a self,
-        _log: &'a slog::Logger,
-        _mgs_clients: &'a mut MgsClients,
-        _update: &'a PendingMgsUpdate,
-    ) -> BoxFuture<'a, Result<(), GatewayClientError>>;
-}
-
-pub enum VersionStatus {
-    ReadyForUpdate,
-    NotReadyForUpdate,
-    UpdateComplete,
 }
 
 pub(super) async fn deliver_update(
@@ -264,4 +245,50 @@ fn status_is_complete(
             }
         }
     }
+}
+
+/// Describes a Reconfigurator-based update for an SP-updated component
+pub trait ReconfiguratorSpComponentUpdater {
+    /// Checks if the component is already updated or ready for update
+    fn precheck<'a>(
+        &'a self,
+        _log: &'a slog::Logger,
+        _mgs_clients: &'a mut MgsClients,
+        _update: &'a PendingMgsUpdate,
+    ) -> BoxFuture<'a, Result<PrecheckStatus, PrecheckError>>;
+
+    /// Attempts once to perform any post-update actions (e.g., reset the
+    /// device)
+    fn post_update<'a>(
+        &'a self,
+        _log: &'a slog::Logger,
+        _mgs_clients: &'a mut MgsClients,
+        _update: &'a PendingMgsUpdate,
+    ) -> BoxFuture<'a, Result<(), GatewayClientError>>;
+}
+
+/// Describes the live state of the component before the update begins
+pub enum PrecheckStatus {
+    UpdateComplete,
+    ReadyForUpdate,
+}
+
+#[derive(Debug, Error)]
+pub enum PrecheckError {
+    #[error("communicating with MGS")]
+    GatewayClientError(#[from] GatewayClientError),
+
+    #[error(
+        "in {sp_type} slot {slot_id}, expected to find
+         part {expected_part:?} serial {expected_serial:?}, but found
+         part {found_part:?} serial {found_serial:?}"
+    )]
+    WrongDevice {
+        sp_type: SpType,
+        slot_id: u32,
+        expected_part: String,
+        expected_serial: String,
+        found_part: String,
+        found_serial: String,
+    },
 }
