@@ -989,6 +989,12 @@ impl Zfs {
         }: DatasetEnsureArgs,
     ) -> Result<(), EnsureDatasetErrorRaw> {
         let dataset_info = Self::dataset_exists(name, &mountpoint)?;
+
+        // Non-zoned datasets with an explicit mountpoint and the
+        // "canmount=on" property should be mounted within the global zone.
+        //
+        // Zoned datasets are mounted when their zones are booted, so
+        // we don't do this mountpoint manipulation for them.
         let wants_mounting =
             !zoned && !dataset_info.mounted && can_mount.wants_mounting();
         let props = build_zfs_set_key_value_pairs(size_details, id);
@@ -1009,14 +1015,8 @@ impl Zfs {
 
         // If the dataset doesn't exist, create it.
 
-        // Non-zoned datasets with an explicit mountpoint and the
-        // "canmount=on" property should be mounted within the global zone.
-        //
         // We'll ensure they have an empty immutable mountpoint before
         // creating the dataset itself, which will also mount it.
-        //
-        // Zoned datasets are mounted when their zones are booted, so
-        // we don't do this mountpoint manipulation for them.
         if wants_mounting {
             let path = &mountpoint.0;
             ensure_empty_immutable_mountpoint(&path).map_err(|err| {
