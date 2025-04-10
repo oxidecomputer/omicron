@@ -6,8 +6,6 @@
 
 use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
-use clap::CommandFactory;
-use clap::FromArgMatches;
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
 use indent_write::fmt::IndentWriter;
@@ -40,6 +38,8 @@ use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_repl_utils::run_repl_from_file;
+use omicron_repl_utils::run_repl_on_stdin;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -47,11 +47,9 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ReconfiguratorSimUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
-use reedline::{Reedline, Signal};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Write;
-use std::io::BufRead;
 use std::io::IsTerminal;
 use swrite::{SWrite, swriteln};
 use tabled::Tabled;
@@ -181,110 +179,25 @@ impl CmdReconfiguratorSim {
             println!("generated RNG seed: {}", sim.sim.initial_seed());
         }
 
-        if let Some(input_file) = self.input_file {
-            let file = std::fs::File::open(&input_file)
-                .with_context(|| format!("open {:?}", &input_file))?;
-            let bufread = std::io::BufReader::new(file);
-            for maybe_buffer in bufread.lines() {
-                let buffer = maybe_buffer
-                    .with_context(|| format!("read {:?}", &input_file))?;
-                println!("> {}", buffer);
-                match process_entry(&mut sim, buffer, &log_capture) {
-                    LoopResult::Continue => (),
-                    LoopResult::Bail(error) => return Err(error),
-                }
-                println!("");
-            }
+        if let Some(input_file) = &self.input_file {
+            run_repl_from_file(input_file, &mut |cmd: TopLevelArgs| {
+                process_command(&mut sim, cmd, &log_capture)
+            })
         } else {
-            let mut ed = Reedline::create();
-            let prompt = reedline::DefaultPrompt::new(
-                reedline::DefaultPromptSegment::Empty,
-                reedline::DefaultPromptSegment::Empty,
-            );
-            loop {
-                match ed.read_line(&prompt) {
-                    Ok(Signal::Success(buffer)) => {
-                        match process_entry(&mut sim, buffer, &log_capture) {
-                            LoopResult::Continue => (),
-                            LoopResult::Bail(error) => return Err(error),
-                        }
-                    }
-                    Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => break,
-                    Err(error) => {
-                        bail!(
-                            "reconfigurator-cli: unexpected error: {:#}",
-                            error
-                        );
-                    }
-                }
-            }
+            run_repl_on_stdin(&mut |cmd: TopLevelArgs| {
+                process_command(&mut sim, cmd, &log_capture)
+            })
         }
-
-        Ok(())
     }
-}
-
-/// Describes next steps after evaluating one "line" of user input
-///
-/// This could just be `Result`, but it's easy to misuse that here because
-/// _commands_ might fail all the time without needing to bail out of the REPL.
-/// We use a separate type for clarity about what success/failure actually
-/// means.
-enum LoopResult {
-    /// Show the prompt and accept another command
-    Continue,
-
-    /// Exit the REPL with a fatal error
-    Bail(anyhow::Error),
 }
 
 /// Processes one "line" of user input.
-fn process_entry(
+fn process_command(
     sim: &mut ReconfiguratorSim,
-    entry: String,
+    cmd: TopLevelArgs,
     logs: &LogCapture,
-) -> LoopResult {
-    // Strip everything after '#' as a comment.
-    let entry = match entry.split_once('#') {
-        Some((real, _comment)) => real,
-        None => &entry,
-    };
-
-    // If no input was provided, take another lap (print the prompt and accept
-    // another line).  This gets handled specially because otherwise clap would
-    // treat this as a usage error and print a help message, which isn't what we
-    // want here.
-    if entry.trim().is_empty() {
-        return LoopResult::Continue;
-    }
-
-    // Parse the line of input as a REPL command.
-    //
-    // Using `split_whitespace()` like this is going to be a problem if we ever
-    // want to support arguments with whitespace in them (using quotes).  But
-    // it's good enough for now.
-    let parts = entry.split_whitespace();
-    let parsed_command = TopLevelArgs::command()
-        .multicall(true)
-        .try_get_matches_from(parts)
-        .and_then(|matches| TopLevelArgs::from_arg_matches(&matches));
-    let command = match parsed_command {
-        Err(error) => {
-            // We failed to parse the command.  Print the error.
-            return match error.print() {
-                // Assuming that worked, just take another lap.
-                Ok(_) => LoopResult::Continue,
-                // If we failed to even print the error, that itself is a fatal
-                // error.
-                Err(error) => LoopResult::Bail(
-                    anyhow!(error).context("printing previous error"),
-                ),
-            };
-        }
-        Ok(TopLevelArgs { command }) => command,
-    };
-
-    // Dispatch to the command's handler.
+) -> anyhow::Result<Option<String>> {
+    let TopLevelArgs { command } = cmd;
     let cmd_result = match command {
         Commands::SledList => cmd_sled_list(sim),
         Commands::SledAdd(args) => cmd_sled_add(sim, args),
@@ -318,13 +231,7 @@ fn process_entry(
         println!("{line}");
     }
 
-    match cmd_result {
-        Err(error) => println!("error: {:#}", error),
-        Ok(Some(s)) => println!("{}", s),
-        Ok(None) => (),
-    }
-
-    LoopResult::Continue
+    cmd_result
 }
 
 // clap configuration for the REPL commands
