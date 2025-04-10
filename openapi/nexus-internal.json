@@ -1572,7 +1572,7 @@
         ]
       },
       "ArtifactHashId": {
-        "description": "A hash-based identifier for an artifact.\n\nSome places, e.g. the installinator, request artifacts by hash rather than by name and version. This type indicates that.",
+        "description": "A hash-based identifier for an artifact or deployment unit: the kind and hash.",
         "type": "object",
         "properties": {
           "hash": {
@@ -1986,10 +1986,11 @@
           },
           "pending_mgs_updates": {
             "description": "List of pending MGS-mediated updates",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/PendingMgsUpdate"
-            }
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingMgsUpdates"
+              }
+            ]
           },
           "sleds": {
             "description": "A map of sled id -> desired configuration of the sled.",
@@ -3792,6 +3793,45 @@
           "request_id"
         ]
       },
+      "ExpectedVersion": {
+        "description": "Describes the version that we expect to find in some firmware slot",
+        "oneOf": [
+          {
+            "description": "We expect to find _no_ valid caboose in this slot",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "no_valid_version"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "We expect to find the specified version in this slot",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "version"
+                ]
+              },
+              "version": {
+                "$ref": "#/components/schemas/ArtifactVersion"
+              }
+            },
+            "required": [
+              "kind",
+              "version"
+            ]
+          }
+        ]
+      },
       "ExternalPortDiscovery": {
         "oneOf": [
           {
@@ -4720,6 +4760,9 @@
               }
             ]
           },
+          "artifact_version": {
+            "$ref": "#/components/schemas/ArtifactVersion"
+          },
           "baseboard_id": {
             "description": "id of the baseboard that we're going to update",
             "allOf": [
@@ -4728,10 +4771,18 @@
               }
             ]
           },
+          "details": {
+            "description": "component-specific details of the pending update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingMgsUpdateDetails"
+              }
+            ]
+          },
           "slot_id": {
             "description": "last known MGS slot (cubby number) of the baseboard",
             "type": "integer",
-            "format": "uint16",
+            "format": "uint32",
             "minimum": 0
           },
           "sp_type": {
@@ -4745,9 +4796,63 @@
         },
         "required": [
           "artifact_hash_id",
+          "artifact_version",
           "baseboard_id",
+          "details",
           "slot_id",
           "sp_type"
+        ]
+      },
+      "PendingMgsUpdateDetails": {
+        "description": "Describes the component-specific details of a PendingMgsUpdate",
+        "oneOf": [
+          {
+            "description": "the SP itself is being updated",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "sp"
+                ]
+              },
+              "expected_active_version": {
+                "description": "expected contents of the active slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ArtifactVersion"
+                  }
+                ]
+              },
+              "expected_inactive_version": {
+                "description": "expected contents of the inactive slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExpectedVersion"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "expected_active_version",
+              "expected_inactive_version"
+            ]
+          }
+        ]
+      },
+      "PendingMgsUpdates": {
+        "type": "object",
+        "properties": {
+          "by_baseboard": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PendingMgsUpdate"
+            }
+          }
+        },
+        "required": [
+          "by_baseboard"
         ]
       },
       "PhysicalDiskKind": {
