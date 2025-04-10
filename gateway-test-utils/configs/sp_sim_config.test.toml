@@ -20,6 +20,14 @@ bind_addr = "[::1]:0"
 [simulated_sps.sidecar.network_config.simulated]
 bind_addr = "[::1]:0"
 
+[[simulated_sps.sidecar.ereport_network_config]]
+[simulated_sps.sidecar.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.sidecar.ereport_network_config]]
+[simulated_sps.sidecar.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
 [[simulated_sps.sidecar.components]]
 id = "dev-0"
 device = "fake-tmp-sensor"
@@ -53,6 +61,14 @@ bind_addr = "[::1]:0"
 [simulated_sps.sidecar.network_config.simulated]
 bind_addr = "[::1]:0"
 
+[[simulated_sps.sidecar.ereport_network_config]]
+[simulated_sps.sidecar.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.sidecar.ereport_network_config]]
+[simulated_sps.sidecar.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
 [[simulated_sps.gimlet]]
 serial_number = "SimGimlet00"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
@@ -64,6 +80,14 @@ bind_addr = "[::1]:0"
 
 [[simulated_sps.gimlet.network_config]]
 [simulated_sps.gimlet.network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
 bind_addr = "[::1]:0"
 
 [[simulated_sps.gimlet.components]]
@@ -179,6 +203,14 @@ bind_addr = "[::1]:0"
 
 [[simulated_sps.gimlet.network_config]]
 [simulated_sps.gimlet.network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:0"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
 bind_addr = "[::1]:0"
 
 [[simulated_sps.gimlet.components]]
