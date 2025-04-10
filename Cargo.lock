@@ -7843,6 +7843,7 @@ dependencies = [
  "smallvec 1.14.0",
  "spin",
  "string_cache",
+ "strum",
  "subtle",
  "syn 1.0.109",
  "syn 2.0.98",
