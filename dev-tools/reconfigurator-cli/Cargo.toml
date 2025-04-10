@@ -28,10 +28,10 @@ nexus-reconfigurator-simulation.workspace = true
 nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-repl-utils.workspace = true
 omicron-uuid-kinds.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
-reedline.workspace = true
 semver.workspace = true
 serde_json.workspace = true
 slog-error-chain.workspace = true
