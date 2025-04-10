@@ -739,7 +739,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -1349,9 +1349,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.32"
+version = "4.5.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6088f3ae8c3608d19260cd7445411865a485688711b78b5be70d78cd96136f83"
+checksum = "d8aa86934b44c19c50f87cc2790e19f54f7a67aedb64101c2e1a2e5ecfb73944"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1359,9 +1359,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.32"
+version = "4.5.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22a7ef7f676155edfb82daa97f99441f3ebf4a58d5e32f295a56259f1b6facc8"
+checksum = "2414dbb2dd0695280da6ea9261e327479e9d37b0630f6b53ba2a11c60c679fd9"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1615,7 +1615,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4244,9 +4244,8 @@ dependencies = [
 [[package]]
 name = "hubtools"
 version = "0.4.6"
-source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#6054a3c2ad89473e551a9a1d06cbd7845e100630"
+source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#688fb6d97f69a652a7578b8ad069e681bf2e152d"
 dependencies = [
- "digest",
  "hex",
  "lpc55_areas",
  "lpc55_sign",
@@ -5299,7 +5298,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -7801,6 +7800,7 @@ dependencies = [
  "getrandom 0.3.1",
  "group",
  "hashbrown 0.15.1",
+ "heck 0.4.1",
  "hickory-proto",
  "hmac",
  "hyper",
@@ -9723,8 +9723,9 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.2.1"
-source = "git+https://github.com/oxidecomputer/qorb?branch=dap%2Fstatic-resolver#5446106a4a06f67a5f2cbb4be5459adf85277ef5"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7161fa1fa51fab06e6458e5f58c0548d10e0ed6c80436be364ced0b775bb65a9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9732,9 +9733,9 @@ dependencies = [
  "derive-where",
  "futures",
  "hickory-resolver",
- "rand 0.8.5",
+ "rand 0.9.0",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -11675,7 +11676,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.98",
@@ -12941,7 +12942,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#04681f26ba09e144e5467dd6bd22c4887692a670"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#b3b4cf1c5d920b8904fd1c03967d352e1b42cb70"
 dependencies = [
  "anyhow",
  "camino",
@@ -12962,7 +12963,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#04681f26ba09e144e5467dd6bd22c4887692a670"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#b3b4cf1c5d920b8904fd1c03967d352e1b42cb70"
 dependencies = [
  "daft",
  "hex",
@@ -12979,7 +12980,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#04681f26ba09e144e5467dd6bd22c4887692a670"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#b3b4cf1c5d920b8904fd1c03967d352e1b42cb70"
 dependencies = [
  "semver 1.0.25",
  "serde",
@@ -12991,7 +12992,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#04681f26ba09e144e5467dd6bd22c4887692a670"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#b3b4cf1c5d920b8904fd1c03967d352e1b42cb70"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -14044,7 +14045,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

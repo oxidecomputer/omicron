@@ -590,7 +590,7 @@ propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e5
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
 # NOTE: see above!
 proptest = "1.6.0"
-qorb = "0.2.1"
+qorb = "0.3.1"
 quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
@@ -883,9 +883,7 @@ opt-level = 3
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
-# XXX-dap update once https://github.com/oxidecomputer/omicron/pull/7955 lands
-[patch.crates-io]
-qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "dap/static-resolver" }
+# [patch.crates-io]
 # diesel = { path = "../../diesel/diesel" }
 # dropshot = { path = "../dropshot/dropshot" }
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
