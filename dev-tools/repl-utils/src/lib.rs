@@ -38,7 +38,7 @@ pub fn run_repl_from_file<C: Parser>(
             LoopResult::Continue => (),
             LoopResult::Bail(error) => return Err(error),
         }
-        println!("");
+        println!();
     }
     Ok(())
 }
