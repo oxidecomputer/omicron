@@ -133,7 +133,7 @@ impl CargoTargets<'_> {
         // We rely on the rust-toolchain.toml file for toolchain information,
         // rather than specifying one within the packaging tool or using the
         // `CARGO` environment variable.
-        let mut cmd = Command::from(cargo_command(CargoLocation::Fixed));
+        let mut cmd = Command::from(cargo_command(CargoLocation::FromPath));
         cmd.arg(command);
         // We specify _both_ --package and --bin; --bin does not imply
         // --package, and without any --package options Cargo unifies features

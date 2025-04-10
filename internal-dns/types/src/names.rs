@@ -49,6 +49,7 @@ pub enum ServiceName {
     Nexus,
     Oximeter,
     ManagementGatewayService,
+    RepoDepot,
     Wicketd,
     Dendrite,
     Tfport,
@@ -80,6 +81,7 @@ impl ServiceName {
             ServiceName::Nexus => "nexus",
             ServiceName::Oximeter => "oximeter",
             ServiceName::ManagementGatewayService => "mgs",
+            ServiceName::RepoDepot => "repo-depot",
             ServiceName::Wicketd => "wicketd",
             ServiceName::Dendrite => "dendrite",
             ServiceName::Tfport => "tfport",
@@ -111,6 +113,7 @@ impl ServiceName {
             | ServiceName::Nexus
             | ServiceName::Oximeter
             | ServiceName::ManagementGatewayService
+            | ServiceName::RepoDepot
             | ServiceName::Wicketd
             | ServiceName::Dendrite
             | ServiceName::Tfport

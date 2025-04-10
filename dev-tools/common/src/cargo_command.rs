@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::process::Command;
+use std::{ffi::OsString, process::Command};
 
 /// Creates and prepares a `std::process::Command` for the `cargo` executable.
 pub fn cargo_command(location: CargoLocation) -> Command {
@@ -25,19 +25,23 @@ pub enum CargoLocation {
     /// is not set.
     FromEnv,
 
-    /// Do not use the `CARGO` environment variable, instead always using `"cargo"`.
-    Fixed,
+    /// Do not use the `CARGO` environment variable, instead always using
+    /// `"cargo"` from `PATH`.
+    ///
+    /// This normally will use a rustup proxy, and can be used for cross-repo
+    /// invocations.
+    FromPath,
 }
 
 impl CargoLocation {
     fn resolve(self) -> Command {
         match self {
             CargoLocation::FromEnv => {
-                let cargo = std::env::var("CARGO")
-                    .unwrap_or_else(|_| String::from("cargo"));
+                let cargo = std::env::var_os("CARGO")
+                    .unwrap_or_else(|| OsString::from("cargo"));
                 Command::new(&cargo)
             }
-            CargoLocation::Fixed => Command::new("cargo"),
+            CargoLocation::FromPath => Command::new("cargo"),
         }
     }
 }
