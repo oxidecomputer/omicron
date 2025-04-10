@@ -108,6 +108,7 @@ impl EreportState {
         let mut pos = gateway_messages::serialize(
             buf,
             &EreportResponseHeader::V0(ResponseHeaderV0 {
+                request_id: req.request_id,
                 restart_id: self.restart_id,
             }),
         )
