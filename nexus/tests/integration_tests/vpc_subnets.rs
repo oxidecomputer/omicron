@@ -42,7 +42,7 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     let project_name = "springfield-squidport";
     let instance_name = "inst";
     create_default_ip_pool(client).await;
-    let _ = create_project(&client, project_name).await;
+    let _ = create_project(client, project_name).await;
 
     let subnets_url =
         format!("/v1/vpc-subnets?project={}&vpc=default", project_name);
@@ -58,11 +58,11 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     // cannot delete the subnet until the instance is gone.
     let instance_url =
         format!("/v1/instances/{instance_name}?project={project_name}");
-    let instance = create_instance(client, &project_name, instance_name).await;
+    let instance = create_instance(client, project_name, instance_name).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
     let err: HttpErrorResponseBody = NexusRequest::expect_failure(
-        &client,
+        client,
         StatusCode::BAD_REQUEST,
         Method::DELETE,
         &subnet_url,
@@ -81,9 +81,9 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
 
     // Stop and then delete the instance
     instance_post(client, instance_name, InstanceOp::Stop).await;
-    instance_simulate(&nexus, &instance_id).await;
+    instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
-    NexusRequest::object_delete(&client, &instance_url)
+    NexusRequest::object_delete(client, &instance_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -91,7 +91,7 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
 
     // Now deleting the subnet should succeed
     NexusRequest::object_delete(
-        &client,
+        client,
         &format!(
             "/v1/vpc-subnets/{}?project={project_name}&vpc=default",
             subnets[0].identity.name
@@ -112,11 +112,11 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let project_name = "springfield-squidport";
-    let _ = create_project(&client, project_name).await;
+    let _ = create_project(client, project_name).await;
 
     // Create a VPC.
     let vpc_name = "vpc1";
-    let vpc = create_vpc(&client, project_name, vpc_name).await;
+    let vpc = create_vpc(client, project_name, vpc_name).await;
 
     let subnets_url =
         format!("/v1/vpc-subnets?project={}&vpc={}", project_name, vpc_name);
@@ -128,7 +128,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     // delete default subnet
     NexusRequest::object_delete(
-        &client,
+        client,
         &format!(
             "/v1/vpc-subnets/{}?project={}&vpc={}",
             subnets[0].identity.name, project_name, vpc_name
@@ -426,7 +426,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     // Creating a subnet with the same name in a different VPC is allowed
     let vpc2_name = "vpc2";
-    let vpc2 = create_vpc(&client, project_name, vpc2_name).await;
+    let vpc2 = create_vpc(client, project_name, vpc2_name).await;
 
     let subnet_same_name: VpcSubnet = NexusRequest::objects_post(
         client,

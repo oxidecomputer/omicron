@@ -116,7 +116,7 @@ impl Server {
     pub fn start(config: &Config) -> Result<Self, Error> {
         Self::with_registry(
             ProducerRegistry::with_id(config.server_info.id),
-            &config,
+            config,
         )
     }
 

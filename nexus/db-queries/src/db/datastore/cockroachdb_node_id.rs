@@ -96,7 +96,7 @@ mod tests {
 
         // We shouldn't have a mapping for it yet.
         let node_id = datastore
-            .cockroachdb_node_id(&opctx, crdb_zone_id)
+            .cockroachdb_node_id(opctx, crdb_zone_id)
             .await
             .expect("looked up node ID");
         assert_eq!(node_id, None);
@@ -105,7 +105,7 @@ mod tests {
         let fake_node_id = "test-node";
         datastore
             .set_cockroachdb_node_id(
-                &opctx,
+                opctx,
                 crdb_zone_id,
                 fake_node_id.to_string(),
             )
@@ -114,7 +114,7 @@ mod tests {
 
         // We can look up the mapping we created.
         let node_id = datastore
-            .cockroachdb_node_id(&opctx, crdb_zone_id)
+            .cockroachdb_node_id(opctx, crdb_zone_id)
             .await
             .expect("looked up node ID");
         assert_eq!(node_id.as_deref(), Some(fake_node_id));
@@ -123,7 +123,7 @@ mod tests {
         let different_node_id = "test-node-2";
         datastore
             .set_cockroachdb_node_id(
-                &opctx,
+                opctx,
                 crdb_zone_id,
                 different_node_id.to_string(),
             )
@@ -134,7 +134,7 @@ mod tests {
         let different_zone_id = OmicronZoneUuid::new_v4();
         datastore
             .set_cockroachdb_node_id(
-                &opctx,
+                opctx,
                 different_zone_id,
                 fake_node_id.to_string(),
             )
@@ -144,7 +144,7 @@ mod tests {
         // We can reassign the same node ID (i.e., setting is idempotent).
         datastore
             .set_cockroachdb_node_id(
-                &opctx,
+                opctx,
                 crdb_zone_id,
                 fake_node_id.to_string(),
             )
@@ -153,7 +153,7 @@ mod tests {
 
         // The mapping should not have changed.
         let node_id = datastore
-            .cockroachdb_node_id(&opctx, crdb_zone_id)
+            .cockroachdb_node_id(opctx, crdb_zone_id)
             .await
             .expect("looked up node ID");
         assert_eq!(node_id.as_deref(), Some(fake_node_id));

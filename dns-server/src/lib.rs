@@ -156,7 +156,7 @@ impl TransientServer {
             log.clone(),
         );
         dns_config_client
-            .dns_config_put(&dns_config)
+            .dns_config_put(dns_config)
             .await
             .context("initializing DNS")?;
         Ok(())

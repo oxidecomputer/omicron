@@ -343,7 +343,7 @@ pub async fn empty_record() -> Result<(), anyhow::Error> {
     assert!(records.is_empty());
 
     // resolve the name
-    lookup_ip_expect_nxdomain(&resolver, &(name + "." + TEST_ZONE + ".")).await;
+    lookup_ip_expect_nxdomain(resolver, &(name + "." + TEST_ZONE + ".")).await;
 
     test_ctx.cleanup().await;
     Ok(())
@@ -372,7 +372,7 @@ pub async fn nxdomain() -> Result<(), anyhow::Error> {
 
     // asking for a nonexistent record within the domain of the internal DNS
     // server should result in an NXDOMAIN
-    lookup_ip_expect_nxdomain(&resolver, &format!("unicorn.{}.", TEST_ZONE))
+    lookup_ip_expect_nxdomain(resolver, &format!("unicorn.{}.", TEST_ZONE))
         .await;
 
     test_ctx.cleanup().await;

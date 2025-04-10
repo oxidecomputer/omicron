@@ -200,7 +200,7 @@ mod tests {
 
         let (authz_project, _project) = datastore
             .project_create(
-                &opctx,
+                opctx,
                 Project::new_with_id(
                     project_id,
                     silo_id,
@@ -216,7 +216,7 @@ mod tests {
             .expect("project must be created successfully");
         let _ = datastore
             .project_create_instance(
-                &opctx,
+                opctx,
                 &authz_project,
                 Instance::new(
                     instance_id,
@@ -245,7 +245,7 @@ mod tests {
             .await
             .expect("instance must be created successfully");
 
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await
@@ -266,7 +266,7 @@ mod tests {
         );
 
         datastore
-            .migration_insert(&opctx, migration.clone())
+            .migration_insert(opctx, migration.clone())
             .await
             .expect("must insert migration successfully");
 
@@ -279,17 +279,15 @@ mod tests {
         let logctx = dev::test_setup_log("test_migration_query_by_instance");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(datastore, opctx).await;
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
-        let migration1 =
-            insert_migration(&datastore, &opctx, instance_id).await;
-        let migration2 =
-            insert_migration(&datastore, &opctx, instance_id).await;
+        let migration1 = insert_migration(datastore, opctx, instance_id).await;
+        let migration2 = insert_migration(datastore, opctx, instance_id).await;
 
         let list = datastore
             .instance_list_migrations(
-                &opctx,
+                opctx,
                 instance_id,
                 &DataPageParams::max_page(),
             )
@@ -297,12 +295,11 @@ mod tests {
             .expect("must list migrations");
         assert_all_migrations_found(&[&migration1, &migration2], &list[..]);
 
-        let migration3 =
-            insert_migration(&datastore, &opctx, instance_id).await;
+        let migration3 = insert_migration(datastore, opctx, instance_id).await;
 
         let list = datastore
             .instance_list_migrations(
-                &opctx,
+                opctx,
                 instance_id,
                 &DataPageParams::max_page(),
             )
@@ -314,12 +311,12 @@ mod tests {
         );
 
         datastore
-            .migration_mark_deleted(&opctx, migration3.id)
+            .migration_mark_deleted(opctx, migration3.id)
             .await
             .expect("must delete migration");
         let list = datastore
             .instance_list_migrations(
-                &opctx,
+                opctx,
                 instance_id,
                 &DataPageParams::max_page(),
             )
@@ -328,7 +325,7 @@ mod tests {
         assert_all_migrations_found(&[&migration1, &migration2], &list[..]);
 
         let deleted = datastore
-            .instance_mark_migrations_deleted(&opctx, instance_id)
+            .instance_mark_migrations_deleted(opctx, instance_id)
             .await
             .expect("must delete remaining migrations");
         assert_eq!(
@@ -338,7 +335,7 @@ mod tests {
 
         let list = datastore
             .instance_list_migrations(
-                &opctx,
+                opctx,
                 instance_id,
                 &DataPageParams::max_page(),
             )
@@ -347,7 +344,7 @@ mod tests {
         assert!(list.is_empty(), "all migrations must be deleted");
 
         let deleted = datastore
-            .instance_mark_migrations_deleted(&opctx, instance_id)
+            .instance_mark_migrations_deleted(opctx, instance_id)
             .await
             .expect("must delete remaining migrations");
         assert_eq!(

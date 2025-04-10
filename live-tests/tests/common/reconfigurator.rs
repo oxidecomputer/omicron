@@ -70,8 +70,8 @@ pub async fn blueprint_edit_current_target(
     let mut builder = BlueprintBuilder::new_based_on(
         log,
         &blueprint1,
-        &planning_input,
-        &collection,
+        planning_input,
+        collection,
         "test-suite",
     )
     .context("creating BlueprintBuilder")?;

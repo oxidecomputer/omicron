@@ -264,7 +264,7 @@ mod test {
         verify_clean_slate(nexus.datastore()).await;
 
         // Build the saga DAG with the provided test parameters and run it.
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         let authz_silo = opctx.authn.silo_required().unwrap();
         let params = new_test_params(&opctx, authz_silo);
         nexus.sagas.saga_execute::<SagaProjectCreate>(params).await.unwrap();
@@ -276,7 +276,7 @@ mod test {
     ) {
         let log = &cptestctx.logctx.log;
         let nexus = &cptestctx.server.server_context().nexus;
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaProjectCreate,
             _,

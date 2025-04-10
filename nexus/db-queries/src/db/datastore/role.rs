@@ -66,8 +66,8 @@ impl DataStore {
             .map(|role_config| {
                 RoleBuiltin::new(
                     role_config.resource_type,
-                    &role_config.role_name,
-                    &role_config.description,
+                    role_config.role_name,
+                    role_config.description,
                 )
             })
             .collect::<Vec<RoleBuiltin>>();
@@ -262,7 +262,7 @@ impl DataStore {
                     r.identity_id,
                     resource_type,
                     resource_id,
-                    &r.role_name.to_database_string(),
+                    r.role_name.to_database_string(),
                 )
             })
             .collect::<Vec<_>>();

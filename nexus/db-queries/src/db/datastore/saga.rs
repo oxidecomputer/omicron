@@ -300,7 +300,7 @@ mod test {
 
         // List them, expect to see them all in order by ID.
         let mut observed_sagas = datastore
-            .saga_list_recovery_candidates_batched(&opctx, sec_id)
+            .saga_list_recovery_candidates_batched(opctx, sec_id)
             .await
             .expect("Failed to list unfinished sagas");
         inserted_sagas.sort_by_key(|a| a.id);
@@ -372,7 +372,7 @@ mod test {
         // List them, expect to see them all in order by ID.
         let observed_nodes = datastore
             .saga_fetch_log_batched(
-                &opctx,
+                opctx,
                 nexus_db_model::saga_types::SagaId::from(node_cx.saga_id),
             )
             .await
@@ -417,7 +417,7 @@ mod test {
         // found" error.
         let observed_nodes = datastore
             .saga_fetch_log_batched(
-                &opctx,
+                opctx,
                 nexus_db_model::saga_types::SagaId::from(saga_id),
             )
             .await
@@ -651,7 +651,7 @@ mod test {
 
         // Reassign uncompleted sagas from SECs B and C to SEC A.
         let nreassigned = datastore
-            .sagas_reassign_sec(&opctx, &[sec_b, sec_c], sec_a)
+            .sagas_reassign_sec(opctx, &[sec_b, sec_c], sec_a)
             .await
             .expect("failed to re-assign sagas");
 
@@ -702,7 +702,7 @@ mod test {
 
         // If we do it again, we should make no changes.
         let nreassigned = datastore
-            .sagas_reassign_sec(&opctx, &[sec_b, sec_c], sec_a)
+            .sagas_reassign_sec(opctx, &[sec_b, sec_c], sec_a)
             .await
             .expect("failed to re-assign sagas");
         assert_eq!(nreassigned, 0);

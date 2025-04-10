@@ -414,7 +414,7 @@ impl SlotWriteContext<'_> {
                 ),
                 async move |ctx| {
                     let block_size =
-                        block_size_handle.into_value(&ctx.token()).await;
+                        block_size_handle.into_value(ctx.token()).await;
                     self.validate_written_host_phase_2_hash(block_size).await
                 },
             )
@@ -1293,8 +1293,7 @@ mod tests {
                 .make_writer(component, slot, destination, total_bytes)
                 .await?;
             // This is the next series of operations.
-            let these_ops =
-                self.partial_ops.pop_front().unwrap_or_else(Vec::new);
+            let these_ops = self.partial_ops.pop_front().unwrap_or_default();
             Ok(PartialAsyncWrite::new(f, these_ops))
         }
     }

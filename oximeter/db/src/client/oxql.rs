@@ -1371,7 +1371,7 @@ mod tests {
                 "failed to create expected points from inserted measurements",
             );
             let expected_timeseries =
-                find_timeseries_in_table(&table, target, foo)
+                find_timeseries_in_table(table, target, foo)
                     .expect("Table did not contain an expected timeseries");
             assert_eq!(
                 expected_timeseries.points, expected_points,
@@ -1418,7 +1418,7 @@ mod tests {
         );
 
         let expected_timeseries =
-            find_timeseries_in_table(&table, expected_target, expected_foo)
+            find_timeseries_in_table(table, expected_target, expected_foo)
                 .expect("Table did not contain expected timeseries");
         let measurements: Vec<_> =
             expected_samples.iter().map(|s| s.measurement.clone()).collect();
@@ -1706,7 +1706,7 @@ mod tests {
         );
 
         let expected_timeseries =
-            find_timeseries_in_table(&table, expected_target, expected_foo)
+            find_timeseries_in_table(table, expected_target, expected_foo)
                 .expect("Table did not contain expected timeseries");
         let measurements: Vec<_> = expected_samples
             .iter()

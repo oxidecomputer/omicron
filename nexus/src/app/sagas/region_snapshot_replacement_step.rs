@@ -251,7 +251,7 @@ async fn rsrss_create_replace_params(
 
     let new_region_address = osagactx
         .nexus()
-        .region_addr(&log, new_region_id)
+        .region_addr(log, new_region_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -443,7 +443,7 @@ async fn rsrss_notify_upstairs(
         &params.serialized_authn,
     );
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_instance) = LookupPath::new(&opctx, osagactx.datastore())
         .instance_id(instance_id)
         .lookup_for(authz::Action::Read)
         .await
@@ -510,7 +510,7 @@ async fn rsrss_notify_upstairs(
     };
 
     let instance_lookup =
-        LookupPath::new(&opctx, &osagactx.datastore()).instance_id(instance_id);
+        LookupPath::new(&opctx, osagactx.datastore()).instance_id(instance_id);
 
     let (vmm, client) = osagactx
         .nexus()

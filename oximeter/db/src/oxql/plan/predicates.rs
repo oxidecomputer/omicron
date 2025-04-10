@@ -468,7 +468,7 @@ mod tests {
         let filter = query_parser::filter("filter link_name == 'foo'").unwrap();
         let predicates = Predicates::Single(filter.clone());
         let SplitPredicates { pushed, not_pushed } =
-            predicates.split_around_align(&align).unwrap();
+            predicates.split_around_align(align).unwrap();
         let Predicates::Single(single) = pushed.as_ref().unwrap() else {
             panic!("Expected Predicates::Single, found {:?}", pushed);
         };
@@ -497,7 +497,7 @@ mod tests {
                 .unwrap();
         let predicates = Predicates::Single(filter.clone());
         let SplitPredicates { pushed, not_pushed } =
-            predicates.split_around_align(&align).unwrap();
+            predicates.split_around_align(align).unwrap();
         let Predicates::Single(single) = pushed.as_ref().unwrap() else {
             panic!("Expected Predicates::Single, found {:?}", pushed);
         };
@@ -533,7 +533,7 @@ mod tests {
         let filter = query_parser::filter("filter datum > 100.0").unwrap();
         let predicates = Predicates::Single(filter.clone());
         let SplitPredicates { pushed, not_pushed } =
-            predicates.split_around_align(&align).unwrap();
+            predicates.split_around_align(align).unwrap();
         assert!(
             pushed.is_none(),
             "Should have pushed nothing through alignment"
@@ -566,7 +566,7 @@ mod tests {
                 .unwrap();
         let predicates = Predicates::Single(filter.clone());
         let SplitPredicates { pushed, not_pushed } =
-            predicates.split_around_align(&align).unwrap();
+            predicates.split_around_align(align).unwrap();
         let Predicates::Disjunctions(list) = pushed.as_ref().unwrap() else {
             panic!("Expected Predicates::Disjunctions, found {:?}", pushed);
         };
@@ -614,7 +614,7 @@ mod tests {
                 .unwrap();
         let predicates = Predicates::Single(filter.clone());
         let SplitPredicates { pushed, not_pushed } =
-            predicates.split_around_align(&align).unwrap();
+            predicates.split_around_align(align).unwrap();
         let Predicates::Disjunctions(list) = pushed.as_ref().unwrap() else {
             panic!("Expected Predicates::Disjunctions, found {:?}", pushed);
         };

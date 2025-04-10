@@ -1095,7 +1095,7 @@ mod tests {
         let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
-        setup_test_schema(&pool).await;
+        setup_test_schema(pool).await;
 
         // We'll first insert an item at 0.
         //
@@ -1155,7 +1155,7 @@ mod tests {
         let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
-        setup_test_schema(&pool).await;
+        setup_test_schema(pool).await;
 
         // To test ordering behavior, we'll generate a range where the natural
         // order of the _items_ differs from their indices. I.e., we have some
@@ -1242,7 +1242,7 @@ mod tests {
         let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
-        setup_test_schema(&pool).await;
+        setup_test_schema(pool).await;
 
         let query = NextItemSelfJoined::<
             item::dsl::item,
@@ -1266,7 +1266,7 @@ mod tests {
         let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
-        setup_test_schema(&pool).await;
+        setup_test_schema(pool).await;
 
         for i in 0..10 {
             let query = NextItemSelfJoinedQuery::new(0, 9);
@@ -1300,7 +1300,7 @@ mod tests {
         let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
-        setup_test_schema(&pool).await;
+        setup_test_schema(pool).await;
 
         // Insert mostly the same items, but leave some gaps.
         const TO_SKIP: [i32; 2] = [3, 7];
@@ -1351,7 +1351,7 @@ mod tests {
         let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
-        setup_test_schema(&pool).await;
+        setup_test_schema(pool).await;
 
         // Insert a bunch of items, not using the next item machinery.
         const N_ITEMS: usize = 10_000;

@@ -335,7 +335,7 @@ impl InstanceAutoRestart {
                 );
                 true
             }
-            (InstanceState::Vmm, Some(ref vmm)) => {
+            (InstanceState::Vmm, Some(vmm)) => {
                 debug_assert_eq!(
                     state.propolis_id,
                     Some(vmm.id),
@@ -352,7 +352,7 @@ impl InstanceAutoRestart {
 
         InstanceKarmicStatus {
             needs_reincarnation,
-            can_reincarnate: self.can_reincarnate(&state),
+            can_reincarnate: self.can_reincarnate(state),
         }
     }
 

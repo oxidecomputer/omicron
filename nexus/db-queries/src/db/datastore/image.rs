@@ -41,7 +41,7 @@ impl DataStore {
             PaginatedBy::Id(pagparams) => paginated(
                 project_dsl::project_image,
                 project_dsl::id,
-                &pagparams,
+                pagparams,
             ),
             PaginatedBy::Name(pagparams) => paginated(
                 project_dsl::project_image,
@@ -71,7 +71,7 @@ impl DataStore {
         use nexus_db_schema::schema::silo_image::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::silo_image, dsl::id, &pagparams)
+                paginated(dsl::silo_image, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::silo_image,

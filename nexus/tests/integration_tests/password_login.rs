@@ -60,7 +60,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     // The timing is verified in expect_login_failure().
     expect_login_failure(
         client,
-        &silo_name,
+        silo_name,
         UserId::from_str("bigfoot").unwrap(),
         params::Password::from_str("ahh").unwrap(),
     )
@@ -82,7 +82,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     // Try to log in with a bogus password.
     expect_login_failure(
         client,
-        &silo_name,
+        silo_name,
         test_user.clone(),
         params::Password::from_str("something else").unwrap(),
     )
@@ -92,7 +92,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     // something.
     let session_token = expect_login_success(
         client,
-        &silo_name,
+        silo_name,
         test_user.clone(),
         test_password.clone(),
     )
@@ -122,7 +122,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     // The old password should no longer work.
     expect_login_failure(
         client,
-        &silo_name,
+        silo_name,
         test_user.clone(),
         test_password.clone(),
     )
@@ -131,7 +131,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     // We should be able to login separately with the new password.
     let session_token2 = expect_login_success(
         client,
-        &silo_name,
+        silo_name,
         test_user.clone(),
         test_password2.clone(),
     )
@@ -185,7 +185,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
 
     let admin_session = expect_login_success(
         client,
-        &silo_name,
+        silo_name,
         admin_user.clone(),
         admin_password.clone(),
     )
@@ -208,14 +208,14 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     // Just to be clear, we modified the test user's password.
     let _ = expect_login_success(
         client,
-        &silo_name,
+        silo_name,
         test_user.clone(),
         hijacked_password.clone(),
     )
     .await;
     expect_login_failure(
         client,
-        &silo_name,
+        silo_name,
         test_user.clone(),
         test_password2.clone(),
     )
@@ -224,14 +224,14 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     // And we did not modify the admin user's password.
     let _ = expect_login_success(
         client,
-        &silo_name,
+        silo_name,
         admin_user.clone(),
         admin_password.clone(),
     )
     .await;
     expect_login_failure(
         client,
-        &silo_name,
+        silo_name,
         admin_user.clone(),
         hijacked_password.clone(),
     )
@@ -249,7 +249,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     .unwrap();
     expect_login_failure(
         client,
-        &silo_name,
+        silo_name,
         test_user.clone(),
         hijacked_password.clone(),
     )
@@ -257,14 +257,14 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     // And we did not modify the admin user's password.
     let _ = expect_login_success(
         client,
-        &silo_name,
+        silo_name,
         admin_user.clone(),
         admin_password.clone(),
     )
     .await;
     expect_login_failure(
         client,
-        &silo_name,
+        silo_name,
         admin_user.clone(),
         hijacked_password.clone(),
     )
@@ -318,7 +318,7 @@ async fn test_local_user_with_no_initial_password(
     // Logging in should not work.  (What password would we use, anyway?)
     expect_login_failure(
         client,
-        &silo_name,
+        silo_name,
         test_user.clone(),
         params::Password::from_str("").unwrap(),
     )
@@ -345,7 +345,7 @@ async fn test_local_user_with_no_initial_password(
     // Now, we should be able to log in and do things.
     let session_token = expect_login_success(
         client,
-        &silo_name,
+        silo_name,
         test_user.clone(),
         test_password2.clone(),
     )

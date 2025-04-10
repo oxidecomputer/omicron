@@ -358,7 +358,7 @@ impl MetricsManager {
         address: Ipv6Addr,
     ) -> Result<Self, Error> {
         let sampler = KstatSampler::new(log).map_err(Error::Kstat)?;
-        let server = start_producer_server(&log, identifiers.sled_id, address)?;
+        let server = start_producer_server(log, identifiers.sled_id, address)?;
         server
             .registry()
             .register_producer(sampler.clone())

@@ -700,7 +700,7 @@ mod tests {
             log,
             || match attempts.next() {
                 Some(Ok(peers)) => {
-                    future::ok(Peers::new(&log, Box::new(peers), timeout))
+                    future::ok(Peers::new(log, Box::new(peers), timeout))
                 }
                 Some(Err(error)) => {
                     future::err(DiscoverPeersError::Retry(error))

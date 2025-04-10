@@ -298,12 +298,12 @@ impl RackInitializeRequest {
     pub fn from_toml_with_fallback(
         data: &str,
     ) -> Result<RackInitializeRequest> {
-        let v2_err = match toml::from_str::<RackInitializeRequest>(&data) {
+        let v2_err = match toml::from_str::<RackInitializeRequest>(data) {
             Ok(req) => return Ok(req),
             Err(e) => e,
         };
         if let Ok(v1) =
-            toml::from_str::<back_compat::RackInitializeRequestV1>(&data)
+            toml::from_str::<back_compat::RackInitializeRequestV1>(data)
         {
             return Ok(v1.into());
         }

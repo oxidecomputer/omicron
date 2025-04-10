@@ -42,7 +42,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let log = lc.log();
     let opctx = lc.opctx();
     let datastore = lc.datastore();
-    let planning_input = PlanningInputFromDb::assemble(&opctx, &datastore)
+    let planning_input = PlanningInputFromDb::assemble(opctx, datastore)
         .await
         .expect("planning input");
     let collection = datastore
@@ -62,7 +62,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         log,
         &planning_input,
         &collection,
-        &nexus,
+        nexus,
         &|builder: &mut BlueprintBuilder| {
             builder
                 .sled_add_zone_nexus(sled_id)
@@ -120,7 +120,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         log,
         &planning_input,
         &collection,
-        &nexus,
+        nexus,
         &|builder: &mut BlueprintBuilder| {
             builder
                 .sled_expunge_zone(sled_id, new_zone.id)
@@ -200,7 +200,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
 
     // Now run through the planner.
     info!(log, "running through planner");
-    let planning_input = PlanningInputFromDb::assemble(&opctx, &datastore)
+    let planning_input = PlanningInputFromDb::assemble(opctx, datastore)
         .await
         .expect("planning input");
     let (_, parent_blueprint) = datastore
@@ -251,7 +251,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         || async {
             for nexus_client in &initial_nexus_clients {
                 assert!(nexus_client.baseurl() != new_zone_client.baseurl());
-                let Ok(sagas) = list_sagas(&nexus_client).await else {
+                let Ok(sagas) = list_sagas(nexus_client).await else {
                     continue;
                 };
 
@@ -284,7 +284,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         .expect("complete demo saga");
     let found = wait_for_condition(
         || async {
-            let sagas = list_sagas(&nexus_found).await.expect("listing sagas");
+            let sagas = list_sagas(nexus_found).await.expect("listing sagas");
             debug!(log, "found sagas (last): {:?}", sagas);
             let found = sagas.into_iter().find(|s| s.id == saga_id).unwrap();
             if matches!(found.state, SagaState::Succeeded) {

@@ -1373,7 +1373,7 @@ impl InstanceRunner {
                         .order
                         .iter()
                         .map(|id| BootOrderEntry {
-                            id: SpecKey::Name(id_to_device_name(&id)),
+                            id: SpecKey::Name(id_to_device_name(id)),
                         })
                         .collect(),
                 });
@@ -2596,7 +2596,7 @@ mod tests {
             );
 
             let _dns_server =
-                crate::fakes::nexus::start_dns_server(&log, &_nexus_server)
+                crate::fakes::nexus::start_dns_server(log, &_nexus_server)
                     .await;
 
             let resolver = Arc::new(
@@ -2608,7 +2608,7 @@ mod tests {
             );
 
             let nexus_client = make_nexus_client_with_port(
-                &log,
+                log,
                 resolver,
                 _nexus_server.local_addr().port(),
             );
@@ -2823,7 +2823,7 @@ mod tests {
     impl InstanceTestObjects {
         async fn new(log: &slog::Logger) -> Self {
             let storage_harness = setup_storage_manager(log).await;
-            let nexus = FakeNexusParts::new(&log).await;
+            let nexus = FakeNexusParts::new(log).await;
             let temp_guard = Utf8TempDir::new().unwrap();
             let (services, metrics_rx) = fake_instance_manager_services(
                 log,
@@ -3378,17 +3378,17 @@ mod tests {
 
     impl TestInstanceRunner {
         async fn new(log: &slog::Logger) -> Self {
-            let storage_harness = setup_storage_manager(&log).await;
+            let storage_harness = setup_storage_manager(log).await;
             let FakeNexusParts {
                 nexus_client,
                 _nexus_server,
                 state_rx,
                 _dns_server,
-            } = FakeNexusParts::new(&log).await;
+            } = FakeNexusParts::new(log).await;
 
             let temp_guard = Utf8TempDir::new().unwrap();
             let (services, _metrics_rx) = fake_instance_manager_services(
-                &log,
+                log,
                 storage_harness.handle().clone(),
                 nexus_client,
                 &temp_guard.path().to_string(),

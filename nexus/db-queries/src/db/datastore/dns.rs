@@ -452,7 +452,7 @@ impl DataStore {
         // This method is used in nested transactions, which are not supported
         // with retryable transactions.
         self.transaction_non_retry_wrapper("dns_update_incremental")
-            .transaction(&conn, |c| async move {
+            .transaction(conn, |c| async move {
                 let version = self
                     .dns_group_latest_version_conn(
                         opctx,
@@ -779,7 +779,7 @@ mod test {
         // DNS has been initialized, we will get an InternalError because we
         // cannot tell what version we're supposed to be at.
         let error = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
+            .dns_config_read(opctx, DnsGroup::Internal)
             .await
             .expect_err(
                 "unexpectedly succeeding reading uninitialized DNS config",
@@ -818,7 +818,7 @@ mod test {
                 .expect("failed to insert initial version");
         }
         let dns_config = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
+            .dns_config_read(opctx, DnsGroup::Internal)
             .await
             .expect("failed to read DNS config");
         println!("found config: {:?}", dns_config);
@@ -835,7 +835,7 @@ mod test {
         // "Internal" DNS group.  If we read the config for the "External" DNS
         // group, we should get the same error as above.
         let error = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
+            .dns_config_read(opctx, DnsGroup::External)
             .await
             .expect_err(
                 "unexpectedly succeeding reading uninitialized DNS config",
@@ -878,7 +878,7 @@ mod test {
 
         let after = Utc::now();
         let dns_config = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
+            .dns_config_read(opctx, DnsGroup::External)
             .await
             .expect("failed to read DNS config");
         println!("found config: {:?}", dns_config);
@@ -918,7 +918,7 @@ mod test {
 
         let after = Utc::now();
         let dns_config = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
+            .dns_config_read(opctx, DnsGroup::Internal)
             .await
             .expect("failed to read DNS config");
         println!("found config: {:?}", dns_config);
@@ -939,7 +939,7 @@ mod test {
         // works right.
         let dns_config_batch_1 = datastore
             .dns_config_read_version(
-                &opctx,
+                opctx,
                 &opctx.log.clone(),
                 NonZeroU32::new(1).unwrap(),
                 &DnsVersion {
@@ -1218,7 +1218,7 @@ mod test {
 
         // Verify external version 1.
         let dns_config_v1 = datastore
-            .dns_config_read_version(&opctx, log, batch_size, &v1)
+            .dns_config_read_version(opctx, log, batch_size, &v1)
             .await
             .unwrap();
         println!("dns_config_v1: {:?}", dns_config_v1);
@@ -1240,7 +1240,7 @@ mod test {
 
         // Verify external version 2.
         let dns_config_v2 = datastore
-            .dns_config_read_version(&opctx, log, batch_size, &v2)
+            .dns_config_read_version(opctx, log, batch_size, &v2)
             .await
             .unwrap();
         println!("dns_config_v2: {:?}", dns_config_v2);
@@ -1273,7 +1273,7 @@ mod test {
 
         // Verify external version 3
         let dns_config_v3 = datastore
-            .dns_config_read_version(&opctx, log, batch_size, &v3)
+            .dns_config_read_version(opctx, log, batch_size, &v3)
             .await
             .unwrap();
         println!("dns_config_v3: {:?}", dns_config_v3);
@@ -1291,10 +1291,8 @@ mod test {
         );
 
         // Without specifying a version, we should get v3.
-        let dns_config_latest = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .unwrap();
+        let dns_config_latest =
+            datastore.dns_config_read(opctx, DnsGroup::External).await.unwrap();
         // Note that the time_created doesn't quite match up here because in
         // `dns_config_latest`, we took a round-trip through the database, which
         // loses some precision.
@@ -1303,7 +1301,7 @@ mod test {
 
         // Verify internal version 1.
         let internal_dns_config_v1 = datastore
-            .dns_config_read_version(&opctx, log, batch_size, &vi1)
+            .dns_config_read_version(opctx, log, batch_size, &vi1)
             .await
             .unwrap();
         println!("internal dns_config_v1: {:?}", internal_dns_config_v1);
@@ -1312,7 +1310,7 @@ mod test {
 
         // Verify internal version 2.
         let internal_dns_config_v2 = datastore
-            .dns_config_read_version(&opctx, log, batch_size, &vi2)
+            .dns_config_read_version(opctx, log, batch_size, &vi2)
             .await
             .unwrap();
         println!("internal dns_config_v2: {:?}", internal_dns_config_v2);
@@ -1582,10 +1580,8 @@ mod test {
         }
 
         // The configuration starts off empty.
-        let dns_config = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .unwrap();
+        let dns_config =
+            datastore.dns_config_read(opctx, DnsGroup::External).await.unwrap();
         assert_eq!(u64::from(dns_config.generation), 1);
         assert_eq!(dns_config.zones.len(), 0);
 
@@ -1607,16 +1603,14 @@ mod test {
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             datastore
-                .dns_update_incremental(&opctx, &conn, update)
+                .dns_update_incremental(opctx, &conn, update)
                 .await
                 .unwrap();
         }
 
         // Verify the new config.
-        let dns_config = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .unwrap();
+        let dns_config =
+            datastore.dns_config_read(opctx, DnsGroup::External).await.unwrap();
         assert_eq!(u64::from(dns_config.generation), 2);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
@@ -1643,15 +1637,13 @@ mod test {
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             datastore
-                .dns_update_incremental(&opctx, &conn, update)
+                .dns_update_incremental(opctx, &conn, update)
                 .await
                 .unwrap();
         }
 
-        let dns_config = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .unwrap();
+        let dns_config =
+            datastore.dns_config_read(opctx, DnsGroup::External).await.unwrap();
         assert_eq!(u64::from(dns_config.generation), 3);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
@@ -1676,15 +1668,13 @@ mod test {
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             datastore
-                .dns_update_incremental(&opctx, &conn, update)
+                .dns_update_incremental(opctx, &conn, update)
                 .await
                 .unwrap();
         }
 
-        let dns_config = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .unwrap();
+        let dns_config =
+            datastore.dns_config_read(opctx, DnsGroup::External).await.unwrap();
         assert_eq!(u64::from(dns_config.generation), 4);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
@@ -1706,15 +1696,13 @@ mod test {
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             datastore
-                .dns_update_incremental(&opctx, &conn, update)
+                .dns_update_incremental(opctx, &conn, update)
                 .await
                 .unwrap();
         }
 
-        let dns_config = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .unwrap();
+        let dns_config =
+            datastore.dns_config_read(opctx, DnsGroup::External).await.unwrap();
         assert_eq!(u64::from(dns_config.generation), 5);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
@@ -1779,7 +1767,7 @@ mod test {
             );
             update2.add_name(String::from("n1"), records1.clone()).unwrap();
             datastore
-                .dns_update_incremental(&opctx, &conn2, update2)
+                .dns_update_incremental(opctx, &conn2, update2)
                 .await
                 .unwrap();
 
@@ -1790,10 +1778,8 @@ mod test {
         }
 
         // Verify the result of the concurrent update.
-        let dns_config = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .unwrap();
+        let dns_config =
+            datastore.dns_config_read(opctx, DnsGroup::External).await.unwrap();
         assert_eq!(u64::from(dns_config.generation), 6);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
@@ -1803,10 +1789,8 @@ mod test {
         );
         assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
         assert_eq!(dns_config.zones[0].records, dns_config.zones[1].records,);
-        let dns_config = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
-            .await
-            .unwrap();
+        let dns_config =
+            datastore.dns_config_read(opctx, DnsGroup::Internal).await.unwrap();
         assert_eq!(u64::from(dns_config.generation), 2);
         assert_eq!(dns_config.zones.len(), 1);
         assert_eq!(dns_config.zones[0].zone_name, "oxide3.test");
@@ -1826,7 +1810,7 @@ mod test {
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             let error = datastore
-                .dns_update_incremental(&opctx, &conn, update)
+                .dns_update_incremental(opctx, &conn, update)
                 .await
                 .unwrap_err();
             let error = match error {
@@ -1840,10 +1824,8 @@ mod test {
             );
         }
 
-        let dns_config = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .unwrap();
+        let dns_config =
+            datastore.dns_config_read(opctx, DnsGroup::External).await.unwrap();
         assert_eq!(u64::from(dns_config.generation), 6);
 
         // Failure case: cannot add a name that already exists.
@@ -1858,7 +1840,7 @@ mod test {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             let error = Error::from(
                 datastore
-                    .dns_update_incremental(&opctx, &conn, update)
+                    .dns_update_incremental(opctx, &conn, update)
                     .await
                     .unwrap_err(),
             );
@@ -1870,10 +1852,8 @@ mod test {
             );
         }
 
-        let dns_config = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .unwrap();
+        let dns_config =
+            datastore.dns_config_read(opctx, DnsGroup::External).await.unwrap();
         assert_eq!(u64::from(dns_config.generation), 6);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
@@ -1938,7 +1918,7 @@ mod test {
             .unwrap();
         let gen1 = Generation::new();
         datastore
-            .dns_update_from_version(&opctx, update1, gen1)
+            .dns_update_from_version(opctx, update1, gen1)
             .await
             .expect("failed to update from first generation");
 
@@ -1958,7 +1938,7 @@ mod test {
             )
             .unwrap();
         let error = datastore
-            .dns_update_from_version(&opctx, update2.clone(), gen1)
+            .dns_update_from_version(opctx, update2.clone(), gen1)
             .await
             .expect_err("update unexpectedly succeeded");
         assert!(
@@ -1970,7 +1950,7 @@ mod test {
         // At this point, the database state should reflect the first update but
         // not the second.
         let config = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
+            .dns_config_read(opctx, DnsGroup::Internal)
             .await
             .expect("failed to read config");
         let gen2 = nexus_db_model::Generation(gen1.next());
@@ -1984,11 +1964,11 @@ mod test {
         // We can apply the second update, as long as we say it's conditional on
         // the current generation.
         datastore
-            .dns_update_from_version(&opctx, update2, gen2)
+            .dns_update_from_version(opctx, update2, gen2)
             .await
             .expect("failed to update from first generation");
         let config = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
+            .dns_config_read(opctx, DnsGroup::Internal)
             .await
             .expect("failed to read config");
         assert_eq!(gen2.next(), config.generation);

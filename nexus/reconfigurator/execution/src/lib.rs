@@ -542,7 +542,7 @@ fn register_deploy_clickhouse_cluster_nodes_step<'a>(
                     let res = clickhouse::deploy_nodes(
                         opctx,
                         blueprint,
-                        &clickhouse_cluster_config,
+                        clickhouse_cluster_config,
                     )
                     .await
                     .map_err(merge_anyhow_list);

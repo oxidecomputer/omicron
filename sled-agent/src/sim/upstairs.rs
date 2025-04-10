@@ -75,7 +75,7 @@ impl SimulatedUpstairs {
         let volume_construction_request = inner.id_to_vcr.get(&id).unwrap();
 
         let targets = extract_targets_from_volume_construction_request(
-            &volume_construction_request,
+            volume_construction_request,
         )
         .map_err(|e| {
             Error::invalid_request(&format!("bad socketaddr: {e:?}"))
@@ -137,7 +137,7 @@ fn extract_targets_from_volume_construction_request(
 
     let mut res = vec![];
     let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
-    parts.push_back(&vcr);
+    parts.push_back(vcr);
 
     while let Some(vcr_part) = parts.pop_front() {
         match vcr_part {

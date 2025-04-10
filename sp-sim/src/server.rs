@@ -66,7 +66,7 @@ impl UdpServer {
                         format!("failed to bind to {}", bind_addr)
                     })?;
 
-                sock.join_multicast_v6(&multicast_addr, interface_index)
+                sock.join_multicast_v6(multicast_addr, interface_index)
                     .with_context(|| {
                         format!(
                             "failed to join multicast group {multicast_addr} \

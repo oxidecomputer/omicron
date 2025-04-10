@@ -51,8 +51,8 @@ impl Encoder {
     fn encode_query(&self, query: Query, mut dst: &mut BytesMut) {
         dst.put_u8(Packet::QUERY);
         io::string::encode(query.id, &mut dst);
-        self.encode_client_info(query.client_info, &mut dst);
-        self.encode_settings(query.settings, &mut dst);
+        self.encode_client_info(query.client_info, dst);
+        self.encode_settings(query.settings, dst);
         io::string::encode(query.secret, &mut dst);
         let stage = match query.stage {
             Stage::FetchColumns => 0,
@@ -67,7 +67,7 @@ impl Encoder {
         io::string::encode("", &mut dst);
 
         // Send an empty block to signal the end of data transfer.
-        self.encode_block(Block::empty(), &mut dst).unwrap();
+        self.encode_block(Block::empty(), dst).unwrap();
     }
 
     /// Encode a ClientInfo into the buffer.

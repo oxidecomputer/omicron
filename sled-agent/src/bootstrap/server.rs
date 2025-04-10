@@ -416,7 +416,7 @@ async fn start_sled_agent(
     let paths =
         sled_config_paths(&long_running_task_handles.storage_manager).await?;
 
-    let mut ledger = Ledger::new_with(&log, paths, request);
+    let mut ledger = Ledger::new_with(log, paths, request);
     ledger.commit().await?;
 
     Ok(server)
@@ -554,7 +554,7 @@ impl Inner {
                     self.long_running_task_handles.clone(),
                     self.service_manager.clone(),
                     &self.base_log,
-                    &log,
+                    log,
                 )
                 .await
                 {
@@ -672,12 +672,12 @@ impl Inner {
         // these addresses would delete "cxgbe0/ll", and could render
         // the sled inaccessible via a local interface.
 
-        sled_hardware::cleanup::delete_underlay_addresses(&log)
+        sled_hardware::cleanup::delete_underlay_addresses(log)
             .map_err(BootstrapError::Cleanup)?;
-        sled_hardware::cleanup::delete_omicron_vnics(&log)
+        sled_hardware::cleanup::delete_omicron_vnics(log)
             .await
             .map_err(BootstrapError::Cleanup)?;
-        illumos_utils::opte::delete_all_xde_devices(&log)?;
+        illumos_utils::opte::delete_all_xde_devices(log)?;
         Ok(())
     }
 

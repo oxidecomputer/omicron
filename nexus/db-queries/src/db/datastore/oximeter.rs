@@ -221,7 +221,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ProducerEndpoint> {
         use nexus_db_schema::schema::metric_producer::dsl;
-        paginated(dsl::metric_producer, dsl::id, &pagparams)
+        paginated(dsl::metric_producer, dsl::id, pagparams)
             .filter(dsl::oximeter_id.eq(oximeter_id))
             .order_by((dsl::oximeter_id, dsl::id))
             .select(ProducerEndpoint::as_select())
@@ -359,14 +359,14 @@ mod tests {
                 address: "[::1]:0".parse().unwrap(), // unused
             });
             datastore
-                .oximeter_create(&opctx, &info)
+                .oximeter_create(opctx, &info)
                 .await
                 .expect("inserted collector");
         }
 
         // Ensure all our collectors exist and aren't expunged.
         let mut all_collectors = datastore
-            .oximeter_list(&opctx, &DataPageParams::max_page())
+            .oximeter_list(opctx, &DataPageParams::max_page())
             .await
             .expect("listed collectors");
         all_collectors.sort_by_key(|info| info.id);
@@ -378,17 +378,17 @@ mod tests {
 
         // Delete the first two of them.
         datastore
-            .oximeter_expunge(&opctx, collector_ids[0])
+            .oximeter_expunge(opctx, collector_ids[0])
             .await
             .expect("expunged collector");
         datastore
-            .oximeter_expunge(&opctx, collector_ids[1])
+            .oximeter_expunge(opctx, collector_ids[1])
             .await
             .expect("expunged collector");
 
         // Ensure those two were expunged.
         let mut all_collectors = datastore
-            .oximeter_list(&opctx, &DataPageParams::max_page())
+            .oximeter_list(opctx, &DataPageParams::max_page())
             .await
             .expect("listed collectors");
         all_collectors.sort_by_key(|info| info.id);
@@ -428,11 +428,11 @@ mod tests {
         assert!(expunged1a.time_expunged.is_some());
 
         datastore
-            .oximeter_expunge(&opctx, collector_ids[0])
+            .oximeter_expunge(opctx, collector_ids[0])
             .await
             .expect("expunged collector");
         datastore
-            .oximeter_expunge(&opctx, collector_ids[1])
+            .oximeter_expunge(opctx, collector_ids[1])
             .await
             .expect("expunged collector");
 
@@ -461,7 +461,7 @@ mod tests {
         let oximeter1_id = Uuid::new_v4();
         datastore
             .oximeter_create(
-                &opctx,
+                opctx,
                 &OximeterInfo::new(&params::OximeterInfo {
                     collector_id: oximeter1_id,
                     address: "[::1]:0".parse().unwrap(), // unused
@@ -478,7 +478,7 @@ mod tests {
             interval: Duration::from_secs(0),
         };
         let chosen_oximeter = datastore
-            .producer_endpoint_upsert_and_assign(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(opctx, &producer)
             .await
             .expect("inserted producer");
         assert_eq!(chosen_oximeter.id, oximeter1_id);
@@ -487,7 +487,7 @@ mod tests {
         // below).
         let producer_info = datastore
             .producers_list_by_oximeter_id(
-                &opctx,
+                opctx,
                 oximeter1_id,
                 &DataPageParams::max_page(),
             )
@@ -499,14 +499,14 @@ mod tests {
 
         // Expunge the oximeter.
         datastore
-            .oximeter_expunge(&opctx, oximeter1_id)
+            .oximeter_expunge(opctx, oximeter1_id)
             .await
             .expect("expunged oximeter");
 
         // Attempting to upsert our producer again should fail; our oximeter has
         // been expunged, and our time modified should be unchanged.
         let err = datastore
-            .producer_endpoint_upsert_and_assign(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(opctx, &producer)
             .await
             .expect_err("producer upsert failed")
             .to_string();
@@ -517,7 +517,7 @@ mod tests {
         {
             let check_info = datastore
                 .producers_list_by_oximeter_id(
-                    &opctx,
+                    opctx,
                     oximeter1_id,
                     &DataPageParams::max_page(),
                 )
@@ -535,7 +535,7 @@ mod tests {
         let oximeter2_id = Uuid::new_v4();
         datastore
             .oximeter_create(
-                &opctx,
+                opctx,
                 &OximeterInfo::new(&params::OximeterInfo {
                     collector_id: oximeter2_id,
                     address: "[::1]:0".parse().unwrap(), // unused
@@ -547,14 +547,14 @@ mod tests {
         // Retry updating our existing producer; it should get reassigned to a
         // the new Oximeter.
         let chosen_oximeter = datastore
-            .producer_endpoint_upsert_and_assign(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(opctx, &producer)
             .await
             .expect("inserted producer");
         assert_eq!(chosen_oximeter.id, oximeter2_id);
         {
             let check_info = datastore
                 .producers_list_by_oximeter_id(
-                    &opctx,
+                    opctx,
                     oximeter2_id,
                     &DataPageParams::max_page(),
                 )
@@ -591,7 +591,7 @@ mod tests {
                 address: "[::1]:0".parse().unwrap(), // unused
             });
             datastore
-                .oximeter_create(&opctx, &info)
+                .oximeter_create(opctx, &info)
                 .await
                 .expect("inserted collector");
         }
@@ -607,7 +607,7 @@ mod tests {
                 interval: Duration::from_secs(0),    // unused
             };
             let collector_id = datastore
-                .producer_endpoint_upsert_and_assign(&opctx, &producer)
+                .producer_endpoint_upsert_and_assign(opctx, &producer)
                 .await
                 .expect("inserted producer")
                 .id;
@@ -624,7 +624,7 @@ mod tests {
 
         // Expunge the first collector.
         datastore
-            .oximeter_expunge(&opctx, collector_ids[0])
+            .oximeter_expunge(opctx, collector_ids[0])
             .await
             .expect("expunged collector");
 
@@ -638,7 +638,7 @@ mod tests {
                 interval: Duration::from_secs(0),    // unused
             };
             let collector_id = datastore
-                .producer_endpoint_upsert_and_assign(&opctx, &producer)
+                .producer_endpoint_upsert_and_assign(opctx, &producer)
                 .await
                 .expect("inserted producer")
                 .id;
@@ -658,7 +658,7 @@ mod tests {
         // should fail.
         for &collector_id in &collector_ids[1..] {
             datastore
-                .oximeter_expunge(&opctx, collector_id)
+                .oximeter_expunge(opctx, collector_id)
                 .await
                 .expect("expunged collector");
         }
@@ -669,7 +669,7 @@ mod tests {
             interval: Duration::from_secs(0),    // unused
         };
         let err = datastore
-            .producer_endpoint_upsert_and_assign(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(opctx, &producer)
             .await
             .expect_err("unexpected success - all oximeters expunged")
             .to_string();
@@ -698,7 +698,7 @@ mod tests {
                 address: "[::1]:0".parse().unwrap(), // unused
             });
             datastore
-                .oximeter_create(&opctx, &info)
+                .oximeter_create(opctx, &info)
                 .await
                 .expect("inserted collector");
         }
@@ -713,7 +713,7 @@ mod tests {
                 interval: Duration::from_secs(0),    // unused
             };
             let collector_id = datastore
-                .producer_endpoint_upsert_and_assign(&opctx, &producer)
+                .producer_endpoint_upsert_and_assign(opctx, &producer)
                 .await
                 .expect("inserted producer")
                 .id;
@@ -733,13 +733,13 @@ mod tests {
 
         // Expunge one collector.
         datastore
-            .oximeter_expunge(&opctx, collector_ids[0])
+            .oximeter_expunge(opctx, collector_ids[0])
             .await
             .expect("expunged Oximeter");
 
         // Reassign producers that belonged to that collector.
         let num_reassigned = datastore
-            .oximeter_reassign_all_producers(&opctx, collector_ids[0])
+            .oximeter_reassign_all_producers(opctx, collector_ids[0])
             .await
             .expect("reassigned producers");
         assert_eq!(
@@ -763,7 +763,7 @@ mod tests {
         for i in 0..4 {
             producer_counts[i] = datastore
                 .producers_list_by_oximeter_id(
-                    &opctx,
+                    opctx,
                     collector_ids[i],
                     &DataPageParams::max_page(),
                 )
@@ -803,7 +803,7 @@ mod tests {
                 address: "[::1]:0".parse().unwrap(), // unused
             });
             datastore
-                .oximeter_create(&opctx, &info)
+                .oximeter_create(opctx, &info)
                 .await
                 .expect("inserted collector");
         }
@@ -818,7 +818,7 @@ mod tests {
                 interval: Duration::from_secs(0),    // unused
             };
             let collector_id = datastore
-                .producer_endpoint_upsert_and_assign(&opctx, &producer)
+                .producer_endpoint_upsert_and_assign(opctx, &producer)
                 .await
                 .expect("inserted producer")
                 .id;
@@ -832,7 +832,7 @@ mod tests {
         // Delete all four collectors.
         for &collector_id in &collector_ids {
             datastore
-                .oximeter_expunge(&opctx, collector_id)
+                .oximeter_expunge(opctx, collector_id)
                 .await
                 .expect("expunged Oximeter");
         }
@@ -841,7 +841,7 @@ mod tests {
         // should fail, as all collectors have been expunged.
         for &collector_id in &collector_ids {
             let num_reassigned = datastore
-                .oximeter_reassign_all_producers(&opctx, collector_id)
+                .oximeter_reassign_all_producers(opctx, collector_id)
                 .await
                 .expect("reassigned producers");
             assert_eq!(
@@ -854,7 +854,7 @@ mod tests {
         let new_collector_id = Uuid::new_v4();
         datastore
             .oximeter_create(
-                &opctx,
+                opctx,
                 &OximeterInfo::new(&params::OximeterInfo {
                     collector_id: new_collector_id,
                     address: "[::1]:0".parse().unwrap(), // unused
@@ -866,7 +866,7 @@ mod tests {
         // Reassigning the original four collectors should now all succeed.
         for (i, &collector_id) in collector_ids.iter().enumerate() {
             let num_reassigned = datastore
-                .oximeter_reassign_all_producers(&opctx, collector_id)
+                .oximeter_reassign_all_producers(opctx, collector_id)
                 .await
                 .expect("reassigned producers");
             assert_eq!(
@@ -878,7 +878,7 @@ mod tests {
         // All 100 producers should be assigned to our new collector.
         let nproducers = datastore
             .producers_list_by_oximeter_id(
-                &opctx,
+                opctx,
                 new_collector_id,
                 &DataPageParams::max_page(),
             )
@@ -905,7 +905,7 @@ mod tests {
             address: "[::1]:0".parse().unwrap(), // unused
         });
         datastore
-            .oximeter_create(&opctx, &collector_info)
+            .oximeter_create(opctx, &collector_info)
             .await
             .expect("failed to insert collector");
 
@@ -917,14 +917,14 @@ mod tests {
             interval: Duration::from_secs(0),    // unused
         };
         datastore
-            .producer_endpoint_upsert_and_assign(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(opctx, &producer)
             .await
             .expect("failed to insert producer");
 
         // Our producer should show up when we list by its collector
         let mut all_producers = datastore
             .producers_list_by_oximeter_id(
-                &opctx,
+                opctx,
                 collector_info.id,
                 &DataPageParams::max_page(),
             )
@@ -938,14 +938,14 @@ mod tests {
         let producer = all_producers.pop().unwrap();
 
         let producer_time_modified =
-            read_time_modified(&datastore, producer.id()).await;
+            read_time_modified(datastore, producer.id()).await;
 
         // Whether it's expired depends on the expiration date we specify; it
         // should show up if the expiration time is newer than the producer's
         // time_modified...
         let expired_producers = read_expired_producers(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             producer_time_modified + Duration::from_secs(1),
         )
         .await;
@@ -957,8 +957,8 @@ mod tests {
         // ... but not if the the producer has been modified since the
         // expiration.
         let expired_producers = read_expired_producers(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             producer_time_modified - Duration::from_secs(1),
         )
         .await;

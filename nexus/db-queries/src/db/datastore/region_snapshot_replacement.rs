@@ -1501,7 +1501,7 @@ impl DataStore {
         }
 
         let maybe_snapshot = self
-            .find_snapshot_by_volume_id(&opctx, db_region.volume_id())
+            .find_snapshot_by_volume_id(opctx, db_region.volume_id())
             .await?;
 
         if maybe_snapshot.is_none() {
@@ -1595,14 +1595,14 @@ mod test {
 
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx, request_1, volume_id,
+                opctx, request_1, volume_id,
             )
             .await
             .unwrap();
 
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx, request_2, volume_id,
+                opctx, request_2, volume_id,
             )
             .await
             .unwrap_err();
@@ -1650,13 +1650,13 @@ mod test {
 
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx, request_1, volume_id,
+                opctx, request_1, volume_id,
             )
             .await
             .unwrap();
 
         datastore
-            .insert_region_replacement_request(&opctx, request_2)
+            .insert_region_replacement_request(opctx, request_2)
             .await
             .unwrap_err();
 
@@ -1699,7 +1699,7 @@ mod test {
 
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx, request, volume_id,
+                opctx, request, volume_id,
             )
             .await
             .unwrap();
@@ -1709,7 +1709,7 @@ mod test {
         assert_eq!(
             datastore
                 .in_progress_region_snapshot_replacement_steps(
-                    &opctx, request_id
+                    opctx, request_id
                 )
                 .await
                 .unwrap(),
@@ -1718,7 +1718,7 @@ mod test {
 
         assert!(
             datastore
-                .get_requested_region_snapshot_replacement_steps(&opctx)
+                .get_requested_region_snapshot_replacement_steps(opctx)
                 .await
                 .unwrap()
                 .is_empty()
@@ -1746,7 +1746,7 @@ mod test {
                 RegionSnapshotReplacementStep::new(request_id, step_volume_id);
 
             let result = datastore
-                .insert_region_snapshot_replacement_step(&opctx, step)
+                .insert_region_snapshot_replacement_step(opctx, step)
                 .await
                 .unwrap();
 
@@ -1756,7 +1756,7 @@ mod test {
         assert_eq!(
             datastore
                 .in_progress_region_snapshot_replacement_steps(
-                    &opctx, request_id
+                    opctx, request_id
                 )
                 .await
                 .unwrap(),
@@ -1765,7 +1765,7 @@ mod test {
 
         assert_eq!(
             datastore
-                .get_requested_region_snapshot_replacement_steps(&opctx)
+                .get_requested_region_snapshot_replacement_steps(opctx)
                 .await
                 .unwrap()
                 .len(),
@@ -1795,7 +1795,7 @@ mod test {
                 RegionSnapshotReplacementStepState::Running;
 
             let result = datastore
-                .insert_region_snapshot_replacement_step(&opctx, step)
+                .insert_region_snapshot_replacement_step(opctx, step)
                 .await
                 .unwrap();
 
@@ -1805,7 +1805,7 @@ mod test {
         assert_eq!(
             datastore
                 .in_progress_region_snapshot_replacement_steps(
-                    &opctx, request_id
+                    opctx, request_id
                 )
                 .await
                 .unwrap(),
@@ -1814,7 +1814,7 @@ mod test {
 
         assert_eq!(
             datastore
-                .get_requested_region_snapshot_replacement_steps(&opctx)
+                .get_requested_region_snapshot_replacement_steps(opctx)
                 .await
                 .unwrap()
                 .len(),
@@ -1845,7 +1845,7 @@ mod test {
                 RegionSnapshotReplacementStepState::VolumeDeleted;
 
             let result = datastore
-                .insert_region_snapshot_replacement_step(&opctx, step)
+                .insert_region_snapshot_replacement_step(opctx, step)
                 .await
                 .unwrap();
 
@@ -1855,7 +1855,7 @@ mod test {
         assert_eq!(
             datastore
                 .in_progress_region_snapshot_replacement_steps(
-                    &opctx, request_id
+                    opctx, request_id
                 )
                 .await
                 .unwrap(),
@@ -1864,7 +1864,7 @@ mod test {
 
         assert_eq!(
             datastore
-                .get_requested_region_snapshot_replacement_steps(&opctx)
+                .get_requested_region_snapshot_replacement_steps(opctx)
                 .await
                 .unwrap()
                 .len(),
@@ -1906,7 +1906,7 @@ mod test {
         let first_request_id = step.id;
 
         let result = datastore
-            .insert_region_snapshot_replacement_step(&opctx, step)
+            .insert_region_snapshot_replacement_step(opctx, step)
             .await
             .unwrap();
 
@@ -1916,7 +1916,7 @@ mod test {
             RegionSnapshotReplacementStep::new(Uuid::new_v4(), volume_id);
 
         let result = datastore
-            .insert_region_snapshot_replacement_step(&opctx, step.clone())
+            .insert_region_snapshot_replacement_step(opctx, step.clone())
             .await
             .unwrap();
 
@@ -1933,7 +1933,7 @@ mod test {
 
         datastore
             .set_region_snapshot_replacement_step_running(
-                &opctx,
+                opctx,
                 first_request_id,
                 saga_id,
             )
@@ -1941,7 +1941,7 @@ mod test {
             .unwrap();
 
         let result = datastore
-            .insert_region_snapshot_replacement_step(&opctx, step.clone())
+            .insert_region_snapshot_replacement_step(opctx, step.clone())
             .await
             .unwrap();
 
@@ -1956,7 +1956,7 @@ mod test {
 
         datastore
             .set_region_snapshot_replacement_step_complete(
-                &opctx,
+                opctx,
                 first_request_id,
                 saga_id,
                 VolumeUuid::new_v4(), // old_snapshot_volume_id
@@ -1965,7 +1965,7 @@ mod test {
             .unwrap();
 
         let result = datastore
-            .insert_region_snapshot_replacement_step(&opctx, step.clone())
+            .insert_region_snapshot_replacement_step(opctx, step.clone())
             .await
             .unwrap();
 
@@ -1979,7 +1979,7 @@ mod test {
 
         datastore
             .set_region_snapshot_replacement_step_volume_deleted(
-                &opctx,
+                opctx,
                 first_request_id,
             )
             .await
@@ -2021,7 +2021,7 @@ mod test {
 
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx, request, volume_id,
+                opctx, request, volume_id,
             )
             .await
             .unwrap();
@@ -2029,7 +2029,7 @@ mod test {
         assert!(
             datastore
                 .region_snapshot_replacement_steps_requiring_garbage_collection(
-                    &opctx
+                    opctx
                 )
                 .await
                 .unwrap()
@@ -2056,7 +2056,7 @@ mod test {
         step.replacement_state = RegionSnapshotReplacementStepState::Complete;
 
         let result = datastore
-            .insert_region_snapshot_replacement_step(&opctx, step)
+            .insert_region_snapshot_replacement_step(opctx, step)
             .await
             .unwrap();
 
@@ -2082,7 +2082,7 @@ mod test {
         step.replacement_state = RegionSnapshotReplacementStepState::Complete;
 
         let result = datastore
-            .insert_region_snapshot_replacement_step(&opctx, step)
+            .insert_region_snapshot_replacement_step(opctx, step)
             .await
             .unwrap();
 
@@ -2092,7 +2092,7 @@ mod test {
             2,
             datastore
                 .region_snapshot_replacement_steps_requiring_garbage_collection(
-                    &opctx,
+                    opctx,
                 )
                 .await
                 .unwrap()
@@ -2152,7 +2152,7 @@ mod test {
         let first_step_id = step.id;
 
         let result = datastore
-            .insert_region_snapshot_replacement_step(&opctx, step)
+            .insert_region_snapshot_replacement_step(opctx, step)
             .await
             .unwrap();
 
@@ -2164,7 +2164,7 @@ mod test {
         );
 
         let result = datastore
-            .insert_region_snapshot_replacement_step(&opctx, step)
+            .insert_region_snapshot_replacement_step(opctx, step)
             .await
             .unwrap();
 
@@ -2209,7 +2209,7 @@ mod test {
         let request = RegionReplacement::new(Uuid::new_v4(), volume_id);
 
         datastore
-            .insert_region_replacement_request(&opctx, request)
+            .insert_region_replacement_request(opctx, request)
             .await
             .unwrap();
 
@@ -2217,7 +2217,7 @@ mod test {
             RegionSnapshotReplacementStep::new(Uuid::new_v4(), volume_id);
 
         datastore
-            .insert_region_snapshot_replacement_step(&opctx, request)
+            .insert_region_snapshot_replacement_step(opctx, request)
             .await
             .unwrap_err();
 

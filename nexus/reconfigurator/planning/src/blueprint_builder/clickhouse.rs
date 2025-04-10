@@ -243,7 +243,7 @@ impl ClickhouseAllocator {
         // We remove first, because the zones are already gone and therefore
         // don't help our quorum.
         for (zone_id, _) in &self.parent_config.keepers {
-            if !active_clickhouse_zones.keepers.contains(&zone_id) {
+            if !active_clickhouse_zones.keepers.contains(zone_id) {
                 // Remove the keeper for the first expunged zone we see.
                 // Remember, we only do one keeper membership change at time.
                 new_config.keepers.remove(zone_id);
@@ -588,7 +588,7 @@ pub mod test {
         // change, because the inventory doesn't reflect the removed keeper
         allocator.parent_config = new_config;
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
-        let new_config = allocator.plan(&&active_clickhouse_zones).unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert!(!new_config.needs_generation_bump(&allocator.parent_config));
 
         // Reflecting the keeper removal in inventory should also result in no

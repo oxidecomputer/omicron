@@ -139,7 +139,7 @@ async fn simc_get_source_volume(
     match &params.create_params.source {
         params::ImageSource::Snapshot { id } => {
             let (.., db_snapshot) =
-                LookupPath::new(&opctx, &osagactx.datastore())
+                LookupPath::new(&opctx, osagactx.datastore())
                     .snapshot_id(*id)
                     .fetch()
                     .await
@@ -290,7 +290,7 @@ async fn simc_create_image_record(
             .datastore()
             .project_image_create(
                 &opctx,
-                &authz_project,
+                authz_project,
                 record.try_into().map_err(ActionError::action_failed)?,
             )
             .await
@@ -300,7 +300,7 @@ async fn simc_create_image_record(
             .datastore()
             .silo_image_create(
                 &opctx,
-                &authz_silo,
+                authz_silo,
                 record.try_into().map_err(ActionError::action_failed)?,
             )
             .await
@@ -324,7 +324,7 @@ async fn simc_create_image_record_undo(
     match &params.image_type {
         ImageType::Project { .. } => {
             let (.., authz_image, db_image) =
-                LookupPath::new(&opctx, &osagactx.datastore())
+                LookupPath::new(&opctx, osagactx.datastore())
                     .project_image_id(image_id)
                     .fetch()
                     .await?;
@@ -337,7 +337,7 @@ async fn simc_create_image_record_undo(
 
         ImageType::Silo { .. } => {
             let (.., authz_image, db_image) =
-                LookupPath::new(&opctx, &osagactx.datastore())
+                LookupPath::new(&opctx, osagactx.datastore())
                     .silo_image_id(image_id)
                     .fetch()
                     .await?;
@@ -386,7 +386,7 @@ pub(crate) mod test {
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         let (.., authz_silo, _authz_project) =
-            LookupPath::new(&opctx, &datastore)
+            LookupPath::new(&opctx, datastore)
                 .project_id(project_id)
                 .lookup_for(nexus_db_queries::authz::Action::Modify)
                 .await
@@ -425,19 +425,18 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
 
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
 
-        create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+        create_disk(client, PROJECT_NAME, DISK_NAME).await;
 
         let snapshot =
-            create_snapshot(&client, PROJECT_NAME, DISK_NAME, "snapshot").await;
+            create_snapshot(client, PROJECT_NAME, DISK_NAME, "snapshot").await;
 
         // Build the saga DAG with the provided test parameters and run it.
         let opctx = test_opctx(cptestctx);
 
         let (.., authz_silo, authz_project) =
-            LookupPath::new(&opctx, &datastore)
+            LookupPath::new(&opctx, datastore)
                 .project_id(project_id)
                 .lookup_for(nexus_db_queries::authz::Action::Modify)
                 .await
@@ -476,12 +475,11 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
 
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
 
         // Build the saga DAG with the provided test parameters and run it.
 
-        let params = new_test_params(&cptestctx, project_id).await;
+        let params = new_test_params(cptestctx, project_id).await;
 
         let output =
             nexus.sagas.saga_execute::<SagaImageCreate>(params).await.unwrap();
@@ -533,8 +531,7 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
 
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaImageCreate,
@@ -542,14 +539,10 @@ pub(crate) mod test {
             _,
         >(
             nexus,
+            || Box::pin(async { new_test_params(cptestctx, project_id).await }),
             || {
                 Box::pin(async {
-                    new_test_params(&cptestctx, project_id).await
-                })
-            },
-            || {
-                Box::pin(async {
-                    verify_clean_slate(&cptestctx).await;
+                    verify_clean_slate(cptestctx).await;
                 })
             },
             log,
@@ -565,8 +558,7 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
 
         crate::app::sagas::test_helpers::action_failure_can_unwind_idempotently::<
             SagaImageCreate,
@@ -575,9 +567,9 @@ pub(crate) mod test {
         >(
             nexus,
             || Box::pin(async {
-                new_test_params(&cptestctx, project_id).await
+                new_test_params(cptestctx, project_id).await
             }),
-            || Box::pin(async { verify_clean_slate(&cptestctx).await; }),
+            || Box::pin(async { verify_clean_slate(cptestctx).await; }),
             log
         ).await;
     }
@@ -588,13 +580,12 @@ pub(crate) mod test {
     ) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
 
-        let params = new_test_params(&cptestctx, project_id).await;
+        let params = new_test_params(cptestctx, project_id).await;
         let dag = create_saga_dag::<SagaImageCreate>(params).unwrap();
         crate::app::sagas::test_helpers::actions_succeed_idempotently(
             nexus, dag,
@@ -612,6 +603,6 @@ pub(crate) mod test {
 
         nexus.image_delete(&opctx, &image_lookup).await.unwrap();
 
-        verify_clean_slate(&cptestctx).await;
+        verify_clean_slate(cptestctx).await;
     }
 }

@@ -183,7 +183,7 @@ pub fn blueprint_external_dns_config<'a>(
         // abstraction, such as it is, would be leakier).
         .filter_map(|silo_name| {
             (silo_name != default_silo_name())
-                .then(|| (silo_dns_name(&silo_name), dns_records.clone()))
+                .then(|| (silo_dns_name(silo_name), dns_records.clone()))
         })
         .collect::<HashMap<String, Vec<DnsRecord>>>();
 

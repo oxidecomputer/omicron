@@ -220,7 +220,7 @@ mod tests {
             datastore: &Arc<DataStore>,
             opctx: &OpContext,
         ) -> Self {
-            resource_helpers::create_default_ip_pool(&client).await;
+            resource_helpers::create_default_ip_pool(client).await;
 
             let _project =
                 resource_helpers::create_project(client, PROJECT_NAME).await;
@@ -234,7 +234,7 @@ mod tests {
             let destroyed_vmm_id = PropolisUuid::new_v4();
             datastore
                 .vmm_insert(
-                    &opctx,
+                    opctx,
                     dbg!(Vmm {
                         id: destroyed_vmm_id.into_untyped_uuid(),
                         time_created: Utc::now(),
@@ -263,7 +263,7 @@ mod tests {
             dbg!(
                 datastore
                     .sled_reservation_create(
-                        &opctx,
+                        opctx,
                         InstanceUuid::from_untyped_uuid(instance.identity.id),
                         destroyed_vmm_id,
                         resources.clone(),

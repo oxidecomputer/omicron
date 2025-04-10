@@ -38,7 +38,7 @@ impl LiveTestContext {
         let log = &logctx.log;
         let resolver = create_resolver(log)?;
         check_execution_environment(&resolver).await?;
-        let datastore = create_datastore(&log, &resolver).await?;
+        let datastore = create_datastore(log, &resolver).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         check_hardware_environment(&opctx, &datastore).await?;
         Ok(LiveTestContext { logctx, opctx, resolver, datastore })

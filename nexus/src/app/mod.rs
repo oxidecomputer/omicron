@@ -1058,7 +1058,7 @@ async fn switch_zone_address_mappings(
                 return Err(e.to_string());
             }
         };
-        match map_switch_zone_addrs(&log, switch_zone_addresses).await {
+        match map_switch_zone_addrs(log, switch_zone_addresses).await {
             Ok(mappings) => {
                 return Ok(mappings);
             }

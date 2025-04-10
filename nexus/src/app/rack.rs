@@ -86,7 +86,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Rack> {
-        self.db_datastore.rack_list(&opctx, pagparams).await
+        self.db_datastore.rack_list(opctx, pagparams).await
     }
 
     pub(crate) async fn rack_lookup(
@@ -361,7 +361,7 @@ impl super::Nexus {
                     );
 
                     self.populate_switch_ports(
-                        &opctx,
+                        opctx,
                         &qsfp_ports,
                         switch.to_string().parse().unwrap(),
                     )
@@ -376,7 +376,7 @@ impl super::Nexus {
                 );
                 for (switch, ports) in port_mappings {
                     self.populate_switch_ports(
-                        &opctx,
+                        opctx,
                         &ports,
                         switch.to_string().parse().unwrap(),
                     )
@@ -442,7 +442,7 @@ impl super::Nexus {
             match self
                 .db_datastore
                 .address_lot_create(
-                    &opctx,
+                    opctx,
                     &AddressLotCreate {
                         identity: IdentityMetadataCreateParams {
                             name: address_lot_name,
@@ -477,7 +477,7 @@ impl super::Nexus {
             match self
                 .db_datastore
                 .bgp_create_announce_set(
-                    &opctx,
+                    opctx,
                     &BgpAnnounceSetCreate {
                         identity: IdentityMetadataCreateParams {
                             name: announce_set_name.clone(),
@@ -515,7 +515,7 @@ impl super::Nexus {
             match self
                 .db_datastore
                 .bgp_config_create(
-                    &opctx,
+                    opctx,
                     &BgpConfigCreate {
                         identity: IdentityMetadataCreateParams {
                             name: bgp_config_name,
@@ -762,7 +762,7 @@ impl super::Nexus {
     /// See RFD 278 for additional context.
     pub(crate) async fn await_rack_initialization(&self, opctx: &OpContext) {
         loop {
-            let result = self.rack_lookup(&opctx, &self.rack_id).await;
+            let result = self.rack_lookup(opctx, &self.rack_id).await;
             match result {
                 Ok(rack) => {
                     if rack.initialized {

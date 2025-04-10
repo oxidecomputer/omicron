@@ -51,16 +51,14 @@ impl SwitchZoneUser {
 
     fn add_new_group_for_user(&self) -> Result<(), ExecutionError> {
         if get_group_by_name(&self.group).is_none() {
-            execute(
-                &mut std::process::Command::new("groupadd").arg(&self.group),
-            )?;
+            execute(std::process::Command::new("groupadd").arg(&self.group))?;
         }
         Ok(())
     }
 
     fn add_new_user(&self) -> Result<(), ExecutionError> {
         if get_user_by_name(&self.user).is_none() {
-            execute(&mut std::process::Command::new("useradd").args([
+            execute(std::process::Command::new("useradd").args([
                 "-m",
                 "-s",
                 &self.shell,
@@ -75,16 +73,12 @@ impl SwitchZoneUser {
     }
 
     fn enable_passwordless_login(&self) -> Result<(), ExecutionError> {
-        execute(
-            &mut std::process::Command::new("passwd").args(["-d", &self.user]),
-        )?;
+        execute(std::process::Command::new("passwd").args(["-d", &self.user]))?;
         Ok(())
     }
 
     fn disable_password_based_login(&self) -> Result<(), ExecutionError> {
-        execute(
-            &mut std::process::Command::new("passwd").args(["-N", &self.user]),
-        )?;
+        execute(std::process::Command::new("passwd").args(["-N", &self.user]))?;
         Ok(())
     }
 
@@ -92,7 +86,7 @@ impl SwitchZoneUser {
         let profiles = self.profiles.join(",");
 
         execute(
-            &mut std::process::Command::new("usermod")
+            std::process::Command::new("usermod")
                 .args(["-P", &profiles, &self.user]),
         )?;
         Ok(())
@@ -121,7 +115,7 @@ impl SwitchZoneUser {
 
         // Not using std::os::unix::fs::chown here because it doesn't support
         // recursive option.
-        execute(&mut std::process::Command::new("chown").args([
+        execute(std::process::Command::new("chown").args([
             "-R",
             &self.user,
             homedir.as_str(),

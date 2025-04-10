@@ -87,7 +87,7 @@ impl<T: Ledgerable> Ledger<T> {
         // Read all the ledgers that we can.
         let mut ledgers = vec![];
         for path in paths.iter() {
-            match T::read_from(log, &path).await {
+            match T::read_from(log, path).await {
                 Ok(ledger) => ledgers.push(ledger),
                 Err(err) => {
                     debug!(log, "Failed to read ledger: {err}"; "path" => %path)
@@ -124,7 +124,7 @@ impl<T: Ledgerable> Ledger<T> {
         let mut failed_paths = vec![];
         let mut one_successful_write = false;
         for path in self.paths.iter() {
-            if let Err(e) = self.atomic_write(&path).await {
+            if let Err(e) = self.atomic_write(path).await {
                 warn!(self.log, "Failed to write ledger"; "path" => ?path, "err" => ?e);
                 failed_paths.push((path.to_path_buf(), e));
             } else {
@@ -155,7 +155,7 @@ impl<T: Ledgerable> Ledger<T> {
 
         tokio::fs::rename(&tmp_path, &path)
             .await
-            .map_err(|err| Error::io_path(&path, err))?;
+            .map_err(|err| Error::io_path(path, err))?;
 
         Ok(())
     }
@@ -176,7 +176,7 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
             <Self as Ledgerable>::deserialize(
                 &tokio::fs::read_to_string(&path)
                     .await
-                    .map_err(|err| Error::io_path(&path, err))?,
+                    .map_err(|err| Error::io_path(path, err))?,
             )
             .map_err(|err| Error::JsonDeserialize {
                 path: path.to_path_buf(),
@@ -200,7 +200,7 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
         })?;
         tokio::fs::write(&path, as_str)
             .await
-            .map_err(|err| Error::io_path(&path, err))?;
+            .map_err(|err| Error::io_path(path, err))?;
         Ok(())
     }
 
@@ -259,7 +259,7 @@ mod test {
 
         let config_dir = camino_tempfile::Utf8TempDir::new().unwrap();
         let ledger = Ledger::new_with(
-            &log,
+            log,
             vec![config_dir.path().to_path_buf()],
             Data::default(),
         );
@@ -269,7 +269,7 @@ mod test {
         assert_eq!(ledger.data(), &Data::default());
 
         let ledger =
-            Ledger::<Data>::new(&log, vec![config_dir.path().to_path_buf()])
+            Ledger::<Data>::new(log, vec![config_dir.path().to_path_buf()])
                 .await;
         assert!(ledger.is_none());
 
@@ -286,7 +286,7 @@ mod test {
 
         // Create the ledger within a configuration directory
         let mut ledger =
-            Ledger::new_with(&log, vec![config_path.clone()], Data::default());
+            Ledger::new_with(log, vec![config_path.clone()], Data::default());
         ledger.data_mut().contents = "new contents".to_string();
         ledger.commit().await.expect("Failed to write ledger");
         assert!(config_path.exists());
@@ -295,7 +295,7 @@ mod test {
 
         // Re-create the ledger, observe the new contents.
         let ledger =
-            Ledger::<Data>::new(&log, vec![config_path.clone()]).await.unwrap();
+            Ledger::<Data>::new(log, vec![config_path.clone()]).await.unwrap();
 
         assert_eq!(ledger.data().contents, "new contents");
         assert_eq!(ledger.data().generation, 1);
@@ -319,7 +319,7 @@ mod test {
             .collect::<Vec<_>>();
 
         let mut ledger =
-            Ledger::new_with(&log, config_paths.clone(), Data::default());
+            Ledger::new_with(log, config_paths.clone(), Data::default());
         ledger.data_mut().contents = "new contents".to_string();
         ledger.commit().await.expect("Failed to write ledger");
 
@@ -329,7 +329,7 @@ mod test {
         drop(ledger);
 
         // Let's write again, but only using one of the two config dirs.
-        let mut ledger = Ledger::<Data>::new(&log, config_paths[..1].to_vec())
+        let mut ledger = Ledger::<Data>::new(log, config_paths[..1].to_vec())
             .await
             .expect("Failed to read ledger");
         ledger.data_mut().contents = "even newer contents".to_string();
@@ -338,7 +338,7 @@ mod test {
         drop(ledger);
 
         // Re-create the ledger (using both config dirs), observe the newest contents.
-        let ledger = Ledger::<Data>::new(&log, config_paths.clone())
+        let ledger = Ledger::<Data>::new(log, config_paths.clone())
             .await
             .expect("Failed to read ledger");
 
@@ -364,7 +364,7 @@ mod test {
             .collect::<Vec<_>>();
 
         let mut ledger =
-            Ledger::new_with(&log, config_paths.clone(), Data::default());
+            Ledger::new_with(log, config_paths.clone(), Data::default());
         ledger.data_mut().contents = "written to both configs".to_string();
         ledger.commit().await.expect("Failed to write ledger");
 
@@ -380,7 +380,7 @@ mod test {
         assert!(config_paths[0].exists());
         assert!(!config_paths[1].exists());
 
-        let mut ledger = Ledger::<Data>::new(&log, config_paths.clone())
+        let mut ledger = Ledger::<Data>::new(log, config_paths.clone())
             .await
             .expect("Failed to read ledger");
 
@@ -392,7 +392,7 @@ mod test {
         drop(ledger);
 
         // We can still parse the ledger from a single path
-        let ledger = Ledger::<Data>::new(&log, config_paths.clone())
+        let ledger = Ledger::<Data>::new(log, config_paths.clone())
             .await
             .expect("Failed to read ledger");
         assert_eq!(ledger.data().contents, "written to one config");
@@ -407,11 +407,11 @@ mod test {
         assert!(!config_paths[0].exists());
         assert!(!config_paths[1].exists());
 
-        let ledger = Ledger::<Data>::new(&log, config_paths.clone()).await;
+        let ledger = Ledger::<Data>::new(log, config_paths.clone()).await;
         assert!(ledger.is_none());
 
         let mut ledger =
-            Ledger::new_with(&log, config_paths.clone(), Data::default());
+            Ledger::new_with(log, config_paths.clone(), Data::default());
         assert_eq!(ledger.data(), &Data::default());
         let err = ledger.commit().await.unwrap_err();
         assert!(

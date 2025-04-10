@@ -59,16 +59,16 @@ impl Baseboard {
 
     pub fn identifier(&self) -> &str {
         match &self {
-            Self::Gimlet { identifier, .. } => &identifier,
-            Self::Pc { identifier, .. } => &identifier,
+            Self::Gimlet { identifier, .. } => identifier,
+            Self::Pc { identifier, .. } => identifier,
             Self::Unknown => "unknown",
         }
     }
 
     pub fn model(&self) -> &str {
         match self {
-            Self::Gimlet { model, .. } => &model,
-            Self::Pc { model, .. } => &model,
+            Self::Gimlet { model, .. } => model,
+            Self::Pc { model, .. } => model,
             Self::Unknown => "unknown",
         }
     }

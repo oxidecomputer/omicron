@@ -385,7 +385,7 @@ impl DataStore {
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::bgp_config, dsl::id, &pagparams)
+                paginated(dsl::bgp_config, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::bgp_config,
@@ -414,7 +414,7 @@ impl DataStore {
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::bgp_announce_set, dsl::id, &pagparams)
+                paginated(dsl::bgp_announce_set, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::bgp_announce_set,
@@ -1017,7 +1017,7 @@ mod tests {
 
         datastore
             .bgp_create_announce_set(
-                &opctx,
+                opctx,
                 &params::BgpAnnounceSetCreate {
                     identity: IdentityMetadataCreateParams {
                         name: announce_name.clone(),
@@ -1031,7 +1031,7 @@ mod tests {
 
         datastore
             .bgp_config_create(
-                &opctx,
+                opctx,
                 &params::BgpConfigCreate {
                     identity: IdentityMetadataCreateParams {
                         name: config_name.clone(),
@@ -1049,7 +1049,7 @@ mod tests {
 
         datastore
             .bgp_config_delete(
-                &opctx,
+                opctx,
                 &params::BgpConfigSelector {
                     name_or_id: NameOrId::Name(config_name),
                 },
@@ -1059,7 +1059,7 @@ mod tests {
 
         datastore
             .bgp_delete_announce_set(
-                &opctx,
+                opctx,
                 &params::BgpAnnounceSetSelector {
                     announce_set: NameOrId::Name(announce_name),
                 },

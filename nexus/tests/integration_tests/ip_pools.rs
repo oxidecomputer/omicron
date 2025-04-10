@@ -80,7 +80,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
-    let ip_pools = get_ip_pools(&client).await;
+    let ip_pools = get_ip_pools(client).await;
     assert_eq!(ip_pools.len(), 0, "Expected empty list of IP pools");
 
     // Verify 404 if the pool doesn't exist yet, both for creating or deleting
@@ -232,7 +232,7 @@ async fn get_ip_pools(client: &ClientTestContext) -> Vec<IpPool> {
 async fn test_ip_pool_list_dedupe(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let ip_pools = get_ip_pools(&client).await;
+    let ip_pools = get_ip_pools(client).await;
     assert_eq!(ip_pools.len(), 0);
 
     let range1 = IpRange::V4(
@@ -252,27 +252,27 @@ async fn test_ip_pool_list_dedupe(cptestctx: &ControlPlaneTestContext) {
     );
     let (pool2, ..) = create_ip_pool(client, "pool2", Some(range2)).await;
 
-    let ip_pools = get_ip_pools(&client).await;
+    let ip_pools = get_ip_pools(client).await;
     assert_eq!(ip_pools.len(), 2);
     assert_eq!(ip_pools[0].identity.id, pool1.id());
     assert_eq!(ip_pools[1].identity.id, pool2.id());
 
     // create 3 silos and link
     let silo1 =
-        create_silo(&client, "silo1", true, SiloIdentityMode::SamlJit).await;
+        create_silo(client, "silo1", true, SiloIdentityMode::SamlJit).await;
     link_ip_pool(client, "pool1", &silo1.id(), false).await;
     // linking pool2 here only, just for variety
     link_ip_pool(client, "pool2", &silo1.id(), false).await;
 
     let silo2 =
-        create_silo(&client, "silo2", true, SiloIdentityMode::SamlJit).await;
+        create_silo(client, "silo2", true, SiloIdentityMode::SamlJit).await;
     link_ip_pool(client, "pool1", &silo2.id(), true).await;
 
     let silo3 =
-        create_silo(&client, "silo3", true, SiloIdentityMode::SamlJit).await;
+        create_silo(client, "silo3", true, SiloIdentityMode::SamlJit).await;
     link_ip_pool(client, "pool1", &silo3.id(), true).await;
 
-    let ip_pools = get_ip_pools(&client).await;
+    let ip_pools = get_ip_pools(client).await;
     assert_eq!(ip_pools.len(), 2);
     assert_eq!(ip_pools[0].identity.id, pool1.id());
     assert_eq!(ip_pools[1].identity.id, pool2.id());
@@ -455,7 +455,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     // linkable, are filtered out of the list of linked silos for a pool. the
     // test silo at cptestctx.silo_name is non-discoverable.
     let silo =
-        create_silo(&client, "my-silo", true, SiloIdentityMode::SamlJit).await;
+        create_silo(client, "my-silo", true, SiloIdentityMode::SamlJit).await;
 
     let silo_pools = pools_for_silo(client, silo.name().as_str()).await;
     assert_eq!(silo_pools.len(), 0);
@@ -525,7 +525,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
         is_default: true,
     };
     let url = "/v1/system/ip-pools/p1/silos";
-    let _: IpPoolSiloLink = object_create(client, &url, &link_params).await;
+    let _: IpPoolSiloLink = object_create(client, url, &link_params).await;
 
     let silos_p1 = silos_for_pool(client, "p1").await;
     assert_eq!(silos_p1.items.len(), 1);
@@ -548,13 +548,9 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     // creating a third pool and trying to link it as default: true should fail
     create_pool(client, "p2").await;
     let url = "/v1/system/ip-pools/p2/silos";
-    let error = object_create_error(
-        client,
-        &url,
-        &link_params,
-        StatusCode::BAD_REQUEST,
-    )
-    .await;
+    let error =
+        object_create_error(client, url, &link_params, StatusCode::BAD_REQUEST)
+            .await;
     assert_eq!(error.error_code.unwrap(), "ObjectAlreadyExists");
 
     // unlink p1 from silo (doesn't matter that it's a default)
@@ -589,12 +585,11 @@ async fn test_ip_pool_silo_list_only_discoverable(
     assert_eq!(silos_p0.items.len(), 0);
 
     let silo_disc =
-        create_silo(&client, "silo-disc", true, SiloIdentityMode::SamlJit)
-            .await;
+        create_silo(client, "silo-disc", true, SiloIdentityMode::SamlJit).await;
     link_ip_pool(client, "p0", &silo_disc.id(), false).await;
 
     let silo_non_disc =
-        create_silo(&client, "silo-non-disc", false, SiloIdentityMode::SamlJit)
+        create_silo(client, "silo-non-disc", false, SiloIdentityMode::SamlJit)
             .await;
     link_ip_pool(client, "p0", &silo_non_disc.id(), false).await;
 
@@ -621,7 +616,7 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
     // linkable, are filtered out of the list of linked silos for a pool. the
     // test silo at cptestctx.silo_name is non-discoverable.
     let silo =
-        create_silo(&client, "my-silo", true, SiloIdentityMode::SamlJit).await;
+        create_silo(client, "my-silo", true, SiloIdentityMode::SamlJit).await;
 
     // put 404s if link doesn't exist yet
     let params = IpPoolSiloUpdate { is_default: true };
@@ -702,7 +697,7 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
 async fn test_ip_pool_pagination(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let base_url = "/v1/system/ip-pools";
-    let first_page = objects_list_page_authz::<IpPool>(client, &base_url).await;
+    let first_page = objects_list_page_authz::<IpPool>(client, base_url).await;
 
     // we start out with no pools
     assert_eq!(first_page.items.len(), 0);
@@ -749,7 +744,7 @@ async fn test_ip_pool_silos_pagination(cptestctx: &ControlPlaneTestContext) {
     for i in 1..=8 {
         let name = format!("silo-{}", i);
         let silo =
-            create_silo(&client, &name, true, SiloIdentityMode::SamlJit).await;
+            create_silo(client, &name, true, SiloIdentityMode::SamlJit).await;
         silo_ids.push(silo.id());
         link_ip_pool(client, "p0", &silo.id(), false).await;
     }
@@ -839,7 +834,7 @@ async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
         )
         .unwrap(),
     );
-    object_create::<IpRange, IpPoolRange>(client, &add_url, &range).await;
+    object_create::<IpRange, IpPoolRange>(client, add_url, &range).await;
 
     assert_ip_pool_utilization(client, "p0", 0, 5, 0, 0).await;
 
@@ -1157,9 +1152,9 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
 
     // manually create default pool and link to test silo, as opposed to default
     // silo, which is what the helper would do
-    let _ = create_ip_pool(&client, "default", None).await;
+    let _ = create_ip_pool(client, "default", None).await;
     let default_name = "default";
-    link_ip_pool(&client, default_name, &silo.identity.id, true).await;
+    link_ip_pool(client, default_name, &silo.identity.id, true).await;
 
     // create other pool and link to silo
     let other_pool_range = IpRange::V4(
@@ -1167,8 +1162,8 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
             .unwrap(),
     );
     let other_name = "other-pool";
-    create_ip_pool(&client, other_name, Some(other_pool_range)).await;
-    link_ip_pool(&client, other_name, &silo.identity.id, false).await;
+    create_ip_pool(client, other_name, Some(other_pool_range)).await;
+    link_ip_pool(client, other_name, &silo.identity.id, false).await;
 
     // create third pool and don't link to silo
     let unlinked_pool_range = IpRange::V4(
@@ -1176,7 +1171,7 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
             .unwrap(),
     );
     let unlinked_name = "unlinked-pool";
-    create_ip_pool(&client, unlinked_name, Some(unlinked_pool_range)).await;
+    create_ip_pool(client, unlinked_name, Some(unlinked_pool_range)).await;
 
     // Create a silo user
     let user = create_local_user(

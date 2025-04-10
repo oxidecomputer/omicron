@@ -68,7 +68,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // Ensure there is enough data left for an exit code
     let exit_code: u8 = if exit_code_index + 1 < out.len() {
-        (&out[exit_code_index + 1..]).parse().expect("Invalid exit code")
+        out[exit_code_index + 1..].parse().expect("Invalid exit code")
     } else {
         panic!("No exit code available");
     };

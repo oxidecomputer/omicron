@@ -76,7 +76,7 @@ impl DataStore {
                 ))
             })?;
 
-        let (.., db_silo_user) = LookupPath::new(opctx, &self)
+        let (.., db_silo_user) = LookupPath::new(opctx, self)
             .silo_user_id(console_session.silo_user_id)
             .fetch()
             .await

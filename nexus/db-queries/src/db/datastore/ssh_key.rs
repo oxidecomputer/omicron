@@ -182,7 +182,7 @@ impl DataStore {
         use nexus_db_schema::schema::ssh_key::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::ssh_key, dsl::id, &pagparams)
+                paginated(dsl::ssh_key, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::ssh_key,
@@ -227,7 +227,7 @@ impl DataStore {
         use nexus_db_schema::schema::ssh_key::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::ssh_key, dsl::id, &pagparams)
+                paginated(dsl::ssh_key, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::ssh_key,

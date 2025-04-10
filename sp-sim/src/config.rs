@@ -61,7 +61,7 @@ impl slog::KV for NetworkConfig {
                 )?;
                 serializer.emit_str(
                     "multicast_interface".into(),
-                    &multicast_interface,
+                    multicast_interface,
                 )?;
             }
         }

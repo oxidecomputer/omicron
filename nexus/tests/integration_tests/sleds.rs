@@ -57,7 +57,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
 
     // Verify that there are two sleds to begin with.
     let sleds_url = "/v1/system/hardware/sleds";
-    assert_eq!(sleds_list(&client, &sleds_url).await.len(), 2);
+    assert_eq!(sleds_list(client, sleds_url).await.len(), 2);
 
     // Now start a few more sled agents.
     let nsleds = 3;
@@ -76,7 +76,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
                 // Index starts at 2: the `nexus_test` macro already created two
                 // sled agents as part of the ControlPlaneTestContext setup.
                 2 + i as u16,
-                &update_directory,
+                update_directory,
                 sim::SimMode::Explicit,
                 &cptestctx.first_sled_agent().simulated_upstairs,
             )
@@ -86,7 +86,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     }
 
     // List sleds again.
-    let sleds_found = sleds_list(&client, &sleds_url).await;
+    let sleds_found = sleds_list(client, sleds_url).await;
     assert_eq!(sleds_found.len(), nsleds + 2);
 
     let sledids_found =
@@ -109,17 +109,17 @@ async fn test_physical_disk_create_list_delete(
 
     // Verify that there are two sleds to begin with.
     let sleds_url = "/v1/system/hardware/sleds";
-    assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 2);
+    assert_eq!(sleds_list(external_client, sleds_url).await.len(), 2);
 
     // The test framework may set up some disks initially.
     let disks_url =
         format!("/v1/system/hardware/sleds/{SLED_AGENT_UUID}/disks");
-    let disks_initial = physical_disks_list(&external_client, &disks_url).await;
+    let disks_initial = physical_disks_list(external_client, &disks_url).await;
 
     // Inject a disk into the database, observe it in the external API
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let sled_id = Uuid::from_str(&SLED_AGENT_UUID).unwrap();
+    let sled_id = Uuid::from_str(SLED_AGENT_UUID).unwrap();
     let physical_disk = DbPhysicalDisk::new(
         PhysicalDiskUuid::new_v4(),
         "v".into(),
@@ -136,7 +136,7 @@ async fn test_physical_disk_create_list_delete(
         .await
         .expect("Failed to upsert physical disk");
 
-    let disks = physical_disks_list(&external_client, &disks_url).await;
+    let disks = physical_disks_list(external_client, &disks_url).await;
     assert_eq!(disks.len(), disks_initial.len() + 1);
     let new_disk = disks
         .iter()
@@ -156,7 +156,7 @@ async fn test_physical_disk_create_list_delete(
         .await
         .expect("Failed to upsert physical disk");
 
-    let list = physical_disks_list(&external_client, &disks_url).await;
+    let list = physical_disks_list(external_client, &disks_url).await;
     assert_eq!(list, disks_initial, "{:#?}", list,);
 }
 
@@ -166,7 +166,7 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
 
     // Verify that there are two sleds to begin with.
     let sleds_url = "/v1/system/hardware/sleds";
-    let sleds = sleds_list(&external_client, &sleds_url).await;
+    let sleds = sleds_list(external_client, sleds_url).await;
     assert_eq!(sleds.len(), 2);
 
     // Verify that there are no instances on the sleds.
@@ -175,18 +175,17 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
         let instances_url =
             format!("/v1/system/hardware/sleds/{sled_id}/instances");
         assert!(
-            sled_instance_list(&external_client, &instances_url)
+            sled_instance_list(external_client, &instances_url)
                 .await
                 .is_empty()
         );
     }
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&external_client).await;
-    let project = create_project(&external_client, "test-project").await;
+    create_default_ip_pool(external_client).await;
+    let project = create_project(external_client, "test-project").await;
     let instance =
-        create_instance(&external_client, "test-project", "test-instance")
-            .await;
+        create_instance(external_client, "test-project", "test-instance").await;
 
     // Ensure 1 instance was created on a sled
     let sled_instances = wait_for_condition(
@@ -204,7 +203,7 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
                     );
 
                     let mut sled_instances =
-                        sled_instance_list(&external_client, &instances_url)
+                        sled_instance_list(external_client, &instances_url)
                             .await;
 
                     total_instances.append(&mut sled_instances);

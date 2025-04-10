@@ -61,7 +61,7 @@ impl DataStore {
         dataset: CrucibleDataset,
     ) -> CreateResult<CrucibleDataset> {
         let conn = &*self.pool_connection_unauthorized().await?;
-        Self::crucible_dataset_upsert_on_connection(&conn, dataset)
+        Self::crucible_dataset_upsert_on_connection(conn, dataset)
             .await
             .map_err(|e| match e {
                 TransactionError::CustomError(e) => e,
@@ -355,7 +355,7 @@ mod test {
         );
 
         let (_sled_id, zpool_id) =
-            create_sled_and_zpool(&datastore, opctx).await;
+            create_sled_and_zpool(datastore, opctx).await;
 
         // Inserting a new dataset should succeed.
         let dataset1 = datastore

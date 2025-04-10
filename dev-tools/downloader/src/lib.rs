@@ -410,7 +410,7 @@ async fn download_file_and_verify(
 ) -> Result<()> {
     let do_download = if path.exists() {
         info!(log, "Already downloaded ({path})");
-        if algorithm.checksum(&path).await? == checksum {
+        if algorithm.checksum(path).await? == checksum {
             info!(
                 log,
                 "Checksum matches already downloaded file - skipping download"
@@ -430,7 +430,7 @@ async fn download_file_and_verify(
                 log,
                 "Downloading {path} (attempt {attempt}/{RETRY_ATTEMPTS})"
             );
-            match streaming_download(&url, &path).await {
+            match streaming_download(url, path).await {
                 Ok(()) => break,
                 Err(err) => {
                     if attempt == RETRY_ATTEMPTS {
@@ -443,7 +443,7 @@ async fn download_file_and_verify(
         }
     }
 
-    let observed_checksum = algorithm.checksum(&path).await?;
+    let observed_checksum = algorithm.checksum(path).await?;
     if observed_checksum != checksum {
         bail!(
             "Checksum mismatch (saw {observed_checksum}, expected {checksum})"

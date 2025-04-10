@@ -39,7 +39,7 @@ pub async fn vpc_list_firewall_rules(
     vpc_lookup: &lookup::Vpc<'_>,
 ) -> ListResultVec<db::model::VpcFirewallRule> {
     let (.., authz_vpc) = vpc_lookup.lookup_for(authz::Action::Read).await?;
-    let rules = datastore.vpc_list_firewall_rules(&opctx, &authz_vpc).await?;
+    let rules = datastore.vpc_list_firewall_rules(opctx, &authz_vpc).await?;
     Ok(rules)
 }
 
@@ -127,7 +127,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
             {
                 instance_interfaces
                     .entry(instance_name.0.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(iface);
             }
         }
@@ -147,7 +147,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
             {
                 vpc_interfaces
                     .entry(vpc_name.0.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(iface);
             }
         }
@@ -168,7 +168,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
             {
                 subnet_interfaces
                     .entry(subnet_name.0.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(iface);
             }
         }
@@ -258,21 +258,21 @@ pub async fn resolve_firewall_rules_for_sled_agent(
             match &target.0 {
                 external::VpcFirewallRuleTarget::Vpc(name) => {
                     vpc_interfaces
-                        .get(&name)
+                        .get(name)
                         .unwrap_or(&no_interfaces)
                         .iter()
                         .for_each(&mut push_target_nic);
                 }
                 external::VpcFirewallRuleTarget::Subnet(name) => {
                     subnet_interfaces
-                        .get(&name)
+                        .get(name)
                         .unwrap_or(&no_interfaces)
                         .iter()
                         .for_each(&mut push_target_nic);
                 }
                 external::VpcFirewallRuleTarget::Instance(name) => {
                     instance_interfaces
-                        .get(&name)
+                        .get(name)
                         .unwrap_or(&no_interfaces)
                         .iter()
                         .for_each(&mut push_target_nic);
@@ -356,7 +356,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                     match &host.0 {
                         external::VpcFirewallRuleHostFilter::Instance(name) => {
                             for interface in instance_interfaces
-                                .get(&name)
+                                .get(name)
                                 .unwrap_or(&no_interfaces)
                             {
                                 host_addrs.push(
@@ -449,7 +449,7 @@ pub async fn send_sled_agents_firewall_rules(
     log: &Logger,
 ) -> Result<(), Error> {
     let rules_for_sled = resolve_firewall_rules_for_sled_agent(
-        datastore, opctx, &vpc, rules, log,
+        datastore, opctx, vpc, rules, log,
     )
     .await?;
     debug!(log, "resolved {} rules for sleds", rules_for_sled.len());

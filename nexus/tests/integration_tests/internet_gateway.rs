@@ -308,7 +308,7 @@ async fn test_igw_ip_pool_attach_silo_user(ctx: &ControlPlaneTestContext) {
     };
 
     let _result: InternetGatewayIpPool =
-        NexusRequest::objects_post(&c, &url, &params)
+        NexusRequest::objects_post(c, &url, &params)
             .authn_as(AuthnMode::SiloUser(user.id))
             .execute_and_parse_unwrap()
             .await;
@@ -328,7 +328,7 @@ async fn test_igw_ip_pool_attach_silo_user(ctx: &ControlPlaneTestContext) {
         "/v1/internet-gateway-ip-pools/{}?project={}&vpc={}&gateway={}&cascade=true",
         IP_POOL_ATTACHMENT_NAME, PROJECT_NAME, VPC_NAME, IGW_NAME,
     );
-    NexusRequest::object_delete(&c, &url)
+    NexusRequest::object_delete(c, &url)
         .authn_as(AuthnMode::SiloUser(user.id))
         .execute()
         .await
@@ -343,8 +343,8 @@ async fn test_igw_ip_pool_attach_silo_user(ctx: &ControlPlaneTestContext) {
 
 async fn test_setup(c: &ClientTestContext) {
     // create a project and vpc to test with
-    let _proj = create_project(&c, PROJECT_NAME).await;
-    let _vpc = create_vpc(&c, PROJECT_NAME, VPC_NAME).await;
+    let _proj = create_project(c, PROJECT_NAME).await;
+    let _vpc = create_vpc(c, PROJECT_NAME, VPC_NAME).await;
     let _pool = create_ip_pool(
         c,
         IP_POOL_NAME,
@@ -354,7 +354,7 @@ async fn test_setup(c: &ClientTestContext) {
         })),
     )
     .await;
-    link_ip_pool(&c, IP_POOL_NAME, &DEFAULT_SILO.id(), true).await;
+    link_ip_pool(c, IP_POOL_NAME, &DEFAULT_SILO.id(), true).await;
     let _floater = create_floating_ip(
         c,
         FLOATING_IP_NAME,

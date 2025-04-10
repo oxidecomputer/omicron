@@ -104,8 +104,8 @@ impl TestHarness {
         let db = TestDatabase::new_with_datastore(log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
-        create_sleds(&datastore, sled_count).await;
+            create_project(opctx, datastore, "project").await;
+        create_sleds(datastore, sled_count).await;
 
         Self { db, authz_project }
     }
@@ -160,7 +160,7 @@ impl TestHarness {
                         print!("|");
                         total_len += width + 3;
                     }
-                    println!("");
+                    println!();
                     println!("{:-<total_len$}", "");
                 }
                 header = false;
@@ -171,9 +171,9 @@ impl TestHarness {
                     print!(" {value:width$} ");
                     print!("|");
                 }
-                println!("");
+                println!();
             }
-            println!("");
+            println!();
         }
 
         client.cleanup().await.expect("Failed to clean up db connection");

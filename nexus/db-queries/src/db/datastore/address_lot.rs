@@ -229,7 +229,7 @@ impl DataStore {
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::address_lot, dsl::id, &pagparams)
+                paginated(dsl::address_lot, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::address_lot,
@@ -254,7 +254,7 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        paginated(dsl::address_lot_block, dsl::id, &pagparams)
+        paginated(dsl::address_lot_block, dsl::id, pagparams)
             .filter(dsl::address_lot_id.eq(authz_address_lot.id()))
             .select(AddressLotBlock::as_select())
             .load_async(&*conn)

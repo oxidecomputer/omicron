@@ -665,7 +665,7 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         let (authz_service_pool, service_pool) =
-            self.ip_pools_service_lookup(&opctx).await?;
+            self.ip_pools_service_lookup(opctx).await?;
 
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
@@ -806,7 +806,7 @@ impl DataStore {
 
                     for physical_disk in physical_disks {
                         info!(log, "physical disk upsert in handoff: {physical_disk:#?}");
-                        if let Err(e) = Self::physical_disk_insert_on_connection(&conn, &opctx, physical_disk)
+                        if let Err(e) = Self::physical_disk_insert_on_connection(&conn, opctx, physical_disk)
                             .await {
                             if !matches!(e, TransactionError::CustomError(Error::ObjectAlreadyExists { .. })) {
                                 error!(log, "Failed to upsert physical disk"; "err" => #%e);
@@ -820,7 +820,7 @@ impl DataStore {
                     info!(log, "Inserted physical disks");
 
                     for zpool in zpools {
-                        if let Err(e) = Self::zpool_insert_on_connection(&conn, &opctx, zpool).await {
+                        if let Err(e) = Self::zpool_insert_on_connection(&conn, opctx, zpool).await {
                             if !matches!(e, TransactionError::CustomError(Error::ObjectAlreadyExists { .. })) {
                                 error!(log, "Failed to upsert zpool"; "err" => #%e);
                                 err.set(RackInitError::ZpoolInsert(e.into())).unwrap();
@@ -882,7 +882,7 @@ impl DataStore {
 
                     // Create the initial Recovery Silo
                     self.rack_create_recovery_silo(
-                        &opctx,
+                        opctx,
                         &conn,
                         &log,
                         rack_init.recovery_silo,
@@ -1131,7 +1131,7 @@ mod test {
 
         // Initializing the rack with no data is odd, but allowed.
         let rack = datastore
-            .rack_set_initialized(&opctx, rack_init.clone())
+            .rack_set_initialized(opctx, rack_init.clone())
             .await
             .expect("Failed to initialize rack");
 
@@ -1140,19 +1140,15 @@ mod test {
         assert!(rack.initialized);
 
         // Verify the DNS configuration.
-        let dns_internal = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
-            .await
-            .unwrap();
+        let dns_internal =
+            datastore.dns_config_read(opctx, DnsGroup::Internal).await.unwrap();
         assert_eq!(u64::from(dns_internal.generation), 1);
         assert!(dns_internal.time_created >= before);
         assert!(dns_internal.time_created <= after);
         assert_eq!(dns_internal.zones.len(), 0);
 
-        let dns_external = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .unwrap();
+        let dns_external =
+            datastore.dns_config_read(opctx, DnsGroup::External).await.unwrap();
         // The external DNS zone has an extra update due to the initial Silo
         // creation.
         assert_eq!(dns_internal.generation.next(), dns_external.generation);
@@ -1161,7 +1157,7 @@ mod test {
         // Verify the details about the initial Silo.
         let silos = datastore
             .silos_list(
-                &opctx,
+                opctx,
                 &PaginatedBy::Name(DataPageParams {
                     marker: None,
                     limit: NonZeroU32::new(2).unwrap(),
@@ -1173,7 +1169,7 @@ mod test {
             .expect("Failed to list Silos");
         // It should *not* show up in the list because it's not discoverable.
         assert_eq!(silos.len(), 0);
-        let (authz_silo, db_silo) = LookupPath::new(&opctx, &datastore)
+        let (authz_silo, db_silo) = LookupPath::new(opctx, datastore)
             .silo_name(&nexus_db_model::Name(
                 rack_init.recovery_silo.identity.name.clone(),
             ))
@@ -1186,7 +1182,7 @@ mod test {
         // expect.
         let silo_users = datastore
             .silo_users_list(
-                &opctx,
+                opctx,
                 &authz::SiloUserList::new(authz_silo.clone()),
                 &DataPageParams {
                     marker: None,
@@ -1207,7 +1203,7 @@ mod test {
             LookupType::ById(silo_users[0].id()),
         );
         let hash = datastore
-            .silo_user_password_hash_fetch(&opctx, &authz_silo_user)
+            .silo_user_password_hash_fetch(opctx, &authz_silo_user)
             .await
             .expect("Failed to lookup password hash")
             .expect("Found no password hash");
@@ -1215,15 +1211,13 @@ mod test {
 
         // It should also be idempotent.
         let rack2 = datastore
-            .rack_set_initialized(&opctx, rack_init)
+            .rack_set_initialized(opctx, rack_init)
             .await
             .expect("Failed to initialize rack");
         assert_eq!(rack.time_modified(), rack2.time_modified());
 
-        let dns_internal2 = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
-            .await
-            .unwrap();
+        let dns_internal2 =
+            datastore.dns_config_read(opctx, DnsGroup::Internal).await.unwrap();
         assert_eq!(dns_internal, dns_internal2);
 
         db.terminate().await;
@@ -1322,9 +1316,9 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled1 = create_test_sled(&datastore, Uuid::new_v4()).await;
-        let sled2 = create_test_sled(&datastore, Uuid::new_v4()).await;
-        let sled3 = create_test_sled(&datastore, Uuid::new_v4()).await;
+        let sled1 = create_test_sled(datastore, Uuid::new_v4()).await;
+        let sled2 = create_test_sled(datastore, Uuid::new_v4()).await;
+        let sled3 = create_test_sled(datastore, Uuid::new_v4()).await;
 
         let service_ip_pool_ranges = vec![
             IpRange::try_from((
@@ -1553,7 +1547,7 @@ mod test {
 
         let rack = datastore
             .rack_set_initialized(
-                &opctx,
+                opctx,
                 RackInit {
                     blueprint: blueprint.clone(),
                     service_ip_pool_ranges,
@@ -1568,14 +1562,14 @@ mod test {
 
         // We should see the blueprint we passed in.
         let (_blueprint_target, observed_blueprint) = datastore
-            .blueprint_target_get_current_full(&opctx)
+            .blueprint_target_get_current_full(opctx)
             .await
             .expect("failed to read blueprint");
         assert_eq!(observed_blueprint, blueprint);
 
         // We should also see the single external IP allocated for each service
         // save for the non-boundary NTP service.
-        let observed_external_ips = get_all_external_ips(&datastore).await;
+        let observed_external_ips = get_all_external_ips(datastore).await;
         assert_eq!(observed_external_ips.len(), 4);
         let dns_external_ip = observed_external_ips
             .iter()
@@ -1618,10 +1612,10 @@ mod test {
         // Furthermore, we should be able to see that these IP addresses have
         // been allocated as a part of the service IP pool.
         let (.., svc_pool) =
-            datastore.ip_pools_service_lookup(&opctx).await.unwrap();
+            datastore.ip_pools_service_lookup(opctx).await.unwrap();
         assert_eq!(svc_pool.name().as_str(), "oxide-service-pool");
 
-        let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
+        let observed_ip_pool_ranges = get_all_ip_pool_ranges(datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
         assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
 
@@ -1654,7 +1648,7 @@ mod test {
         );
         assert_eq!(ntp2_external_ip.ip.ip(), ntp2_ip);
 
-        let observed_datasets = get_all_crucible_datasets(&datastore).await;
+        let observed_datasets = get_all_crucible_datasets(datastore).await;
         assert!(observed_datasets.is_empty());
 
         db.terminate().await;
@@ -1668,7 +1662,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
+        let sled = create_test_sled(datastore, Uuid::new_v4()).await;
 
         // Ask for two Nexus services, with different external IPs.
         let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
@@ -1810,7 +1804,7 @@ mod test {
 
         let rack = datastore
             .rack_set_initialized(
-                &opctx,
+                opctx,
                 RackInit {
                     blueprint: blueprint.clone(),
                     datasets: datasets.clone(),
@@ -1828,7 +1822,7 @@ mod test {
 
         // We should see the blueprint we passed in.
         let (_blueprint_target, observed_blueprint) = datastore
-            .blueprint_target_get_current_full(&opctx)
+            .blueprint_target_get_current_full(opctx)
             .await
             .expect("failed to read blueprint");
         assert_eq!(observed_blueprint, blueprint);
@@ -1842,7 +1836,7 @@ mod test {
         assert_eq!(observed_zones.len(), 2);
 
         // We should see both IPs allocated for these services.
-        let observed_external_ips = get_all_external_ips(&datastore).await;
+        let observed_external_ips = get_all_external_ips(datastore).await;
         for external_ip in &observed_external_ips {
             assert!(external_ip.is_service);
             assert!(external_ip.parent_id.is_some());
@@ -1897,21 +1891,19 @@ mod test {
         // Furthermore, we should be able to see that this IP addresses have been
         // allocated as a part of the service IP pool.
         let (.., svc_pool) =
-            datastore.ip_pools_service_lookup(&opctx).await.unwrap();
+            datastore.ip_pools_service_lookup(opctx).await.unwrap();
         assert_eq!(svc_pool.name().as_str(), "oxide-service-pool");
 
-        let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
+        let observed_ip_pool_ranges = get_all_ip_pool_ranges(datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
         assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
 
-        let observed_datasets = get_all_crucible_datasets(&datastore).await;
+        let observed_datasets = get_all_crucible_datasets(datastore).await;
         assert!(observed_datasets.is_empty());
 
         // Verify the internal and external DNS configurations.
-        let dns_config_internal = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
-            .await
-            .unwrap();
+        let dns_config_internal =
+            datastore.dns_config_read(opctx, DnsGroup::Internal).await.unwrap();
         assert_eq!(u64::from(dns_config_internal.generation), 1);
         assert_eq!(dns_config_internal.zones.len(), 1);
         assert_eq!(dns_config_internal.zones[0].zone_name, DNS_ZONE);
@@ -1920,10 +1912,8 @@ mod test {
             HashMap::from([("nexus".to_string(), internal_records)]),
         );
 
-        let dns_config_external = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .unwrap();
+        let dns_config_external =
+            datastore.dns_config_read(opctx, DnsGroup::External).await.unwrap();
         assert_eq!(u64::from(dns_config_external.generation), 2);
         assert_eq!(dns_config_external.zones.len(), 1);
         assert_eq!(
@@ -1947,7 +1937,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
+        let sled = create_test_sled(datastore, Uuid::new_v4()).await;
 
         let mut system = SystemDescription::new();
         system
@@ -2016,7 +2006,7 @@ mod test {
 
         let result = datastore
             .rack_set_initialized(
-                &opctx,
+                opctx,
                 RackInit { blueprint: blueprint.clone(), ..Default::default() },
             )
             .await;
@@ -2026,8 +2016,8 @@ mod test {
             "Invalid Request: Requested external IP address not available"
         );
 
-        assert!(get_all_crucible_datasets(&datastore).await.is_empty());
-        assert!(get_all_external_ips(&datastore).await.is_empty());
+        assert!(get_all_crucible_datasets(datastore).await.is_empty());
+        assert!(get_all_external_ips(datastore).await.is_empty());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2040,7 +2030,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled = create_test_sled(&datastore, Uuid::new_v4()).await;
+        let sled = create_test_sled(datastore, Uuid::new_v4()).await;
 
         let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let service_ip_pool_ranges = vec![IpRange::from(ip)];
@@ -2152,7 +2142,7 @@ mod test {
 
         let result = datastore
             .rack_set_initialized(
-                &opctx,
+                opctx,
                 RackInit {
                     rack_id: rack_id(),
                     blueprint: blueprint.clone(),
@@ -2167,8 +2157,8 @@ mod test {
             "Invalid Request: Requested external IP address not available",
         );
 
-        assert!(get_all_crucible_datasets(&datastore).await.is_empty());
-        assert!(get_all_external_ips(&datastore).await.is_empty());
+        assert!(get_all_crucible_datasets(datastore).await.is_empty());
+        assert!(get_all_external_ips(datastore).await.is_empty());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2184,7 +2174,7 @@ mod test {
 
         // Ensure we get an empty list when there are no allocations
         let allocations =
-            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+            datastore.rack_subnet_allocations(opctx, rack_id).await.unwrap();
         assert!(allocations.is_empty());
 
         // Add 5 allocations
@@ -2196,14 +2186,14 @@ mod test {
                 hw_baseboard_id: Uuid::new_v4(),
             };
             datastore
-                .sled_subnet_allocation_insert(&opctx, &allocation)
+                .sled_subnet_allocation_insert(opctx, &allocation)
                 .await
                 .unwrap();
         }
 
         // List all 5 allocations
         let allocations =
-            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+            datastore.rack_subnet_allocations(opctx, rack_id).await.unwrap();
 
         assert_eq!(5, allocations.len());
 
@@ -2216,7 +2206,7 @@ mod test {
             hw_baseboard_id: Uuid::new_v4(),
         };
         let _err = datastore
-            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .sled_subnet_allocation_insert(opctx, &should_fail_allocation)
             .await
             .unwrap_err();
 
@@ -2225,14 +2215,14 @@ mod test {
         let mut allocation = should_fail_allocation.clone();
         allocation.subnet_octet = 38;
         datastore
-            .sled_subnet_allocation_insert(&opctx, &allocation)
+            .sled_subnet_allocation_insert(opctx, &allocation)
             .await
             .unwrap();
 
         should_fail_allocation.subnet_octet = 39;
         should_fail_allocation.hw_baseboard_id = Uuid::new_v4();
         let _err = datastore
-            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .sled_subnet_allocation_insert(opctx, &should_fail_allocation)
             .await
             .unwrap_err();
 
@@ -2244,18 +2234,18 @@ mod test {
             hw_baseboard_id: Uuid::new_v4(),
         };
         let _err = datastore
-            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .sled_subnet_allocation_insert(opctx, &should_fail_allocation)
             .await
             .unwrap_err();
         should_fail_allocation.subnet_octet = 256;
         let _err = datastore
-            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .sled_subnet_allocation_insert(opctx, &should_fail_allocation)
             .await
             .unwrap_err();
 
         // We should have 6 allocations
         let allocations =
-            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+            datastore.rack_subnet_allocations(opctx, rack_id).await.unwrap();
 
         assert_eq!(6, allocations.len());
         assert_eq!(
@@ -2283,7 +2273,7 @@ mod test {
             allocated_octets.push(
                 match datastore
                     .allocate_sled_underlay_subnet_octets(
-                        &opctx,
+                        opctx,
                         rack_id,
                         hw_baseboard_id,
                     )
@@ -2307,7 +2297,7 @@ mod test {
 
         // We should have 5 allocations in the DB, sorted appropriately
         let allocations =
-            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+            datastore.rack_subnet_allocations(opctx, rack_id).await.unwrap();
         assert_eq!(5, allocations.len());
         assert_eq!(
             expected,
@@ -2321,7 +2311,7 @@ mod test {
         {
             match datastore
                 .allocate_sled_underlay_subnet_octets(
-                    &opctx,
+                    opctx,
                     rack_id,
                     hw_baseboard_id,
                 )
@@ -2340,14 +2330,11 @@ mod test {
         // Pick one of the hw_baseboard_ids and insert a sled record. We should
         // get back the `CommissionedSled` allocation result if we retry
         // allocation of that baseboard.
-        create_test_sled(
-            &datastore,
-            allocations[0].sled_id.into_untyped_uuid(),
-        )
-        .await;
+        create_test_sled(datastore, allocations[0].sled_id.into_untyped_uuid())
+            .await;
         match datastore
             .allocate_sled_underlay_subnet_octets(
-                &opctx,
+                opctx,
                 rack_id,
                 hw_baseboard_ids[0],
             )
@@ -2374,7 +2361,7 @@ mod test {
         for _ in 0..5 {
             // Commission the sled.
             let sled = create_test_sled(
-                &datastore,
+                datastore,
                 prior_allocation.sled_id.into_untyped_uuid(),
             )
             .await;
@@ -2383,7 +2370,7 @@ mod test {
             // allocation back.
             match datastore
                 .allocate_sled_underlay_subnet_octets(
-                    &opctx,
+                    opctx,
                     rack_id,
                     target_hw_baseboard_id,
                 )
@@ -2399,24 +2386,24 @@ mod test {
             }
 
             // Decommission the sled.
-            let (authz_sled,) = LookupPath::new(&opctx, &datastore)
+            let (authz_sled,) = LookupPath::new(opctx, datastore)
                 .sled_id(sled.id())
                 .lookup_for(authz::Action::Modify)
                 .await
                 .expect("found target sled ID");
             datastore
-                .sled_set_policy_to_expunged(&opctx, &authz_sled)
+                .sled_set_policy_to_expunged(opctx, &authz_sled)
                 .await
                 .expect("expunged sled");
             datastore
-                .sled_set_state_to_decommissioned(&opctx, &authz_sled)
+                .sled_set_state_to_decommissioned(opctx, &authz_sled)
                 .await
                 .expect("decommissioned sled");
 
             // Attempt a new allocation for the same hw_baseboard_id.
             let allocation = match datastore
                 .allocate_sled_underlay_subnet_octets(
-                    &opctx,
+                    opctx,
                     rack_id,
                     target_hw_baseboard_id,
                 )
@@ -2438,7 +2425,7 @@ mod test {
             // same allocation back (the sled hasn't been commissioned yet).
             match datastore
                 .allocate_sled_underlay_subnet_octets(
-                    &opctx,
+                    opctx,
                     rack_id,
                     target_hw_baseboard_id,
                 )

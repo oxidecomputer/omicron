@@ -128,7 +128,7 @@ pub(crate) mod test {
     async fn create_org_and_project(
         client: &ClientTestContext,
     ) -> (Uuid, Uuid) {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pool(client).await;
         let project = create_project(client, PROJECT_NAME).await;
         let router =
             create_router(client, PROJECT_NAME, "default", ROUTER_NAME).await;
@@ -148,7 +148,7 @@ pub(crate) mod test {
         router_id: Uuid,
     ) -> Params {
         let nexus = &cptestctx.server.server_context().nexus;
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         let (.., authz_vpc, authz_subnet, _) = nexus
             .vpc_subnet_lookup(
                 &opctx,
@@ -197,7 +197,7 @@ pub(crate) mod test {
     ) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let (project_id, router_id) = create_org_and_project(&client).await;
+        let (project_id, router_id) = create_org_and_project(client).await;
 
         let params = new_test_params(cptestctx, project_id, router_id).await;
         nexus.sagas.saga_execute::<SagaVpcSubnetUpdate>(params).await.unwrap();
@@ -209,7 +209,7 @@ pub(crate) mod test {
     ) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let (project_id, router_id) = create_org_and_project(&client).await;
+        let (project_id, router_id) = create_org_and_project(client).await;
 
         let params = new_test_params(cptestctx, project_id, router_id).await;
         let dag = create_saga_dag::<SagaVpcSubnetUpdate>(params).unwrap();

@@ -34,8 +34,8 @@ impl Producer {
         &self,
         provisions: &Vec<VirtualProvisioningCollection>,
     ) -> Result<(), MetricsError> {
-        self.append_cpu_metrics(&provisions)?;
-        self.append_disk_metrics(&provisions)
+        self.append_cpu_metrics(provisions)?;
+        self.append_disk_metrics(provisions)
     }
 
     pub fn append_disk_metrics(

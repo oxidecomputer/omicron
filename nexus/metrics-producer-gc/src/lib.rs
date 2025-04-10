@@ -224,13 +224,13 @@ mod tests {
             address: "[::1]:0".parse().unwrap(),
         });
         datastore
-            .oximeter_create(&opctx, &collector_info)
+            .oximeter_create(opctx, &collector_info)
             .await
             .expect("failed to insert collector");
 
         // GC'ing expired producers should succeed if there are no producers at
         // all.
-        let pruned = prune_expired_producers(&opctx, &datastore, Utc::now())
+        let pruned = prune_expired_producers(opctx, datastore, Utc::now())
             .await
             .expect("failed to prune expired producers");
         assert!(pruned.successes.is_empty());
@@ -244,18 +244,18 @@ mod tests {
             interval: Duration::from_secs(0),    // unused
         };
         datastore
-            .producer_endpoint_upsert_and_assign(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(opctx, &producer)
             .await
             .expect("failed to insert producer");
 
         let producer_time_modified =
-            read_time_modified(&datastore, producer.id).await;
+            read_time_modified(datastore, producer.id).await;
 
         // GC'ing expired producers with an expiration time older than our
         // producer's `time_modified` should not prune anything.
         let pruned = prune_expired_producers(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             producer_time_modified - Duration::from_secs(1),
         )
         .await
@@ -266,8 +266,8 @@ mod tests {
         // GC'ing expired producers with an expiration time _newer_ than our
         // producer's `time_modified` should prune our one producer.
         let pruned = prune_expired_producers(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             producer_time_modified + Duration::from_secs(1),
         )
         .await
@@ -280,8 +280,8 @@ mod tests {
         // GC'ing again with the same expiration should do nothing, because we
         // already pruned the producer.
         let pruned = prune_expired_producers(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             producer_time_modified + Duration::from_secs(1),
         )
         .await
@@ -310,7 +310,7 @@ mod tests {
             address: collector.addr(),
         });
         datastore
-            .oximeter_create(&opctx, &collector_info)
+            .oximeter_create(opctx, &collector_info)
             .await
             .expect("failed to insert collector");
 
@@ -322,12 +322,12 @@ mod tests {
             interval: Duration::from_secs(0),    // unused
         };
         datastore
-            .producer_endpoint_upsert_and_assign(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(opctx, &producer)
             .await
             .expect("failed to insert producer");
 
         let producer_time_modified =
-            read_time_modified(&datastore, producer.id).await;
+            read_time_modified(datastore, producer.id).await;
 
         // GC'ing expired producers with an expiration time _newer_ than our
         // producer's `time_modified` should prune our one producer and notify
@@ -341,8 +341,8 @@ mod tests {
         );
 
         let pruned = prune_expired_producers(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             producer_time_modified + Duration::from_secs(1),
         )
         .await

@@ -359,7 +359,7 @@ mod tests {
         let (_tx_blueprint, rx_blueprint) = watch::channel(None);
         let mut collector =
             CockroachNodeIdCollector::new(datastore.clone(), rx_blueprint);
-        let result = collector.activate(&opctx).await;
+        let result = collector.activate(opctx).await;
 
         assert_eq!(result, json!({"error": "no blueprint"}));
 
@@ -403,7 +403,7 @@ mod tests {
 
         // The blueprint is empty. This should be fine: we should get no
         // successes and no errors.
-        let result = collector.activate(&opctx).await;
+        let result = collector.activate(opctx).await;
         assert_eq!(result, json!({"nsuccess": 0}));
 
         // Create a few fake CRDB zones, and assign them node IDs in the
@@ -413,7 +413,7 @@ mod tests {
         for (i, zone_id) in crdb_zones.iter().copied().enumerate() {
             datastore
                 .set_cockroachdb_node_id(
-                    &opctx,
+                    opctx,
                     zone_id,
                     format!("test-node-{i}"),
                 )
@@ -427,7 +427,7 @@ mod tests {
         // should instead report that all nodes are recorded successfully.
         let result = collector
             .activate_impl(
-                &opctx,
+                opctx,
                 &FakeCockroachAdminAddrs(
                     crdb_zones
                         .iter()
@@ -525,7 +525,7 @@ mod tests {
             }),
         ));
 
-        let result = collector.activate_impl(&opctx, &crdb_admin_addrs).await;
+        let result = collector.activate_impl(opctx, &crdb_admin_addrs).await;
 
         admin1.verify_and_clear();
         admin2.verify_and_clear();

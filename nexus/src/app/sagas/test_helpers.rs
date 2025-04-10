@@ -47,7 +47,7 @@ pub(crate) async fn instance_start(
     id: &InstanceUuid,
 ) {
     let nexus = &cptestctx.server.server_context().nexus;
-    let opctx = test_opctx(&cptestctx);
+    let opctx = test_opctx(cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: None,
@@ -67,7 +67,7 @@ pub(crate) async fn instance_stop(
     id: &InstanceUuid,
 ) {
     let nexus = &cptestctx.server.server_context().nexus;
-    let opctx = test_opctx(&cptestctx);
+    let opctx = test_opctx(cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: None,
@@ -88,7 +88,7 @@ pub(crate) async fn instance_stop_by_name(
     project_name: &str,
 ) {
     let nexus = &cptestctx.server.server_context().nexus;
-    let opctx = test_opctx(&cptestctx);
+    let opctx = test_opctx(cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
@@ -109,7 +109,7 @@ pub(crate) async fn instance_delete_by_name(
     project_name: &str,
 ) {
     let nexus = &cptestctx.server.server_context().nexus;
-    let opctx = test_opctx(&cptestctx);
+    let opctx = test_opctx(cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
@@ -173,7 +173,7 @@ pub(crate) async fn instance_simulate_by_name(
           "project_name" => %project_name);
 
     let nexus = &cptestctx.server.server_context().nexus;
-    let opctx = test_opctx(&cptestctx);
+    let opctx = test_opctx(cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
@@ -198,7 +198,7 @@ pub async fn instance_fetch(
     instance_id: InstanceUuid,
 ) -> InstanceAndActiveVmm {
     let datastore = cptestctx.server.server_context().nexus.datastore().clone();
-    let opctx = test_opctx(&cptestctx);
+    let opctx = test_opctx(cptestctx);
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Read)
@@ -237,7 +237,7 @@ pub async fn instance_fetch_all(
     instance_id: InstanceUuid,
 ) -> InstanceGestalt {
     let datastore = cptestctx.server.server_context().nexus.datastore().clone();
-    let opctx = test_opctx(&cptestctx);
+    let opctx = test_opctx(cptestctx);
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Read)
@@ -266,7 +266,7 @@ pub async fn instance_fetch_by_name(
 ) -> InstanceAndActiveVmm {
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let opctx = test_opctx(&cptestctx);
+    let opctx = test_opctx(cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
@@ -297,9 +297,9 @@ pub(crate) async fn instance_wait_for_state(
     instance_id: InstanceUuid,
     desired_state: InstanceState,
 ) -> InstanceAndActiveVmm {
-    let opctx = test_opctx(&cptestctx);
+    let opctx = test_opctx(cptestctx);
     let datastore = cptestctx.server.server_context().nexus.datastore();
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Read)
         .await
@@ -314,7 +314,7 @@ pub async fn instance_wait_for_state_by_name(
     desired_state: InstanceState,
 ) -> InstanceAndActiveVmm {
     let nexus = &cptestctx.server.server_context().nexus;
-    let opctx = test_opctx(&cptestctx);
+    let opctx = test_opctx(cptestctx);
     let instance_selector =
         nexus_types::external_api::params::InstanceSelector {
             project: Some(project_name.to_string().try_into().unwrap()),
@@ -348,7 +348,7 @@ async fn instance_poll_state(
     let result = poll::wait_for_condition(
         || async {
             let db_state = datastore
-                .instance_fetch_with_vmm(&opctx, &authz_instance)
+                .instance_fetch_with_vmm(opctx, &authz_instance)
                 .await
                 .map_err(poll::CondCheckError::<Error>::Failed)?;
 

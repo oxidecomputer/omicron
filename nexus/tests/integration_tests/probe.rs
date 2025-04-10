@@ -16,8 +16,8 @@ type ControlPlaneTestContext =
 async fn test_probe_basic_crud(ctx: &ControlPlaneTestContext) {
     let client = &ctx.external_client;
 
-    create_default_ip_pool(&client).await;
-    create_project(&client, "nebula").await;
+    create_default_ip_pool(client).await;
+    create_project(client, "nebula").await;
 
     let probes = NexusRequest::iter_collection_authn::<ProbeInfo>(
         client,

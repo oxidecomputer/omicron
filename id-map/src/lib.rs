@@ -489,7 +489,7 @@ mod tests {
         "#;
 
         let err =
-            serde_json::from_str::<IdMap<TestEntry>>(&serialized).unwrap_err();
+            serde_json::from_str::<IdMap<TestEntry>>(serialized).unwrap_err();
         let err = err.to_string();
 
         assert!(

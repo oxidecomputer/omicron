@@ -119,7 +119,7 @@ impl super::Nexus {
 
         for (switch_port_id, _switch_port_name) in ports.into_iter() {
             self.set_switch_port_settings_id(
-                &opctx,
+                opctx,
                 switch_port_id,
                 Some(switch_port_settings_id),
                 UpdatePrecondition::DontCare,
@@ -233,7 +233,7 @@ impl super::Nexus {
         };
 
         self.set_switch_port_settings_id(
-            &opctx,
+            opctx,
             switch_port_id,
             Some(switch_port_settings_id),
             UpdatePrecondition::DontCare,
@@ -266,7 +266,7 @@ impl super::Nexus {
 
         // update the switch port settings association
         self.set_switch_port_settings_id(
-            &opctx,
+            opctx,
             switch_port_id,
             None,
             UpdatePrecondition::DontCare,

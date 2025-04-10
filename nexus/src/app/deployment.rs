@@ -188,7 +188,7 @@ impl super::Nexus {
             ))
         })?;
 
-        self.blueprint_add(&opctx, &blueprint).await?;
+        self.blueprint_add(opctx, &blueprint).await?;
         Ok(blueprint)
     }
 
@@ -197,7 +197,7 @@ impl super::Nexus {
         opctx: &OpContext,
         blueprint: Blueprint,
     ) -> Result<(), Error> {
-        let _ = self.blueprint_add(&opctx, &blueprint).await?;
+        let _ = self.blueprint_add(opctx, &blueprint).await?;
         Ok(())
     }
 }

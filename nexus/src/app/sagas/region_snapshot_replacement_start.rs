@@ -1256,25 +1256,25 @@ pub(crate) mod test {
         let datastore = nexus.datastore();
         let opctx = test_opctx(cptestctx);
 
-        assert_eq!(region_allocations(&datastore).await, 0);
+        assert_eq!(region_allocations(datastore).await, 0);
 
         let mut disk_test = DiskTest::new(cptestctx).await;
         disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
 
-        assert_eq!(region_allocations(&datastore).await, 0);
+        assert_eq!(region_allocations(datastore).await, 0);
 
         let _project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+            create_project(client, PROJECT_NAME).await.identity.id;
 
-        assert_eq!(region_allocations(&datastore).await, 0);
+        assert_eq!(region_allocations(datastore).await, 0);
 
         // Create a disk
-        let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+        let disk = create_disk(client, PROJECT_NAME, DISK_NAME).await;
 
-        assert_eq!(region_allocations(&datastore).await, 3);
+        assert_eq!(region_allocations(datastore).await, 3);
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk_id)
             .fetch()
             .await
@@ -1282,13 +1282,13 @@ pub(crate) mod test {
 
         // Create a snapshot
         let snapshot =
-            create_snapshot(&client, PROJECT_NAME, DISK_NAME, SNAPSHOT_NAME)
+            create_snapshot(client, PROJECT_NAME, DISK_NAME, SNAPSHOT_NAME)
                 .await;
 
-        assert_eq!(region_allocations(&datastore).await, 6);
+        assert_eq!(region_allocations(datastore).await, 6);
 
         let snapshot_id = snapshot.identity.id;
-        let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot_id)
             .fetch()
             .await
@@ -1450,16 +1450,16 @@ pub(crate) mod test {
         // For these tests, six provisioned regions exist: three for the
         // original disk, and three for the (currently unused) snapshot
         // destination volume
-        assert_eq!(region_allocations(&datastore).await, 6);
+        assert_eq!(region_allocations(datastore).await, 6);
 
         // Assert that only those six provisioned regions are non-destroyed
-        assert_no_other_ensured_regions(sled_agent, test, &datastore).await;
+        assert_no_other_ensured_regions(sled_agent, test, datastore).await;
 
         assert_region_snapshot_replacement_request_untouched(
-            cptestctx, &datastore, &request,
+            cptestctx, datastore, request,
         )
         .await;
-        assert_volume_untouched(&datastore, &affected_volume_original).await;
+        assert_volume_untouched(datastore, affected_volume_original).await;
     }
 
     async fn regions(datastore: &DataStore) -> Vec<db::model::Region> {
@@ -1559,10 +1559,10 @@ pub(crate) mod test {
             .unwrap();
 
         let actual: VolumeConstructionRequest =
-            serde_json::from_str(&affected_volume.data()).unwrap();
+            serde_json::from_str(affected_volume.data()).unwrap();
 
         let expected: VolumeConstructionRequest =
-            serde_json::from_str(&affected_volume_original.data()).unwrap();
+            serde_json::from_str(affected_volume_original.data()).unwrap();
 
         assert_eq!(actual, expected);
     }
@@ -1607,7 +1607,7 @@ pub(crate) mod test {
             .unwrap();
 
         verify_clean_slate(
-            &cptestctx,
+            cptestctx,
             &disk_test,
             &request,
             &affected_volume_original,
@@ -1624,7 +1624,7 @@ pub(crate) mod test {
             || {
                 Box::pin(async {
                     verify_clean_slate(
-                        &cptestctx,
+                        cptestctx,
                         &disk_test,
                         &request,
                         &affected_volume_original,
@@ -1677,7 +1677,7 @@ pub(crate) mod test {
             .unwrap();
 
         verify_clean_slate(
-            &cptestctx,
+            cptestctx,
             &disk_test,
             &request,
             &affected_volume_original,
@@ -1693,7 +1693,7 @@ pub(crate) mod test {
             || Box::pin(async { new_test_params(&opctx, &request) }),
             || Box::pin(async {
                 verify_clean_slate(
-                    &cptestctx,
+                    cptestctx,
                     &disk_test,
                     &request,
                     &affected_volume_original,
@@ -1802,7 +1802,7 @@ pub(crate) mod test {
         runnable_saga.run_to_completion().await.unwrap();
 
         verify_clean_slate(
-            &cptestctx,
+            cptestctx,
             &disk_test,
             &request,
             &affected_volume_original,
@@ -1829,7 +1829,7 @@ pub(crate) mod test {
         // data, and for this test we're doing one expungements.
         let sled_id = cptestctx.first_sled_id();
 
-        let disk_test = DiskTestBuilder::new(&cptestctx)
+        let disk_test = DiskTestBuilder::new(cptestctx)
             .on_specific_sled(sled_id)
             .with_zpool_count(4)
             .build()
@@ -1849,20 +1849,20 @@ pub(crate) mod test {
         // Create a disk and a snapshot
         let client = &cptestctx.external_client;
         let _project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+            create_project(client, PROJECT_NAME).await.identity.id;
 
-        let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+        let disk = create_disk(client, PROJECT_NAME, "disk").await;
         let snapshot =
-            create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+            create_snapshot(client, PROJECT_NAME, "disk", "snap").await;
 
         // Before expunging any physical disk, save some DB models
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk.identity.id)
             .fetch()
             .await
             .unwrap();
 
-        let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot.identity.id)
             .fetch()
             .await
@@ -1987,7 +1987,7 @@ pub(crate) mod test {
         // data, and for this test we're doing two expungements.
         let sled_id = cptestctx.first_sled_id();
 
-        let disk_test = DiskTestBuilder::new(&cptestctx)
+        let disk_test = DiskTestBuilder::new(cptestctx)
             .on_specific_sled(sled_id)
             .with_zpool_count(5)
             .build()
@@ -2007,20 +2007,20 @@ pub(crate) mod test {
         // Create a disk and a snapshot
         let client = &cptestctx.external_client;
         let _project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+            create_project(client, PROJECT_NAME).await.identity.id;
 
-        let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+        let disk = create_disk(client, PROJECT_NAME, "disk").await;
         let snapshot =
-            create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+            create_snapshot(client, PROJECT_NAME, "disk", "snap").await;
 
         // Before expunging any physical disk, save some DB models
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk.identity.id)
             .fetch()
             .await
             .unwrap();
 
-        let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot.identity.id)
             .fetch()
             .await

@@ -244,7 +244,7 @@ fn print_sql_query(query: &str) {
     println!(
         "{}",
         sqlformat::format(
-            &query,
+            query,
             &sqlformat::QueryParams::None,
             sqlformat::FormatOptions { uppercase: true, ..Default::default() }
         )

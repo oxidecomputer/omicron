@@ -292,8 +292,8 @@ pub async fn link_ip_pool(
 pub async fn create_default_ip_pool(
     client: &ClientTestContext,
 ) -> views::IpPool {
-    let (pool, ..) = create_ip_pool(&client, "default", None).await;
-    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
+    let (pool, ..) = create_ip_pool(client, "default", None).await;
+    link_ip_pool(client, "default", &DEFAULT_SILO.id(), true).await;
     pool
 }
 
@@ -592,7 +592,7 @@ pub async fn create_affinity_group(
     group_name: &str,
 ) -> AffinityGroup {
     object_create(
-        &client,
+        client,
         format!("/v1/affinity-groups?project={}", &project_name).as_str(),
         &params::AffinityGroupCreate {
             identity: IdentityMetadataCreateParams {
@@ -612,7 +612,7 @@ pub async fn create_anti_affinity_group(
     group_name: &str,
 ) -> AntiAffinityGroup {
     object_create(
-        &client,
+        client,
         format!("/v1/anti-affinity-groups?project={}", &project_name).as_str(),
         &params::AntiAffinityGroupCreate {
             identity: IdentityMetadataCreateParams {
@@ -632,7 +632,7 @@ pub async fn create_vpc(
     vpc_name: &str,
 ) -> Vpc {
     object_create(
-        &client,
+        client,
         format!("/v1/vpcs?project={}", &project_name).as_str(),
         &params::VpcCreate {
             identity: IdentityMetadataCreateParams {
@@ -688,7 +688,7 @@ pub async fn create_vpc_subnet(
     custom_router: Option<&str>,
 ) -> VpcSubnet {
     object_create(
-        &client,
+        client,
         &format!("/v1/vpc-subnets?project={project_name}&vpc={vpc_name}"),
         &params::VpcSubnetCreate {
             identity: IdentityMetadataCreateParams {
@@ -711,7 +711,7 @@ pub async fn create_router(
     router_name: &str,
 ) -> VpcRouter {
     NexusRequest::objects_post(
-        &client,
+        client,
         format!("/v1/vpc-routers?project={}&vpc={}", &project_name, &vpc_name)
             .as_str(),
         &params::VpcRouterCreate {
@@ -739,7 +739,7 @@ pub async fn create_route(
     target: RouteTarget,
 ) -> RouterRoute {
     NexusRequest::objects_post(
-        &client,
+        client,
         format!(
             "/v1/vpc-router-routes?project={}&vpc={}&router={}",
             &project_name, &vpc_name, &router_name
@@ -808,7 +808,7 @@ pub async fn create_internet_gateway(
     internet_gateway_name: &str,
 ) -> InternetGateway {
     NexusRequest::objects_post(
-        &client,
+        client,
         format!(
             "/v1/internet-gateways?project={}&vpc={}",
             &project_name, &vpc_name
@@ -837,7 +837,7 @@ pub async fn delete_internet_gateway(
     cascade: bool,
 ) {
     NexusRequest::object_delete(
-        &client,
+        client,
         format!(
             "/v1/internet-gateways/{}?project={}&vpc={}&cascade={}",
             &internet_gateway_name, &project_name, &vpc_name, cascade
@@ -865,7 +865,7 @@ pub async fn attach_ip_pool_to_igw(
 
     let ip_pool: Name = ip_pool_name.parse().unwrap();
     NexusRequest::objects_post(
-        &client,
+        client,
         url.as_str(),
         &params::InternetGatewayIpPoolCreate {
             identity: IdentityMetadataCreateParams {
@@ -896,7 +896,7 @@ pub async fn detach_ip_pool_from_igw(
         ip_pool_name, project_name, vpc_name, igw_name, cascade,
     );
 
-    NexusRequest::object_delete(&client, url.as_str())
+    NexusRequest::object_delete(client, url.as_str())
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -917,7 +917,7 @@ pub async fn attach_ip_address_to_igw(
     );
 
     NexusRequest::objects_post(
-        &client,
+        client,
         url.as_str(),
         &params::InternetGatewayIpAddressCreate {
             identity: IdentityMetadataCreateParams {
@@ -948,7 +948,7 @@ pub async fn detach_ip_address_from_igw(
         attachment_name, project_name, vpc_name, igw_name, cascade
     );
 
-    NexusRequest::object_delete(&client, url.as_str())
+    NexusRequest::object_delete(client, url.as_str())
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await

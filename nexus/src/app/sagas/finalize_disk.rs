@@ -144,7 +144,7 @@ async fn sfd_set_finalizing_state(
     );
 
     let (.., authz_disk, db_disk) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .disk_id(params.disk_id)
             .fetch_for(authz::Action::Modify)
             .await
@@ -167,7 +167,7 @@ async fn sfd_set_finalizing_state(
             // Record the disk's new generation number as this saga node's output. It
             // will be important later to *only* transition this disk out of finalizing
             // if the generation number matches what *this* saga is doing.
-            let (.., db_disk) = LookupPath::new(&opctx, &osagactx.datastore())
+            let (.., db_disk) = LookupPath::new(&opctx, osagactx.datastore())
                 .disk_id(params.disk_id)
                 .fetch_for(authz::Action::Read)
                 .await
@@ -195,7 +195,7 @@ async fn sfd_set_finalizing_state_undo(
     );
 
     let (.., authz_disk, db_disk) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .disk_id(params.disk_id)
             .fetch_for(authz::Action::Modify)
             .await
@@ -260,7 +260,7 @@ async fn sfd_get_pantry_address(
         &params.serialized_authn,
     );
 
-    let (.., db_disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., db_disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch_for(authz::Action::Modify)
         .await
@@ -289,7 +289,7 @@ async fn sfd_call_pantry_detach_for_disk(
 
     call_pantry_detach(
         sagactx.user_data().nexus(),
-        &log,
+        log,
         params.disk_id,
         pantry_address,
     )
@@ -316,7 +316,7 @@ async fn sfd_clear_pantry_address(
 
     info!(log, "setting disk {} pantry to None", params.disk_id);
 
-    let (.., authz_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(params.disk_id)
         .lookup_for(authz::Action::Modify)
         .await
@@ -342,7 +342,7 @@ async fn sfd_set_detached_state(
     );
 
     let (.., authz_disk, db_disk) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .disk_id(params.disk_id)
             .fetch_for(authz::Action::Modify)
             .await

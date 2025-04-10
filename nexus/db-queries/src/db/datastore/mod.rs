@@ -239,7 +239,7 @@ impl DataStore {
                 }
 
                 match datastore
-                    .ensure_schema(&log, EXPECTED_VERSION, config)
+                    .ensure_schema(log, EXPECTED_VERSION, config)
                     .await
                 {
                     Ok(()) => return Ok(()),
@@ -529,7 +529,7 @@ mod test {
 
         let authz_silo = opctx.authn.silo_required().unwrap();
 
-        let (.., silo) = LookupPath::new(&opctx, &datastore)
+        let (.., silo) = LookupPath::new(opctx, datastore)
             .silo_id(authz_silo.id())
             .fetch()
             .await
@@ -544,14 +544,13 @@ mod test {
                 },
             },
         );
-        datastore.project_create(&opctx, project).await.unwrap();
+        datastore.project_create(opctx, project).await.unwrap();
 
-        let (.., silo_after_project_create) =
-            LookupPath::new(&opctx, &datastore)
-                .silo_id(authz_silo.id())
-                .fetch()
-                .await
-                .unwrap();
+        let (.., silo_after_project_create) = LookupPath::new(opctx, datastore)
+            .silo_id(authz_silo.id())
+            .fetch()
+            .await
+            .unwrap();
         assert!(silo_after_project_create.rcgen > silo.rcgen);
 
         db.terminate().await;
@@ -567,7 +566,7 @@ mod test {
             logctx.log.new(o!("component" => "TestExternalAuthn")),
             Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::external_authn(),
-            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+            Arc::clone(datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
         let token = "a_token".to_string();
@@ -603,7 +602,7 @@ mod test {
             .await
             .unwrap();
 
-        let (.., db_silo_user) = LookupPath::new(&opctx, &datastore)
+        let (.., db_silo_user) = LookupPath::new(opctx, datastore)
             .silo_user_id(session.silo_user_id)
             .fetch()
             .await
@@ -611,7 +610,7 @@ mod test {
         assert_eq!(DEFAULT_SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
-        let (.., fetched) = LookupPath::new(&opctx, &datastore)
+        let (.., fetched) = LookupPath::new(opctx, datastore)
             .console_session_token(&token)
             .fetch()
             .await
@@ -633,7 +632,7 @@ mod test {
             LookupType::ByCompositeId(token.clone()),
         );
         let renewed = datastore
-            .session_update_last_used(&opctx, &authz_session)
+            .session_update_last_used(opctx, &authz_session)
             .await
             .unwrap();
         assert!(
@@ -641,7 +640,7 @@ mod test {
         );
 
         // time_last_used change persists in DB
-        let (.., fetched) = LookupPath::new(&opctx, &datastore)
+        let (.., fetched) = LookupPath::new(opctx, datastore)
             .console_session_token(&token)
             .fetch()
             .await
@@ -651,10 +650,9 @@ mod test {
         // deleting it using `opctx` (which represents the test-privileged user)
         // should succeed but not do anything -- you can't delete someone else's
         // session
-        let delete =
-            datastore.session_hard_delete(&opctx, &authz_session).await;
+        let delete = datastore.session_hard_delete(opctx, &authz_session).await;
         assert_eq!(delete, Ok(()));
-        let fetched = LookupPath::new(&opctx, &datastore)
+        let fetched = LookupPath::new(opctx, datastore)
             .console_session_token(&token)
             .fetch()
             .await;
@@ -669,13 +667,13 @@ mod test {
                 DEFAULT_SILO_ID,
                 SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap(),
             ),
-            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+            Arc::clone(datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let delete = datastore
             .session_hard_delete(&silo_user_opctx, &authz_session)
             .await;
         assert_eq!(delete, Ok(()));
-        let fetched = LookupPath::new(&opctx, &datastore)
+        let fetched = LookupPath::new(opctx, datastore)
             .console_session_token(&token)
             .fetch()
             .await;
@@ -686,7 +684,7 @@ mod test {
 
         // deleting an already nonexistent is considered a success
         let delete_again =
-            datastore.session_hard_delete(&opctx, &authz_session).await;
+            datastore.session_hard_delete(opctx, &authz_session).await;
         assert_eq!(delete_again, Ok(()));
 
         db.terminate().await;
@@ -948,7 +946,7 @@ mod test {
                 .then(|disk| {
                     let pool_id_future = create_test_zpool(
                         &datastore,
-                        &opctx,
+                        opctx,
                         disk.sled_id,
                         disk.disk_id,
                     );
@@ -991,9 +989,7 @@ mod test {
                     SledToDatasetMap::new(),
                     |mut map, (sled_id, dataset_id)| {
                         // Build a map of sled ID to dataset IDs.
-                        map.entry(sled_id)
-                            .or_insert_with(Vec::new)
-                            .push(dataset_id);
+                        map.entry(sled_id).or_default().push(dataset_id);
                         async move { map }
                     },
                 )
@@ -1012,7 +1008,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let test_datasets = TestDatasets::create(
-            &opctx,
+            opctx,
             datastore.clone(),
             // We aren't forcing the datasets to be on distinct sleds, so we
             // just need one eligible sled.
@@ -1032,7 +1028,7 @@ mod test {
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
             let dataset_and_regions = datastore
                 .disk_region_allocate(
-                    &opctx,
+                    opctx,
                     volume_id,
                     &params.disk_source,
                     params.size,
@@ -1106,7 +1102,7 @@ mod test {
         // Create a rack with enough sleds for a successful allocation when we
         // require 3 distinct eligible sleds.
         let test_datasets = TestDatasets::create(
-            &opctx,
+            opctx,
             datastore.clone(),
             // We're forcing the datasets to be on distinct sleds, hence the
             // full REGION_REDUNDANCY_THRESHOLD.
@@ -1126,11 +1122,11 @@ mod test {
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
             let dataset_and_regions = datastore
                 .disk_region_allocate(
-                    &opctx,
+                    opctx,
                     volume_id,
                     &params.disk_source,
                     params.size,
-                    &&RegionAllocationStrategy::RandomWithDistinctSleds {
+                    &RegionAllocationStrategy::RandomWithDistinctSleds {
                         seed: Some(alloc_seed),
                     },
                 )
@@ -1194,7 +1190,7 @@ mod test {
         // Create a rack without enough sleds for a successful allocation when
         // we require 3 distinct provisionable sleds.
         TestDatasets::create(
-            &opctx,
+            opctx,
             datastore.clone(),
             // Here, we need to have REGION_REDUNDANCY_THRESHOLD - 1 eligible
             // sleds to test this failure condition.
@@ -1213,11 +1209,11 @@ mod test {
 
             let err = datastore
                 .disk_region_allocate(
-                    &opctx,
+                    opctx,
                     volume_id,
                     &params.disk_source,
                     params.size,
-                    &&RegionAllocationStrategy::RandomWithDistinctSleds {
+                    &RegionAllocationStrategy::RandomWithDistinctSleds {
                         seed: Some(alloc_seed),
                     },
                 )
@@ -1244,7 +1240,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         TestDatasets::create(
-            &opctx,
+            opctx,
             datastore.clone(),
             REGION_REDUNDANCY_THRESHOLD,
         )
@@ -1258,7 +1254,7 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
         let mut dataset_and_regions1 = datastore
             .disk_region_allocate(
-                &opctx,
+                opctx,
                 volume_id,
                 &params.disk_source,
                 params.size,
@@ -1271,7 +1267,7 @@ mod test {
         // if the shuffle changes.
         let mut dataset_and_regions2 = datastore
             .disk_region_allocate(
-                &opctx,
+                opctx,
                 volume_id,
                 &params.disk_source,
                 params.size,
@@ -1312,12 +1308,12 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a sled...
-        let sled_id = create_test_sled(&datastore).await;
+        let sled_id = create_test_sled(datastore).await;
 
         // ... and a disk on that sled...
         let physical_disk_id = create_test_physical_disk(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             sled_id,
             PhysicalDiskKind::U2,
             "fake serial".to_string(),
@@ -1328,8 +1324,8 @@ mod test {
         let zpool_ids: Vec<Uuid> = stream::iter(0..REGION_REDUNDANCY_THRESHOLD)
             .then(|_| {
                 create_test_zpool_not_in_inventory(
-                    &datastore,
-                    &opctx,
+                    datastore,
+                    opctx,
                     sled_id,
                     physical_disk_id,
                 )
@@ -1361,7 +1357,7 @@ mod test {
         let volume1_id = VolumeUuid::new_v4();
         let err = datastore
             .disk_region_allocate(
-                &opctx,
+                opctx,
                 volume1_id,
                 &params.disk_source,
                 params.size,
@@ -1380,11 +1376,11 @@ mod test {
         // If we add the zpools to the inventory and try again, the allocation
         // will succeed.
         for zpool_id in zpool_ids {
-            add_test_zpool_to_inventory(&datastore, zpool_id, sled_id).await;
+            add_test_zpool_to_inventory(datastore, zpool_id, sled_id).await;
         }
         datastore
             .disk_region_allocate(
-                &opctx,
+                opctx,
                 volume1_id,
                 &params.disk_source,
                 params.size,
@@ -1405,12 +1401,12 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a sled...
-        let sled_id = create_test_sled(&datastore).await;
+        let sled_id = create_test_sled(datastore).await;
 
         // ... and a disk on that sled...
         let physical_disk_id = create_test_physical_disk(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             sled_id,
             PhysicalDiskKind::U2,
             "fake serial".to_string(),
@@ -1422,8 +1418,8 @@ mod test {
             stream::iter(0..REGION_REDUNDANCY_THRESHOLD - 1)
                 .then(|_| {
                     create_test_zpool(
-                        &datastore,
-                        &opctx,
+                        datastore,
+                        opctx,
                         sled_id,
                         physical_disk_id,
                     )
@@ -1455,7 +1451,7 @@ mod test {
         let volume1_id = VolumeUuid::new_v4();
         let err = datastore
             .disk_region_allocate(
-                &opctx,
+                opctx,
                 volume1_id,
                 &params.disk_source,
                 params.size,
@@ -1485,26 +1481,22 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a sled...
-        let sled_id = create_test_sled(&datastore).await;
+        let sled_id = create_test_sled(datastore).await;
 
         // ... and create several disks on that sled, each with a zpool/dataset.
         let mut physical_disk_ids = vec![];
         for i in 0..REGION_REDUNDANCY_THRESHOLD {
             let physical_disk_id = create_test_physical_disk(
-                &datastore,
-                &opctx,
+                datastore,
+                opctx,
                 sled_id,
                 PhysicalDiskKind::U2,
                 format!("fake serial #{i}"),
             )
             .await;
-            let zpool_id = create_test_zpool(
-                &datastore,
-                &opctx,
-                sled_id,
-                physical_disk_id,
-            )
-            .await;
+            let zpool_id =
+                create_test_zpool(datastore, opctx, sled_id, physical_disk_id)
+                    .await;
             let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
             let dataset = CrucibleDataset::new(
                 DatasetUuid::new_v4(),
@@ -1551,20 +1543,20 @@ mod test {
             // The rest are assumed "in service" + "active".
             datastore
                 .physical_disk_update_policy(
-                    &opctx,
+                    opctx,
                     physical_disk_ids[0],
                     policy,
                 )
                 .await
                 .unwrap();
             datastore
-                .physical_disk_update_state(&opctx, physical_disk_ids[0], state)
+                .physical_disk_update_state(opctx, physical_disk_ids[0], state)
                 .await
                 .unwrap();
 
             let result = datastore
                 .disk_region_allocate(
-                    &opctx,
+                    opctx,
                     volume_id,
                     &params.disk_source,
                     params.size,
@@ -1600,7 +1592,7 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         TestDatasets::create(
-            &opctx,
+            opctx,
             datastore.clone(),
             REGION_REDUNDANCY_THRESHOLD,
         )
@@ -1614,7 +1606,7 @@ mod test {
         assert!(
             datastore
                 .disk_region_allocate(
-                    &opctx,
+                    opctx,
                     volume1_id,
                     &params.disk_source,
                     params.size,
@@ -1703,14 +1695,14 @@ mod test {
             .build();
         datastore.sled_upsert(sled2).await.unwrap();
 
-        let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
+        let ip = datastore.next_ipv6_address(opctx, sled1_id).await.unwrap();
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 0);
         assert_eq!(ip, expected_ip);
-        let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
+        let ip = datastore.next_ipv6_address(opctx, sled1_id).await.unwrap();
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 1);
         assert_eq!(ip, expected_ip);
 
-        let ip = datastore.next_ipv6_address(&opctx, sled2_id).await.unwrap();
+        let ip = datastore.next_ipv6_address(opctx, sled2_id).await.unwrap();
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1df, 0, 0, 0, 0, 1, 0);
         assert_eq!(ip, expected_ip);
 
@@ -1743,7 +1735,7 @@ mod test {
             .await
             .unwrap();
 
-        let (.., authz_user) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_user) = LookupPath::new(opctx, datastore)
             .silo_user_id(silo_user_id)
             .lookup_for(authz::Action::CreateChild)
             .await
@@ -1764,7 +1756,7 @@ mod test {
             },
         );
         let created = datastore
-            .ssh_key_create(&opctx, &authz_user, ssh_key.clone())
+            .ssh_key_create(opctx, &authz_user, ssh_key.clone())
             .await
             .unwrap();
         assert_eq!(created.silo_user_id, ssh_key.silo_user_id);
@@ -1772,7 +1764,7 @@ mod test {
 
         // Lookup the key we just created.
         let (authz_silo, authz_silo_user, authz_ssh_key, found) =
-            LookupPath::new(&opctx, &datastore)
+            LookupPath::new(opctx, datastore)
                 .silo_user_id(silo_user_id)
                 .ssh_key_name(&key_name.into())
                 .fetch()
@@ -1784,9 +1776,8 @@ mod test {
         assert_eq!(found.public_key, ssh_key.public_key);
 
         // Trying to insert the same one again fails.
-        let duplicate = datastore
-            .ssh_key_create(&opctx, &authz_user, ssh_key.clone())
-            .await;
+        let duplicate =
+            datastore.ssh_key_create(opctx, &authz_user, ssh_key.clone()).await;
         assert!(matches!(
             duplicate,
             Err(Error::ObjectAlreadyExists { type_name, object_name })
@@ -1795,7 +1786,7 @@ mod test {
         ));
 
         // Delete the key we just created.
-        datastore.ssh_key_delete(&opctx, &authz_ssh_key).await.unwrap();
+        datastore.ssh_key_delete(opctx, &authz_ssh_key).await.unwrap();
 
         // Clean up.
         db.terminate().await;
@@ -1810,19 +1801,19 @@ mod test {
 
         // Create a Rack, insert it into the DB.
         let rack = Rack::new(Uuid::new_v4());
-        let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
+        let result = datastore.rack_insert(opctx, &rack).await.unwrap();
         assert_eq!(result.id(), rack.id());
         assert_eq!(result.initialized, false);
 
         // Re-insert the Rack (check for idempotency).
-        let result = datastore.rack_insert(&opctx, &rack).await.unwrap();
+        let result = datastore.rack_insert(opctx, &rack).await.unwrap();
         assert_eq!(result.id(), rack.id());
         assert_eq!(result.initialized, false);
 
         // Initialize the Rack.
         let result = datastore
             .rack_set_initialized(
-                &opctx,
+                opctx,
                 RackInit { rack_id: rack.id(), ..Default::default() },
             )
             .await
@@ -1832,7 +1823,7 @@ mod test {
         // Re-initialize the rack (check for idempotency)
         let result = datastore
             .rack_set_initialized(
-                &opctx,
+                opctx,
                 RackInit { rack_id: rack.id(), ..Default::default() },
             )
             .await
@@ -1849,7 +1840,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let error = datastore.test_try_table_scan(&opctx).await;
+        let error = datastore.test_try_table_scan(opctx).await;
         println!("error from attempted table scan: {:#}", error);
         match error {
             Error::InternalError { internal_message } => {
@@ -1916,7 +1907,7 @@ mod test {
 
         // Delete everything, make sure we delete all records we made above
         let count = datastore
-            .deallocate_external_ip_by_instance_id(&opctx, instance_id)
+            .deallocate_external_ip_by_instance_id(opctx, instance_id)
             .await
             .expect("Failed to delete instance external IPs");
         assert_eq!(
@@ -1927,7 +1918,7 @@ mod test {
 
         // Do it again, we should get zero records
         let count = datastore
-            .deallocate_external_ip_by_instance_id(&opctx, instance_id)
+            .deallocate_external_ip_by_instance_id(opctx, instance_id)
             .await
             .expect("Failed to delete instance external IPs");
         assert_eq!(count, 0, "Expected to delete zero IPs for the instance");
@@ -1978,14 +1969,14 @@ mod test {
 
         // Delete it twice, make sure we get the right sentinel return values.
         let deleted =
-            datastore.deallocate_external_ip(&opctx, ip.id).await.unwrap();
+            datastore.deallocate_external_ip(opctx, ip.id).await.unwrap();
         assert!(
             deleted,
             "Got unexpected sentinel value back when \
             deleting external IP the first time"
         );
         let deleted =
-            datastore.deallocate_external_ip(&opctx, ip.id).await.unwrap();
+            datastore.deallocate_external_ip(opctx, ip.id).await.unwrap();
         assert!(
             !deleted,
             "Got unexpected sentinel value back when \
@@ -1994,10 +1985,7 @@ mod test {
 
         // Deleting a non-existing record fails
         assert!(
-            datastore
-                .deallocate_external_ip(&opctx, Uuid::nil())
-                .await
-                .is_err()
+            datastore.deallocate_external_ip(opctx, Uuid::nil()).await.is_err()
         );
 
         db.terminate().await;

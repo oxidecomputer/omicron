@@ -111,7 +111,7 @@ pub fn get_floating_ip_by_id_url(fip_id: &Uuid) -> String {
 async fn test_floating_ip_access(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create a floating IP from the default pool.
@@ -127,13 +127,13 @@ async fn test_floating_ip_access(cptestctx: &ControlPlaneTestContext) {
 
     // Fetch floating IP by ID
     let fetched_fip =
-        floating_ip_get(&client, &get_floating_ip_by_id_url(&fip.identity.id))
+        floating_ip_get(client, &get_floating_ip_by_id_url(&fip.identity.id))
             .await;
     assert_eq!(fetched_fip.identity.id, fip.identity.id);
 
     // Fetch floating IP by name and project_id
     let fetched_fip = floating_ip_get(
-        &client,
+        client,
         &get_floating_ip_by_name_url(
             fip.identity.name.as_str(),
             &project.identity.id.to_string(),
@@ -144,7 +144,7 @@ async fn test_floating_ip_access(cptestctx: &ControlPlaneTestContext) {
 
     // Fetch floating IP by name and project_name
     let fetched_fip = floating_ip_get(
-        &client,
+        client,
         &get_floating_ip_by_name_url(
             fip.identity.name.as_str(),
             project.identity.name.as_str(),
@@ -159,7 +159,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // automatically linked to current silo
-    let default_pool = create_default_ip_pool(&client).await;
+    let default_pool = create_default_ip_pool(client).await;
 
     assert_ip_pool_utilization(client, "default", 0, 65536, 0, 0).await;
 
@@ -169,7 +169,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     );
     // not automatically linked to currently silo. see below
     let (other_pool, ..) =
-        create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
+        create_ip_pool(client, "other-pool", Some(other_pool_range)).await;
 
     assert_ip_pool_utilization(client, "other-pool", 0, 5, 0, 0).await;
 
@@ -231,7 +231,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
 
     // now link the pool and everything should work with the exact same params
     let silo_id = DEFAULT_SILO.id();
-    link_ip_pool(&client, "other-pool", &silo_id, false).await;
+    link_ip_pool(client, "other-pool", &silo_id, false).await;
 
     // Create with no chosen IP from named pool.
     let fip: FloatingIp = object_create(client, &url, &params).await;
@@ -274,23 +274,23 @@ async fn test_floating_ip_create_non_admin(
 
     // manually create default pool and link to test silo, as opposed to default
     // silo, which is what the helper would do
-    let _ = create_ip_pool(&client, "default", None).await;
-    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+    let _ = create_ip_pool(client, "default", None).await;
+    link_ip_pool(client, "default", &silo.identity.id, true).await;
 
     // create other pool and link to silo
     let other_pool_range = IpRange::V4(
         Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
             .unwrap(),
     );
-    create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
-    link_ip_pool(&client, "other-pool", &silo.identity.id, false).await;
+    create_ip_pool(client, "other-pool", Some(other_pool_range)).await;
+    link_ip_pool(client, "other-pool", &silo.identity.id, false).await;
 
     // create third pool and don't link to silo
     let unlinked_pool_range = IpRange::V4(
         Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
             .unwrap(),
     );
-    create_ip_pool(&client, "unlinked-pool", Some(unlinked_pool_range)).await;
+    create_ip_pool(client, "unlinked-pool", Some(unlinked_pool_range)).await;
 
     // Create a silo user
     let user = create_local_user(
@@ -395,7 +395,7 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
 
     // Create other silo and pool linked to that silo
     let other_silo = create_silo(
-        &client,
+        client,
         "not-my-silo",
         true,
         shared::SiloIdentityMode::SamlJit,
@@ -405,7 +405,7 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
         Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
             .unwrap(),
     );
-    create_ip_pool(&client, "external-silo-pool", Some(other_pool_range)).await;
+    create_ip_pool(client, "external-silo-pool", Some(other_pool_range)).await;
     // don't link pool to silo yet
 
     let fip_name = FIP_NAMES[4];
@@ -431,7 +431,7 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
     );
 
     // error is the same after linking the pool to the other silo
-    link_ip_pool(&client, "external-silo-pool", &other_silo.identity.id, false)
+    link_ip_pool(client, "external-silo-pool", &other_silo.identity.id, false)
         .await;
 
     let error =
@@ -448,7 +448,7 @@ async fn test_floating_ip_create_ip_in_use(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
 
     let project = create_project(client, PROJECT_NAME).await;
     let contested_ip = "10.0.0.0".parse().unwrap();
@@ -496,7 +496,7 @@ async fn test_floating_ip_create_name_in_use(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
 
     let project = create_project(client, PROJECT_NAME).await;
     let contested_name = FIP_NAMES[0];
@@ -545,7 +545,7 @@ async fn test_floating_ip_create_name_in_use(
 async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create the Floating IP
@@ -597,7 +597,7 @@ async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
 async fn test_floating_ip_delete(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     let fip = create_floating_ip(
@@ -637,7 +637,7 @@ async fn test_floating_ip_create_attachment(
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     let fip = create_floating_ip(
@@ -663,7 +663,7 @@ async fn test_floating_ip_create_attachment(
 
     // Reacquire FIP: parent ID must have updated to match instance.
     let fetched_fip =
-        floating_ip_get(&client, &get_floating_ip_by_id_url(&fip.identity.id))
+        floating_ip_get(client, &get_floating_ip_by_id_url(&fip.identity.id))
             .await;
     assert_eq!(fetched_fip.instance_id, Some(instance.identity.id));
 
@@ -703,7 +703,7 @@ async fn test_floating_ip_create_attachment(
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     NexusRequest::object_delete(
-        &client,
+        client,
         &format!("/v1/instances/{instance_name}?project={PROJECT_NAME}"),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -713,7 +713,7 @@ async fn test_floating_ip_create_attachment(
 
     // Reacquire FIP again: parent ID must now be unset.
     let fetched_fip =
-        floating_ip_get(&client, &get_floating_ip_by_id_url(&fip.identity.id))
+        floating_ip_get(client, &get_floating_ip_by_id_url(&fip.identity.id))
             .await;
     assert_eq!(fetched_fip.instance_id, None);
 
@@ -736,7 +736,7 @@ async fn test_external_ip_live_attach_detach(
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     assert_ip_pool_utilization(client, "default", 0, 65536, 0, 0).await;
@@ -948,7 +948,7 @@ async fn test_floating_ip_attach_fail_between_projects(
     let apictx = &cptestctx.server.server_context();
     let _nexus = &apictx.nexus;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
     let _project = create_project(client, PROJECT_NAME).await;
     let _project2 = create_project(client, "proj2").await;
 
@@ -1026,7 +1026,7 @@ async fn test_external_ip_attach_fail_if_in_use_by_other(
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create 2 instances, bind a FIP to each.
@@ -1084,7 +1084,7 @@ async fn test_external_ip_attach_fails_after_maximum(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create 33 floating IPs, and bind the first 32 to an instance.
@@ -1162,14 +1162,14 @@ async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
     let other_pool_range = IpRange::V4(
         Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 1))
             .unwrap(),
     );
-    create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
+    create_ip_pool(client, "other-pool", Some(other_pool_range)).await;
     let silo_id = DEFAULT_SILO.id();
-    link_ip_pool(&client, "other-pool", &silo_id, false).await;
+    link_ip_pool(client, "other-pool", &silo_id, false).await;
 
     create_project(client, PROJECT_NAME).await;
 
@@ -1264,7 +1264,7 @@ async fn instance_for_external_ips(
         fips.push(params::ExternalIpCreate::Ephemeral { pool: None })
     }
     create_instance_with(
-        &client,
+        client,
         PROJECT_NAME,
         instance_name,
         &params::InstanceNetworkInterfaceAttachment::Default,

@@ -1169,7 +1169,7 @@ impl SledAgent {
     }
 
     pub fn artifact_store(&self) -> &ArtifactStore<StorageHandle> {
-        &self.inner.repo_depot.app_private()
+        self.inner.repo_depot.app_private()
     }
 
     /// Issue a snapshot request for a Crucible disk attached to an instance

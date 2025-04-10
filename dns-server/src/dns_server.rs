@@ -155,7 +155,7 @@ async fn handle_dns_packet(request: Request) {
     trace!(&log, "buffer"; "buffer" => ?buf.hex_dump());
 
     // Decode the message.
-    let mut dec = BinDecoder::new(&buf);
+    let mut dec = BinDecoder::new(buf);
     let mr = match MessageRequest::read(&mut dec) {
         Ok(mr) => mr,
         Err(error) => {
@@ -366,7 +366,7 @@ async fn respond_records(
         additional_records,
     );
 
-    encode_and_send(&request, mresp, "records").await.map_err(|error| {
+    encode_and_send(request, mresp, "records").await.map_err(|error| {
         RequestError::ServFail(anyhow!("failed to emit response: {:#}", error))
     })
 }
@@ -382,7 +382,7 @@ async fn respond_nxdomain(
     header: &Header,
 ) {
     let log = &request.log;
-    let mresp = rb_nxdomain.error_msg(&header, ResponseCode::NXDomain);
+    let mresp = rb_nxdomain.error_msg(header, ResponseCode::NXDomain);
     if let Err(error) = encode_and_send(request, mresp, "NXDOMAIN").await {
         error!(
             log,

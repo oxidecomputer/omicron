@@ -37,10 +37,8 @@ pub fn new_bootstore_config(
         learn_timeout: Duration::from_secs(5),
         rack_init_timeout: Duration::from_secs(300),
         rack_secret_request_timeout: Duration::from_secs(5),
-        fsm_state_ledger_paths: bootstore_fsm_state_paths(&all_disks)?,
-        network_config_ledger_paths: bootstore_network_config_paths(
-            &all_disks,
-        )?,
+        fsm_state_ledger_paths: bootstore_fsm_state_paths(all_disks)?,
+        network_config_ledger_paths: bootstore_network_config_paths(all_disks)?,
     })
 }
 

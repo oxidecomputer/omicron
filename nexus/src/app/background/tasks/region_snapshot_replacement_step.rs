@@ -240,10 +240,7 @@ impl RegionSnapshotReplacementFindAffected {
 
             let volumes = match self
                 .datastore
-                .find_volumes_referencing_socket_addr(
-                    &opctx,
-                    target_addr.into(),
-                )
+                .find_volumes_referencing_socket_addr(opctx, target_addr.into())
                 .await
             {
                 Ok(volumes) => volumes,
@@ -850,20 +847,20 @@ mod test {
         // replaced
 
         let new_volume_1_id =
-            add_fake_volume_for_snapshot_addr(&datastore, snapshot_addr).await;
+            add_fake_volume_for_snapshot_addr(datastore, snapshot_addr).await;
         let new_volume_2_id =
-            add_fake_volume_for_snapshot_addr(&datastore, snapshot_addr).await;
+            add_fake_volume_for_snapshot_addr(datastore, snapshot_addr).await;
 
         // Add some fake volumes that do not
 
         let other_volume_1_id = add_fake_volume_for_snapshot_addr(
-            &datastore,
+            datastore,
             "[fd00:1122:3344::101]:1000".parse().unwrap(),
         )
         .await;
 
         let other_volume_2_id = add_fake_volume_for_snapshot_addr(
-            &datastore,
+            datastore,
             "[fd12:5544:3344::912]:3901".parse().unwrap(),
         )
         .await;

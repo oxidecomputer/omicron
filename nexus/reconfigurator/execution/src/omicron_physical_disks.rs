@@ -46,7 +46,7 @@ async fn decommission_expunged_disks_impl(
                 "disk_id" => disk_id.to_string(),
             ));
 
-            match datastore.physical_disk_decommission(&opctx, disk_id).await {
+            match datastore.physical_disk_decommission(opctx, disk_id).await {
                 Err(error) => {
                     warn!(
                         log,
@@ -118,7 +118,7 @@ mod test {
             sled_id.into_untyped_uuid(),
         );
         datastore
-            .physical_disk_insert(&opctx, physical_disk.clone())
+            .physical_disk_insert(opctx, physical_disk.clone())
             .await
             .unwrap();
         id
@@ -241,18 +241,18 @@ mod test {
         );
 
         let sled_id = SledUuid::from_untyped_uuid(
-            Uuid::from_str(&SLED_AGENT_UUID).unwrap(),
+            Uuid::from_str(SLED_AGENT_UUID).unwrap(),
         );
 
         // Create a couple disks in the database
         let disks = [
-            make_disk_in_db(&datastore, &opctx, 0, sled_id).await,
-            make_disk_in_db(&datastore, &opctx, 1, sled_id).await,
+            make_disk_in_db(datastore, &opctx, 0, sled_id).await,
+            make_disk_in_db(datastore, &opctx, 1, sled_id).await,
         ];
 
         // Add a zpool, dataset, and region to each disk.
         for disk_id in disks {
-            add_zpool_dataset_and_region(&datastore, &opctx, disk_id, sled_id)
+            add_zpool_dataset_and_region(datastore, &opctx, disk_id, sled_id)
                 .await;
         }
 
@@ -290,7 +290,7 @@ mod test {
 
         super::decommission_expunged_disks_impl(
             &opctx,
-            &datastore,
+            datastore,
             [(sled_id, disk_to_decommission)].into_iter(),
         )
         .await
@@ -319,19 +319,19 @@ mod test {
         // Even though we've decommissioned this disk, the pools, datasets, and
         // regions should remain. Refer to the "decommissioned_disk_cleaner"
         // for how these get eventually cleared up.
-        let pools = get_pools(&datastore, disk_to_decommission).await;
+        let pools = get_pools(datastore, disk_to_decommission).await;
         assert_eq!(pools.len(), 1);
-        let datasets = get_crucible_datasets(&datastore, pools[0]).await;
+        let datasets = get_crucible_datasets(datastore, pools[0]).await;
         assert_eq!(datasets.len(), 1);
-        let regions = get_regions(&datastore, datasets[0]).await;
+        let regions = get_regions(datastore, datasets[0]).await;
         assert_eq!(regions.len(), 1);
 
         // Similarly, the "other disk" should still exist.
-        let pools = get_pools(&datastore, other_disk).await;
+        let pools = get_pools(datastore, other_disk).await;
         assert_eq!(pools.len(), 1);
-        let datasets = get_crucible_datasets(&datastore, pools[0]).await;
+        let datasets = get_crucible_datasets(datastore, pools[0]).await;
         assert_eq!(datasets.len(), 1);
-        let regions = get_regions(&datastore, datasets[0]).await;
+        let regions = get_regions(datastore, datasets[0]).await;
         assert_eq!(regions.len(), 1);
     }
 }

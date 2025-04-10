@@ -185,7 +185,7 @@ impl DataStore {
         {
             let silo_admin_group_ensure_query =
                 DataStore::silo_group_ensure_query(
-                    &nexus_opctx,
+                    nexus_opctx,
                     &authz_silo,
                     db::model::SiloGroup::new(
                         silo_group_id,
@@ -228,7 +228,7 @@ impl DataStore {
         // with retryable transactions.
         let silo = self
             .transaction_non_retry_wrapper("silo_create")
-            .transaction(&conn, |conn| async move {
+            .transaction(conn, |conn| async move {
                 let silo = silo_create_query
                     .get_result_async(&conn)
                     .await
@@ -334,7 +334,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::silo::dsl;
         let mut query = match pagparams {
-            PaginatedBy::Id(params) => paginated(dsl::silo, dsl::id, &params),
+            PaginatedBy::Id(params) => paginated(dsl::silo, dsl::id, params),
             PaginatedBy::Name(params) => paginated(
                 dsl::silo,
                 dsl::name,
@@ -450,7 +450,7 @@ impl DataStore {
                     )));
                 }
 
-                self.silo_quotas_delete(opctx, &conn, &authz_silo).await?;
+                self.silo_quotas_delete(opctx, &conn, authz_silo).await?;
 
                 self.virtual_provisioning_collection_delete_on_connection(
                     &opctx.log, &conn, id,

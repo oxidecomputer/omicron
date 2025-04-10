@@ -666,7 +666,7 @@ mod test {
 
         use schema::test_users::dsl;
 
-        populate_users(&pool, &vec![(1, 1), (2, 2), (3, 3)]).await;
+        populate_users(pool, &vec![(1, 1), (2, 2), (3, 3)]).await;
 
         // Get the first paginated result.
         let mut pagparams = DataPageParams::<i64> {
@@ -675,7 +675,7 @@ mod test {
             limit: NonZeroU32::new(1).unwrap(),
         };
         let query = paginated(dsl::test_users, dsl::age, &pagparams);
-        let observed = execute_query(&pool, query).await;
+        let observed = execute_query(pool, query).await;
         assert_eq!(observed, vec![(1, 1)]);
 
         // Get the next paginated results, check that they arrived in the order
@@ -684,7 +684,7 @@ mod test {
         pagparams.marker = Some(&marker);
         pagparams.limit = NonZeroU32::new(2).unwrap();
         let query = paginated(dsl::test_users, dsl::age, &pagparams);
-        let observed = execute_query(&pool, query).await;
+        let observed = execute_query(pool, query).await;
         assert_eq!(observed, vec![(2, 2), (3, 3)]);
 
         db.terminate().await;
@@ -700,7 +700,7 @@ mod test {
 
         use schema::test_users::dsl;
 
-        populate_users(&pool, &vec![(1, 1), (2, 2), (3, 3)]).await;
+        populate_users(pool, &vec![(1, 1), (2, 2), (3, 3)]).await;
 
         // Get the first paginated result.
         let mut pagparams = DataPageParams::<i64> {
@@ -709,7 +709,7 @@ mod test {
             limit: NonZeroU32::new(1).unwrap(),
         };
         let query = paginated(dsl::test_users, dsl::age, &pagparams);
-        let observed = execute_query(&pool, query).await;
+        let observed = execute_query(pool, query).await;
         assert_eq!(observed, vec![(3, 3)]);
 
         // Get the next paginated results, check that they arrived in the order
@@ -718,7 +718,7 @@ mod test {
         pagparams.marker = Some(&marker);
         pagparams.limit = NonZeroU32::new(2).unwrap();
         let query = paginated(dsl::test_users, dsl::age, &pagparams);
-        let observed = execute_query(&pool, query).await;
+        let observed = execute_query(pool, query).await;
         assert_eq!(observed, vec![(2, 2), (1, 1)]);
 
         db.terminate().await;
@@ -734,7 +734,7 @@ mod test {
 
         use schema::test_users::dsl;
 
-        populate_users(&pool, &vec![(1, 1), (1, 2), (2, 1), (2, 3), (3, 1)])
+        populate_users(pool, &vec![(1, 1), (1, 2), (2, 1), (2, 3), (3, 1)])
             .await;
 
         // Get the first paginated result.
@@ -748,7 +748,7 @@ mod test {
             (dsl::age, dsl::height),
             &pagparams,
         );
-        let observed = execute_query(&pool, query).await;
+        let observed = execute_query(pool, query).await;
         assert_eq!(observed, vec![(1, 1)]);
 
         // Get the next paginated results, check that they arrived in the order
@@ -761,7 +761,7 @@ mod test {
             (dsl::age, dsl::height),
             &pagparams,
         );
-        let observed = execute_query(&pool, query).await;
+        let observed = execute_query(pool, query).await;
         assert_eq!(observed, vec![(1, 2), (2, 1), (2, 3), (3, 1)]);
 
         // Switch the order of columns to see height-first results.
@@ -771,7 +771,7 @@ mod test {
             (dsl::height, dsl::age),
             &pagparams,
         );
-        let observed = execute_query(&pool, query).await;
+        let observed = execute_query(pool, query).await;
         assert_eq!(observed, vec![(1, 1), (2, 1), (3, 1), (1, 2), (2, 3)]);
 
         db.terminate().await;
@@ -787,7 +787,7 @@ mod test {
 
         use schema::test_users::dsl;
 
-        populate_users(&pool, &vec![(1, 1), (1, 2), (2, 1), (2, 3), (3, 1)])
+        populate_users(pool, &vec![(1, 1), (1, 2), (2, 1), (2, 3), (3, 1)])
             .await;
 
         // Get the first paginated result.
@@ -801,7 +801,7 @@ mod test {
             (dsl::age, dsl::height),
             &pagparams,
         );
-        let observed = execute_query(&pool, query).await;
+        let observed = execute_query(pool, query).await;
         assert_eq!(observed, vec![(3, 1)]);
 
         // Get the next paginated results, check that they arrived in the order
@@ -814,7 +814,7 @@ mod test {
             (dsl::age, dsl::height),
             &pagparams,
         );
-        let observed = execute_query(&pool, query).await;
+        let observed = execute_query(pool, query).await;
         assert_eq!(observed, vec![(2, 3), (2, 1), (1, 2), (1, 1)]);
 
         // Switch the order of columns to see height-first results.
@@ -824,7 +824,7 @@ mod test {
             (dsl::height, dsl::age),
             &pagparams,
         );
-        let observed = execute_query(&pool, query).await;
+        let observed = execute_query(pool, query).await;
         assert_eq!(observed, vec![(2, 3), (1, 2), (3, 1), (2, 1), (1, 1)]);
 
         db.terminate().await;
@@ -843,7 +843,7 @@ mod test {
         use schema::test_phone_numbers::dsl as phone_numbers_dsl;
         use schema::test_users::dsl;
 
-        populate_users(&pool, &vec![(1, 1), (1, 2), (2, 1), (2, 3), (3, 1)])
+        populate_users(pool, &vec![(1, 1), (1, 2), (2, 1), (2, 3), (3, 1)])
             .await;
 
         async fn get_page(
@@ -868,7 +868,7 @@ mod test {
                             .on(phone_numbers_dsl::user_id.eq(dsl::id)),
                     ),
                     (dsl::age, phone_numbers_dsl::phone_number),
-                    &pagparams,
+                    pagparams,
                 )
                 .select((User::as_select(), PhoneNumber::as_select()))
                 .load_async(&conn)
@@ -890,7 +890,7 @@ mod test {
             direction: PaginationOrder::Ascending,
             limit: NonZeroU32::new(1).unwrap(),
         };
-        let observed = get_page(&pool, &pagparams).await;
+        let observed = get_page(pool, &pagparams).await;
         assert_eq!(dbg!(&observed), &[((1, 1), 10)]);
 
         // Get the next paginated results, check that they arrived in the order
@@ -899,7 +899,7 @@ mod test {
             (observed[0].user.age, observed[0].phone_number.phone_number);
         pagparams.marker = Some(&marker);
         pagparams.limit = NonZeroU32::new(10).unwrap();
-        let observed = get_page(&pool, &pagparams).await;
+        let observed = get_page(pool, &pagparams).await;
         assert_eq!(
             dbg!(&observed),
             &[
@@ -922,7 +922,7 @@ mod test {
             (observed[9].user.age, observed[9].phone_number.phone_number);
         pagparams.marker = Some(&marker);
         pagparams.limit = NonZeroU32::new(10).unwrap();
-        let observed = get_page(&pool, &pagparams).await;
+        let observed = get_page(pool, &pagparams).await;
         assert_eq!(
             dbg!(&observed),
             &[((2, 3), 42), ((3, 1), 50), ((3, 1), 51), ((3, 1), 52)]

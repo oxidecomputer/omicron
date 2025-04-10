@@ -103,7 +103,7 @@ impl SupportBundleCollector {
     ) -> anyhow::Result<SledAgentBundleCleanupResult> {
         let sled_client = nexus_networking::sled_client(
             &self.datastore,
-            &opctx,
+            opctx,
             sled_id.into_untyped_uuid(),
             &opctx.log,
         )
@@ -180,7 +180,7 @@ impl SupportBundleCollector {
                 if let Err(err) = self
                     .datastore
                     .support_bundle_update(
-                        &opctx,
+                        opctx,
                         &authz_bundle,
                         SupportBundleState::Failed,
                     )
@@ -274,15 +274,13 @@ impl SupportBundleCollector {
             // Find the sled where we're storing this bundle.
             let result = self
                 .datastore
-                .zpool_get_sled_if_in_service(&opctx, bundle.zpool_id.into())
+                .zpool_get_sled_if_in_service(opctx, bundle.zpool_id.into())
                 .await;
 
             let delete_from_db = match result {
                 Ok(sled_id) => {
                     match self
-                        .cleanup_bundle_from_sled_agent(
-                            &opctx, sled_id, &bundle,
-                        )
+                        .cleanup_bundle_from_sled_agent(opctx, sled_id, &bundle)
                         .await?
                     {
                         SledAgentBundleCleanupResult::Deleted => {
@@ -372,7 +370,7 @@ impl SupportBundleCollector {
         };
 
         let collection = BundleCollection {
-            collector: &self,
+            collector: self,
             log: opctx.log.new(slog::o!("bundle" => bundle.id.to_string())),
             opctx,
             request,
@@ -384,7 +382,7 @@ impl SupportBundleCollector {
         if let Err(err) = self
             .datastore
             .support_bundle_update(
-                &opctx,
+                opctx,
                 &authz_bundle,
                 SupportBundleState::Active,
             )
@@ -455,7 +453,7 @@ impl BundleCollection<'_> {
                     );
 
                     let bundle = self.collector.datastore.support_bundle_get(
-                        &self.opctx,
+                        self.opctx,
                         self.bundle.id.into()
                     ).await?;
                     if !matches!(bundle.state, SupportBundleState::Collecting) {
@@ -492,13 +490,13 @@ impl BundleCollection<'_> {
             .collector
             .datastore
             .zpool_get_sled_if_in_service(
-                &self.opctx,
+                self.opctx,
                 self.bundle.zpool_id.into(),
             )
             .await?;
         let sled_client = nexus_networking::sled_client(
             &self.collector.datastore,
-            &self.opctx,
+            self.opctx,
             sled_id.into_untyped_uuid(),
             &self.log,
         )
@@ -561,7 +559,7 @@ impl BundleCollection<'_> {
         if let Ok(all_sleds) = self
             .collector
             .datastore
-            .sled_list_all_batched(&self.opctx, SledFilter::InService)
+            .sled_list_all_batched(self.opctx, SledFilter::InService)
             .await
         {
             report.listed_in_service_sleds = true;
@@ -588,7 +586,7 @@ impl BundleCollection<'_> {
 
                 let Ok(sled_client) = nexus_networking::sled_client(
                     &self.collector.datastore,
-                    &self.opctx,
+                    self.opctx,
                     sled.id(),
                     log,
                 )
@@ -701,7 +699,7 @@ impl BackgroundTask for SupportBundleCollector {
             let mut collection_report = None;
             let mut collection_err = None;
 
-            match self.cleanup_destroyed_bundles(&opctx).await {
+            match self.cleanup_destroyed_bundles(opctx).await {
                 Ok(report) => cleanup_report = Some(report),
                 Err(err) => {
                     cleanup_err =
@@ -710,7 +708,7 @@ impl BackgroundTask for SupportBundleCollector {
             };
 
             let request = BundleRequest::default();
-            match self.collect_bundle(&opctx, &request).await {
+            match self.collect_bundle(opctx, &request).await {
                 Ok(report) => collection_report = Some(report),
                 Err(err) => {
                     collection_err =
@@ -750,7 +748,7 @@ fn recursively_add_directory_to_zipfile(
         .read_dir_utf8()?
         .filter_map(Result::ok)
         .collect::<Vec<Utf8DirEntry>>();
-    entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    entries.sort_by(|a, b| a.file_name().cmp(b.file_name()));
 
     for entry in &entries {
         // Remove the "/tmp/..." prefix from the path when we're storing it in the
@@ -973,7 +971,7 @@ mod test {
             sled_id.into_untyped_uuid(),
         );
         datastore
-            .physical_disk_insert(&opctx, physical_disk.clone())
+            .physical_disk_insert(opctx, physical_disk.clone())
             .await
             .unwrap();
         id
@@ -1008,8 +1006,8 @@ mod test {
                 let disk_id =
                     make_disk_in_db(datastore, opctx, i, sled_id).await;
                 let (zpool_id, dataset_id) = add_zpool_and_debug_dataset(
-                    &datastore,
-                    &opctx,
+                    datastore,
+                    opctx,
                     disk_id,
                     sled_id,
                     blueprint_id,
@@ -1073,7 +1071,7 @@ mod test {
         // Before we can create any bundles, we need to create the
         // space for them to be provisioned.
         let _datasets =
-            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+            TestDataset::setup(cptestctx, datastore, &opctx, 1).await;
 
         // Assign a bundle to ourselves. We expect to collect it on
         // the next call to "collect_bundle".
@@ -1128,7 +1126,7 @@ mod test {
         // Before we can create any bundles, we need to create the
         // space for them to be provisioned.
         let _datasets =
-            TestDataset::setup(cptestctx, &datastore, &opctx, 2).await;
+            TestDataset::setup(cptestctx, datastore, &opctx, 2).await;
 
         // Assign two bundles to ourselves.
         let bundle1 = datastore
@@ -1204,7 +1202,7 @@ mod test {
         // Before we can create any bundles, we need to create the
         // space for them to be provisioned.
         let _datasets =
-            TestDataset::setup(cptestctx, &datastore, &opctx, 2).await;
+            TestDataset::setup(cptestctx, datastore, &opctx, 2).await;
 
         // If we delete the bundle before we start collection, we can delete it
         // immediately.
@@ -1259,7 +1257,7 @@ mod test {
         // Before we can create any bundles, we need to create the
         // space for them to be provisioned.
         let _datasets =
-            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+            TestDataset::setup(cptestctx, datastore, &opctx, 1).await;
 
         // We can allocate a support bundle and collect it
         let bundle = datastore
@@ -1324,7 +1322,7 @@ mod test {
         // Before we can create any bundles, we need to create the
         // space for them to be provisioned.
         let _datasets =
-            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+            TestDataset::setup(cptestctx, datastore, &opctx, 1).await;
 
         // We can allocate a support bundle, though we'll fail it before it gets
         // collected.
@@ -1384,7 +1382,7 @@ mod test {
         // Before we can create any bundles, we need to create the
         // space for them to be provisioned.
         let _datasets =
-            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+            TestDataset::setup(cptestctx, datastore, &opctx, 1).await;
 
         // We can allocate a support bundle and collect it
         let bundle = datastore
@@ -1458,7 +1456,7 @@ mod test {
         // Before we can create any bundles, we need to create the
         // space for them to be provisioned.
         let _datasets =
-            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+            TestDataset::setup(cptestctx, datastore, &opctx, 1).await;
 
         // We can allocate a support bundle and collect it
         let bundle = datastore

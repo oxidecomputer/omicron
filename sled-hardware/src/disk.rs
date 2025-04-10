@@ -292,7 +292,7 @@ impl PooledDisk {
         // Ensure the GPT has the right format. This does not necessarily
         // mean that the partitions are populated with the data we need.
         let partitions =
-            ensure_partition_layout(&log, &paths, variant, identity, zpool_id)?;
+            ensure_partition_layout(log, paths, variant, identity, zpool_id)?;
 
         // Find the path to the zpool which exists on this disk.
         //
@@ -327,7 +327,7 @@ impl PooledDisk {
 pub fn check_if_zpool_exists(
     zpool_path: &Utf8Path,
 ) -> Result<ZpoolName, PooledDiskError> {
-    let zpool_name = match Fstyp::get_zpool(&zpool_path) {
+    let zpool_name = match Fstyp::get_zpool(zpool_path) {
         Ok(zpool_name) => zpool_name,
         Err(_) => return Err(PooledDiskError::ZpoolDoesNotExist),
     };
@@ -340,7 +340,7 @@ pub fn ensure_zpool_exists(
     zpool_path: &Utf8Path,
     zpool_id: Option<ZpoolUuid>,
 ) -> Result<ZpoolName, PooledDiskError> {
-    let zpool_name = match Fstyp::get_zpool(&zpool_path) {
+    let zpool_name = match Fstyp::get_zpool(zpool_path) {
         Ok(zpool_name) => {
             if let Some(expected) = zpool_id {
                 info!(log, "Checking that UUID in storage matches request"; "expected" => ?expected);
@@ -388,7 +388,7 @@ pub fn ensure_zpool_exists(
                 DiskVariant::M2 => ZpoolName::new_internal(id),
                 DiskVariant::U2 => ZpoolName::new_external(id),
             };
-            Zpool::real_api().create(&zpool_name, &zpool_path)?;
+            Zpool::real_api().create(&zpool_name, zpool_path)?;
             zpool_name
         }
     };
@@ -404,7 +404,7 @@ pub fn ensure_zpool_imported(
     log: &Logger,
     zpool_name: &ZpoolName,
 ) -> Result<(), PooledDiskError> {
-    Zpool::import(&zpool_name).map_err(|e| {
+    Zpool::import(zpool_name).map_err(|e| {
         warn!(log, "Failed to import zpool {zpool_name}: {e}");
         PooledDiskError::ZpoolImport(e)
     })?;
@@ -422,7 +422,7 @@ pub fn ensure_zpool_failmode_is_continue(
     // actively harmful to try to wait for it to come back; we'll be waiting
     // forever and get stuck. We'd rather get the errors so we can deal with
     // them ourselves.
-    Zpool::set_failmode_continue(&zpool_name).map_err(|e| {
+    Zpool::set_failmode_continue(zpool_name).map_err(|e| {
         warn!(
             log,
             "Failed to set failmode=continue on zpool {zpool_name}: {e}"

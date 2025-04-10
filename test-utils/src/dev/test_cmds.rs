@@ -292,7 +292,7 @@ fn redact_basic(input: &str) -> String {
     // characters to avoid catching any random sequence of numbers.
     let s = regex::Regex::new(r"\[::1\]:\d{4,5}")
         .unwrap()
-        .replace_all(&input, "[::1]:REDACTED_PORT")
+        .replace_all(input, "[::1]:REDACTED_PORT")
         .to_string();
     let s = regex::Regex::new(r"\[::ffff:127.0.0.1\]:\d{4,5}")
         .unwrap()
@@ -380,7 +380,7 @@ fn redact_uuids(input: &str) -> String {
     const UUID_LEN: usize = 36;
     regex::Regex::new(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
         .unwrap()
-        .replace_all(&input, fill_redaction_text("uuid", UUID_LEN))
+        .replace_all(input, fill_redaction_text("uuid", UUID_LEN))
         .to_string()
 }
 

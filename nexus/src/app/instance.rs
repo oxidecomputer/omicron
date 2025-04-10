@@ -273,7 +273,7 @@ async fn normalize_ssh_keys(
         .authn
         .actor_required()
         .internal_context("loading current user's ssh keys for new Instance")?;
-    let (.., authz_user) = LookupPath::new(opctx, &datastore)
+    let (.., authz_user) = LookupPath::new(opctx, datastore)
         .silo_user_id(actor.actor_id())
         .lookup_for(authz::Action::ListChildren)
         .await?;
@@ -616,7 +616,7 @@ impl super::Nexus {
         id: InstanceUuid,
         params: nexus_types::internal_api::params::InstanceMigrateRequest,
     ) -> UpdateResult<InstanceAndActiveVmm> {
-        let (.., authz_instance) = LookupPath::new(&opctx, &self.db_datastore)
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
             .instance_id(id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
@@ -797,7 +797,7 @@ impl super::Nexus {
         propolis_id: &PropolisUuid,
         sled_id: &SledUuid,
     ) -> Result<Option<nexus::SledVmmState>, InstanceStateChangeError> {
-        let sa = self.sled_client(&sled_id).await?;
+        let sa = self.sled_client(sled_id).await?;
         sa.vmm_unregister(propolis_id)
             .await
             .map(|res| res.into_inner().updated_runtime.map(Into::into))
@@ -1096,8 +1096,8 @@ impl super::Nexus {
         let disks = self
             .db_datastore
             .instance_list_disks(
-                &opctx,
-                &authz_instance,
+                opctx,
+                authz_instance,
                 &PaginatedBy::Name(DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
@@ -1160,14 +1160,14 @@ impl super::Nexus {
 
         let nics = self
             .db_datastore
-            .derive_guest_network_interface_info(&opctx, &authz_instance)
+            .derive_guest_network_interface_info(opctx, authz_instance)
             .await?;
 
         // Collect the external IPs for the instance.
         let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
             .db_datastore
             .instance_lookup_external_ips(
-                &opctx,
+                opctx,
                 InstanceUuid::from_untyped_uuid(authz_instance.id()),
             )
             .await?
@@ -1366,9 +1366,9 @@ impl super::Nexus {
                 if e.vmm_gone() {
                     let _ = self
                         .mark_vmm_failed(
-                            &opctx,
+                            opctx,
                             authz_instance.clone(),
-                            &initial_vmm,
+                            initial_vmm,
                             &e,
                         )
                         .await;
@@ -1520,7 +1520,7 @@ impl super::Nexus {
         let (_instance, disk) = self
             .db_datastore
             .instance_attach_disk(
-                &opctx,
+                opctx,
                 &authz_instance,
                 &authz_disk,
                 MAX_DISKS_PER_INSTANCE,
@@ -1566,7 +1566,7 @@ impl super::Nexus {
         //   - Update the disk state in the DB to "Detached".
         let disk = self
             .db_datastore
-            .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
+            .instance_detach_disk(opctx, &authz_instance, &authz_disk)
             .await?;
         Ok(disk)
     }
@@ -2173,7 +2173,7 @@ pub(crate) async fn process_vmm_update(
 
     let result = datastore
         .vmm_and_migration_update_runtime(
-            &opctx,
+            opctx,
             propolis_id,
             // TODO(eliza): probably should take this by value...
             &new_runtime_state.vmm_state.clone().into(),
@@ -2192,7 +2192,7 @@ pub(crate) async fn process_vmm_update(
         let instance_id =
             InstanceUuid::from_untyped_uuid(result.found_vmm.instance_id);
 
-        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
+        let (.., authz_instance) = LookupPath::new(opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;

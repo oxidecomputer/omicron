@@ -50,7 +50,7 @@ fn target_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
     if let Data::Struct(ref data) = item.data {
         let name = &item.ident;
         let fields = if let Fields::Named(ref data_fields) = data.fields {
-            extract_struct_fields(&data_fields, None)
+            extract_struct_fields(data_fields, None)
         } else if matches!(data.fields, Fields::Unit) {
             vec![]
         } else {
@@ -59,7 +59,7 @@ fn target_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
                 "Can only be derived for structs with named fields or unit structs",
             ));
         };
-        return Ok(build_target_trait_impl(&name, &fields[..]));
+        return Ok(build_target_trait_impl(name, &fields[..]));
     }
     Err(Error::new(
         item.span(),
@@ -74,9 +74,9 @@ fn metric_impl(item: TokenStream) -> syn::Result<TokenStream> {
     let name = &item.ident;
     if let Fields::Named(ref data_fields) = item.fields {
         let ignore = datum_field.ident.as_ref().unwrap().to_string();
-        let fields = extract_struct_fields(&data_fields, Some(&ignore));
+        let fields = extract_struct_fields(data_fields, Some(&ignore));
         let metric_impl =
-            build_metric_trait_impl(name, &fields[..], &datum_field);
+            build_metric_trait_impl(name, &fields[..], datum_field);
         Ok(quote! {
             #metric_impl
         })

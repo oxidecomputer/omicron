@@ -50,11 +50,11 @@ impl DataStore {
         disk: PhysicalDisk,
         zpool: Zpool,
     ) -> Result<(), Error> {
-        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
 
         self.transaction_retry_wrapper("physical_disk_adoption")
-            .transaction(&conn, |conn| {
+            .transaction(conn, |conn| {
                 let err = err.clone();
                 let disk = disk.clone();
                 let zpool = zpool.clone();
@@ -108,9 +108,9 @@ impl DataStore {
         opctx: &OpContext,
         disk: PhysicalDisk,
     ) -> CreateResult<PhysicalDisk> {
-        let conn = &*self.pool_connection_authorized(&opctx).await?;
-        let disk = Self::physical_disk_insert_on_connection(&conn, opctx, disk)
-            .await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+        let disk =
+            Self::physical_disk_insert_on_connection(conn, opctx, disk).await?;
         Ok(disk)
     }
 
@@ -161,7 +161,7 @@ impl DataStore {
         )
         .filter(dsl::time_deleted.is_null())
         .set((dsl::disk_policy.eq(policy), dsl::time_modified.eq(now)))
-        .execute_async(&*self.pool_connection_authorized(&opctx).await?)
+        .execute_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|err| public_error_from_diesel(err, ErrorHandler::Server))?;
         Ok(())
@@ -182,7 +182,7 @@ impl DataStore {
         )
         .filter(dsl::time_deleted.is_null())
         .set((dsl::disk_state.eq(state), dsl::time_modified.eq(now)))
-        .execute_async(&*self.pool_connection_authorized(&opctx).await?)
+        .execute_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|err| public_error_from_diesel(err, ErrorHandler::Server))?;
         Ok(())
@@ -294,7 +294,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::physical_disk::dsl;
         let now = Utc::now();
-        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
         diesel::update(dsl::physical_disk)
             .filter(dsl::id.eq(to_db_typed_uuid(id)))
             .filter(dsl::time_deleted.is_null())
@@ -371,7 +371,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled = create_test_sled(&datastore).await;
+        let sled = create_test_sled(datastore).await;
         let sled_id = sled.id();
 
         // Insert a disk
@@ -384,14 +384,14 @@ mod test {
             sled_id,
         );
         let first_observed_disk = datastore
-            .physical_disk_insert(&opctx, disk.clone())
+            .physical_disk_insert(opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
         assert_eq!(disk.id(), first_observed_disk.id());
 
         // Insert a disk with an identical UUID
         let err = datastore
-            .physical_disk_insert(&opctx, disk.clone())
+            .physical_disk_insert(opctx, disk.clone())
             .await
             .expect_err("Should have failed upserting disk");
 
@@ -412,7 +412,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled = create_test_sled(&datastore).await;
+        let sled = create_test_sled(datastore).await;
         let sled_id = sled.id();
 
         // Insert a disk
@@ -425,7 +425,7 @@ mod test {
             sled_id,
         );
         datastore
-            .physical_disk_insert(&opctx, disk.clone())
+            .physical_disk_insert(opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
 
@@ -439,13 +439,13 @@ mod test {
             sled_id,
         );
         datastore
-            .physical_disk_insert(&opctx, disk.clone())
+            .physical_disk_insert(opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
 
         let pagparams = list_disk_params();
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_id, &pagparams)
+            .sled_list_physical_disks(opctx, sled_id, &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 2);
@@ -460,7 +460,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled = create_test_sled(&datastore).await;
+        let sled = create_test_sled(datastore).await;
 
         // Insert a disk
         let disk_id = PhysicalDiskUuid::new_v4();
@@ -473,30 +473,30 @@ mod test {
             sled.id(),
         );
         datastore
-            .physical_disk_insert(&opctx, disk.clone())
+            .physical_disk_insert(opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
         let pagparams = list_disk_params();
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled.id(), &pagparams)
+            .sled_list_physical_disks(opctx, sled.id(), &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
 
         // Delete the inserted disk
         datastore
-            .physical_disk_delete(&opctx, disk_id)
+            .physical_disk_delete(opctx, disk_id)
             .await
             .expect("Failed to delete disk");
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled.id(), &pagparams)
+            .sled_list_physical_disks(opctx, sled.id(), &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert!(disks.is_empty());
 
         // Deleting again should not throw an error
         datastore
-            .physical_disk_delete(&opctx, disk_id)
+            .physical_disk_delete(opctx, disk_id)
             .await
             .expect("Failed to delete disk");
 
@@ -517,8 +517,8 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled_a = create_test_sled(&datastore).await;
-        let sled_b = create_test_sled(&datastore).await;
+        let sled_a = create_test_sled(datastore).await;
+        let sled_b = create_test_sled(datastore).await;
 
         // Insert a disk
         let disk_id = PhysicalDiskUuid::new_v4();
@@ -531,33 +531,33 @@ mod test {
             sled_a.id(),
         );
         datastore
-            .physical_disk_insert(&opctx, disk.clone())
+            .physical_disk_insert(opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
         let pagparams = list_disk_params();
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_a.id(), &pagparams)
+            .sled_list_physical_disks(opctx, sled_a.id(), &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_b.id(), &pagparams)
+            .sled_list_physical_disks(opctx, sled_b.id(), &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert!(disks.is_empty());
 
         // Delete the inserted disk
         datastore
-            .physical_disk_delete(&opctx, disk_id)
+            .physical_disk_delete(opctx, disk_id)
             .await
             .expect("Failed to delete disk");
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_a.id(), &pagparams)
+            .sled_list_physical_disks(opctx, sled_a.id(), &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert!(disks.is_empty());
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_b.id(), &pagparams)
+            .sled_list_physical_disks(opctx, sled_b.id(), &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert!(disks.is_empty());
@@ -573,17 +573,17 @@ mod test {
             sled_b.id(),
         );
         datastore
-            .physical_disk_insert(&opctx, disk.clone())
+            .physical_disk_insert(opctx, disk.clone())
             .await
             .expect("Failed second attempt at upserting disk");
 
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_a.id(), &pagparams)
+            .sled_list_physical_disks(opctx, sled_a.id(), &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert!(disks.is_empty());
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_b.id(), &pagparams)
+            .sled_list_physical_disks(opctx, sled_b.id(), &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
@@ -606,8 +606,8 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled_a = create_test_sled(&datastore).await;
-        let sled_b = create_test_sled(&datastore).await;
+        let sled_a = create_test_sled(datastore).await;
+        let sled_b = create_test_sled(datastore).await;
 
         // Insert a disk
         let disk_id = PhysicalDiskUuid::new_v4();
@@ -620,24 +620,24 @@ mod test {
             sled_a.id(),
         );
         datastore
-            .physical_disk_insert(&opctx, disk.clone())
+            .physical_disk_insert(opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
         let pagparams = list_disk_params();
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_a.id(), &pagparams)
+            .sled_list_physical_disks(opctx, sled_a.id(), &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_b.id(), &pagparams)
+            .sled_list_physical_disks(opctx, sled_b.id(), &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert!(disks.is_empty());
 
         // Remove the disk from the first sled
         datastore
-            .physical_disk_delete(&opctx, disk_id)
+            .physical_disk_delete(opctx, disk_id)
             .await
             .expect("Failed to delete disk");
 
@@ -651,17 +651,17 @@ mod test {
             sled_b.id(),
         );
         datastore
-            .physical_disk_insert(&opctx, disk.clone())
+            .physical_disk_insert(opctx, disk.clone())
             .await
             .expect("Failed second attempt at upserting disk");
 
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_a.id(), &pagparams)
+            .sled_list_physical_disks(opctx, sled_a.id(), &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert!(disks.is_empty());
         let disks = datastore
-            .sled_list_physical_disks(&opctx, sled_b.id(), &pagparams)
+            .sled_list_physical_disks(opctx, sled_b.id(), &pagparams)
             .await
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
@@ -782,23 +782,22 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled = create_test_sled(&datastore).await;
+        let sled = create_test_sled(datastore).await;
 
         // We can insert a disk into a sled that is not yet expunged
         let inv_disk = create_inv_disk("serial-001".to_string(), 1);
         let (disk, zpool) = create_disk_zpool_combo(sled.id(), &inv_disk);
         datastore
-            .physical_disk_and_zpool_insert(&opctx, disk, zpool)
+            .physical_disk_and_zpool_insert(opctx, disk, zpool)
             .await
             .unwrap();
 
         // Mark the sled as expunged
-        let sled_lookup =
-            LookupPath::new(&opctx, &datastore).sled_id(sled.id());
+        let sled_lookup = LookupPath::new(opctx, datastore).sled_id(sled.id());
         let (authz_sled,) =
             sled_lookup.lookup_for(authz::Action::Modify).await.unwrap();
         datastore
-            .sled_set_policy_to_expunged(&opctx, &authz_sled)
+            .sled_set_policy_to_expunged(opctx, &authz_sled)
             .await
             .unwrap();
 
@@ -806,7 +805,7 @@ mod test {
         let inv_disk = create_inv_disk("serial-002".to_string(), 2);
         let (disk, zpool) = create_disk_zpool_combo(sled.id(), &inv_disk);
         let err = datastore
-            .physical_disk_and_zpool_insert(&opctx, disk, zpool)
+            .physical_disk_and_zpool_insert(opctx, disk, zpool)
             .await
             .unwrap_err();
 
@@ -827,13 +826,13 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let sled_a = create_test_sled(&datastore).await;
-        let sled_b = create_test_sled(&datastore).await;
+        let sled_a = create_test_sled(datastore).await;
+        let sled_b = create_test_sled(datastore).await;
 
         // No inventory -> No uninitialized disks
         let uninitialized_disks = datastore
             .physical_disk_uninitialized_list(
-                &opctx,
+                opctx,
                 CollectionUuid::new_v4(), // Collection that does not exist
             )
             .await
@@ -857,14 +856,14 @@ mod test {
         let collection = builder.build();
         let collection_id = collection.id;
         datastore
-            .inventory_insert_collection(&opctx, &collection)
+            .inventory_insert_collection(opctx, &collection)
             .await
             .expect("failed to insert collection");
 
         // Now when we list the uninitialized disks, we should see everything in
         // the inventory.
         let uninitialized_disks = datastore
-            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .physical_disk_uninitialized_list(opctx, collection_id)
             .await
             .expect("Failed to list uninitialized disks");
         assert_eq!(uninitialized_disks.len(), 6);
@@ -897,24 +896,24 @@ mod test {
         let (disk_001, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[0]);
         datastore
-            .physical_disk_and_zpool_insert(&opctx, disk_001, zpool)
+            .physical_disk_and_zpool_insert(opctx, disk_001, zpool)
             .await
             .unwrap();
         let (disk_002, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[1]);
         datastore
-            .physical_disk_and_zpool_insert(&opctx, disk_002, zpool)
+            .physical_disk_and_zpool_insert(opctx, disk_002, zpool)
             .await
             .unwrap();
         let (disk_101, zpool) =
             create_disk_zpool_combo(sled_b.id(), &disks_b[0]);
         datastore
-            .physical_disk_and_zpool_insert(&opctx, disk_101, zpool)
+            .physical_disk_and_zpool_insert(opctx, disk_101, zpool)
             .await
             .unwrap();
 
         let uninitialized_disks = datastore
-            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .physical_disk_uninitialized_list(opctx, collection_id)
             .await
             .expect("Failed to list uninitialized disks");
         assert_eq!(uninitialized_disks.len(), 3);
@@ -947,24 +946,24 @@ mod test {
         let (disk_003, zpool) =
             create_disk_zpool_combo(sled_a.id(), &disks_a[2]);
         datastore
-            .physical_disk_and_zpool_insert(&opctx, disk_003.clone(), zpool)
+            .physical_disk_and_zpool_insert(opctx, disk_003.clone(), zpool)
             .await
             .unwrap();
         let (disk_102, zpool) =
             create_disk_zpool_combo(sled_b.id(), &disks_b[1]);
         datastore
-            .physical_disk_and_zpool_insert(&opctx, disk_102.clone(), zpool)
+            .physical_disk_and_zpool_insert(opctx, disk_102.clone(), zpool)
             .await
             .unwrap();
         let (disk_103, zpool) =
             create_disk_zpool_combo(sled_b.id(), &disks_b[2]);
         datastore
-            .physical_disk_and_zpool_insert(&opctx, disk_103.clone(), zpool)
+            .physical_disk_and_zpool_insert(opctx, disk_103.clone(), zpool)
             .await
             .unwrap();
 
         let uninitialized_disks = datastore
-            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .physical_disk_uninitialized_list(opctx, collection_id)
             .await
             .expect("Failed to list uninitialized disks");
         assert_eq!(uninitialized_disks.len(), 0);
@@ -980,7 +979,7 @@ mod test {
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
             .execute_async(
-                &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
             )
             .await
             .unwrap();
@@ -991,14 +990,14 @@ mod test {
             .filter(dsl::time_deleted.is_null())
             .set(dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
             .execute_async(
-                &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
+                &*datastore.pool_connection_authorized(opctx).await.unwrap(),
             )
             .await
             .unwrap();
 
         // The set of uninitialized disks should remain at zero
         let uninitialized_disks = datastore
-            .physical_disk_uninitialized_list(&opctx, collection_id)
+            .physical_disk_uninitialized_list(opctx, collection_id)
             .await
             .expect("Failed to list uninitialized disks");
         assert_eq!(uninitialized_disks.len(), 0);

@@ -47,9 +47,9 @@ impl DataStore {
         opctx: &OpContext,
         zpool: Zpool,
     ) -> CreateResult<Zpool> {
-        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
         let zpool =
-            Self::zpool_insert_on_connection(&conn, opctx, zpool).await?;
+            Self::zpool_insert_on_connection(conn, opctx, zpool).await?;
         Ok(zpool)
     }
 
@@ -196,9 +196,9 @@ impl DataStore {
         opctx: &OpContext,
         zpool_id: ZpoolUuid,
     ) -> DeleteResult {
-        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
         Self::zpool_delete_self_and_all_datasets_on_connection(
-            &conn, opctx, zpool_id,
+            conn, opctx, zpool_id,
         )
         .await
     }

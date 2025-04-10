@@ -74,8 +74,8 @@ impl IneligibleSleds {
     ) -> Result<()> {
         let non_provisionable_fut = async {
             sled_set_policy(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 self.non_provisionable,
                 SledPolicy::InService {
                     provision_policy: SledProvisionPolicy::NonProvisionable,
@@ -94,8 +94,8 @@ impl IneligibleSleds {
 
         let expunged_fut = async {
             sled_set_policy(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 self.expunged,
                 SledPolicy::Expunged,
                 ValidateTransition::Yes,
@@ -115,8 +115,8 @@ impl IneligibleSleds {
         // removal as well.)
         let decommissioned_fut = async {
             sled_set_policy(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 self.decommissioned,
                 SledPolicy::Expunged,
                 ValidateTransition::Yes,
@@ -132,8 +132,8 @@ impl IneligibleSleds {
             })?;
 
             sled_set_state(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 self.decommissioned,
                 SledState::Decommissioned,
                 ValidateTransition::Yes,
@@ -153,8 +153,8 @@ impl IneligibleSleds {
         // provision resources on it.
         let illegal_decommissioned_fut = async {
             sled_set_state(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 self.illegal_decommissioned,
                 SledState::Decommissioned,
                 ValidateTransition::No,
@@ -201,8 +201,8 @@ impl IneligibleSleds {
             kind: IneligibleSledKind,
         ) -> Result<()> {
             sled_set_policy(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 sled_id,
                 SledPolicy::provisionable(),
                 ValidateTransition::No,
@@ -217,8 +217,8 @@ impl IneligibleSleds {
             })?;
 
             sled_set_state(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 sled_id,
                 SledState::Active,
                 ValidateTransition::No,
@@ -252,7 +252,7 @@ pub(super) async fn sled_set_policy(
     check: ValidateTransition,
     expected_old_policy: Expected<SledPolicy>,
 ) -> Result<()> {
-    let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
+    let (authz_sled, _) = LookupPath::new(opctx, datastore)
         .sled_id(sled_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
@@ -300,14 +300,14 @@ pub(super) async fn sled_set_state(
     check: ValidateTransition,
     expected_old_state: Expected<SledState>,
 ) -> Result<()> {
-    let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
+    let (authz_sled, _) = LookupPath::new(opctx, datastore)
         .sled_id(sled_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
         .unwrap();
 
     let res = datastore
-        .sled_set_state_impl(&opctx, &authz_sled, new_state, check)
+        .sled_set_state_impl(opctx, &authz_sled, new_state, check)
         .await;
     match expected_old_state {
         Expected::Ok(expected) => {

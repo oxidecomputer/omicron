@@ -120,7 +120,7 @@ impl Workspaces {
         workspaces.insert(
             String::from("dendrite"),
             load_dependent_repo(
-                &maghemite,
+                maghemite,
                 "dendrite",
                 "dpd-client",
                 None,
@@ -177,7 +177,7 @@ impl Workspaces {
             .workspaces
             .values()
             .filter_map(|w| {
-                w.find_workspace_package(&server_pkgname).map(|p| (w, p))
+                w.find_workspace_package(server_pkgname).map(|p| (w, p))
             })
             .collect();
 

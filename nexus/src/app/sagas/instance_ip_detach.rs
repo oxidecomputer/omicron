@@ -376,7 +376,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let _ = ip_manip_test_setup(&client).await;
+        let _ = ip_manip_test_setup(client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
@@ -490,7 +490,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let _project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
@@ -506,7 +506,7 @@ pub(crate) mod test {
             test_helpers::action_failure_can_unwind::<SagaInstanceIpDetach, _, _>(
                 nexus,
                 || Box::pin(new_test_params(&opctx, datastore, use_float) ),
-                || Box::pin(verify_clean_slate(&cptestctx, instance.id())),
+                || Box::pin(verify_clean_slate(cptestctx, instance.id())),
                 log,
             )
             .await;
@@ -524,7 +524,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let _project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
@@ -544,7 +544,7 @@ pub(crate) mod test {
             >(
                 nexus,
                 || Box::pin(new_test_params(&opctx, datastore, use_float)),
-                || Box::pin(verify_clean_slate(&cptestctx, instance.id())),
+                || Box::pin(verify_clean_slate(cptestctx, instance.id())),
                 log,
             )
             .await;
@@ -561,7 +561,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let _project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 

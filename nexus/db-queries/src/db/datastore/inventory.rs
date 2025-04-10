@@ -2525,7 +2525,7 @@ mod test {
             part_number: "some-part".into(),
         };
         let err = datastore
-            .find_hw_baseboard_id(&opctx, &baseboard_id)
+            .find_hw_baseboard_id(opctx, &baseboard_id)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::ObjectNotFound { .. }));
@@ -2546,14 +2546,14 @@ mod test {
         let builder = nexus_inventory::CollectionBuilder::new("test");
         let collection1 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection1)
+            .inventory_insert_collection(opctx, &collection1)
             .await
             .expect("failed to insert collection");
 
         // Read it back.
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         let collection_read = datastore
-            .inventory_collection_read(&opctx, collection1.id)
+            .inventory_collection_read(opctx, collection1.id)
             .await
             .expect("failed to read collection back");
         assert_eq!(collection1, collection_read);
@@ -2573,11 +2573,11 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection2 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection2)
+            .inventory_insert_collection(opctx, &collection2)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
-            .inventory_collection_read(&opctx, collection2.id)
+            .inventory_collection_read(opctx, collection2.id)
             .await
             .expect("failed to read collection back");
         assert_eq!(collection2, collection_read);
@@ -2598,7 +2598,7 @@ mod test {
         // having to actually read 1000s of records.
         let batched_read = datastore
             .inventory_collection_read_batched(
-                &opctx,
+                opctx,
                 collection2.id,
                 NonZeroU32::new(1).unwrap(),
             )
@@ -2617,11 +2617,11 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection3 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection3)
+            .inventory_insert_collection(opctx, &collection3)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
-            .inventory_collection_read(&opctx, collection3.id)
+            .inventory_collection_read(opctx, collection3.id)
             .await
             .expect("failed to read collection back");
         assert_eq!(collection3, collection_read);
@@ -2671,11 +2671,11 @@ mod test {
             .unwrap();
         let collection4 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection4)
+            .inventory_insert_collection(opctx, &collection4)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
-            .inventory_collection_read(&opctx, collection4.id)
+            .inventory_collection_read(opctx, collection4.id)
             .await
             .expect("failed to read collection back");
         assert_eq!(collection4, collection_read);
@@ -2700,11 +2700,11 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection5 = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection5)
+            .inventory_insert_collection(opctx, &collection5)
             .await
             .expect("failed to insert collection");
         let collection_read = datastore
-            .inventory_collection_read(&opctx, collection5.id)
+            .inventory_collection_read(opctx, collection5.id)
             .await
             .expect("failed to read collection back");
         assert_eq!(collection5, collection_read);
@@ -2721,7 +2721,7 @@ mod test {
 
         // Try to insert the same collection again and make sure it fails.
         let error = datastore
-            .inventory_insert_collection(&opctx, &collection5)
+            .inventory_insert_collection(opctx, &collection5)
             .await
             .expect_err("unexpectedly succeeded in inserting collection");
         assert!(
@@ -2762,7 +2762,7 @@ mod test {
             ]
         );
         datastore
-            .inventory_prune_collections(&opctx, 4)
+            .inventory_prune_collections(opctx, 4)
             .await
             .expect("failed to prune collections");
         assert_eq!(
@@ -2778,7 +2778,7 @@ mod test {
         // Again, we should skip over collection1 and delete the next oldest:
         // collection3.
         datastore
-            .inventory_prune_collections(&opctx, 3)
+            .inventory_prune_collections(opctx, 3)
             .await
             .expect("failed to prune collections");
         assert_eq!(
@@ -2793,7 +2793,7 @@ mod test {
         );
         // At this point, if we're keeping 3, we don't need to prune anything.
         datastore
-            .inventory_prune_collections(&opctx, 3)
+            .inventory_prune_collections(opctx, 3)
             .await
             .expect("failed to prune collections");
         assert_eq!(
@@ -2816,7 +2816,7 @@ mod test {
             collection6.id, collection6.time_started
         );
         datastore
-            .inventory_insert_collection(&opctx, &collection6)
+            .inventory_insert_collection(opctx, &collection6)
             .await
             .expect("failed to insert collection");
         assert_eq!(
@@ -2830,7 +2830,7 @@ mod test {
             &[collection1.id, collection4.id, collection5.id, collection6.id,]
         );
         datastore
-            .inventory_prune_collections(&opctx, 3)
+            .inventory_prune_collections(opctx, 3)
             .await
             .expect("failed to prune collections");
         assert_eq!(
@@ -2845,7 +2845,7 @@ mod test {
         );
         // Again, at this point, we should not prune anything.
         datastore
-            .inventory_prune_collections(&opctx, 3)
+            .inventory_prune_collections(opctx, 3)
             .await
             .expect("failed to prune collections");
         assert_eq!(
@@ -2868,11 +2868,11 @@ mod test {
             collection7.id, collection7.time_started
         );
         datastore
-            .inventory_insert_collection(&opctx, &collection7)
+            .inventory_insert_collection(opctx, &collection7)
             .await
             .expect("failed to insert collection");
         datastore
-            .inventory_prune_collections(&opctx, 3)
+            .inventory_prune_collections(opctx, 3)
             .await
             .expect("failed to prune collections");
         assert_eq!(
@@ -2888,23 +2888,23 @@ mod test {
 
         // If we try to fetch a pruned collection, we should get nothing.
         let _ = datastore
-            .inventory_collection_read(&opctx, collection4.id)
+            .inventory_collection_read(opctx, collection4.id)
             .await
             .expect_err("unexpectedly read pruned collection");
 
         // But we should still be able to fetch the collections that do exist.
         let collection_read = datastore
-            .inventory_collection_read(&opctx, collection5.id)
+            .inventory_collection_read(opctx, collection5.id)
             .await
             .unwrap();
         assert_eq!(collection5, collection_read);
         let collection_read = datastore
-            .inventory_collection_read(&opctx, collection6.id)
+            .inventory_collection_read(opctx, collection6.id)
             .await
             .unwrap();
         assert_eq!(collection6, collection_read);
         let collection_read = datastore
-            .inventory_collection_read(&opctx, collection7.id)
+            .inventory_collection_read(opctx, collection7.id)
             .await
             .unwrap();
         assert_eq!(collection7, collection_read);
@@ -2912,7 +2912,7 @@ mod test {
         // We should prune more than one collection, if needed.  We'll wind up
         // with just collection6 because that's the latest one with no errors.
         datastore
-            .inventory_prune_collections(&opctx, 1)
+            .inventory_prune_collections(opctx, 1)
             .await
             .expect("failed to prune collections");
         assert_eq!(
@@ -2929,7 +2929,7 @@ mod test {
         // Remove the remaining collection and make sure the inventory tables
         // are empty (i.e., we got everything).
         datastore
-            .inventory_delete_collection(&opctx, collection6.id)
+            .inventory_delete_collection(opctx, collection6.id)
             .await
             .expect("failed to delete collection");
         assert!(datastore.inventory_collections().await.unwrap().is_empty());
@@ -3122,18 +3122,18 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection)
+            .inventory_insert_collection(opctx, &collection)
             .await
             .expect("failed to insert collection");
 
         // Read all "inv_" tables and ensure that they are populated.
-        check_all_inv_tables(&datastore, AllInvTables::ArePopulated)
+        check_all_inv_tables(datastore, AllInvTables::ArePopulated)
             .await
             .expect("All inv_... tables should be populated by representative collection");
 
         // Delete that collection we just added
         datastore
-            .inventory_delete_collection(&opctx, collection.id)
+            .inventory_delete_collection(opctx, collection.id)
             .await
             .expect("failed to prune collections");
         assert_eq!(
@@ -3148,7 +3148,7 @@ mod test {
         );
 
         // Read all "inv_" tables and ensure that they're empty
-        check_all_inv_tables(&datastore, AllInvTables::AreEmpty).await.expect(
+        check_all_inv_tables(datastore, AllInvTables::AreEmpty).await.expect(
             "All inv_... tables should be deleted alongside collection",
         );
 
@@ -3168,12 +3168,12 @@ mod test {
         let Representative { builder, .. } = representative();
         let collection = builder.build();
         datastore
-            .inventory_insert_collection(&opctx, &collection)
+            .inventory_insert_collection(opctx, &collection)
             .await
             .expect("failed to insert collection");
 
         // Read all "inv_" tables and ensure that they are populated.
-        check_all_inv_tables(&datastore, AllInvTables::ArePopulated)
+        check_all_inv_tables(datastore, AllInvTables::ArePopulated)
             .await
             .expect("All inv_... tables should be populated by representative collection");
 

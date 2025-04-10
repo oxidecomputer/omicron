@@ -71,7 +71,7 @@ impl super::Nexus {
     ) -> ListResultVec<String> {
         let (_, silo) =
             self.silo_lookup(opctx, silo_id.into())?.fetch().await?;
-        let silo_dns_name = silo_dns_name(&silo.name());
+        let silo_dns_name = silo_dns_name(silo.name());
         let external_dns_zones = self
             .db_datastore
             .dns_zones_list_all(opctx, nexus_db_model::DnsGroup::External)
@@ -131,8 +131,8 @@ impl super::Nexus {
 
         let silo = datastore
             .silo_create(
-                &opctx,
-                &nexus_opctx,
+                opctx,
+                nexus_opctx,
                 new_silo_params,
                 &new_silo_dns_names,
                 dns_update,
@@ -169,7 +169,7 @@ impl super::Nexus {
             format!("delete silo: {:?}", db_silo.name()),
             self.id.to_string(),
         );
-        dns_update.remove_name(silo_dns_name(&db_silo.name()))?;
+        dns_update.remove_name(silo_dns_name(db_silo.name()))?;
         datastore
             .silo_delete(opctx, &authz_silo, &db_silo, dns_opctx, dns_update)
             .await?;
@@ -378,7 +378,7 @@ impl super::Nexus {
             .datastore()
             .silo_user_fetch_by_external_id(
                 opctx,
-                &authz_silo,
+                authz_silo,
                 &authenticated_subject.external_id,
             )
             .await?;
@@ -410,7 +410,7 @@ impl super::Nexus {
                     );
 
                     self.db_datastore
-                        .silo_user_create(&authz_silo, silo_user)
+                        .silo_user_create(authz_silo, silo_user)
                         .await?
                 }
             }
@@ -429,7 +429,7 @@ impl super::Nexus {
                     self.db_datastore
                         .silo_group_optional_lookup(
                             opctx,
-                            &authz_silo,
+                            authz_silo,
                             group.clone(),
                         )
                         .await?
@@ -438,9 +438,7 @@ impl super::Nexus {
                 db::model::UserProvisionType::Jit => {
                     let silo_group = self
                         .silo_group_lookup_or_create_by_name(
-                            opctx,
-                            &authz_silo,
-                            &group,
+                            opctx, authz_silo, group,
                         )
                         .await?;
 

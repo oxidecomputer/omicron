@@ -61,7 +61,7 @@ impl BackgroundTask for InstanceReincarnation {
 
             if let Err(error) = self
                 .reincarnate_all(
-                    &opctx,
+                    opctx,
                     ReincarnationReason::Failed,
                     &mut status,
                     &mut running_sagas,
@@ -81,7 +81,7 @@ impl BackgroundTask for InstanceReincarnation {
 
             if let Err(error) = self
                 .reincarnate_all(
-                    &opctx,
+                    opctx,
                     ReincarnationReason::SagaUnwound,
                     &mut status,
                     &mut running_sagas,
@@ -154,7 +154,7 @@ impl InstanceReincarnation {
             let batch = self
                 .datastore
                 .find_reincarnatable_instances(
-                    &opctx,
+                    opctx,
                     reason,
                     &p.current_pagparams(),
                 )
@@ -399,7 +399,7 @@ mod test {
             put_instance_in_state(cptestctx, opctx, id, state).await
         } else {
             let datastore = cptestctx.server.server_context().nexus.datastore();
-            let (_, _, authz_instance) = LookupPath::new(&opctx, datastore)
+            let (_, _, authz_instance) = LookupPath::new(opctx, datastore)
                 .instance_id(id.into_untyped_uuid())
                 .lookup_for(authz::Action::Modify)
                 .await
@@ -423,7 +423,7 @@ mod test {
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
         let vmm = datastore
             .vmm_insert(
-                &opctx,
+                opctx,
                 Vmm {
                     id: Uuid::new_v4(),
                     time_created: Utc::now(),
@@ -443,7 +443,7 @@ mod test {
             .expect("SagaUnwound VMM should be inserted");
         let vmm_id = vmm.id;
         let prev_state = datastore
-            .instance_refetch(&opctx, &authz_instance)
+            .instance_refetch(opctx, authz_instance)
             .await
             .expect("instance must exist")
             .runtime_state;
@@ -478,13 +478,13 @@ mod test {
         );
 
         let datastore = cptestctx.server.server_context().nexus.datastore();
-        let (_, _, authz_instance) = LookupPath::new(&opctx, datastore)
+        let (_, _, authz_instance) = LookupPath::new(opctx, datastore)
             .instance_id(id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await
             .expect("instance must exist");
         let prev_state = datastore
-            .instance_refetch(&opctx, &authz_instance)
+            .instance_refetch(opctx, &authz_instance)
             .await
             .expect("instance must exist")
             .runtime_state;
@@ -545,7 +545,7 @@ mod test {
             datastore.clone(),
         );
 
-        setup_test_project(&cptestctx, &opctx).await;
+        setup_test_project(cptestctx, &opctx).await;
 
         let mut task = InstanceReincarnation::new(
             datastore.clone(),
@@ -562,7 +562,7 @@ mod test {
         // Create an instance in the `Failed` state that's eligible to be
         // restarted.
         let instance = create_instance(
-            &cptestctx,
+            cptestctx,
             &opctx,
             "my-cool-instance",
             InstanceAutoRestartPolicy::BestEffort,
@@ -578,7 +578,7 @@ mod test {
         assert_eq!(status.changed_state, Vec::new());
 
         test_helpers::instance_wait_for_state(
-            &cptestctx,
+            cptestctx,
             InstanceUuid::from_untyped_uuid(instance.id()),
             InstanceState::Vmm,
         )
@@ -596,7 +596,7 @@ mod test {
             datastore.clone(),
         );
 
-        setup_test_project(&cptestctx, &opctx).await;
+        setup_test_project(cptestctx, &opctx).await;
 
         let mut task = InstanceReincarnation::new(
             datastore.clone(),
@@ -607,7 +607,7 @@ mod test {
         // Create an instance in the `Failed` state that's eligible to be
         // restarted.
         let instance = create_instance(
-            &cptestctx,
+            cptestctx,
             &opctx,
             "my-cool-instance",
             None,
@@ -623,7 +623,7 @@ mod test {
         assert_eq!(status.changed_state, Vec::new());
 
         test_helpers::instance_wait_for_state(
-            &cptestctx,
+            cptestctx,
             InstanceUuid::from_untyped_uuid(instance.id()),
             InstanceState::Vmm,
         )
@@ -641,7 +641,7 @@ mod test {
             datastore.clone(),
         );
 
-        setup_test_project(&cptestctx, &opctx).await;
+        setup_test_project(cptestctx, &opctx).await;
 
         let mut task = InstanceReincarnation::new(
             datastore.clone(),
@@ -655,7 +655,7 @@ mod test {
         let num_failed = 3;
         for i in 0..num_failed {
             let instance = create_instance(
-                &cptestctx,
+                cptestctx,
                 &opctx,
                 &format!("sotapanna-{i}"),
                 InstanceAutoRestartPolicy::BestEffort,
@@ -670,7 +670,7 @@ mod test {
         for i in 0..num_saga_unwound {
             // Make the instance record.
             let instance = create_instance(
-                &cptestctx,
+                cptestctx,
                 &opctx,
                 &format!("sadakagami-{i}"),
                 InstanceAutoRestartPolicy::BestEffort,
@@ -678,7 +678,7 @@ mod test {
             )
             .await;
             // Now, give the instance an active VMM which is SagaUnwound.
-            attach_saga_unwound_vmm(&cptestctx, &opctx, &instance).await;
+            attach_saga_unwound_vmm(cptestctx, &opctx, &instance).await;
             will_reincarnate.insert(ReincarnatableInstance {
                 instance_id: instance.id(),
                 reason: ReincarnationReason::SagaUnwound,
@@ -691,7 +691,7 @@ mod test {
         // them to be reincarnated.
         for i in 0..3 {
             let instance = create_instance(
-                &cptestctx,
+                cptestctx,
                 &opctx,
                 &format!("arahant-{i}"),
                 InstanceAutoRestartPolicy::Never,
@@ -706,7 +706,7 @@ mod test {
         // permitting them to be reincarnated.
         for i in 3..5 {
             let instance = create_instance(
-                &cptestctx,
+                cptestctx,
                 &opctx,
                 &format!("arahant-{i}"),
                 InstanceAutoRestartPolicy::Never,
@@ -714,7 +714,7 @@ mod test {
             )
             .await;
 
-            attach_saga_unwound_vmm(&cptestctx, &opctx, &instance).await;
+            attach_saga_unwound_vmm(cptestctx, &opctx, &instance).await;
             will_not_reincarnate.insert(instance.id());
         }
 
@@ -726,7 +726,7 @@ mod test {
                 .enumerate()
         {
             let instance = create_instance(
-                &cptestctx,
+                cptestctx,
                 &opctx,
                 &format!("anagami-{i}"),
                 InstanceAutoRestartPolicy::BestEffort,
@@ -773,7 +773,7 @@ mod test {
             );
 
             test_helpers::instance_wait_for_state(
-                &cptestctx,
+                cptestctx,
                 InstanceUuid::from_untyped_uuid(instance.instance_id),
                 InstanceState::Vmm,
             )
@@ -792,7 +792,7 @@ mod test {
             datastore.clone(),
         );
 
-        setup_test_project(&cptestctx, &opctx).await;
+        setup_test_project(cptestctx, &opctx).await;
 
         let mut task = InstanceReincarnation::new(
             datastore.clone(),
@@ -801,7 +801,7 @@ mod test {
         );
 
         let instance1 = create_instance(
-            &cptestctx,
+            cptestctx,
             &opctx,
             "victor",
             InstanceAutoRestartPolicy::BestEffort,
@@ -824,7 +824,7 @@ mod test {
             .expect("we must be able to set the cooldown period");
 
         let instance2 = create_instance(
-            &cptestctx,
+            cptestctx,
             &opctx,
             "frankenstein",
             InstanceAutoRestartPolicy::BestEffort,
@@ -845,13 +845,13 @@ mod test {
         // Now, let's do some state changes:
         // Pretend instance 1 restarted, and then failed again.
         test_helpers::instance_wait_for_state(
-            &cptestctx,
+            cptestctx,
             instance1_id,
             InstanceState::Vmm,
         )
         .await;
         put_instance_in_state(
-            &cptestctx,
+            cptestctx,
             &opctx,
             instance1_id,
             InstanceState::Failed,
@@ -860,7 +860,7 @@ mod test {
 
         // Move instance 2 to failed.
         put_instance_in_state(
-            &cptestctx,
+            cptestctx,
             &opctx,
             instance2_id,
             InstanceState::Failed,
@@ -879,7 +879,7 @@ mod test {
 
         // Instance 2 should be started
         test_helpers::instance_wait_for_state(
-            &cptestctx,
+            cptestctx,
             instance2_id,
             InstanceState::Vmm,
         )
@@ -899,7 +899,7 @@ mod test {
 
         // Instance 1 should be started.
         test_helpers::instance_wait_for_state(
-            &cptestctx,
+            cptestctx,
             instance1_id,
             InstanceState::Vmm,
         )

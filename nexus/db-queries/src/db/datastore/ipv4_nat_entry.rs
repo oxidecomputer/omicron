@@ -394,13 +394,10 @@ mod test {
 
         // We should not have any NAT entries at this moment
         let initial_state =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         assert!(initial_state.is_empty());
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            0
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 0);
 
         // Each change (creation / deletion) to the NAT table should increment the
         // version number of the row in the NAT table
@@ -422,21 +419,18 @@ mod test {
             ),
         };
 
-        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
+        datastore.ensure_ipv4_nat_entry(opctx, nat1.clone()).await.unwrap();
         let first_entry =
-            datastore.ipv4_nat_find_by_values(&opctx, nat1).await.unwrap();
+            datastore.ipv4_nat_find_by_values(opctx, nat1).await.unwrap();
 
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         // The NAT table has undergone one change. One entry has been added,
         // none deleted, so we should be at version 1.
         assert_eq!(nat_entries.len(), 1);
         assert_eq!(nat_entries.last().unwrap().version_added, 1);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            1
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 1);
 
         // Add another nat entry.
         let nat2 = Ipv4NatValues {
@@ -450,10 +444,10 @@ mod test {
             ),
         };
 
-        datastore.ensure_ipv4_nat_entry(&opctx, nat2).await.unwrap();
+        datastore.ensure_ipv4_nat_entry(opctx, nat2).await.unwrap();
 
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         // The NAT table has undergone two changes. Two entries have been
         // added, none deleted, so we should be at version 2.
@@ -461,32 +455,26 @@ mod test {
             nat_entries.iter().find(|e| e.version_added == 2).unwrap();
         assert_eq!(nat_entries.len(), 2);
         assert_eq!(nat_entry.version_added, 2);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            2
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 2);
 
         // Test Cleanup logic
         // Cleanup should only perma-delete entries that are older than a
         // specified version number and whose `time_deleted` field is
         // older than a specified age.
         let time_cutoff = Utc::now();
-        datastore.ipv4_nat_cleanup(&opctx, 2, time_cutoff).await.unwrap();
+        datastore.ipv4_nat_cleanup(opctx, 2, time_cutoff).await.unwrap();
 
         // Nothing should have changed (no records currently marked for deletion)
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         assert_eq!(nat_entries.len(), 2);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            2
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 2);
 
         // Delete the first nat entry. It should show up as a later version number.
-        datastore.ipv4_nat_delete(&opctx, &first_entry).await.unwrap();
+        datastore.ipv4_nat_delete(opctx, &first_entry).await.unwrap();
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         // The NAT table has undergone three changes. Two entries have been
         // added, one deleted, so we should be at version 3. Since the
@@ -497,44 +485,35 @@ mod test {
         assert_eq!(nat_entries.len(), 2);
         assert_eq!(nat_entry.version_removed, Some(3));
         assert_eq!(nat_entry.id, first_entry.id);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            3
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 3);
 
         // Try cleaning up with the old version and time cutoff values
-        datastore.ipv4_nat_cleanup(&opctx, 2, time_cutoff).await.unwrap();
+        datastore.ipv4_nat_cleanup(opctx, 2, time_cutoff).await.unwrap();
 
         // Try cleaning up with a greater version and old time cutoff values
-        datastore.ipv4_nat_cleanup(&opctx, 6, time_cutoff).await.unwrap();
+        datastore.ipv4_nat_cleanup(opctx, 6, time_cutoff).await.unwrap();
 
         // Try cleaning up with a older version and newer time cutoff values
-        datastore.ipv4_nat_cleanup(&opctx, 2, Utc::now()).await.unwrap();
+        datastore.ipv4_nat_cleanup(opctx, 2, Utc::now()).await.unwrap();
 
         // Both records should still exist (soft deleted record is newer than cutoff
         // values )
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         assert_eq!(nat_entries.len(), 2);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            3
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 3);
 
         // Try cleaning up with a both cutoff values increased
-        datastore.ipv4_nat_cleanup(&opctx, 4, Utc::now()).await.unwrap();
+        datastore.ipv4_nat_cleanup(opctx, 4, Utc::now()).await.unwrap();
 
         // Soft deleted NAT entry should be removed from the table
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         assert_eq!(nat_entries.len(), 1);
         // version should be unchanged
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            3
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 3);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -551,13 +530,10 @@ mod test {
 
         // We should not have any NAT entries at this moment
         let initial_state =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         assert!(initial_state.is_empty());
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            0
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 0);
 
         // Each change (creation / deletion) to the NAT table should increment the
         // version number of the row in the NAT table
@@ -579,33 +555,30 @@ mod test {
             ),
         };
 
-        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
+        datastore.ensure_ipv4_nat_entry(opctx, nat1.clone()).await.unwrap();
 
         // Try to add it again. It should still only result in a single entry.
-        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
+        datastore.ensure_ipv4_nat_entry(opctx, nat1.clone()).await.unwrap();
         let first_entry = datastore
-            .ipv4_nat_find_by_values(&opctx, nat1.clone())
+            .ipv4_nat_find_by_values(opctx, nat1.clone())
             .await
             .unwrap();
 
         let nat_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         // The NAT table has undergone one change. One entry has been added,
         // none deleted, so we should be at version 1.
         assert_eq!(nat_entries.len(), 1);
         assert_eq!(nat_entries.last().unwrap().version_added, 1);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            1
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 1);
 
-        datastore.ipv4_nat_delete(&opctx, &first_entry).await.unwrap();
+        datastore.ipv4_nat_delete(opctx, &first_entry).await.unwrap();
 
         // The NAT table has undergone two changes. One entry has been added,
         // then deleted, so we should be at version 2.
         let nat_entries = datastore
-            .ipv4_nat_list_since_version(&opctx, 0, 10)
+            .ipv4_nat_list_since_version(opctx, 0, 10)
             .await
             .unwrap()
             .into_iter();
@@ -621,18 +594,15 @@ mod test {
 
         assert!(active.is_empty());
         assert_eq!(inactive.len(), 1);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            2
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 2);
 
         // Add the same entry back. This simulates the behavior we will see
         // when stopping and then restarting an instance.
-        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
+        datastore.ensure_ipv4_nat_entry(opctx, nat1.clone()).await.unwrap();
 
         // The NAT table has undergone three changes.
         let nat_entries = datastore
-            .ipv4_nat_list_since_version(&opctx, 0, 10)
+            .ipv4_nat_list_since_version(opctx, 0, 10)
             .await
             .unwrap()
             .into_iter();
@@ -648,18 +618,15 @@ mod test {
 
         assert_eq!(active.len(), 1);
         assert_eq!(inactive.len(), 1);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            3
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 3);
 
         let second_entry =
-            datastore.ipv4_nat_find_by_values(&opctx, nat1).await.unwrap();
-        datastore.ipv4_nat_delete(&opctx, &second_entry).await.unwrap();
+            datastore.ipv4_nat_find_by_values(opctx, nat1).await.unwrap();
+        datastore.ipv4_nat_delete(opctx, &second_entry).await.unwrap();
 
         // The NAT table has undergone four changes
         let nat_entries = datastore
-            .ipv4_nat_list_since_version(&opctx, 0, 10)
+            .ipv4_nat_list_since_version(opctx, 0, 10)
             .await
             .unwrap()
             .into_iter();
@@ -675,10 +642,7 @@ mod test {
 
         assert_eq!(active.len(), 0);
         assert_eq!(inactive.len(), 2);
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            4
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 4);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -693,13 +657,10 @@ mod test {
 
         // We should not have any NAT entries at this moment
         let initial_state =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         assert!(initial_state.is_empty());
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            0
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 0);
 
         // create two nat entries:
         // 1. an entry should be deleted during the next sync
@@ -729,11 +690,11 @@ mod test {
             ..nat1
         };
 
-        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
-        datastore.ensure_ipv4_nat_entry(&opctx, nat2.clone()).await.unwrap();
+        datastore.ensure_ipv4_nat_entry(opctx, nat1.clone()).await.unwrap();
+        datastore.ensure_ipv4_nat_entry(opctx, nat2.clone()).await.unwrap();
 
         let db_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         assert_eq!(db_entries.len(), 2);
 
@@ -748,7 +709,7 @@ mod test {
         };
 
         datastore
-            .ipv4_nat_sync_service_zones(&opctx, &[nat2.clone(), nat3.clone()])
+            .ipv4_nat_sync_service_zones(opctx, &[nat2.clone(), nat3.clone()])
             .await
             .unwrap();
 
@@ -757,7 +718,7 @@ mod test {
         // 2. the old one that "survived" the last sync
         // 3. a new one that was added during the last sync
         let db_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         assert_eq!(db_entries.len(), 3);
 
@@ -782,7 +743,7 @@ mod test {
         // this simulates a zone leaving and then returning, i.e. when a sled gets restarted
         datastore
             .ipv4_nat_sync_service_zones(
-                &opctx,
+                opctx,
                 &[nat1.clone(), nat2.clone(), nat3.clone()],
             )
             .await
@@ -790,7 +751,7 @@ mod test {
 
         // we should have four nat entries in the db
         let db_entries =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         assert_eq!(db_entries.len(), 4);
 
@@ -815,13 +776,10 @@ mod test {
 
         // We should not have any NAT entries at this moment
         let initial_state =
-            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+            datastore.ipv4_nat_list_since_version(opctx, 0, 10).await.unwrap();
 
         assert!(initial_state.is_empty());
-        assert_eq!(
-            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
-            0
-        );
+        assert_eq!(datastore.ipv4_nat_current_version(opctx).await.unwrap(), 0);
 
         let addresses = (0..=255).map(|i| {
             let addr = Ipv4Addr::new(10, 0, 0, i);
@@ -849,7 +807,7 @@ mod test {
         // create the nat entries
         for entry in nat_entries {
             let result = datastore
-                .ensure_ipv4_nat_entry(&opctx, entry.clone())
+                .ensure_ipv4_nat_entry(opctx, entry.clone())
                 .await
                 .unwrap();
 
@@ -860,15 +818,13 @@ mod test {
         for entry in
             db_records.iter().choose_multiple(&mut rand::thread_rng(), 50)
         {
-            datastore.ipv4_nat_delete(&opctx, entry).await.unwrap();
+            datastore.ipv4_nat_delete(opctx, entry).await.unwrap();
         }
 
         // get the new state of all nat entries
         // note that this is not the method under test
-        let db_records = datastore
-            .ipv4_nat_list_since_version(&opctx, 0, 300)
-            .await
-            .unwrap();
+        let db_records =
+            datastore.ipv4_nat_list_since_version(opctx, 0, 300).await.unwrap();
 
         // Count the actual number of changes seen.
         // This check is required because we _were_ getting changes in ascending order,
@@ -881,7 +837,7 @@ mod test {
         let mut version = 0;
         let limit = 100;
         let mut changes =
-            datastore.ipv4_nat_changeset(&opctx, version, limit).await.unwrap();
+            datastore.ipv4_nat_changeset(opctx, version, limit).await.unwrap();
 
         while !changes.is_empty() {
             // check ordering
@@ -945,7 +901,7 @@ mod test {
 
             version = changes.last().unwrap().gen;
             changes = datastore
-                .ipv4_nat_changeset(&opctx, version, limit)
+                .ipv4_nat_changeset(opctx, version, limit)
                 .await
                 .unwrap();
         }

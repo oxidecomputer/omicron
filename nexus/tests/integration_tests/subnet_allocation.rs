@@ -69,7 +69,7 @@ async fn create_instance_expect_failure(
     };
 
     NexusRequest::new(
-        RequestBuilder::new(&client, Method::POST, &url_instances)
+        RequestBuilder::new(client, Method::POST, url_instances)
             .body(Some(&new_instance))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -88,8 +88,8 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let project_name = "springfield-squidport";
 
     // Create a project that we'll use for testing.
-    create_default_ip_pool(&client).await;
-    create_project(&client, project_name).await;
+    create_default_ip_pool(client).await;
+    create_project(client, project_name).await;
     let url_instances = format!("/v1/instances?project={}", project_name);
 
     // Create a new, small VPC Subnet, so we don't need to issue many requests

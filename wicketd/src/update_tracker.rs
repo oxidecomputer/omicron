@@ -470,13 +470,13 @@ impl SpawnUpdateDriver for RealSpawnUpdateDriver<'_> {
                     prev.task.abort();
                     *prev = self
                         .update_tracker
-                        .spawn_upload_trampoline_phase_2_to_mgs(&plan);
+                        .spawn_upload_trampoline_phase_2_to_mgs(plan);
                 }
             }
             None => {
                 *upload_trampoline_phase_2_to_mgs = Some(
                     self.update_tracker
-                        .spawn_upload_trampoline_phase_2_to_mgs(&plan),
+                        .spawn_upload_trampoline_phase_2_to_mgs(plan),
                 );
             }
         }

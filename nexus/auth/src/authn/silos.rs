@@ -144,7 +144,7 @@ impl SamlIdentityProvider {
         sp_builder.slo_url(self.slo_url.clone());
 
         if let Some(cert) = &self.public_cert_bytes()? {
-            if let Ok(parsed) = openssl::x509::X509::from_der(&cert) {
+            if let Ok(parsed) = openssl::x509::X509::from_der(cert) {
                 sp_builder.certificate(Some(parsed));
             }
         }

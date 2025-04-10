@@ -1245,17 +1245,17 @@ mod test {
 
         // Basic cases: look up a few Silos by name.
         let authority = Authority::from_static("silo1.sys.oxide1.test");
-        let ae1 = endpoint_for_authority(&log, &authority, &watch_rx).unwrap();
+        let ae1 = endpoint_for_authority(log, &authority, &watch_rx).unwrap();
         assert_eq!(ae1, *e1);
         let authority = Authority::from_static("silo1.sys.oxide2.test");
-        let ae1 = endpoint_for_authority(&log, &authority, &watch_rx).unwrap();
+        let ae1 = endpoint_for_authority(log, &authority, &watch_rx).unwrap();
         assert_eq!(ae1, *e1);
         let authority = Authority::from_static("silo2.sys.oxide1.test");
-        let ae2 = endpoint_for_authority(&log, &authority, &watch_rx).unwrap();
+        let ae2 = endpoint_for_authority(log, &authority, &watch_rx).unwrap();
         assert_eq!(ae2, *e2);
         // The port number in the authority should be ignored.
         let authority = Authority::from_static("silo3.sys.oxide1.test:456");
-        let ae3 = endpoint_for_authority(&log, &authority, &watch_rx).unwrap();
+        let ae3 = endpoint_for_authority(log, &authority, &watch_rx).unwrap();
         assert_eq!(ae3, *e3);
         // We should get back a default endpoint if we use a server name that's
         // not known.  That includes any IPv4 or IPv6 address, too.  The default
@@ -1269,7 +1269,7 @@ mod test {
         ] {
             let authority = Authority::from_static(name);
             let ae =
-                endpoint_for_authority(&log, &authority, &watch_rx).unwrap();
+                endpoint_for_authority(log, &authority, &watch_rx).unwrap();
             assert_eq!(ae, *e3);
         }
 
@@ -1523,7 +1523,7 @@ mod test {
             {
                 println!("config {:?} endpoint {:?}", rx_label, name);
                 let result =
-                    endpoint_for_authority(&log, &authority, rx_channel);
+                    endpoint_for_authority(log, &authority, rx_channel);
                 match result {
                     Err(Error::ServiceUnavailable { internal_message }) => {
                         assert_eq!(rx_label, "none");

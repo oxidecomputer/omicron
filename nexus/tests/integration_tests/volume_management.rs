@@ -155,7 +155,7 @@ async fn create_base_disk(
     };
 
     NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &disks_url)
+        RequestBuilder::new(client, Method::POST, disks_url)
             .body(Some(&base_disk))
             .expect_status(Some(StatusCode::CREATED)),
     )
@@ -178,14 +178,14 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
     // 4. Delete the snapshot
 
     let client = &cptestctx.external_client;
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let image = create_image(&client).await;
+    let image = create_image(client).await;
     // Create a disk from this image
     let base_disk =
-        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+        create_base_disk(client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
     let snapshot: views::Snapshot = object_create(
@@ -238,15 +238,15 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     // 4. Delete the disk
 
     let client = &cptestctx.external_client;
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
     // Define an image
-    let image = create_image(&client).await;
+    let image = create_image(client).await;
     // Create a disk from this image
     let base_disk =
-        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+        create_base_disk(client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
     let snapshot: views::Snapshot = object_create(
@@ -299,14 +299,14 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
     // 4. Delete the snapshots
 
     let client = &cptestctx.external_client;
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let image = create_image(&client).await;
+    let image = create_image(client).await;
     // Create a disk from this image
     let base_disk =
-        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+        create_base_disk(client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot requests
     for i in 0..4 {
@@ -362,14 +362,14 @@ async fn test_snapshot_prevents_other_disk(
     // allocation.
 
     let client = &cptestctx.external_client;
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let image = create_image(&client).await;
+    let image = create_image(client).await;
     // Create a disk from this image
     let base_disk =
-        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+        create_base_disk(client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
     let snapshot: views::Snapshot = object_create(
@@ -464,7 +464,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
 ) {
     // Test multiple disks with multiple snapshots
     let client = &cptestctx.external_client;
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
@@ -599,7 +599,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
 ) {
     // Test multiple disks with multiple snapshots, varying the delete order
     let client = &cptestctx.external_client;
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
@@ -868,10 +868,10 @@ async fn test_multiple_layers_of_snapshots_delete_all_disks_first(
     // Test layering read-only snapshots through multiple disks:
     // delete all disks, then delete all snapshots
     let client = &cptestctx.external_client;
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     create_project_and_pool(client).await;
 
-    prepare_for_test_multiple_layers_of_snapshots(&client).await;
+    prepare_for_test_multiple_layers_of_snapshots(client).await;
 
     // Delete the disks
     for name in ["layer-1-disk", "layer-2-disk", "layer-3-disk"] {
@@ -906,10 +906,10 @@ async fn test_multiple_layers_of_snapshots_delete_all_snapshots_first(
     // Test layering read-only snapshots through multiple disks:
     // delete all snapshots, then delete all disks
     let client = &cptestctx.external_client;
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     create_project_and_pool(client).await;
 
-    prepare_for_test_multiple_layers_of_snapshots(&client).await;
+    prepare_for_test_multiple_layers_of_snapshots(client).await;
 
     // Delete the snapshots
     for name in ["layer-1-snapshot", "layer-2-snapshot", "layer-3-snapshot"] {
@@ -944,10 +944,10 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
     // Test layering read-only snapshots through multiple disks:
     // delete snapshots and disks in a random order
     let client = &cptestctx.external_client;
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     create_project_and_pool(client).await;
 
-    prepare_for_test_multiple_layers_of_snapshots(&client).await;
+    prepare_for_test_multiple_layers_of_snapshots(client).await;
 
     #[derive(Debug)]
     enum DeleteObject {
@@ -1008,15 +1008,15 @@ async fn test_create_image_from_snapshot(cptestctx: &ControlPlaneTestContext) {
     // 3. Create an image from that snapshot
 
     let client = &cptestctx.external_client;
-    let _disk_test = DiskTest::new(&cptestctx).await;
+    let _disk_test = DiskTest::new(cptestctx).await;
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let image = create_image(&client).await;
+    let image = create_image(client).await;
 
     // Create a disk from this image
     let _base_disk =
-        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+        create_base_disk(client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
@@ -1067,15 +1067,15 @@ async fn test_create_image_from_snapshot_delete(
     // 6. Delete the image.
 
     let client = &cptestctx.external_client;
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let image = create_image(&client).await;
+    let image = create_image(client).await;
 
     // Create a disk from this image
     let _base_disk =
-        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
+        create_base_disk(client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
@@ -1137,7 +1137,7 @@ async fn test_create_image_from_snapshot_delete(
 
     // Delete the image
     let image_url = "/v1/images/debian-11";
-    NexusRequest::object_delete(client, &image_url)
+    NexusRequest::object_delete(client, image_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -1162,7 +1162,7 @@ async fn delete_image_test(
     // 3. Create an image from that snapshot
     // 4. Delete each of these items in some order
 
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
 
     let client = &cptestctx.external_client;
     create_project_and_pool(client).await;
@@ -1242,7 +1242,7 @@ async fn delete_image_test(
         match item {
             DeleteImageTestParam::Image => {
                 let image_url = "/v1/images/debian-11";
-                NexusRequest::object_delete(client, &image_url)
+                NexusRequest::object_delete(client, image_url)
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
@@ -1411,8 +1411,8 @@ async fn test_volume_remove_read_only_parent_base(
 
     // Create the Volume with a read_only_parent, and the temp volume that
     // the saga would create for us.
-    create_volume(&datastore, volume_id, Some(rop)).await;
-    create_volume(&datastore, t_vid, None).await;
+    create_volume(datastore, volume_id, Some(rop)).await;
+    create_volume(datastore, t_vid, None).await;
 
     // We should get Ok(true) back after removal of the ROP.
     let res = datastore.volume_remove_rop(volume_id, t_vid).await.unwrap();
@@ -1514,7 +1514,7 @@ async fn test_volume_remove_read_only_parent_no_parent(
 
     let volume_id = VolumeUuid::new_v4();
     let t_vid = VolumeUuid::new_v4();
-    create_volume(&datastore, volume_id, None).await;
+    create_volume(datastore, volume_id, None).await;
 
     // We will get Ok(false) back from this operation.
     let res = datastore.volume_remove_rop(volume_id, t_vid).await.unwrap();
@@ -1583,7 +1583,7 @@ async fn test_volume_remove_read_only_parent_volume_deleted(
         url: "http://oxide.computer/rop".to_string(),
     };
     // Make the volume
-    create_volume(&datastore, volume_id, Some(rop)).await;
+    create_volume(datastore, volume_id, Some(rop)).await;
 
     // Soft delete the volume
     let _cr = datastore.soft_delete_volume(volume_id).await.unwrap();
@@ -1611,7 +1611,7 @@ async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
         url: "http://oxide.computer/rop".to_string(),
     };
 
-    create_volume(&datastore, volume_id, Some(rop)).await;
+    create_volume(datastore, volume_id, Some(rop)).await;
 
     println!("Created this volume: {:?}", volume_id);
     // disk to volume id, to then remove ROP?
@@ -1674,7 +1674,7 @@ async fn test_volume_remove_rop_saga_twice(
         url: "http://oxide.computer/rop".to_string(),
     };
 
-    create_volume(&datastore, volume_id, Some(rop)).await;
+    create_volume(datastore, volume_id, Some(rop)).await;
 
     println!("Created this volume: {:?}", volume_id);
     // disk to volume id, to then remove ROP?
@@ -1810,7 +1810,7 @@ async fn test_volume_remove_rop_saga_deleted_volume(
         url: "http://oxide.computer/rop".to_string(),
     };
     // Make the volume
-    create_volume(&datastore, volume_id, Some(rop)).await;
+    create_volume(datastore, volume_id, Some(rop)).await;
 
     // Soft delete the volume
     let _cr = datastore.soft_delete_volume(volume_id).await.unwrap();
@@ -2178,7 +2178,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     let datastore = nexus.datastore();
 
     // Four zpools, one dataset each
-    let disk_test = DiskTestBuilder::new(&cptestctx)
+    let disk_test = DiskTestBuilder::new(cptestctx)
         .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
@@ -2503,7 +2503,7 @@ async fn test_disk_create_saga_unwinds_correctly(
     let client = &cptestctx.external_client;
     create_project_and_pool(client).await;
 
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
@@ -2553,7 +2553,7 @@ async fn test_snapshot_create_saga_unwinds_correctly(
     let client = &cptestctx.external_client;
     create_project_and_pool(client).await;
 
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
@@ -3475,7 +3475,7 @@ async fn test_upstairs_notify_downstairs_client_stops(
 #[nexus_test]
 async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let _disk_test = DiskTest::new(&cptestctx).await;
+    let _disk_test = DiskTest::new(cptestctx).await;
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
@@ -3510,7 +3510,7 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
 
     let disk_id = disk.identity.id;
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .fetch()
         .await
@@ -3564,7 +3564,7 @@ impl TestReadOnlyRegionReferenceUsage {
             datastore.clone(),
         );
 
-        DiskTestBuilder::new(&cptestctx)
+        DiskTestBuilder::new(cptestctx)
             .on_specific_sled(cptestctx.first_sled_id())
             .with_zpool_count(4)
             .build()
@@ -3724,7 +3724,7 @@ impl TestReadOnlyRegionReferenceUsage {
         assert!(
             self.datastore
                 .regions_to_delete(
-                    &self.last_resources_to_delete.as_ref().unwrap()
+                    self.last_resources_to_delete.as_ref().unwrap()
                 )
                 .await
                 .unwrap()
@@ -3738,7 +3738,7 @@ impl TestReadOnlyRegionReferenceUsage {
             !self
                 .datastore
                 .regions_to_delete(
-                    &self.last_resources_to_delete.as_ref().unwrap()
+                    self.last_resources_to_delete.as_ref().unwrap()
                 )
                 .await
                 .unwrap()
@@ -4072,7 +4072,7 @@ async fn test_read_only_region_reference_counting(
 
     // Create one zpool on each of the 4 sleds. This is required for region
     // replacement or region snapshot replacement
-    let disk_test = DiskTestBuilder::new(&cptestctx)
+    let disk_test = DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -4080,13 +4080,13 @@ async fn test_read_only_region_reference_counting(
 
     create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
     let snapshot =
-        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+        create_snapshot(client, PROJECT_NAME, "disk", "snapshot").await;
 
     let disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snapshot",
         snapshot.identity.id,
@@ -4096,7 +4096,7 @@ async fn test_read_only_region_reference_counting(
     // Perform region snapshot replacement for one of the snapshot's regions,
     // causing a read-only region to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -4120,11 +4120,11 @@ async fn test_read_only_region_reference_counting(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, internal_client).await;
 
     // The snapshot's allocated regions should have the one read-only region
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -4146,7 +4146,7 @@ async fn test_read_only_region_reference_counting(
 
     // The disk-from-snap VCR should also reference that read-only region
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_from_snapshot.identity.id)
         .fetch()
         .await
@@ -4342,7 +4342,7 @@ async fn test_read_only_region_reference_counting_layers(
 
     // Create one zpool on each of the 4 sleds. This is required for region
     // replacement or region snapshot replacement
-    let disk_test = DiskTestBuilder::new(&cptestctx)
+    let disk_test = DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -4350,13 +4350,13 @@ async fn test_read_only_region_reference_counting_layers(
 
     create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
     let snapshot =
-        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+        create_snapshot(client, PROJECT_NAME, "disk", "snapshot").await;
 
     let disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snapshot",
         snapshot.identity.id,
@@ -4366,7 +4366,7 @@ async fn test_read_only_region_reference_counting_layers(
     // Perform region snapshot replacement for one of the snapshot's regions,
     // causing a read-only region to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -4390,11 +4390,11 @@ async fn test_read_only_region_reference_counting_layers(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, internal_client).await;
 
     // Grab the read-only region in the snapshot volume
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -4411,7 +4411,7 @@ async fn test_read_only_region_reference_counting_layers(
 
     // The disk-from-snap VCR should also reference that read-only region
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_from_snapshot.identity.id)
         .fetch()
         .await
@@ -4460,7 +4460,7 @@ async fn test_read_only_region_reference_counting_layers(
     // Take a snapshot of the disk-from-snapshot disk
 
     let double_snapshot = create_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snapshot",
         "double-snapshot",
@@ -4469,7 +4469,7 @@ async fn test_read_only_region_reference_counting_layers(
 
     // Assert correct volume usage records
 
-    let (.., db_double_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_double_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(double_snapshot.identity.id)
         .fetch()
         .await
@@ -4587,7 +4587,7 @@ async fn test_volume_replace_snapshot_respects_accounting(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    DiskTestBuilder::new(&cptestctx)
+    DiskTestBuilder::new(cptestctx)
         .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
@@ -4597,9 +4597,9 @@ async fn test_volume_replace_snapshot_respects_accounting(
 
     // Create a disk, then a snapshot of that disk
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -4611,9 +4611,9 @@ async fn test_volume_replace_snapshot_respects_accounting(
     assert_eq!(disk_allocated_regions.len(), 3);
 
     let snapshot =
-        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+        create_snapshot(client, PROJECT_NAME, "disk", "snapshot").await;
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -4792,7 +4792,7 @@ async fn test_volume_remove_rop_respects_accounting(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    DiskTestBuilder::new(&cptestctx)
+    DiskTestBuilder::new(cptestctx)
         .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
@@ -4803,9 +4803,9 @@ async fn test_volume_remove_rop_respects_accounting(
     // Create a disk, then a snapshot of that disk, then a disk from that
     // snapshot.
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -4817,9 +4817,9 @@ async fn test_volume_remove_rop_respects_accounting(
     assert_eq!(disk_allocated_regions.len(), 3);
 
     let snapshot =
-        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+        create_snapshot(client, PROJECT_NAME, "disk", "snapshot").await;
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -4828,14 +4828,14 @@ async fn test_volume_remove_rop_respects_accounting(
         });
 
     let disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snapshot",
         snapshot.identity.id,
     )
     .await;
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_from_snapshot.identity.id)
         .fetch()
         .await
@@ -4955,7 +4955,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    DiskTestBuilder::new(&cptestctx)
+    DiskTestBuilder::new(cptestctx)
         .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
@@ -4966,9 +4966,9 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     // Create a disk, then a snapshot of that disk, then a disk from that
     // snapshot.
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -4980,9 +4980,9 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     assert_eq!(disk_allocated_regions.len(), 3);
 
     let snapshot =
-        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+        create_snapshot(client, PROJECT_NAME, "disk", "snapshot").await;
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -4991,14 +4991,14 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
         });
 
     let disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snapshot",
         snapshot.identity.id,
     )
     .await;
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_from_snapshot.identity.id)
         .fetch()
         .await
@@ -5010,7 +5010,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
         });
 
     let another_disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "another-disk-from-snapshot",
         snapshot.identity.id,
@@ -5018,7 +5018,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     .await;
 
     let (.., db_another_disk_from_snapshot) =
-        LookupPath::new(&opctx, &datastore)
+        LookupPath::new(&opctx, datastore)
             .disk_id(another_disk_from_snapshot.identity.id)
             .fetch()
             .await
@@ -5214,7 +5214,7 @@ async fn test_migrate_to_ref_count_with_records(
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
 
-    DiskTestBuilder::new(&cptestctx)
+    DiskTestBuilder::new(cptestctx)
         .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
@@ -5224,39 +5224,39 @@ async fn test_migrate_to_ref_count_with_records(
 
     // Create a disk
 
-    create_disk(&client, PROJECT_NAME, "disk").await;
+    create_disk(client, PROJECT_NAME, "disk").await;
 
     // Test migration
 
-    let records_before = get_volume_resource_usage_records(&datastore).await;
+    let records_before = get_volume_resource_usage_records(datastore).await;
 
-    delete_all_volume_resource_usage_records(&datastore).await;
-    perform_migration(&datastore).await;
+    delete_all_volume_resource_usage_records(datastore).await;
+    perform_migration(datastore).await;
 
-    let records_after = get_volume_resource_usage_records(&datastore).await;
+    let records_after = get_volume_resource_usage_records(datastore).await;
 
     assert_eq!(records_before, records_after);
 
     // Create a snapshot
 
     let snapshot =
-        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+        create_snapshot(client, PROJECT_NAME, "disk", "snapshot").await;
 
     // Test migration
 
-    let records_before = get_volume_resource_usage_records(&datastore).await;
+    let records_before = get_volume_resource_usage_records(datastore).await;
 
-    delete_all_volume_resource_usage_records(&datastore).await;
-    perform_migration(&datastore).await;
+    delete_all_volume_resource_usage_records(datastore).await;
+    perform_migration(datastore).await;
 
-    let records_after = get_volume_resource_usage_records(&datastore).await;
+    let records_after = get_volume_resource_usage_records(datastore).await;
 
     assert_eq!(records_before, records_after);
 
     // Create a disk from that snapshot
 
     create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snapshot",
         snapshot.identity.id,
@@ -5265,12 +5265,12 @@ async fn test_migrate_to_ref_count_with_records(
 
     // Test migration
 
-    let records_before = get_volume_resource_usage_records(&datastore).await;
+    let records_before = get_volume_resource_usage_records(datastore).await;
 
-    delete_all_volume_resource_usage_records(&datastore).await;
-    perform_migration(&datastore).await;
+    delete_all_volume_resource_usage_records(datastore).await;
+    perform_migration(datastore).await;
 
-    let records_after = get_volume_resource_usage_records(&datastore).await;
+    let records_after = get_volume_resource_usage_records(datastore).await;
 
     assert_eq!(records_before, records_after);
 
@@ -5284,12 +5284,12 @@ async fn test_migrate_to_ref_count_with_records(
 
     // Test the migration
 
-    let records_before = get_volume_resource_usage_records(&datastore).await;
+    let records_before = get_volume_resource_usage_records(datastore).await;
 
-    delete_all_volume_resource_usage_records(&datastore).await;
-    perform_migration(&datastore).await;
+    delete_all_volume_resource_usage_records(datastore).await;
+    perform_migration(datastore).await;
 
-    let records_after = get_volume_resource_usage_records(&datastore).await;
+    let records_after = get_volume_resource_usage_records(datastore).await;
 
     assert_eq!(records_before, records_after);
 
@@ -5303,12 +5303,12 @@ async fn test_migrate_to_ref_count_with_records(
 
     // Test the migration
 
-    let records_before = get_volume_resource_usage_records(&datastore).await;
+    let records_before = get_volume_resource_usage_records(datastore).await;
 
-    delete_all_volume_resource_usage_records(&datastore).await;
-    perform_migration(&datastore).await;
+    delete_all_volume_resource_usage_records(datastore).await;
+    perform_migration(datastore).await;
 
-    let records_after = get_volume_resource_usage_records(&datastore).await;
+    let records_after = get_volume_resource_usage_records(datastore).await;
 
     assert_eq!(records_before, records_after);
 }
@@ -5324,7 +5324,7 @@ async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    DiskTestBuilder::new(&cptestctx)
+    DiskTestBuilder::new(cptestctx)
         .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
@@ -5335,10 +5335,10 @@ async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
     // Create a disk, then a snapshot from that disk, then an image based on
     // that snapshot
 
-    create_disk(&client, PROJECT_NAME, "disk").await;
+    create_disk(client, PROJECT_NAME, "disk").await;
 
     let snapshot =
-        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+        create_snapshot(client, PROJECT_NAME, "disk", "snapshot").await;
 
     let params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
@@ -5359,7 +5359,7 @@ async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
 
     // Soft-delete the snapshot's volume
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -5379,12 +5379,12 @@ async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
     // This means that the snapshot volume is soft-deleted, make sure the
     // migration does not make usage records for it!
 
-    let records_before = get_volume_resource_usage_records(&datastore).await;
+    let records_before = get_volume_resource_usage_records(datastore).await;
 
-    delete_all_volume_resource_usage_records(&datastore).await;
-    perform_migration(&datastore).await;
+    delete_all_volume_resource_usage_records(datastore).await;
+    perform_migration(datastore).await;
 
-    let records_after = get_volume_resource_usage_records(&datastore).await;
+    let records_after = get_volume_resource_usage_records(datastore).await;
 
     assert_eq!(records_before, records_after);
 }
@@ -5397,7 +5397,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
 
-    let disk_test = DiskTestBuilder::new(&cptestctx)
+    let disk_test = DiskTestBuilder::new(cptestctx)
         .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
@@ -5560,12 +5560,12 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     // Test the migration does not incorrectly think a region snapshot with
     // deleting = true is used by any volume
 
-    let records_before = get_volume_resource_usage_records(&datastore).await;
+    let records_before = get_volume_resource_usage_records(datastore).await;
 
-    delete_all_volume_resource_usage_records(&datastore).await;
-    perform_migration(&datastore).await;
+    delete_all_volume_resource_usage_records(datastore).await;
+    perform_migration(datastore).await;
 
-    let records_after = get_volume_resource_usage_records(&datastore).await;
+    let records_after = get_volume_resource_usage_records(datastore).await;
 
     assert_eq!(records_before, records_after);
 }
@@ -5592,7 +5592,7 @@ async fn test_double_layer_with_read_only_region_delete(
 
     // Create one zpool on each of the four sleds. This is required for region
     // replacement or region snapshot replacement
-    let disk_test = DiskTestBuilder::new(&cptestctx)
+    let disk_test = DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -5600,13 +5600,13 @@ async fn test_double_layer_with_read_only_region_delete(
 
     create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
     let snapshot =
-        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+        create_snapshot(client, PROJECT_NAME, "disk", "snapshot").await;
 
     let _disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snapshot",
         snapshot.identity.id,
@@ -5614,7 +5614,7 @@ async fn test_double_layer_with_read_only_region_delete(
     .await;
 
     let _another_disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "another-disk-from-snapshot",
         snapshot.identity.id,
@@ -5624,7 +5624,7 @@ async fn test_double_layer_with_read_only_region_delete(
     // Perform region snapshot replacement for one of the snapshot's targets,
     // causing a read-only region to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -5648,7 +5648,7 @@ async fn test_double_layer_with_read_only_region_delete(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, internal_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
 
@@ -5717,7 +5717,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
 
     // Create one zpool on each of the four sleds. This is required for region
     // replacement or region snapshot replacement
-    let disk_test = DiskTestBuilder::new(&cptestctx)
+    let disk_test = DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -5725,15 +5725,15 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
 
     create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
     let snapshot =
-        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+        create_snapshot(client, PROJECT_NAME, "disk", "snapshot").await;
 
     // Perform region snapshot replacement for two of the snapshot's targets,
     // causing two read-only regions to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -5759,7 +5759,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, internal_client).await;
 
     wait_for_condition(
         || {
@@ -5805,14 +5805,14 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, internal_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Create a disk from the snapshot
 
     let _disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snapshot",
         snapshot.identity.id,
@@ -5834,7 +5834,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .await
         .unwrap();
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, internal_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
 
@@ -5892,7 +5892,7 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
 
     // Create one zpool on each of the 4 sleds. This is required for region
     // replacement or region snapshot replacement
-    DiskTestBuilder::new(&cptestctx)
+    DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -5902,10 +5902,10 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
 
     // Create disk, then a snapshot
 
-    let _disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let _disk = create_disk(client, PROJECT_NAME, "disk").await;
 
     let snapshot =
-        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+        create_snapshot(client, PROJECT_NAME, "disk", "snapshot").await;
 
     // Delete the disk
 
@@ -5917,7 +5917,7 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
 
     // Create a volume that uses the snapshot volume as a read-only parent
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -6008,7 +6008,7 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
 
     // Create one zpool on each of the 4 sleds. This is required for region
     // replacement or region snapshot replacement
-    DiskTestBuilder::new(&cptestctx)
+    DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -6193,7 +6193,7 @@ async fn test_no_zombie_read_write_regions(
 
     // Create one zpool on each of the 4 sleds. This is required for region
     // replacement or region snapshot replacement
-    DiskTestBuilder::new(&cptestctx)
+    DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -6369,7 +6369,7 @@ async fn test_proper_region_sled_redundancy(
 
     let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-    DiskTestBuilder::new(&cptestctx)
+    DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(10)
         .build()
@@ -6380,7 +6380,7 @@ async fn test_proper_region_sled_redundancy(
 
     let client = &cptestctx.external_client;
     let sleds_url = "/v1/system/hardware/sleds";
-    let sleds_found = sleds_list(&client, &sleds_url).await;
+    let sleds_found = sleds_list(client, sleds_url).await;
     assert_eq!(sleds_found.len(), 4);
     for sled in sleds_found {
         assert_eq!(sled.state, views::SledState::Active);

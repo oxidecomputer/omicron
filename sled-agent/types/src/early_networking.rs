@@ -44,7 +44,7 @@ impl FromStr for EarlyNetworkConfig {
             body: EarlyNetworkConfigBody,
         }
 
-        let v2_err = match serde_json::from_str::<ShadowConfig>(&value) {
+        let v2_err = match serde_json::from_str::<ShadowConfig>(value) {
             Ok(cfg) => {
                 return Ok(EarlyNetworkConfig {
                     generation: cfg.generation,
@@ -56,7 +56,7 @@ impl FromStr for EarlyNetworkConfig {
         };
         // If we fail to parse the config as any known version, we return the
         // error corresponding to the parse failure of the newest schema.
-        serde_json::from_str::<back_compat::EarlyNetworkConfigV1>(&value)
+        serde_json::from_str::<back_compat::EarlyNetworkConfigV1>(value)
             .map(|v1| EarlyNetworkConfig {
                 generation: v1.generation,
                 schema_version: Self::schema_version(),

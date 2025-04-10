@@ -345,7 +345,7 @@ async fn ensure_package(
     match &package.source {
         PackageSource::Prebuilt { repo, commit, sha256 } => {
             let expected_digest = hex::decode(&sha256)?;
-            let path = package.get_output_path(package_name, &output_directory);
+            let path = package.get_output_path(package_name, output_directory);
 
             let should_download = if path.exists() {
                 // Re-download the package if the SHA doesn't match.
@@ -388,7 +388,7 @@ async fn ensure_package(
         }
         PackageSource::Manual => {
             progress.set_message("confirming manual package".into());
-            let path = package.get_output_path(package_name, &output_directory);
+            let path = package.get_output_path(package_name, output_directory);
             if !path.exists() {
                 bail!(
                     "The package for {} (expected at {}) does not exist.",
@@ -406,7 +406,7 @@ async fn ensure_package(
                 cache_disabled: disable_cache,
             };
             package
-                .create(package_name, &output_directory, &build_config)
+                .create(package_name, output_directory, &build_config)
                 .await
                 .with_context(|| {
                     let msg = format!("failed to create {package_name} in {output_directory:?}");
@@ -434,7 +434,7 @@ async fn do_package(
     let ui = ProgressUI::new(config.log());
 
     if !no_rebuild {
-        do_build(&config).await?;
+        do_build(config).await?;
     }
 
     let packages = config.packages_to_build();
@@ -449,7 +449,7 @@ async fn do_package(
                 None,
                 |((package_name, package), ui)| async move {
                     ensure_package(
-                        &config,
+                        config,
                         &ui,
                         package_name,
                         package,
@@ -499,11 +499,11 @@ async fn do_unpack(
 
     // Copy all packages to the install location in parallel.
     let packages =
-        config.package_config().packages_to_deploy(&config.target()).0;
+        config.package_config().packages_to_deploy(config.target()).0;
 
     packages.par_iter().try_for_each(
         |(package_name, package)| -> Result<()> {
-            let tarfile = package.get_output_path(&package_name, artifact_dir);
+            let tarfile = package.get_output_path(package_name, artifact_dir);
             let src = tarfile.as_path();
             let dst = package.get_output_path_for_service(install_dir);
             info!(
@@ -711,7 +711,7 @@ async fn do_clean(
     artifact_dir: &Utf8Path,
     install_dir: &Utf8Path,
 ) -> Result<()> {
-    do_uninstall(&config).await?;
+    do_uninstall(config).await?;
     info!(config.log(), "Removing artifacts from {}", artifact_dir);
     const ARTIFACTS_TO_KEEP: &[&str] = &[
         "clickhouse",

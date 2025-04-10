@@ -185,13 +185,13 @@ impl StorageManagerTestHarness {
 
         let key_manager_error_injector = Arc::new(AtomicBool::new(false));
         let (mut key_manager, key_requester) = key_manager::KeyManager::new(
-            &log,
+            log,
             HardcodedSecretRetriever {
                 inject_error: key_manager_error_injector.clone(),
             },
         );
         let (manager, handle) =
-            StorageManager::new(&log, mount_config, key_requester.clone());
+            StorageManager::new(log, mount_config, key_requester.clone());
 
         // Spawn the key_manager so that it will respond to requests for encryption keys
         let key_manager_task =
@@ -338,7 +338,7 @@ impl StorageManagerTestHarness {
     // Otherwise, removing the temporary directory containing that zpool
     // will likely fail with a "device busy" error.
     pub async fn remove_vdev(&mut self, raw: &RawDisk) {
-        assert!(self.vdevs.remove(&raw), "Vdev does not exist");
+        assert!(self.vdevs.remove(raw), "Vdev does not exist");
         self.handle
             .detected_raw_disk_removal(raw.clone())
             .await

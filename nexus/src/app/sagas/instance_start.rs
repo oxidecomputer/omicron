@@ -295,7 +295,7 @@ async fn sis_move_to_starting(
 
     // For idempotency, refetch the instance to see if this step already applied
     // its desired update.
-    let (_, _, authz_instance, ..) = LookupPath::new(&opctx, &datastore)
+    let (_, _, authz_instance, ..) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
@@ -491,7 +491,7 @@ async fn sis_dpd_ensure(
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
     let sled_uuid = sagactx.lookup::<SledUuid>("sled_id")?;
-    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
+    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
         .sled_id(sled_uuid.into_untyped_uuid())
         .fetch()
         .await
@@ -522,7 +522,7 @@ async fn sis_dpd_ensure_undo(
           "instance_id" => %instance_id,
           "start_reason" => ?params.reason);
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_instance) = LookupPath::new(&opctx, osagactx.datastore())
         .instance_id(instance_id)
         .lookup_for(authz::Action::Modify)
         .await
@@ -576,7 +576,7 @@ async fn sis_ensure_registered(
           "start_reason" => ?params.reason);
 
     let (authz_silo, authz_project, authz_instance) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .instance_id(instance_id)
             .lookup_for(authz::Action::Modify)
             .await
@@ -646,7 +646,7 @@ async fn sis_ensure_registered_undo(
 
     // Fetch the latest record so that this callee can drive the instance into
     // a Failed state if the unregister call fails.
-    let (.., authz_instance, _) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance, _) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await
@@ -815,8 +815,8 @@ mod test {
     const INSTANCE_NAME: &str = "test-instance";
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
-        let project = create_project(&client, PROJECT_NAME).await;
+        create_default_ip_pool(client).await;
+        let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }
 
@@ -856,7 +856,7 @@ mod test {
     ) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let _project_id = setup_test_project(&client).await;
+        let _project_id = setup_test_project(client).await;
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -896,7 +896,7 @@ mod test {
         let log = &cptestctx.logctx.log;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let _project_id = setup_test_project(&client).await;
+        let _project_id = setup_test_project(client).await;
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -955,7 +955,7 @@ mod test {
     ) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let _project_id = setup_test_project(&client).await;
+        let _project_id = setup_test_project(client).await;
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -996,7 +996,7 @@ mod test {
     async fn test_ensure_running_unwind(cptestctx: &ControlPlaneTestContext) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let _project_id = setup_test_project(&client).await;
+        let _project_id = setup_test_project(client).await;
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);

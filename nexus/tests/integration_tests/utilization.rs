@@ -27,7 +27,7 @@ type ControlPlaneTestContext =
 async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
 
     // set high quota for test silo
     let _ = NexusRequest::object_put(
@@ -90,8 +90,8 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
         SiloQuotasCreate::arbitrarily_high_default().into()
     );
 
-    let _ = create_project(&client, &PROJECT_NAME).await;
-    let _ = create_instance(client, &PROJECT_NAME, &INSTANCE_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
+    let _ = create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
     // Start instance
     NexusRequest::new(
@@ -134,7 +134,7 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
     );
 
     // Simulate space for disks
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
 
     // provision disk
     NexusRequest::new(

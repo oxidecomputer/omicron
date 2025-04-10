@@ -767,7 +767,7 @@ fn sign_junk_data(key_pair: &DerEncodedKeyPair) -> Result<(), anyhow::Error> {
 
     let mut signer = openssl::sign::Signer::new(
         openssl::hash::MessageDigest::sha256(),
-        &private_key.as_ref(),
+        private_key.as_ref(),
     )?;
 
     let some_junk_data = b"this is some junk data";
@@ -798,7 +798,7 @@ where
     let v = Option::<DerEncodedKeyPair>::deserialize(deserializer)?;
 
     if let Some(ref key_pair) = v {
-        if let Err(e) = sign_junk_data(&key_pair) {
+        if let Err(e) = sign_junk_data(key_pair) {
             return Err(de::Error::custom(format!(
                 "data signed with key not verified with certificate! {}",
                 e

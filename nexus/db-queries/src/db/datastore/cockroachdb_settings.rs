@@ -142,7 +142,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let settings = datastore.cockroachdb_settings(&opctx).await.unwrap();
+        let settings = datastore.cockroachdb_settings(opctx).await.unwrap();
         let version: CockroachDbClusterVersion =
             settings.version.parse().expect("unexpected cluster version");
         if settings.preserve_downgrade == "" {
@@ -164,7 +164,7 @@ mod test {
         // back.
         let Err(Error::InternalError { internal_message }) = datastore
             .cockroachdb_setting_set_string(
-                &opctx,
+                opctx,
                 String::new(),
                 "cluster.preserve_downgrade_option",
                 version.to_string(),
@@ -181,7 +181,7 @@ mod test {
         // And ensure that the state didn't change.
         assert_eq!(
             settings,
-            datastore.cockroachdb_settings(&opctx).await.unwrap()
+            datastore.cockroachdb_settings(opctx).await.unwrap()
         );
 
         // Test setting it (twice, to verify doing it again doesn't trigger
@@ -189,7 +189,7 @@ mod test {
         for _ in 0..2 {
             datastore
                 .cockroachdb_setting_set_string(
-                    &opctx,
+                    opctx,
                     settings.state_fingerprint.clone(),
                     "cluster.preserve_downgrade_option",
                     version.to_string(),
@@ -197,7 +197,7 @@ mod test {
                 .await
                 .unwrap();
             assert_eq!(
-                datastore.cockroachdb_settings(&opctx).await.unwrap(),
+                datastore.cockroachdb_settings(opctx).await.unwrap(),
                 CockroachDbSettings {
                     state_fingerprint: settings.state_fingerprint.clone(),
                     version: version.to_string(),
@@ -210,15 +210,14 @@ mod test {
         for _ in 0..2 {
             datastore
                 .cockroachdb_setting_set_string(
-                    &opctx,
+                    opctx,
                     settings.state_fingerprint.clone(),
                     "cluster.preserve_downgrade_option",
                     String::new(),
                 )
                 .await
                 .unwrap();
-            let settings =
-                datastore.cockroachdb_settings(&opctx).await.unwrap();
+            let settings = datastore.cockroachdb_settings(opctx).await.unwrap();
             if version == CockroachDbClusterVersion::NEWLY_INITIALIZED {
                 assert_eq!(
                     settings,

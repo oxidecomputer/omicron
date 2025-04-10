@@ -33,7 +33,7 @@ pub fn encode(block: Block, mut dst: &mut BytesMut) -> Result<(), Error> {
         &mut dst,
     );
     for (name, col) in block.columns {
-        io::column::encode(&name, col, &mut dst)?;
+        io::column::encode(&name, col, dst)?;
     }
     Ok(())
 }

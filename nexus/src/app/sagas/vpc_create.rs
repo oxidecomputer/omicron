@@ -676,7 +676,7 @@ pub(crate) mod test {
     const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pool(client).await;
         let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }
@@ -715,7 +715,7 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let project_selector =
             params::ProjectSelector { project: NameOrId::Id(project_id) };
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         let (.., authz_project) = nexus
             .project_lookup(&opctx, project_selector)
             .expect("Invalid parameters constructing project lookup")
@@ -729,13 +729,13 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
         project_id: Uuid,
     ) {
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         let datastore = cptestctx.server.server_context().nexus.datastore();
         let default_name = Name::try_from("default".to_string()).unwrap();
         let system_name = Name::try_from("system".to_string()).unwrap();
 
         // Default Subnet
-        let (.., authz_subnet, subnet) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_subnet, subnet) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .vpc_name(&default_name.clone().into())
             .vpc_subnet_name(&default_name.clone().into())
@@ -748,7 +748,7 @@ pub(crate) mod test {
             .expect("Failed to delete default Subnet");
 
         // Default gateway routes
-        let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_route, _route) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .vpc_name(&default_name.clone().into())
             .vpc_router_name(&system_name.clone().into())
@@ -761,7 +761,7 @@ pub(crate) mod test {
             .await
             .expect("Failed to delete default route");
 
-        let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_route, _route) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .vpc_name(&default_name.clone().into())
             .vpc_router_name(&system_name.clone().into())
@@ -775,7 +775,7 @@ pub(crate) mod test {
             .expect("Failed to delete default route");
 
         // System router
-        let (.., authz_router, _router) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_router, _router) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .vpc_name(&default_name.clone().into())
             .vpc_router_name(&system_name.into())
@@ -789,7 +789,7 @@ pub(crate) mod test {
 
         // Default gateway
         let (.., authz_vpc, authz_igw, _igw) =
-            LookupPath::new(&opctx, &datastore)
+            LookupPath::new(&opctx, datastore)
                 .project_id(project_id)
                 .vpc_name(&default_name.clone().into())
                 .internet_gateway_name(&default_name.clone().into())
@@ -807,7 +807,7 @@ pub(crate) mod test {
             .expect("Failed to delete default gateway");
 
         // Default VPC & Firewall Rules
-        let (.., authz_vpc, vpc) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_vpc, vpc) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .vpc_name(&default_name.into())
             .fetch()
@@ -995,16 +995,16 @@ pub(crate) mod test {
     ) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_org_and_project(&client).await;
-        delete_project_vpc_defaults(&cptestctx, project_id).await;
+        let project_id = create_org_and_project(client).await;
+        delete_project_vpc_defaults(cptestctx, project_id).await;
 
         // Before running the test, confirm we have no records of any VPCs.
         verify_clean_slate(nexus.datastore()).await;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         let authz_project = get_authz_project(
-            &cptestctx,
+            cptestctx,
             project_id,
             authz::Action::CreateChild,
         )
@@ -1021,10 +1021,10 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_org_and_project(&client).await;
-        delete_project_vpc_defaults(&cptestctx, project_id).await;
+        let project_id = create_org_and_project(client).await;
+        delete_project_vpc_defaults(cptestctx, project_id).await;
 
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaVpcCreate,
             _,
@@ -1036,7 +1036,7 @@ pub(crate) mod test {
                     new_test_params(
                         &opctx,
                         get_authz_project(
-                            &cptestctx,
+                            cptestctx,
                             project_id,
                             authz::Action::CreateChild,
                         )

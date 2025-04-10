@@ -221,7 +221,7 @@ impl TestState {
     // outstanding request remains.
     fn disconnect_all_peers_and_clear_pending_learn_request(&mut self) {
         for peer in &self.common.connected_peers {
-            self.common.sut.on_disconnected(&peer);
+            self.common.sut.on_disconnected(peer);
         }
         self.common.connected_peers = BTreeSet::new();
         for _ in 0..self.ticks_until_learn_timeout() {

@@ -465,7 +465,7 @@ impl<'a> Planner<'a> {
             // First, we need to ensure that sleds are using their expected
             // disks. This is necessary before we can allocate any zones.
             let sled_edits =
-                self.blueprint.sled_add_disks(sled_id, &sled_resources)?;
+                self.blueprint.sled_add_disks(sled_id, sled_resources)?;
 
             if let EnsureMultiple::Changed {
                 added,
@@ -690,7 +690,7 @@ impl<'a> Planner<'a> {
                     .input
                     .all_sled_resources(SledFilter::Discretionary)
                     .filter(|(sled_id, _)| {
-                        !sleds_waiting_for_ntp_zone.contains(&sled_id)
+                        !sleds_waiting_for_ntp_zone.contains(sled_id)
                     })
                     .map(|(sled_id, sled_resources)| {
                         OmicronZonePlacementSledState {
@@ -1037,15 +1037,15 @@ pub(crate) mod test {
     ) {
         let planner = Planner::new_based_on(
             log.clone(),
-            &blueprint,
-            &input,
+            blueprint,
+            input,
             test_name,
-            &collection,
+            collection,
         )
         .expect("created planner");
         let child_blueprint = planner.plan().expect("planning succeeded");
         verify_blueprint(&child_blueprint);
-        let summary = child_blueprint.diff_since_blueprint(&blueprint);
+        let summary = child_blueprint.diff_since_blueprint(blueprint);
         eprintln!(
             "diff between blueprints (expected no changes):\n{}",
             summary.display()
@@ -2039,7 +2039,7 @@ pub(crate) mod test {
         assert_eq!(
             collection
                 .sled_agents
-                .get(&sled_id)
+                .get(sled_id)
                 .unwrap()
                 .omicron_physical_disks_generation,
             Generation::new()
@@ -2060,7 +2060,7 @@ pub(crate) mod test {
         let expunged_disk_id = {
             let expunged_disk = &mut builder
                 .sleds_mut()
-                .get_mut(&sled_id)
+                .get_mut(sled_id)
                 .unwrap()
                 .resources
                 .zpools
@@ -2126,7 +2126,7 @@ pub(crate) mod test {
         // has learned about the expungement.
         collection
             .sled_agents
-            .get_mut(&sled_id)
+            .get_mut(sled_id)
             .unwrap()
             .omicron_physical_disks_generation = Generation::from_u32(3);
 
@@ -2336,7 +2336,7 @@ pub(crate) mod test {
                     assert!(name.starts_with("oxz_crucible"));
                     assert!(expected_kinds.remove(&test_transient_zone_kind));
                 } else {
-                    assert!(expected_kinds.remove(&modified.kind.before));
+                    assert!(expected_kinds.remove(modified.kind.before));
                 }
             }
             modified_sled_configs.push(modified_sled);

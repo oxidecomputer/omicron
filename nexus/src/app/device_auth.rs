@@ -212,7 +212,7 @@ impl super::Nexus {
         use DeviceAccessTokenResponse::*;
         match self
             .device_access_token_fetch(
-                &opctx,
+                opctx,
                 params.client_id,
                 params.device_code,
             )

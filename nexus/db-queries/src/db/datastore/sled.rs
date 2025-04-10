@@ -231,27 +231,26 @@ fn pick_sled_reservation_target(
     }
     if let Some(required_id) = required.iter().next() {
         // If we have a "required" sled, it must be chosen.
-        if banned.contains(&required_id) {
+        if banned.contains(required_id) {
             return Err(
                 SledReservationError::ConflictingAntiAndAffinityConstraints,
             );
         }
-        if !targets.contains(&required_id) {
+        if !targets.contains(required_id) {
             return Err(SledReservationError::RequiredAffinitySledNotValid);
         }
         return Ok(*required_id);
     }
 
     // We have no "required" sleds, but might have preferences.
-    let mut targets: HashSet<_> =
-        targets.difference(&banned).cloned().collect();
+    let mut targets: HashSet<_> = targets.difference(banned).cloned().collect();
 
     // Only consider "preferred" sleds that are viable targets
     let preferred: HashSet<_> =
-        targets.intersection(&preferred).cloned().collect();
+        targets.intersection(preferred).cloned().collect();
     // Only consider "unpreferred" sleds that are viable targets
     let mut unpreferred: HashSet<_> =
-        targets.intersection(&unpreferred).cloned().collect();
+        targets.intersection(unpreferred).cloned().collect();
 
     // If a target is both preferred and unpreferred, it is not considered
     // a part of either set.
@@ -338,7 +337,7 @@ impl DataStore {
         opctx: &OpContext,
         sled_id: SledUuid,
     ) -> Result<(), Error> {
-        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
         Self::check_sled_in_service_on_connection(conn, sled_id)
             .await
             .map_err(From::from)
@@ -1186,8 +1185,8 @@ pub(in crate::db::datastore) mod test {
         // Set the sled to decommissioned (this is not a legal transition, but
         // we don't care about sled policy in sled_upsert, just the state.)
         sled_set_state(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             SledUuid::from_untyped_uuid(observed_sled.id()),
             SledState::Decommissioned,
             ValidateTransition::No,
@@ -1217,7 +1216,7 @@ pub(in crate::db::datastore) mod test {
         assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
 
         // The sled should not have been updated.
-        let (_, observed_sled_2) = LookupPath::new(&opctx, &datastore)
+        let (_, observed_sled_2) = LookupPath::new(opctx, datastore)
             .sled_id(observed_sled.id())
             .fetch_for(authz::Action::Modify)
             .await
@@ -1271,7 +1270,7 @@ pub(in crate::db::datastore) mod test {
                 illegal_decommissioned_sled.id(),
             ),
         };
-        ineligible_sleds.setup(&opctx, &datastore).await.unwrap();
+        ineligible_sleds.setup(opctx, datastore).await.unwrap();
 
         // This should be an error since there are no provisionable sleds.
         let resources = db::model::Resources::new(
@@ -1283,7 +1282,7 @@ pub(in crate::db::datastore) mod test {
         let constraints = db::model::SledReservationConstraints::none();
         let error = datastore
             .sled_reservation_create(
-                &opctx,
+                opctx,
                 InstanceUuid::new_v4(),
                 PropolisUuid::new_v4(),
                 resources.clone(),
@@ -1304,7 +1303,7 @@ pub(in crate::db::datastore) mod test {
             let constraints = db::model::SledReservationConstraints::none();
             let resource = datastore
                 .sled_reservation_create(
-                    &opctx,
+                    opctx,
                     InstanceUuid::new_v4(),
                     PropolisUuid::new_v4(),
                     resources.clone(),
@@ -1319,7 +1318,7 @@ pub(in crate::db::datastore) mod test {
             );
 
             datastore
-                .sled_reservation_delete(&opctx, resource.id.into())
+                .sled_reservation_delete(opctx, resource.id.into())
                 .await
                 .unwrap();
         }
@@ -1419,18 +1418,18 @@ pub(in crate::db::datastore) mod test {
         ) -> Uuid {
             match self.affinity {
                 Affinity::Positive => create_affinity_group(
-                    &opctx,
-                    &datastore,
-                    &authz_project,
+                    opctx,
+                    datastore,
+                    authz_project,
                     self.name,
                     self.policy,
                 )
                 .await
                 .id(),
                 Affinity::Negative => create_anti_affinity_group(
-                    &opctx,
-                    &datastore,
-                    &authz_project,
+                    opctx,
+                    datastore,
+                    authz_project,
                     self.name,
                     self.policy,
                 )
@@ -1458,7 +1457,7 @@ pub(in crate::db::datastore) mod test {
                     group.name,
                     (
                         group.affinity,
-                        group.create(&opctx, &datastore, &authz_project).await,
+                        group.create(opctx, datastore, authz_project).await,
                     ),
                 );
             }
@@ -1567,8 +1566,8 @@ pub(in crate::db::datastore) mod test {
             all_groups: &AllGroups,
         ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
         {
-            self.add_to_groups(&datastore, &all_groups).await;
-            create_instance_reservation(&datastore, &opctx, self).await
+            self.add_to_groups(datastore, all_groups).await;
+            create_instance_reservation(datastore, opctx, self).await
         }
 
         async fn add_to_groups(
@@ -1584,7 +1583,7 @@ pub(in crate::db::datastore) mod test {
                 match *affinity {
                     Affinity::Positive => {
                         add_instance_to_affinity_group(
-                            &datastore,
+                            datastore,
                             AffinityGroupUuid::from_untyped_uuid(*group_id),
                             self.id,
                         )
@@ -1592,7 +1591,7 @@ pub(in crate::db::datastore) mod test {
                     }
                     Affinity::Negative => {
                         add_instance_to_anti_affinity_group(
-                            &datastore,
+                            datastore,
                             AntiAffinityGroupUuid::from_untyped_uuid(*group_id),
                             self.id,
                         )
@@ -1621,7 +1620,7 @@ pub(in crate::db::datastore) mod test {
         // view of the error code.
         let result = db
             .sled_reservation_create_inner(
-                &opctx,
+                opctx,
                 instance.id,
                 PropolisUuid::new_v4(),
                 instance.resources.clone(),
@@ -1645,10 +1644,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Negative,
@@ -1656,22 +1655,21 @@ pub(in crate::db::datastore) mod test {
             policy: external::AffinityPolicy::Fail,
         }];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
         let instances = [
             Instance::new().group("anti-affinity").sled(sleds[0].id()),
             Instance::new().group("anti-affinity").sled(sleds[1].id()),
         ];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
 
         let test_instance = Instance::new().group("anti-affinity");
         let err = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect_err("Should have failed to place instance");
 
@@ -1694,10 +1692,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Negative,
@@ -1705,22 +1703,21 @@ pub(in crate::db::datastore) mod test {
             policy: external::AffinityPolicy::Fail,
         }];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
         let instances = [
             Instance::new().group("anti-affinity").sled(sleds[0].id()),
             Instance::new().group("anti-affinity").sled(sleds[1].id()),
         ];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
 
         let test_instance = Instance::new().group("anti-affinity");
         let resource = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect("Should have succeeded allocation");
         assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[2].id());
@@ -1740,10 +1737,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Negative,
@@ -1751,22 +1748,21 @@ pub(in crate::db::datastore) mod test {
             policy: external::AffinityPolicy::Allow,
         }];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
         let instances = [
             Instance::new().group("anti-affinity").sled(sleds[0].id()),
             Instance::new().group("anti-affinity").sled(sleds[1].id()),
         ];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
 
         let test_instance = Instance::new().group("anti-affinity");
         let resource = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect("Should have succeeded allocation");
         assert!(
@@ -1788,10 +1784,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Positive,
@@ -1799,26 +1795,25 @@ pub(in crate::db::datastore) mod test {
             policy: external::AffinityPolicy::Fail,
         }];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
         let instances = [Instance::new().group("affinity").sled(sleds[0].id())];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
 
         let test_instance = Instance::new().group("affinity");
         let resource = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect("Should have placed instance");
         assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[0].id());
 
         let another_test_instance = Instance::new().group("affinity");
         let resource = another_test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect("Should have placed instance (again)");
         assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[0].id());
@@ -1835,10 +1830,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -1853,8 +1848,7 @@ pub(in crate::db::datastore) mod test {
             },
         ];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
 
         // We are constrained so that an instance belonging to both groups must be
         // placed on both sled 0 and sled 1. This cannot be satisfied, and it returns
@@ -1865,7 +1859,7 @@ pub(in crate::db::datastore) mod test {
         ];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
@@ -1873,7 +1867,7 @@ pub(in crate::db::datastore) mod test {
         let test_instance =
             Instance::new().group("affinity1").group("affinity2");
         let err = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect_err("Should have failed to place instance");
 
@@ -1898,10 +1892,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Positive,
@@ -1909,15 +1903,14 @@ pub(in crate::db::datastore) mod test {
             policy: external::AffinityPolicy::Fail,
         }];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
         let instances = [Instance::new()
             .use_many_resources()
             .group("affinity")
             .sled(sleds[0].id())];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
@@ -1925,7 +1918,7 @@ pub(in crate::db::datastore) mod test {
         let test_instance =
             Instance::new().use_many_resources().group("affinity");
         let err = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect_err("Should have failed to place instance");
         let SledReservationTransactionError::Reservation(
@@ -1951,10 +1944,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [Group {
             affinity: Affinity::Positive,
@@ -1962,15 +1955,14 @@ pub(in crate::db::datastore) mod test {
             policy: external::AffinityPolicy::Allow,
         }];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
         let instances = [Instance::new()
             .use_many_resources()
             .group("affinity")
             .sled(sleds[0].id())];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
@@ -1978,7 +1970,7 @@ pub(in crate::db::datastore) mod test {
         let test_instance =
             Instance::new().use_many_resources().group("affinity");
         let reservation = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect("Should have made reservation");
         assert_eq!(reservation.sled_id.into_untyped_uuid(), sleds[1].id());
@@ -1999,10 +1991,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -2017,15 +2009,14 @@ pub(in crate::db::datastore) mod test {
             },
         ];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
         let instances = [Instance::new()
             .group("anti-affinity")
             .group("affinity")
             .sled(sleds[0].id())];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
@@ -2033,7 +2024,7 @@ pub(in crate::db::datastore) mod test {
         let test_instance =
             Instance::new().group("anti-affinity").group("affinity");
         let err = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect_err("Contradictory constraints should not be satisfiable");
         let SledReservationTransactionError::Reservation(
@@ -2058,10 +2049,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -2076,8 +2067,7 @@ pub(in crate::db::datastore) mod test {
             },
         ];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
         let instances = [
             Instance::new()
                 .group("anti-affinity")
@@ -2090,7 +2080,7 @@ pub(in crate::db::datastore) mod test {
         ];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
@@ -2098,7 +2088,7 @@ pub(in crate::db::datastore) mod test {
         let test_instance =
             Instance::new().group("anti-affinity").group("affinity");
         let resource = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect("Should have succeeded allocation");
         assert!(
@@ -2117,10 +2107,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -2140,8 +2130,7 @@ pub(in crate::db::datastore) mod test {
             },
         ];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
 
         // Sleds 0 and 1 contain the "strict-anti-affinity" group instances,
         // and won't be used.
@@ -2159,7 +2148,7 @@ pub(in crate::db::datastore) mod test {
         ];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
@@ -2169,7 +2158,7 @@ pub(in crate::db::datastore) mod test {
             .group("anti-affinity")
             .group("affinity");
         let resource = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect("Should have succeeded allocation");
 
@@ -2185,10 +2174,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -2203,8 +2192,7 @@ pub(in crate::db::datastore) mod test {
             },
         ];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
 
         // Sled 0 contains an affinity group, but it's large enough to make it
         // non-viable for future allocations.
@@ -2229,7 +2217,7 @@ pub(in crate::db::datastore) mod test {
         ];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
@@ -2237,7 +2225,7 @@ pub(in crate::db::datastore) mod test {
         let test_instance =
             Instance::new().group("affinity").group("anti-affinity");
         let resource = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect("Should have succeeded allocation");
 
@@ -2253,10 +2241,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -2271,8 +2259,7 @@ pub(in crate::db::datastore) mod test {
             },
         ];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
 
         // Only "sleds[1]" has space. We ignore the affinity policy because
         // our new instance won't belong to either group.
@@ -2288,14 +2275,14 @@ pub(in crate::db::datastore) mod test {
         ];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
 
         let test_instance = Instance::new();
         let resource = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect("Should have succeeded allocation");
 
@@ -2312,10 +2299,10 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let groups = [
             Group {
@@ -2330,8 +2317,7 @@ pub(in crate::db::datastore) mod test {
             },
         ];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
 
         // Only "sleds[2]" has space, even though it also contains an anti-affinity group.
         // However, if we don't belong to this group, we won't care.
@@ -2343,14 +2329,14 @@ pub(in crate::db::datastore) mod test {
         ];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
 
         let test_instance = Instance::new().group("anti-affinity1");
         let resource = test_instance
-            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .add_to_groups_and_reserve(opctx, datastore, &all_groups)
             .await
             .expect("Should have succeeded allocation");
 
@@ -2370,17 +2356,17 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let test_instance = Instance::new().group("affinity");
 
         // We manually call the first half of sled reservation: finding targets.
         //
         // All sleds should be available.
-        let possible_sleds = test_instance.find_targets(&datastore).await;
+        let possible_sleds = test_instance.find_targets(datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
         assert!(
@@ -2399,21 +2385,20 @@ pub(in crate::db::datastore) mod test {
             policy: external::AffinityPolicy::Fail,
         }];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
         let instances = [Instance::new().group("affinity").sled(sleds[0].id())];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
 
         // Put the instance-under-test in the "affinity" group.
-        test_instance.add_to_groups(&datastore, &all_groups).await;
+        test_instance.add_to_groups(datastore, &all_groups).await;
 
         // Now if we try to find targets again, the result will change.
-        let possible_sleds = test_instance.find_targets(&datastore).await;
+        let possible_sleds = test_instance.find_targets(datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
         assert!(
@@ -2436,7 +2421,7 @@ pub(in crate::db::datastore) mod test {
             assert!(
                 !test_instance
                     .insert_resource(
-                        &datastore,
+                        datastore,
                         PropolisUuid::new_v4(),
                         SledUuid::from_untyped_uuid(sleds[i].id()),
                     )
@@ -2449,7 +2434,7 @@ pub(in crate::db::datastore) mod test {
         assert!(
             test_instance
                 .insert_resource(
-                    &datastore,
+                    datastore,
                     PropolisUuid::new_v4(),
                     SledUuid::from_untyped_uuid(sleds[0].id()),
                 )
@@ -2470,17 +2455,17 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let test_instance = Instance::new().group("anti-affinity");
 
         // We manually call the first half of sled reservation: finding targets.
         //
         // All sleds should be available.
-        let possible_sleds = test_instance.find_targets(&datastore).await;
+        let possible_sleds = test_instance.find_targets(datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
         assert!(
@@ -2499,22 +2484,21 @@ pub(in crate::db::datastore) mod test {
             policy: external::AffinityPolicy::Fail,
         }];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
         let instances =
             [Instance::new().group("anti-affinity").sled(sleds[0].id())];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
 
         // Put the instance-under-test in the "anti-affinity" group.
-        test_instance.add_to_groups(&datastore, &all_groups).await;
+        test_instance.add_to_groups(datastore, &all_groups).await;
 
         // Now if we try to find targets again, the result will change.
-        let possible_sleds = test_instance.find_targets(&datastore).await;
+        let possible_sleds = test_instance.find_targets(datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
         assert!(
@@ -2536,7 +2520,7 @@ pub(in crate::db::datastore) mod test {
         assert!(
             !test_instance
                 .insert_resource(
-                    &datastore,
+                    datastore,
                     PropolisUuid::new_v4(),
                     SledUuid::from_untyped_uuid(sleds[0].id()),
                 )
@@ -2548,7 +2532,7 @@ pub(in crate::db::datastore) mod test {
         assert!(
             test_instance
                 .insert_resource(
-                    &datastore,
+                    datastore,
                     PropolisUuid::new_v4(),
                     SledUuid::from_untyped_uuid(sleds[1].id()),
                 )
@@ -2567,17 +2551,17 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore, "project").await;
+            create_project(opctx, datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
-        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+        let sleds = create_sleds(datastore, SLED_COUNT).await;
 
         let test_instance = Instance::new().use_many_resources();
 
         // We manually call the first half of sled reservation: finding targets.
         //
         // All sleds should be available.
-        let possible_sleds = test_instance.find_targets(&datastore).await;
+        let possible_sleds = test_instance.find_targets(datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
         assert!(
@@ -2592,8 +2576,7 @@ pub(in crate::db::datastore) mod test {
         // Concurrently create large instances on sleds 0, 2, 3.
         let groups = [];
         let all_groups =
-            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-                .await;
+            AllGroups::create(opctx, datastore, &authz_project, &groups).await;
         let instances = [
             Instance::new().use_many_resources().sled(sleds[0].id()),
             Instance::new().use_many_resources().sled(sleds[2].id()),
@@ -2601,13 +2584,13 @@ pub(in crate::db::datastore) mod test {
         ];
         for instance in instances {
             instance
-                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .add_to_groups_and_reserve(opctx, datastore, &all_groups)
                 .await
                 .expect("Failed to set up instances");
         }
 
         // Now if we try to find targets again, the result will change.
-        let possible_sleds = test_instance.find_targets(&datastore).await;
+        let possible_sleds = test_instance.find_targets(datastore).await;
         assert_eq!(possible_sleds.len(), 1);
         assert!(possible_sleds[0].affinity_policy.is_none());
         assert!(possible_sleds[0].anti_affinity_policy.is_none());
@@ -2620,7 +2603,7 @@ pub(in crate::db::datastore) mod test {
             assert!(
                 !test_instance
                     .insert_resource(
-                        &datastore,
+                        datastore,
                         PropolisUuid::new_v4(),
                         SledUuid::from_untyped_uuid(sleds[i].id()),
                     )
@@ -2633,7 +2616,7 @@ pub(in crate::db::datastore) mod test {
         assert!(
             test_instance
                 .insert_resource(
-                    &datastore,
+                    datastore,
                     PropolisUuid::new_v4(),
                     SledUuid::from_untyped_uuid(sleds[1].id()),
                 )
@@ -2698,11 +2681,11 @@ pub(in crate::db::datastore) mod test {
         );
 
         datastore
-            .physical_disk_insert(&opctx, disk1.clone())
+            .physical_disk_insert(opctx, disk1.clone())
             .await
             .expect("Failed to upsert physical disk");
         datastore
-            .physical_disk_insert(&opctx, disk2.clone())
+            .physical_disk_insert(opctx, disk2.clone())
             .await
             .expect("Failed to upsert physical disk");
 
@@ -2711,18 +2694,18 @@ pub(in crate::db::datastore) mod test {
         // We verify this state because it should be changing below.
         assert_eq!(
             PhysicalDiskPolicy::InService,
-            lookup_physical_disk(&datastore, disk1.id()).await.disk_policy
+            lookup_physical_disk(datastore, disk1.id()).await.disk_policy
         );
         assert_eq!(
             PhysicalDiskPolicy::InService,
-            lookup_physical_disk(&datastore, disk2.id()).await.disk_policy
+            lookup_physical_disk(datastore, disk2.id()).await.disk_policy
         );
 
         // Expunge the sled. As a part of this process, the query should UPDATE
         // the physical_disk table.
         sled_set_policy(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             sled_id,
             SledPolicy::Expunged,
             ValidateTransition::Yes,
@@ -2734,18 +2717,18 @@ pub(in crate::db::datastore) mod test {
         // Observe that the disk policy is now expunged
         assert_eq!(
             PhysicalDiskPolicy::Expunged,
-            lookup_physical_disk(&datastore, disk1.id()).await.disk_policy
+            lookup_physical_disk(datastore, disk1.id()).await.disk_policy
         );
         assert_eq!(
             PhysicalDiskPolicy::Expunged,
-            lookup_physical_disk(&datastore, disk2.id()).await.disk_policy
+            lookup_physical_disk(datastore, disk2.id()).await.disk_policy
         );
 
         // We can now decommission the sled, which should also decommission the
         // disks.
         sled_set_state(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             sled_id,
             SledState::Decommissioned,
             ValidateTransition::Yes,
@@ -2757,11 +2740,11 @@ pub(in crate::db::datastore) mod test {
         // Observe that the disk state is now decommissioned
         assert_eq!(
             PhysicalDiskState::Decommissioned,
-            lookup_physical_disk(&datastore, disk1.id()).await.disk_state
+            lookup_physical_disk(datastore, disk1.id()).await.disk_state
         );
         assert_eq!(
             PhysicalDiskState::Decommissioned,
-            lookup_physical_disk(&datastore, disk2.id()).await.disk_state
+            lookup_physical_disk(datastore, disk2.id()).await.disk_state
         );
 
         db.terminate().await;
@@ -2869,8 +2852,8 @@ pub(in crate::db::datastore) mod test {
 
         for (i, ((policy, state), after)) in all_transitions {
             test_sled_state_transitions_once(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 SledUuid::from_untyped_uuid(sled_id),
                 policy,
                 state,
@@ -3030,7 +3013,7 @@ pub(in crate::db::datastore) mod test {
         assert_eq!(ninserted, size);
 
         let sleds = datastore
-            .sled_list_all_batched(&opctx, SledFilter::Commissioned)
+            .sled_list_all_batched(opctx, SledFilter::Commissioned)
             .await
             .expect("failed to list all sleds");
 

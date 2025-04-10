@@ -306,7 +306,10 @@ iter_nth = "warn"
 iter_nth_zero = "warn"
 iter_skip_next = "warn"
 len_zero = "warn"
+needless_borrow = "warn"
+println_empty_string = "warn"
 redundant_field_names = "warn"
+unwrap_or_default = "warn"
 # `declare_interior_mutable_const` is classified as a style lint, but it can
 # identify real bugs (e.g., declarying a `const Atomic` and using it like
 # a `static Atomic`). However, it is also subject to false positives (e.g.,

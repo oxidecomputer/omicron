@@ -148,7 +148,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     let projects_url = "/v1/projects";
 
     // Verify that there are no projects to begin with.
-    let projects = projects_list(&client, &projects_url, "", None).await;
+    let projects = projects_list(client, projects_url, "", None).await;
     assert_eq!(0, projects.len());
 
     // Create three projects used by the rest of this test.
@@ -199,8 +199,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     // Basic GET projects list now that we've created a few.
     // TODO-coverage: pagination
     // TODO-coverage: marker even without pagination
-    let initial_projects =
-        projects_list(&client, &projects_url, "", None).await;
+    let initial_projects = projects_list(client, projects_url, "", None).await;
     assert_eq!(initial_projects.len(), 3);
     assert_eq!(initial_projects[0].identity.id, new_project_ids[0]);
     assert_eq!(initial_projects[0].identity.name, "simproject1");
@@ -213,7 +212,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert!(!initial_projects[2].identity.description.is_empty());
 
     // Basic test of out-of-the-box GET project
-    let project = project_get(&client, "/v1/projects/simproject2").await;
+    let project = project_get(client, "/v1/projects/simproject2").await;
     let expected = &initial_projects[1];
     assert_eq!(project.identity.id, expected.identity.id);
     assert_eq!(project.identity.name, expected.identity.name);
@@ -276,7 +275,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
         .iter()
         .filter(|p| p.identity.name != "simproject2")
         .collect();
-    let new_projects = projects_list(&client, "/v1/projects", "", None).await;
+    let new_projects = projects_list(client, "/v1/projects", "", None).await;
     assert_eq!(new_projects.len(), expected_projects.len());
     assert_eq!(new_projects[0].identity.id, expected_projects[0].identity.id);
     assert_eq!(
@@ -321,7 +320,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project.identity.description, "Li'l lightnin'");
 
     let expected = project;
-    let project = project_get(&client, "/v1/projects/simproject3").await;
+    let project = project_get(client, "/v1/projects/simproject3").await;
     assert_eq!(project.identity.name, expected.identity.name);
     assert_eq!(project.identity.description, expected.identity.description);
     assert_eq!(project.identity.description, "Li'l lightnin'");
@@ -369,7 +368,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
         },
     };
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &projects_url)
+        RequestBuilder::new(client, Method::POST, projects_url)
             .body(Some(&project_create))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -391,7 +390,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
         description: &'static str,
     }
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &projects_url)
+        RequestBuilder::new(client, Method::POST, projects_url)
             .body(Some(&BadProject {
                 name: "sim_project",
                 description: "underscore",
@@ -432,7 +431,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     // - "honor-roller" with description "a soapbox racer"
     // - "lil-lightnin" with description "little lightning"
     // - "simproject1", same as when it was created.
-    let projects = projects_list(&client, &projects_url, "", None).await;
+    let projects = projects_list(client, projects_url, "", None).await;
     assert_eq!(projects.len(), 3);
     assert_eq!(projects[0].identity.name, "honor-roller");
     assert_eq!(projects[0].identity.description, "a soapbox racer");
@@ -448,7 +447,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
 
     // Verify that there are no projects to begin with.
     let projects_url = "/v1/projects";
-    assert_eq!(projects_list(&client, &projects_url, "", None).await.len(), 0);
+    assert_eq!(projects_list(client, projects_url, "", None).await.len(), 0);
 
     // Create a large number of projects that we can page through.
     let projects_total = 10;
@@ -461,7 +460,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
         // a uuid though, so we'll use a prefix.
         let mut name = Uuid::new_v4().to_string();
         name.insert_str(0, "project-");
-        let project = create_project(&client, &name).await;
+        let project = create_project(client, &name).await;
         projects_created.push(project.identity);
     }
 
@@ -482,7 +481,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
     // Page through all the projects in the default order, which should be in
     // increasing order of name.
     let found_projects_by_name =
-        projects_list(&client, projects_url, "", Some(projects_subset)).await;
+        projects_list(client, projects_url, "", Some(projects_subset)).await;
     assert_eq!(found_projects_by_name.len(), project_names_by_name.len());
     assert_eq!(
         project_names_by_name,
@@ -495,7 +494,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
     // Page through all the projects in ascending order by name, which should be
     // the same as above.
     let found_projects_by_name = projects_list(
-        &client,
+        client,
         projects_url,
         "sort_by=name_ascending",
         Some(projects_subset),
@@ -513,7 +512,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
     // Page through all the projects in descending order by name, which should be
     // the reverse of the above.
     let mut found_projects_by_name = projects_list(
-        &client,
+        client,
         projects_url,
         "sort_by=name_descending",
         Some(projects_subset),
@@ -531,7 +530,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
 
     // Page through the projects in ascending order by id.
     let found_projects_by_id = projects_list(
-        &client,
+        client,
         projects_url,
         "sort_by=id_ascending",
         Some(projects_subset),

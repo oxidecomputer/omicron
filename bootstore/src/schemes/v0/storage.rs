@@ -66,7 +66,7 @@ impl PersistentFsmState {
         config: FsmConfig,
     ) -> (Fsm, u64) {
         if let Some(ledger) =
-            Ledger::<PersistentFsmState>::new(&log, paths).await
+            Ledger::<PersistentFsmState>::new(log, paths).await
         {
             let persistent_state = ledger.into_inner();
             info!(
@@ -134,7 +134,7 @@ impl NetworkConfig {
         log: &Logger,
         paths: Vec<Utf8PathBuf>,
     ) -> Option<NetworkConfig> {
-        if let Some(ledger) = Ledger::<NetworkConfig>::new(&log, paths).await {
+        if let Some(ledger) = Ledger::<NetworkConfig>::new(log, paths).await {
             let config = ledger.into_inner();
             info!(
                 log,

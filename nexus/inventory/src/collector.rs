@@ -353,7 +353,7 @@ impl<'a> Collector<'a> {
             }
         };
 
-        self.in_progress.found_sled_inventory(&sled_agent_url, inventory)
+        self.in_progress.found_sled_inventory(sled_agent_url, inventory)
     }
 
     /// Collect inventory from about keepers from all `ClickhouseAdminKeeper`
@@ -363,7 +363,7 @@ impl<'a> Collector<'a> {
             "nkeeper_admin_clients" => self.keeper_admin_clients.len());
 
         for client in &self.keeper_admin_clients {
-            Self::collect_one_keeper(&client, &self.log, &mut self.in_progress)
+            Self::collect_one_keeper(client, &self.log, &mut self.in_progress)
                 .await;
         }
 
@@ -548,7 +548,7 @@ mod test {
             // Some error strings have OS error numbers in them.  We want to
             // ignore those, particularly for CI, which runs these tests on
             // multiple OSes.
-            let message = os_error_re.replace_all(&e, "os error <<redacted>>");
+            let message = os_error_re.replace_all(e, "os error <<redacted>>");
             // Communication errors differ based on the configuration of the
             // machine running the test. For example whether or not the machine
             // has IPv6 configured will determine if an error is network
@@ -579,7 +579,7 @@ mod test {
         );
 
         let agent =
-            sim::Server::start(&config, &log, false, &simulated_upstairs, 0)
+            sim::Server::start(&config, &log, false, simulated_upstairs, 0)
                 .await
                 .unwrap();
 

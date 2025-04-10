@@ -954,7 +954,7 @@ async fn siu_become_updater(
         .datastore()
         .instance_updater_inherit_lock(
             &opctx,
-            &authz_instance,
+            authz_instance,
             orig_lock,
             saga_id,
         )
@@ -1379,7 +1379,7 @@ async fn unwind_instance_lock(
     let log = osagactx.log();
     let instance_id = authz_instance.id();
     let opctx =
-        crate::context::op_context_for_saga_action(sagactx, &serialized_authn);
+        crate::context::op_context_for_saga_action(sagactx, serialized_authn);
 
     debug!(
         log,
@@ -1521,8 +1521,8 @@ mod test {
     // 6. migration source failed
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
-        let project = create_project(&client, PROJECT_NAME).await;
+        create_default_ip_pool(client).await;
+        let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }
 
@@ -2313,7 +2313,7 @@ mod test {
             let nexus = &cptestctx.server.server_context().nexus;
             let _project_id =
                 setup_test_project(&cptestctx.external_client).await;
-            let opctx = test_helpers::test_opctx(&cptestctx);
+            let opctx = test_helpers::test_opctx(cptestctx);
 
             // Stupid side channel for passing the expected parent start saga's lock
             // ID into the "after unwinding" method, so that it can check that the
@@ -2466,12 +2466,11 @@ mod test {
             )
             .await;
 
-            let (_, _, authz_instance, ..) =
-                LookupPath::new(&opctx, &datastore)
-                    .instance_id(instance_id.into_untyped_uuid())
-                    .fetch()
-                    .await
-                    .expect("test instance should be present in datastore");
+            let (_, _, authz_instance, ..) = LookupPath::new(&opctx, datastore)
+                .instance_id(instance_id.into_untyped_uuid())
+                .fetch()
+                .await
+                .expect("test instance should be present in datastore");
             let initial_state = datastore
                 .instance_fetch_all(&opctx, &authz_instance)
                 .await
@@ -2851,10 +2850,10 @@ mod test {
             .await
             .expect("must lock instance");
         let state = datastore
-            .instance_fetch_all(&opctx, &authz_instance)
+            .instance_fetch_all(opctx, &authz_instance)
             .await
             .expect("instance must exist");
-        let update = UpdatesRequired::for_instance(&log, &state)
+        let update = UpdatesRequired::for_instance(log, &state)
             .expect("the test's precondition should require updates");
 
         info!(

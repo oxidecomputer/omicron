@@ -146,7 +146,7 @@ mod test {
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        create_schema(&pool).await;
+        create_schema(pool).await;
 
         use schema::test_users::dsl;
         let explanation = dsl::test_users
@@ -170,7 +170,7 @@ mod test {
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        create_schema(&pool).await;
+        create_schema(pool).await;
 
         use schema::test_users::dsl;
         let explanation = dsl::test_users

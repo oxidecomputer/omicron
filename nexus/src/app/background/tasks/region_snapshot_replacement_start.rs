@@ -218,7 +218,7 @@ impl RegionSnapshotReplacementDetector {
                 match self
                     .datastore
                     .set_region_snapshot_replacement_complete_from_requested(
-                        &opctx, request.id,
+                        opctx, request.id,
                     )
                     .await
                 {
@@ -434,7 +434,7 @@ mod test {
         let disk_test = DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let project = create_project(&client, "testing").await;
+        let project = create_project(client, "testing").await;
         let project_id = project.identity.id;
 
         let nexus = &cptestctx.server.server_context().nexus;
@@ -482,7 +482,7 @@ mod test {
 
         // Create the fake snapshot
 
-        let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_project) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .lookup_for(authz::Action::CreateChild)
             .await

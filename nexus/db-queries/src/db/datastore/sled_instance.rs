@@ -21,7 +21,7 @@ impl DataStore {
     ) -> ListResultVec<SledInstance> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         use nexus_db_schema::schema::sled_instance::dsl;
-        paginated(dsl::sled_instance, dsl::id, &pagparams)
+        paginated(dsl::sled_instance, dsl::id, pagparams)
             .filter(dsl::active_sled_id.eq(authz_sled.id()))
             .select(SledInstance::as_select())
             .load_async::<SledInstance>(

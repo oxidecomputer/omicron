@@ -122,7 +122,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     print!("{}", VERIFY_HEADER);
     for endpoint in &*VERIFY_ENDPOINTS {
         let setup_response = setup_results.get(&endpoint.url);
-        verify_endpoint(&log, client, endpoint, setup_response).await;
+        verify_endpoint(log, client, endpoint, setup_response).await;
     }
 }
 
@@ -228,7 +228,7 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         },
         // Create the default IP pool
         SetupReq::Post {
-            url: &DEMO_IP_POOLS_URL,
+            url: DEMO_IP_POOLS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
             id_routes: vec!["/v1/ip-pools/{id}"],
         },
@@ -348,25 +348,25 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         },
         // Create a SAML identity provider
         SetupReq::Post {
-            url: &SAML_IDENTITY_PROVIDERS_URL,
+            url: SAML_IDENTITY_PROVIDERS_URL,
             body: serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
             id_routes: vec![],
         },
         // Create a SSH key
         SetupReq::Post {
-            url: &DEMO_SSHKEYS_URL,
+            url: DEMO_SSHKEYS_URL,
             body: serde_json::to_value(&*DEMO_SSHKEY_CREATE).unwrap(),
             id_routes: vec![],
         },
         // Create a Certificate
         SetupReq::Post {
-            url: &DEMO_CERTIFICATES_URL,
+            url: DEMO_CERTIFICATES_URL,
             body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
             id_routes: vec![],
         },
         // Create a Support Bundle
         SetupReq::Post {
-            url: &SUPPORT_BUNDLES_URL,
+            url: SUPPORT_BUNDLES_URL,
             body: serde_json::to_value(()).unwrap(),
             id_routes: vec!["/experimental/v1/system/support-bundles/{id}"],
         },

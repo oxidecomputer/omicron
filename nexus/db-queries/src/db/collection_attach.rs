@@ -691,7 +691,7 @@ mod test {
             .await
             .unwrap();
 
-        get_collection(id, &conn).await
+        get_collection(id, conn).await
     }
 
     async fn get_collection(
@@ -895,7 +895,7 @@ mod test {
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
 
-        let conn = setup_db(&pool).await;
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -931,7 +931,7 @@ mod test {
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
 
-        let conn = setup_db(&pool).await;
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -978,7 +978,7 @@ mod test {
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
 
-        let conn = setup_db(&pool).await;
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();

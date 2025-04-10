@@ -141,7 +141,7 @@ pub(crate) mod test {
     const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pool(client).await;
         let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }
@@ -158,7 +158,7 @@ pub(crate) mod test {
         project_id: Uuid,
     ) -> Params {
         let nexus = &cptestctx.server.server_context().nexus;
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         let (.., authz_vpc, authz_subnet, db_subnet) = nexus
             .vpc_subnet_lookup(
                 &opctx,
@@ -187,7 +187,7 @@ pub(crate) mod test {
     ) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_org_and_project(&client).await;
+        let project_id = create_org_and_project(client).await;
 
         let params = new_test_params(cptestctx, project_id).await;
         nexus.sagas.saga_execute::<SagaVpcSubnetDelete>(params).await.unwrap();
@@ -199,7 +199,7 @@ pub(crate) mod test {
     ) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_org_and_project(&client).await;
+        let project_id = create_org_and_project(client).await;
 
         let params = new_test_params(cptestctx, project_id).await;
         let dag = create_saga_dag::<SagaVpcSubnetDelete>(params).unwrap();

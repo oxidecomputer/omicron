@@ -370,14 +370,14 @@ async fn serve_static(
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
     let path_to_read = match accept_gz(accept_encoding)
-        .then(|| find_file(&with_gz_ext(&path), static_dir))
+        .then(|| find_file(&with_gz_ext(path), static_dir))
     {
         Some(Ok(gzipped_path)) => {
             resp = resp
                 .header(http::header::CONTENT_ENCODING, CONTENT_ENCODING_GZIP);
             gzipped_path
         }
-        _ => find_file(&path, static_dir)?,
+        _ => find_file(path, static_dir)?,
     };
 
     let file = File::open(&path_to_read).await.map_err(|e| {

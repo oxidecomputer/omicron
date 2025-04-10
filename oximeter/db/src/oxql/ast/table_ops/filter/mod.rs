@@ -91,7 +91,7 @@ impl Filter {
     {
         match &self.expr {
             FilterExpr::Simple(simple) => {
-                visitor.visit_simple(self.negated, &simple)
+                visitor.visit_simple(self.negated, simple)
             }
             FilterExpr::Compound(compound) => {
                 let left = compound.left.visit_fields(visitor)?;

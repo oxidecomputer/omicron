@@ -399,7 +399,7 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
         &mut self,
         basename: &str,
     ) -> Option<ApiSpecFileName> {
-        match ApiSpecFileName::parse_lockstep(&self.apis, basename) {
+        match ApiSpecFileName::parse_lockstep(self.apis, basename) {
             Err(
                 warning @ (BadLockstepFileName::NoSuchApi
                 | BadLockstepFileName::NotLockstep),
@@ -483,7 +483,7 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
         ident: &ApiIdent,
         basename: &str,
     ) -> Option<ApiSpecFileName> {
-        match ApiSpecFileName::parse_versioned(&self.apis, ident, basename) {
+        match ApiSpecFileName::parse_versioned(self.apis, ident, basename) {
             Ok(file_name) => Some(file_name),
             Err(
                 warning @ (BadVersionedFileName::NoSuchApi
@@ -521,7 +521,7 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
         ident: &ApiIdent,
         basename: &str,
     ) -> Option<ApiSpecFileName> {
-        match ApiSpecFileName::parse_versioned(&self.apis, ident, basename) {
+        match ApiSpecFileName::parse_versioned(self.apis, ident, basename) {
             Ok(file_name) => Some(file_name),
             Err(
                 warning @ (BadVersionedFileName::NoSuchApi

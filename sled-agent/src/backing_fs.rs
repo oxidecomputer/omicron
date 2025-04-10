@@ -163,7 +163,7 @@ pub(crate) fn ensure_backing_fs(
         // can't retrieve the property at all, then there is definitely no ZFS
         // filesystem mounted there - most likely we are running with a non-ZFS
         // root, such as when net booted during CI.
-        if Zfs::get_value(&bfs.mountpoint, "mountpoint")
+        if Zfs::get_value(bfs.mountpoint, "mountpoint")
             .unwrap_or("not-zfs".to_string())
             == bfs.mountpoint
         {

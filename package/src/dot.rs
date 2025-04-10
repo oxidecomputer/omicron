@@ -202,8 +202,8 @@ pub fn do_dot(
                         .iter()
                         .map(|mapping| {
                             Ok((
-                                mapping.from.interpolate(&target)?,
-                                mapping.to.interpolate(&target)?,
+                                mapping.from.interpolate(target)?,
+                                mapping.to.interpolate(target)?,
                             ))
                         })
                         .collect::<anyhow::Result<_>>()?;

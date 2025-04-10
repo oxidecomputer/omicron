@@ -274,7 +274,7 @@ impl Query {
                     BasicTableOp::Filter(filter) => {
                         // Merge with any existing filter.
                         if let Some(left) = maybe_filter {
-                            Some(left.merge(&filter, LogicalOp::And))
+                            Some(left.merge(filter, LogicalOp::And))
                         } else {
                             Some(filter.clone())
                         }

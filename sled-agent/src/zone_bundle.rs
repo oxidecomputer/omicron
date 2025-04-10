@@ -399,7 +399,7 @@ impl ZoneBundler {
         let dirs = inner.bundle_directories().await;
         for dir in dirs.iter() {
             bundles.extend(
-                list_bundles_for_zone(&self.log, &dir, name)
+                list_bundles_for_zone(&self.log, dir, name)
                     .await?
                     .into_iter()
                     .map(|(_path, bdl)| bdl),
@@ -1106,7 +1106,7 @@ async fn create(
                     "zone" => zone.name(),
                     "error" => ?e,
                 );
-                cleanup_zfs_snapshots(&log, &snapshots);
+                cleanup_zfs_snapshots(log, &snapshots);
                 return Err(e);
             }
         };
@@ -1137,7 +1137,7 @@ async fn create(
 
     // Finish writing out the tarball itself.
     if let Err(e) = builder.into_inner().context("Failed to build bundle") {
-        cleanup_zfs_snapshots(&log, &snapshots);
+        cleanup_zfs_snapshots(log, &snapshots);
         return Err(BundleError::from(e));
     }
 
@@ -1160,7 +1160,7 @@ async fn create(
             break;
         }
     }
-    cleanup_zfs_snapshots(&log, &snapshots);
+    cleanup_zfs_snapshots(log, &snapshots);
     if let Some(err) = copy_err {
         return Err(err);
     }
@@ -1490,7 +1490,7 @@ async fn run_cleanup(
     }
 
     // There's some work to do, let's enumerate all the bundles.
-    let bundles = enumerate_zone_bundles(log, &storage_dirs).await?;
+    let bundles = enumerate_zone_bundles(log, storage_dirs).await?;
     debug!(
         log,
         "enumerated {} zone bundles across {} directories",
@@ -1847,7 +1847,7 @@ mod illumos_tests {
     }
 
     async fn setup_storage(log: &Logger) -> StorageManagerTestHarness {
-        let mut harness = StorageManagerTestHarness::new(&log).await;
+        let mut harness = StorageManagerTestHarness::new(log).await;
 
         harness.handle().key_manager_ready().await;
         let _raw_disks =

@@ -71,7 +71,7 @@ pub async fn create_reservation(
     loop {
         match db
             .sled_reservation_create(
-                &opctx,
+                opctx,
                 instance_id,
                 vmm_id,
                 small_resource_request(),
@@ -101,7 +101,7 @@ pub async fn delete_reservation(
     db: &DataStore,
     vmm_id: PropolisUuid,
 ) -> Result<()> {
-    db.sled_reservation_delete(&opctx, vmm_id)
+    db.sled_reservation_delete(opctx, vmm_id)
         .await
         .context("Failed to delete reservation")?;
     Ok(())

@@ -51,7 +51,7 @@ impl WicketdArtifactStore {
             .map(|(k, v)| InstallableArtifacts {
                 artifact_id: k.clone(),
                 installable: v.clone(),
-                sign: artifacts.rot_by_sign().get(&k).cloned(),
+                sign: artifacts.rot_by_sign().get(k).cloned(),
             })
             .collect();
         Some((system_version, artifact_ids))

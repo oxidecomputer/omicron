@@ -178,7 +178,7 @@ impl RawDisk {
 
     pub fn identity(&self) -> &DiskIdentity {
         match self {
-            Self::Real(disk) => &disk.identity(),
+            Self::Real(disk) => disk.identity(),
             Self::Synthetic(disk) => &disk.identity,
         }
     }

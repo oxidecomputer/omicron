@@ -219,12 +219,12 @@ impl DataStore {
 
             for (i, step) in target_version.upgrade_steps().enumerate() {
                 let target_step =
-                    StepSemverVersion::new(&target_version.semver(), i)?;
+                    StepSemverVersion::new(target_version.semver(), i)?;
                 let log = log.new(o!("target_step.version" => target_step.version.to_string()));
 
                 self.apply_step_version_update(
                     &log,
-                    &step,
+                    step,
                     &target_step,
                     &current_version,
                     &found_target_version,
@@ -294,8 +294,7 @@ impl DataStore {
         current_version: &Version,
         found_target_version: &Option<Version>,
     ) -> Result<(), anyhow::Error> {
-        if skippable_version(&log, &target_step.version, &found_target_version)
-        {
+        if skippable_version(log, &target_step.version, found_target_version) {
             return Ok(());
         }
 
@@ -309,7 +308,7 @@ impl DataStore {
         //
         // Sets the following:
         // - db_metadata.target_version = new version
-        self.prepare_schema_update(&current_version, &target_step)
+        self.prepare_schema_update(current_version, target_step)
             .await
             .context("Failed to prepare schema change")?;
 
@@ -320,7 +319,7 @@ impl DataStore {
 
         // Perform the schema change.
         self.apply_schema_update(
-            &current_version,
+            current_version,
             &target_step.version,
             step.sql(),
         )
@@ -444,7 +443,7 @@ impl DataStore {
                         );");
                     conn.batch_execute_async(&validate_version_query).await?;
                 }
-                conn.batch_execute_async(&sql).await?;
+                conn.batch_execute_async(sql).await?;
                 Ok(())
             }).await;
 
@@ -704,7 +703,7 @@ mod test {
             let v2 = v2.clone();
             let sql = sql.to_string();
             async move {
-                add_upgrade_subcomponent(&config_dir_path, v2.clone(), &sql, i)
+                add_upgrade_subcomponent(config_dir_path, v2.clone(), &sql, i)
                     .await
             }
         };
@@ -744,7 +743,7 @@ mod test {
         // We want to trigger errors, but have no need to wait.
         let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
         while let Err(e) = datastore
-            .ensure_schema(&log, SCHEMA_VERSION, Some(&all_versions))
+            .ensure_schema(log, SCHEMA_VERSION, Some(&all_versions))
             .await
         {
             warn!(log, "Failed to ensure schema"; "err" => %e);

@@ -561,7 +561,7 @@ fn construct_field_schema(
     metric_name: &str,
     metric_field_names: &BTreeSet<String>,
 ) -> Result<BTreeSet<FieldSchema>, MetricsError> {
-    if let Some(dup) = target_fields.intersection(&metric_field_names).next() {
+    if let Some(dup) = target_fields.intersection(metric_field_names).next() {
         return Err(MetricsError::SchemaDefinition(format!(
             "Field '{}' is duplicated between target \
             '{}' and metric '{}'",

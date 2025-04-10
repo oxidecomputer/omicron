@@ -206,7 +206,7 @@ async fn insert_samples(
     );
     if !dry_run {
         client
-            .insert_samples(&samples)
+            .insert_samples(samples)
             .await
             .context("Failed to insert samples")?;
     }

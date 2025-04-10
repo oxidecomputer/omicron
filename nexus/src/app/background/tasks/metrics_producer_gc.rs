@@ -227,7 +227,7 @@ mod tests {
         // Move our producer backwards in time: pretend it registered two hours
         // ago, which should result in it being pruned.
         set_time_modified(
-            &datastore,
+            datastore,
             producer.id,
             Utc::now() - chrono::TimeDelta::hours(2),
         )

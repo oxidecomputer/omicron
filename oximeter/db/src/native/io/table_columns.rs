@@ -203,7 +203,7 @@ mod tests {
 `timeseries_name` String
 `fields.name` Array(String)
 "#;
-        let columns = column_descriptions(&mut &*INPUT)
+        let columns = column_descriptions(INPUT)
             .expect("failed to decode column descriptions")
             .expect("expected Some(_) column description");
         assert_eq!(columns.len(), 2);
@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn test_column_description_with_default() {
         static INPUT: &str = "`timeseries_name` String\tDEFAULT \"foo\"";
-        let column = column_description(&mut &*INPUT)
+        let column = column_description(INPUT)
             .expect("failed to decode column description")
             .1;
         assert_eq!(column.name, "timeseries_name");

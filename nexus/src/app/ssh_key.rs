@@ -49,7 +49,7 @@ impl super::Nexus {
         params: params::SshKeyCreate,
     ) -> CreateResult<db::model::SshKey> {
         let ssh_key = db::model::SshKey::new(silo_user_id, params);
-        let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
+        let (.., authz_user) = LookupPath::new(opctx, self.datastore())
             .silo_user_id(silo_user_id)
             .lookup_for(authz::Action::CreateChild)
             .await?;
@@ -63,7 +63,7 @@ impl super::Nexus {
         silo_user_id: Uuid,
         page_params: &PaginatedBy<'_>,
     ) -> ListResultVec<SshKey> {
-        let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
+        let (.., authz_user) = LookupPath::new(opctx, self.datastore())
             .silo_user_id(silo_user_id)
             .lookup_for(authz::Action::ListChildren)
             .await?;

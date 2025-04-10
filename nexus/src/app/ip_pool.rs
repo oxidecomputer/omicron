@@ -34,13 +34,13 @@ use uuid::Uuid;
 fn not_found_from_lookup(pool_lookup: &lookup::IpPool<'_>) -> Error {
     match pool_lookup {
         lookup::IpPool::Name(_, name) => {
-            Error::not_found_by_name(ResourceType::IpPool, &name)
+            Error::not_found_by_name(ResourceType::IpPool, name)
         }
         lookup::IpPool::OwnedName(_, name) => {
-            Error::not_found_by_name(ResourceType::IpPool, &name)
+            Error::not_found_by_name(ResourceType::IpPool, name)
         }
         lookup::IpPool::PrimaryKey(_, id) => {
-            Error::not_found_by_id(ResourceType::IpPool, &id)
+            Error::not_found_by_id(ResourceType::IpPool, id)
         }
         lookup::IpPool::Error(_, error) => error.to_owned(),
     }
@@ -173,7 +173,7 @@ impl super::Nexus {
         }
 
         let (authz_silo,) = self
-            .silo_lookup(&opctx, silo_link.silo.clone())?
+            .silo_lookup(opctx, silo_link.silo.clone())?
             .lookup_for(authz::Action::Modify)
             .await?;
         self.db_datastore

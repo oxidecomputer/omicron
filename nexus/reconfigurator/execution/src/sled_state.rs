@@ -93,7 +93,7 @@ mod tests {
         datastore: &DataStore,
     ) -> Vec<SledUuid> {
         datastore
-            .sled_list_all_batched(&opctx, SledFilter::Commissioned)
+            .sled_list_all_batched(opctx, SledFilter::Commissioned)
             .await
             .expect("listing sleds")
             .into_iter()

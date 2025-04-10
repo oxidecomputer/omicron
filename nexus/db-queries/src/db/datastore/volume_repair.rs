@@ -197,10 +197,10 @@ mod test {
             .await
             .unwrap();
 
-        datastore.volume_repair_lock(&opctx, volume_id, lock_1).await.unwrap();
+        datastore.volume_repair_lock(opctx, volume_id, lock_1).await.unwrap();
 
         let err = datastore
-            .volume_repair_lock(&opctx, volume_id, lock_2)
+            .volume_repair_lock(opctx, volume_id, lock_2)
             .await
             .unwrap_err();
 
@@ -223,7 +223,7 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_repair_lock(&opctx, volume_id, lock_1)
+            .volume_repair_lock(opctx, volume_id, lock_1)
             .await
             .unwrap_err();
 
@@ -253,8 +253,8 @@ mod test {
             .await
             .unwrap();
 
-        datastore.volume_repair_lock(&opctx, volume_id, lock_id).await.unwrap();
-        datastore.volume_repair_lock(&opctx, volume_id, lock_id).await.unwrap();
+        datastore.volume_repair_lock(opctx, volume_id, lock_id).await.unwrap();
+        datastore.volume_repair_lock(opctx, volume_id, lock_id).await.unwrap();
 
         db.terminate().await;
         logctx.cleanup_successful();

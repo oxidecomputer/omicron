@@ -119,7 +119,7 @@ impl BlessedFiles {
     ) -> anyhow::Result<BlessedFiles> {
         let mut api_files: ApiSpecFilesBuilder<BlessedApiSpecFile> =
             ApiSpecFilesBuilder::new(apis, error_accumulator);
-        let files_found = git_ls_tree(&commit, directory)?;
+        let files_found = git_ls_tree(commit, directory)?;
         for f in files_found {
             // We should be looking at either a single-component path
             // ("api.json") or a file inside one level of directory hierarchy

@@ -538,7 +538,7 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     pub fn parent_blueprint(&self) -> &Blueprint {
-        &self.parent_blueprint
+        self.parent_blueprint
     }
 
     fn resource_allocator(
@@ -2121,7 +2121,7 @@ pub mod test {
             .sled_lookup(SledFilter::Commissioned, new_sled_id)
             .unwrap()
             .resources;
-        builder.sled_add_disks(new_sled_id, &new_sled_resources).unwrap();
+        builder.sled_add_disks(new_sled_id, new_sled_resources).unwrap();
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
         for pool_id in new_sled_resources.zpools.keys() {
             builder.sled_ensure_zone_crucible(new_sled_id, *pool_id).unwrap();
@@ -2365,7 +2365,7 @@ pub mod test {
                 input.all_sled_resources(SledFilter::InService)
             {
                 let edits =
-                    builder.sled_add_disks(sled_id, &sled_resources).unwrap();
+                    builder.sled_add_disks(sled_id, sled_resources).unwrap();
                 assert_eq!(
                     edits.disks,
                     EditCounts {

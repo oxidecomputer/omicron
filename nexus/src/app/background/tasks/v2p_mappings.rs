@@ -113,7 +113,7 @@ impl BackgroundTask for V2PManager {
                 //
                 info!(&log, "v2p mappings to delete"; "sled" => sled.serial_number(), "mappings" => ?v2p_to_del);
                 for mapping in v2p_to_del {
-                    if let Err(e) = client.del_v2p(&mapping).await {
+                    if let Err(e) = client.del_v2p(mapping).await {
                         error!(
                             &log,
                             "failed to delete v2p mapping from sled";

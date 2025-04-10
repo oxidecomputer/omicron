@@ -92,9 +92,9 @@ impl DataStore {
             .await?;
 
         let num_inserted = if policy.version == 1 {
-            self.clickhouse_policy_insert_first_policy(opctx, &policy).await?
+            self.clickhouse_policy_insert_first_policy(opctx, policy).await?
         } else {
-            self.clickhouse_policy_insert_next_policy(opctx, &policy).await?
+            self.clickhouse_policy_insert_next_policy(opctx, policy).await?
         };
 
         match num_inserted {

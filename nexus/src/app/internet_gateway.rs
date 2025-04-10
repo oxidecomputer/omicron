@@ -75,7 +75,7 @@ impl super::Nexus {
             db::model::InternetGateway::new(id, authz_vpc.id(), params.clone());
         let (_, router) = self
             .db_datastore
-            .vpc_create_internet_gateway(&opctx, &authz_vpc, router)
+            .vpc_create_internet_gateway(opctx, &authz_vpc, router)
             .await?;
 
         self.vpc_needed_notify_sleds();
@@ -203,7 +203,7 @@ impl super::Nexus {
 
         // need to use this method so it works for non-fleet users
         let (authz_pool, ..) =
-            self.silo_ip_pool_fetch(&opctx, &params.ip_pool).await?;
+            self.silo_ip_pool_fetch(opctx, &params.ip_pool).await?;
 
         let id = Uuid::new_v4();
         let route = db::model::InternetGatewayIpPool::new(
@@ -214,7 +214,7 @@ impl super::Nexus {
         );
         let route = self
             .db_datastore
-            .internet_gateway_attach_ip_pool(&opctx, &authz_igw, route)
+            .internet_gateway_attach_ip_pool(opctx, &authz_igw, route)
             .await?;
 
         self.vpc_needed_notify_sleds();
@@ -339,7 +339,7 @@ impl super::Nexus {
         );
         let route = self
             .db_datastore
-            .internet_gateway_attach_ip_address(&opctx, &authz_igw, route)
+            .internet_gateway_attach_ip_address(opctx, &authz_igw, route)
             .await?;
 
         self.vpc_needed_notify_sleds();

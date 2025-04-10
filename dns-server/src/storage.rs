@@ -621,7 +621,7 @@ impl Store {
             .zones
             .iter()
             .find(|z| {
-                let zone_name = LowerName::from(Name::from_str(&z).unwrap());
+                let zone_name = LowerName::from(Name::from_str(z).unwrap());
                 zone_name.zone_of(name)
             })
             .ok_or_else(|| QueryError::NoZone(orig_name.to_string()))?;

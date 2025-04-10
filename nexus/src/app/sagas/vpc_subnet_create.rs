@@ -373,7 +373,7 @@ pub(crate) mod test {
     const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pool(client).await;
         let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }
@@ -421,7 +421,7 @@ pub(crate) mod test {
         project_id: Uuid,
     ) -> (authz::Vpc, db::model::Vpc, authz::VpcRouter) {
         let nexus = &cptestctx.server.server_context().nexus;
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         let datastore = nexus.datastore();
         let (.., authz_vpc, db_vpc) = nexus
             .vpc_lookup(
@@ -501,11 +501,11 @@ pub(crate) mod test {
     ) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_org_and_project(&client).await;
-        let opctx = test_opctx(&cptestctx);
+        let project_id = create_org_and_project(client).await;
+        let opctx = test_opctx(cptestctx);
 
         let (authz_vpc, db_vpc, authz_system_router) =
-            get_vpc_state(&cptestctx, project_id).await;
+            get_vpc_state(cptestctx, project_id).await;
         verify_clean_slate(nexus.datastore(), authz_vpc.id()).await;
         let params =
             new_test_params(&opctx, authz_vpc, db_vpc, authz_system_router);
@@ -520,17 +520,17 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_org_and_project(&client).await;
-        let (authz_vpc, ..) = get_vpc_state(&cptestctx, project_id).await;
+        let project_id = create_org_and_project(client).await;
+        let (authz_vpc, ..) = get_vpc_state(cptestctx, project_id).await;
         let vpc_id = authz_vpc.id();
 
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         test_helpers::action_failure_can_unwind::<SagaVpcSubnetCreate, _, _>(
             nexus,
             || {
                 Box::pin(async {
                     let (authz_vpc, db_vpc, authz_system_router) =
-                        get_vpc_state(&cptestctx, project_id).await;
+                        get_vpc_state(cptestctx, project_id).await;
                     new_test_params(
                         &opctx,
                         authz_vpc,
@@ -557,11 +557,11 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_org_and_project(&client).await;
-        let (authz_vpc, ..) = get_vpc_state(&cptestctx, project_id).await;
+        let project_id = create_org_and_project(client).await;
+        let (authz_vpc, ..) = get_vpc_state(cptestctx, project_id).await;
         let vpc_id = authz_vpc.id();
 
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         test_helpers::action_failure_can_unwind_idempotently::<
             SagaVpcSubnetCreate,
             _,
@@ -571,7 +571,7 @@ pub(crate) mod test {
             || {
                 Box::pin(async {
                     let (authz_vpc, db_vpc, authz_system_router) =
-                        get_vpc_state(&cptestctx, project_id).await;
+                        get_vpc_state(cptestctx, project_id).await;
                     new_test_params(
                         &opctx,
                         authz_vpc,
@@ -596,11 +596,11 @@ pub(crate) mod test {
     ) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_org_and_project(&client).await;
-        let opctx = test_opctx(&cptestctx);
+        let project_id = create_org_and_project(client).await;
+        let opctx = test_opctx(cptestctx);
 
         let (authz_vpc, db_vpc, authz_system_router) =
-            get_vpc_state(&cptestctx, project_id).await;
+            get_vpc_state(cptestctx, project_id).await;
         verify_clean_slate(nexus.datastore(), authz_vpc.id()).await;
         let params =
             new_test_params(&opctx, authz_vpc, db_vpc, authz_system_router);

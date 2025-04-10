@@ -143,7 +143,7 @@ impl DataStore {
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(group_dsl::affinity_group, group_dsl::id, &pagparams)
+                paginated(group_dsl::affinity_group, group_dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 group_dsl::affinity_group,
@@ -183,7 +183,7 @@ impl DataStore {
             PaginatedBy::Id(pagparams) => paginated(
                 group_dsl::anti_affinity_group,
                 group_dsl::id,
-                &pagparams,
+                pagparams,
             ),
             PaginatedBy::Name(pagparams) => paginated(
                 group_dsl::anti_affinity_group,
@@ -1265,7 +1265,7 @@ mod tests {
                 failure_domain: external::FailureDomain::Sled,
             },
         );
-        datastore.affinity_group_create(&opctx, &authz_project, group).await
+        datastore.affinity_group_create(opctx, authz_project, group).await
     }
 
     // Helper function for creating an anti-affinity group with
@@ -1287,9 +1287,7 @@ mod tests {
                 failure_domain: external::FailureDomain::Sled,
             },
         );
-        datastore
-            .anti_affinity_group_create(&opctx, &authz_project, group)
-            .await
+        datastore.anti_affinity_group_create(opctx, authz_project, group).await
     }
 
     // Helper for explicitly modifying sled resource usage
@@ -1344,10 +1342,10 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (authz_project, _) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
 
         let (authz_other_project, _) =
-            create_project(&opctx, &datastore, "my-other-project").await;
+            create_project(opctx, datastore, "my-other-project").await;
 
         let pagparams_id = DataPageParams {
             marker: None,
@@ -1358,24 +1356,20 @@ mod tests {
 
         // To start: No groups exist
         let groups = datastore
-            .affinity_group_list(&opctx, &authz_project, &pagbyid)
+            .affinity_group_list(opctx, &authz_project, &pagbyid)
             .await
             .unwrap();
         assert!(groups.is_empty());
 
         // Create a group
-        let group = create_affinity_group(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "my-group",
-        )
-        .await
-        .unwrap();
+        let group =
+            create_affinity_group(opctx, datastore, &authz_project, "my-group")
+                .await
+                .unwrap();
 
         // Now when we list groups, we'll see the one we created.
         let groups = datastore
-            .affinity_group_list(&opctx, &authz_project, &pagbyid)
+            .affinity_group_list(opctx, &authz_project, &pagbyid)
             .await
             .unwrap();
         assert_eq!(groups.len(), 1);
@@ -1383,7 +1377,7 @@ mod tests {
 
         // This group won't appear in the other project
         let groups = datastore
-            .affinity_group_list(&opctx, &authz_other_project, &pagbyid)
+            .affinity_group_list(opctx, &authz_other_project, &pagbyid)
             .await
             .unwrap();
         assert!(groups.is_empty());
@@ -1402,10 +1396,10 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (authz_project, _) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
 
         let (authz_other_project, _) =
-            create_project(&opctx, &datastore, "my-other-project").await;
+            create_project(opctx, datastore, "my-other-project").await;
 
         let pagparams_id = DataPageParams {
             marker: None,
@@ -1416,15 +1410,15 @@ mod tests {
 
         // To start: No groups exist
         let groups = datastore
-            .anti_affinity_group_list(&opctx, &authz_project, &pagbyid)
+            .anti_affinity_group_list(opctx, &authz_project, &pagbyid)
             .await
             .unwrap();
         assert!(groups.is_empty());
 
         // Create a group
         let group = create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-group",
         )
@@ -1433,7 +1427,7 @@ mod tests {
 
         // Now when we list groups, we'll see the one we created.
         let groups = datastore
-            .anti_affinity_group_list(&opctx, &authz_project, &pagbyid)
+            .anti_affinity_group_list(opctx, &authz_project, &pagbyid)
             .await
             .unwrap();
         assert_eq!(groups.len(), 1);
@@ -1441,7 +1435,7 @@ mod tests {
 
         // This group won't appear in the other project
         let groups = datastore
-            .anti_affinity_group_list(&opctx, &authz_other_project, &pagbyid)
+            .anti_affinity_group_list(opctx, &authz_other_project, &pagbyid)
             .await
             .unwrap();
         assert!(groups.is_empty());
@@ -1461,19 +1455,15 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, mut project) =
-            create_project(&opctx, &datastore, "my-project").await;
-        let group = create_affinity_group(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "my-group",
-        )
-        .await
-        .unwrap();
+            create_project(opctx, datastore, "my-project").await;
+        let group =
+            create_affinity_group(opctx, datastore, &authz_project, "my-group")
+                .await
+                .unwrap();
 
         // If we try to delete the project, we'll fail.
         let err = datastore
-            .project_delete(&opctx, &authz_project, &project)
+            .project_delete(opctx, &authz_project, &project)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::InvalidRequest { .. }));
@@ -1489,13 +1479,13 @@ mod tests {
             .lookup_for(authz::Action::Delete)
             .await
             .unwrap();
-        datastore.affinity_group_delete(&opctx, &authz_group).await.unwrap();
+        datastore.affinity_group_delete(opctx, &authz_group).await.unwrap();
 
         // When the group was created, it bumped the rcgen in the project. If we
         // have an old view of the project, we expect a "concurrent
         // modification" error.
         let err = datastore
-            .project_delete(&opctx, &authz_project, &project)
+            .project_delete(opctx, &authz_project, &project)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("concurrent modification"), "{err:?}");
@@ -1504,7 +1494,7 @@ mod tests {
         // we can successfully delete the project.
         project.rcgen = project.rcgen.next().into();
         datastore
-            .project_delete(&opctx, &authz_project, &project)
+            .project_delete(opctx, &authz_project, &project)
             .await
             .unwrap();
 
@@ -1524,10 +1514,10 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, mut project) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
         let group = create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-group",
         )
@@ -1536,7 +1526,7 @@ mod tests {
 
         // If we try to delete the project, we'll fail.
         let err = datastore
-            .project_delete(&opctx, &authz_project, &project)
+            .project_delete(opctx, &authz_project, &project)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::InvalidRequest { .. }));
@@ -1554,7 +1544,7 @@ mod tests {
             .await
             .unwrap();
         datastore
-            .anti_affinity_group_delete(&opctx, &authz_group)
+            .anti_affinity_group_delete(opctx, &authz_group)
             .await
             .unwrap();
 
@@ -1562,7 +1552,7 @@ mod tests {
         // have an old view of the project, we expect a "concurrent
         // modification" error.
         let err = datastore
-            .project_delete(&opctx, &authz_project, &project)
+            .project_delete(opctx, &authz_project, &project)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("concurrent modification"), "{err:?}");
@@ -1571,7 +1561,7 @@ mod tests {
         // we can successfully delete the project.
         project.rcgen = project.rcgen.next().into();
         datastore
-            .project_delete(&opctx, &authz_project, &project)
+            .project_delete(opctx, &authz_project, &project)
             .await
             .unwrap();
 
@@ -1590,28 +1580,28 @@ mod tests {
 
         // Create two projects
         let (authz_project1, _) =
-            create_project(&opctx, &datastore, "my-project-1").await;
+            create_project(opctx, datastore, "my-project-1").await;
         let (authz_project2, _) =
-            create_project(&opctx, &datastore, "my-project-2").await;
+            create_project(opctx, datastore, "my-project-2").await;
 
         // We can create a group wiht the same name in different projects
         let group = create_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project1,
             "my-group",
         )
         .await
         .unwrap();
-        create_affinity_group(&opctx, &datastore, &authz_project2, "my-group")
+        create_affinity_group(opctx, datastore, &authz_project2, "my-group")
             .await
             .unwrap();
 
         // If we try to create a new group with the same name in the same
         // project, we'll see an error.
         let err = create_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project1,
             "my-group",
         )
@@ -1632,9 +1622,9 @@ mod tests {
             .lookup_for(authz::Action::Delete)
             .await
             .unwrap();
-        datastore.affinity_group_delete(&opctx, &authz_group).await.unwrap();
+        datastore.affinity_group_delete(opctx, &authz_group).await.unwrap();
 
-        create_affinity_group(&opctx, &datastore, &authz_project1, "my-group")
+        create_affinity_group(opctx, datastore, &authz_project1, "my-group")
             .await
             .expect("Should have been able to re-use name after deletion");
 
@@ -1654,22 +1644,22 @@ mod tests {
 
         // Create two projects
         let (authz_project1, _) =
-            create_project(&opctx, &datastore, "my-project-1").await;
+            create_project(opctx, datastore, "my-project-1").await;
         let (authz_project2, _) =
-            create_project(&opctx, &datastore, "my-project-2").await;
+            create_project(opctx, datastore, "my-project-2").await;
 
         // We can create a group wiht the same name in different projects
         let group = create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project1,
             "my-group",
         )
         .await
         .unwrap();
         create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project2,
             "my-group",
         )
@@ -1679,8 +1669,8 @@ mod tests {
         // If we try to create a new group with the same name in the same
         // project, we'll see an error.
         let err = create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project1,
             "my-group",
         )
@@ -1702,13 +1692,13 @@ mod tests {
             .await
             .unwrap();
         datastore
-            .anti_affinity_group_delete(&opctx, &authz_group)
+            .anti_affinity_group_delete(opctx, &authz_group)
             .await
             .unwrap();
 
         create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project1,
             "my-group",
         )
@@ -1730,15 +1720,11 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
-        let group = create_affinity_group(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "my-group",
-        )
-        .await
-        .unwrap();
+            create_project(opctx, datastore, "my-project").await;
+        let group =
+            create_affinity_group(opctx, datastore, &authz_project, "my-group")
+                .await
+                .unwrap();
 
         let (.., authz_group) = LookupPath::new(opctx, datastore)
             .affinity_group_id(group.id())
@@ -1754,15 +1740,15 @@ mod tests {
         };
         let pagbyid = PaginatedBy::Id(pagparams_id);
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .affinity_group_member_list(opctx, &authz_group, &pagbyid)
             .await
             .unwrap();
         assert!(members.is_empty());
 
         // Create an instance without a VMM.
         let instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-instance",
         )
@@ -1770,13 +1756,13 @@ mod tests {
 
         // Add the instance as a member to the group
         datastore
-            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
+            .affinity_group_member_instance_add(opctx, &authz_group, instance)
             .await
             .unwrap();
 
         // We should now be able to list the new member
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .affinity_group_member_list(opctx, &authz_group, &pagbyid)
             .await
             .unwrap()
             .into_iter()
@@ -1788,14 +1774,14 @@ mod tests {
         // We can delete the member and observe an empty member list
         datastore
             .affinity_group_member_instance_delete(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
             .await
             .unwrap();
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .affinity_group_member_list(opctx, &authz_group, &pagbyid)
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -1816,10 +1802,10 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
         let group = create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-group",
         )
@@ -1839,15 +1825,15 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .anti_affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert!(members.is_empty());
 
         // Create an instance without a VMM.
         let instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-instance",
         )
@@ -1856,7 +1842,7 @@ mod tests {
         // Add the instance as a member to the group
         datastore
             .anti_affinity_group_member_instance_add(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
@@ -1865,7 +1851,7 @@ mod tests {
 
         // We should now be able to list the new member
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .anti_affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(members.len(), 1);
@@ -1880,14 +1866,14 @@ mod tests {
         // We can delete the member and observe an empty member list
         datastore
             .anti_affinity_group_member_instance_delete(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
             .await
             .unwrap();
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .anti_affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -1907,15 +1893,11 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
-        let group = create_affinity_group(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "my-group",
-        )
-        .await
-        .unwrap();
+            create_project(opctx, datastore, "my-project").await;
+        let group =
+            create_affinity_group(opctx, datastore, &authz_project, "my-group")
+                .await
+                .unwrap();
 
         let (.., authz_group) = LookupPath::new(opctx, datastore)
             .affinity_group_id(group.id())
@@ -1930,7 +1912,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -1943,8 +1925,8 @@ mod tests {
         for i in 0..INSTANCE_COUNT {
             let name = format!("instance-{i}");
             let instance = create_stopped_instance_record(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 &authz_project,
                 &name,
             )
@@ -1958,7 +1940,7 @@ mod tests {
             };
             datastore
                 .affinity_group_member_instance_add(
-                    &opctx,
+                    opctx,
                     &authz_group,
                     instance,
                 )
@@ -1977,7 +1959,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let observed_members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members);
@@ -1991,7 +1973,7 @@ mod tests {
         });
 
         let observed_members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members[3..]);
@@ -2003,7 +1985,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let observed_members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members[3..5]);
@@ -2016,7 +1998,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Descending,
         });
         let observed_members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members);
@@ -2031,7 +2013,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let observed_members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members);
@@ -2043,7 +2025,7 @@ mod tests {
         });
 
         let observed_members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members[3..]);
@@ -2056,7 +2038,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Descending,
         });
         let observed_members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members);
@@ -2081,10 +2063,10 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
         let group = create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-group",
         )
@@ -2104,11 +2086,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let members = datastore
-            .anti_affinity_group_member_list(
-                &opctx,
-                &authz_aa_group,
-                &pagparams,
-            )
+            .anti_affinity_group_member_list(opctx, &authz_aa_group, &pagparams)
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2122,8 +2100,8 @@ mod tests {
         for i in 0..INSTANCE_COUNT {
             let name = format!("instance-{i}");
             let instance = create_stopped_instance_record(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 &authz_project,
                 &name,
             )
@@ -2137,7 +2115,7 @@ mod tests {
             };
             datastore
                 .anti_affinity_group_member_instance_add(
-                    &opctx,
+                    opctx,
                     &authz_aa_group,
                     instance,
                 )
@@ -2156,11 +2134,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let observed_members = datastore
-            .anti_affinity_group_member_list(
-                &opctx,
-                &authz_aa_group,
-                &pagparams,
-            )
+            .anti_affinity_group_member_list(opctx, &authz_aa_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members);
@@ -2174,11 +2148,7 @@ mod tests {
         });
 
         let observed_members = datastore
-            .anti_affinity_group_member_list(
-                &opctx,
-                &authz_aa_group,
-                &pagparams,
-            )
+            .anti_affinity_group_member_list(opctx, &authz_aa_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members[3..]);
@@ -2190,11 +2160,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let observed_members = datastore
-            .anti_affinity_group_member_list(
-                &opctx,
-                &authz_aa_group,
-                &pagparams,
-            )
+            .anti_affinity_group_member_list(opctx, &authz_aa_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members[3..5]);
@@ -2207,11 +2173,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Descending,
         });
         let observed_members = datastore
-            .anti_affinity_group_member_list(
-                &opctx,
-                &authz_aa_group,
-                &pagparams,
-            )
+            .anti_affinity_group_member_list(opctx, &authz_aa_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members);
@@ -2226,11 +2188,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let observed_members = datastore
-            .anti_affinity_group_member_list(
-                &opctx,
-                &authz_aa_group,
-                &pagparams,
-            )
+            .anti_affinity_group_member_list(opctx, &authz_aa_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members);
@@ -2242,11 +2200,7 @@ mod tests {
         });
 
         let observed_members = datastore
-            .anti_affinity_group_member_list(
-                &opctx,
-                &authz_aa_group,
-                &pagparams,
-            )
+            .anti_affinity_group_member_list(opctx, &authz_aa_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members[3..]);
@@ -2259,11 +2213,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Descending,
         });
         let observed_members = datastore
-            .anti_affinity_group_member_list(
-                &opctx,
-                &authz_aa_group,
-                &pagparams,
-            )
+            .anti_affinity_group_member_list(opctx, &authz_aa_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(observed_members, members);
@@ -2284,15 +2234,11 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
-        let group = create_affinity_group(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "my-group",
-        )
-        .await
-        .unwrap();
+            create_project(opctx, datastore, "my-project").await;
+        let group =
+            create_affinity_group(opctx, datastore, &authz_project, "my-group")
+                .await
+                .unwrap();
 
         let (.., authz_group) = LookupPath::new(opctx, datastore)
             .affinity_group_id(group.id())
@@ -2307,25 +2253,25 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .affinity_group_member_list(opctx, &authz_group, &pagbyid)
             .await
             .unwrap();
         assert!(members.is_empty());
 
         // Create an instance with a VMM.
         let instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-instance",
         )
         .await;
 
-        allocate_instance_reservation(&datastore, instance).await;
+        allocate_instance_reservation(datastore, instance).await;
 
         // Cannot add the instance to the group while it's running.
         let err = datastore
-            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
+            .affinity_group_member_instance_add(opctx, &authz_group, instance)
             .await
             .expect_err(
                 "Shouldn't be able to add running instances to affinity groups",
@@ -2339,18 +2285,18 @@ mod tests {
         );
 
         // If we have no reservation for the instance, we can add it to the group.
-        delete_instance_reservation(&datastore, instance).await;
+        delete_instance_reservation(datastore, instance).await;
         datastore
-            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
+            .affinity_group_member_instance_add(opctx, &authz_group, instance)
             .await
             .unwrap();
 
         // Now we can reserve a sled for the instance once more.
-        allocate_instance_reservation(&datastore, instance).await;
+        allocate_instance_reservation(datastore, instance).await;
 
         // We should now be able to list the new member
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .affinity_group_member_list(opctx, &authz_group, &pagbyid)
             .await
             .unwrap()
             .into_iter()
@@ -2363,14 +2309,14 @@ mod tests {
         // though it's running!
         datastore
             .affinity_group_member_instance_delete(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
             .await
             .unwrap();
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .affinity_group_member_list(opctx, &authz_group, &pagbyid)
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2391,10 +2337,10 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
         let group = create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-group",
         )
@@ -2414,25 +2360,25 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .anti_affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert!(members.is_empty());
 
         // Create an instance with a VMM.
         let instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-instance",
         )
         .await;
-        allocate_instance_reservation(&datastore, instance).await;
+        allocate_instance_reservation(datastore, instance).await;
 
         // Cannot add the instance to the group while it's running.
         let err = datastore
             .anti_affinity_group_member_instance_add(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
@@ -2449,10 +2395,10 @@ mod tests {
         );
 
         // If we have no reservation for the instance, we can add it to the group.
-        delete_instance_reservation(&datastore, instance).await;
+        delete_instance_reservation(datastore, instance).await;
         datastore
             .anti_affinity_group_member_instance_add(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
@@ -2460,11 +2406,11 @@ mod tests {
             .unwrap();
 
         // Now we can reserve a sled for the instance once more.
-        allocate_instance_reservation(&datastore, instance).await;
+        allocate_instance_reservation(datastore, instance).await;
 
         // We should now be able to list the new member
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .anti_affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(members.len(), 1);
@@ -2479,14 +2425,14 @@ mod tests {
         // though it's running!
         datastore
             .anti_affinity_group_member_instance_delete(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
             .await
             .unwrap();
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .anti_affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2506,15 +2452,11 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
-        let group = create_affinity_group(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "my-group",
-        )
-        .await
-        .unwrap();
+            create_project(opctx, datastore, "my-project").await;
+        let group =
+            create_affinity_group(opctx, datastore, &authz_project, "my-group")
+                .await
+                .unwrap();
 
         let (.., authz_group) = LookupPath::new(opctx, datastore)
             .affinity_group_id(group.id())
@@ -2529,30 +2471,30 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .affinity_group_member_list(opctx, &authz_group, &pagbyid)
             .await
             .unwrap();
         assert!(members.is_empty());
 
         // Create an instance without a VMM, add it to the group.
         let instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-instance",
         )
         .await;
         datastore
-            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
+            .affinity_group_member_instance_add(opctx, &authz_group, instance)
             .await
             .unwrap();
 
         // Delete the group
-        datastore.affinity_group_delete(&opctx, &authz_group).await.unwrap();
+        datastore.affinity_group_delete(opctx, &authz_group).await.unwrap();
 
         // Confirm that no instance members exist
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .affinity_group_member_list(opctx, &authz_group, &pagbyid)
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2573,10 +2515,10 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
         let group = create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-group",
         )
@@ -2596,26 +2538,22 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let members = datastore
-            .anti_affinity_group_member_list(
-                &opctx,
-                &authz_aa_group,
-                &pagparams,
-            )
+            .anti_affinity_group_member_list(opctx, &authz_aa_group, &pagparams)
             .await
             .unwrap();
         assert!(members.is_empty());
 
         // Create an instance without a VMM, add it to the group.
         let instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-instance",
         )
         .await;
         datastore
             .anti_affinity_group_member_instance_add(
-                &opctx,
+                opctx,
                 &authz_aa_group,
                 instance,
             )
@@ -2624,17 +2562,13 @@ mod tests {
 
         // Delete the group
         datastore
-            .anti_affinity_group_delete(&opctx, &authz_aa_group)
+            .anti_affinity_group_delete(opctx, &authz_aa_group)
             .await
             .unwrap();
 
         // Confirm that no group members exist
         let members = datastore
-            .anti_affinity_group_member_list(
-                &opctx,
-                &authz_aa_group,
-                &pagparams,
-            )
+            .anti_affinity_group_member_list(opctx, &authz_aa_group, &pagparams)
             .await
             .unwrap();
         assert!(
@@ -2658,15 +2592,11 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
-        let group = create_affinity_group(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "my-group",
-        )
-        .await
-        .unwrap();
+            create_project(opctx, datastore, "my-project").await;
+        let group =
+            create_affinity_group(opctx, datastore, &authz_project, "my-group")
+                .await
+                .unwrap();
 
         let (.., authz_group) = LookupPath::new(opctx, datastore)
             .affinity_group_id(group.id())
@@ -2681,21 +2611,21 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .affinity_group_member_list(opctx, &authz_group, &pagbyid)
             .await
             .unwrap();
         assert!(members.is_empty());
 
         // Create an instance without a VMM, add it to the group.
         let instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-instance",
         )
         .await;
         datastore
-            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
+            .affinity_group_member_instance_add(opctx, &authz_group, instance)
             .await
             .unwrap();
 
@@ -2706,13 +2636,13 @@ mod tests {
             .await
             .unwrap();
         datastore
-            .project_delete_instance(&opctx, &authz_instance)
+            .project_delete_instance(opctx, &authz_instance)
             .await
             .unwrap();
 
         // Confirm that no instance members exist
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .affinity_group_member_list(opctx, &authz_group, &pagbyid)
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2733,10 +2663,10 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
         let group = create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-group",
         )
@@ -2756,22 +2686,22 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .anti_affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert!(members.is_empty());
 
         // Create an instance without a VMM, add it to the group.
         let instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-instance",
         )
         .await;
         datastore
             .anti_affinity_group_member_instance_add(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
@@ -2785,13 +2715,13 @@ mod tests {
             .await
             .unwrap();
         datastore
-            .project_delete_instance(&opctx, &authz_instance)
+            .project_delete_instance(opctx, &authz_instance)
             .await
             .unwrap();
 
         // Confirm that no instance members exist
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .anti_affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2812,7 +2742,7 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
 
         struct TestArgs {
             // Does the group exist?
@@ -2830,8 +2760,8 @@ mod tests {
         for arg in args {
             // Create an affinity group, and maybe delete it.
             let group = create_affinity_group(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 &authz_project,
                 "my-group",
             )
@@ -2846,15 +2776,15 @@ mod tests {
 
             if !arg.group {
                 datastore
-                    .affinity_group_delete(&opctx, &authz_group)
+                    .affinity_group_delete(opctx, &authz_group)
                     .await
                     .unwrap();
             }
 
             // Create an instance, and maybe delete it.
             let instance = create_stopped_instance_record(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 &authz_project,
                 "my-instance",
             )
@@ -2866,7 +2796,7 @@ mod tests {
                 .unwrap();
             if !arg.instance {
                 datastore
-                    .project_delete_instance(&opctx, &authz_instance)
+                    .project_delete_instance(opctx, &authz_instance)
                     .await
                     .unwrap();
             }
@@ -2877,7 +2807,7 @@ mod tests {
             // group/instance exist.
             let err = datastore
                 .affinity_group_member_instance_add(
-                    &opctx,
+                    opctx,
                     &authz_group,
                     instance,
                 )
@@ -2909,7 +2839,7 @@ mod tests {
             // Do the same thing, but for group membership removal.
             let err = datastore
                 .affinity_group_member_instance_delete(
-                    &opctx,
+                    opctx,
                     &authz_group,
                     instance,
                 )
@@ -2940,13 +2870,13 @@ mod tests {
             // Cleanup, if we actually created anything.
             if arg.instance {
                 datastore
-                    .project_delete_instance(&opctx, &authz_instance)
+                    .project_delete_instance(opctx, &authz_instance)
                     .await
                     .unwrap();
             }
             if arg.group {
                 datastore
-                    .affinity_group_delete(&opctx, &authz_group)
+                    .affinity_group_delete(opctx, &authz_group)
                     .await
                     .unwrap();
             }
@@ -2968,7 +2898,7 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
 
         struct TestArgs {
             // Does the group exist?
@@ -2986,8 +2916,8 @@ mod tests {
         for arg in args {
             // Create an anti-affinity group, and maybe delete it.
             let group = create_anti_affinity_group(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 &authz_project,
                 "my-group",
             )
@@ -3002,15 +2932,15 @@ mod tests {
 
             if !arg.group {
                 datastore
-                    .anti_affinity_group_delete(&opctx, &authz_group)
+                    .anti_affinity_group_delete(opctx, &authz_group)
                     .await
                     .unwrap();
             }
 
             // Create an instance, and maybe deletes it
             let instance = create_stopped_instance_record(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 &authz_project,
                 "my-instance",
             )
@@ -3024,7 +2954,7 @@ mod tests {
 
             if !arg.instance {
                 datastore
-                    .project_delete_instance(&opctx, &authz_instance)
+                    .project_delete_instance(opctx, &authz_instance)
                     .await
                     .unwrap();
             }
@@ -3035,7 +2965,7 @@ mod tests {
             // group/instance exist.
             let err = datastore
                 .anti_affinity_group_member_instance_add(
-                    &opctx,
+                    opctx,
                     &authz_group,
                     instance,
                 )
@@ -3067,7 +2997,7 @@ mod tests {
             // Do the same thing, but for group membership removal.
             let err = datastore
                 .anti_affinity_group_member_instance_delete(
-                    &opctx,
+                    opctx,
                     &authz_group,
                     instance,
                 )
@@ -3099,13 +3029,13 @@ mod tests {
             // Cleanup, if we actually created anything.
             if arg.instance {
                 datastore
-                    .project_delete_instance(&opctx, &authz_instance)
+                    .project_delete_instance(opctx, &authz_instance)
                     .await
                     .unwrap();
             }
             if arg.group {
                 datastore
-                    .anti_affinity_group_delete(&opctx, &authz_group)
+                    .anti_affinity_group_delete(opctx, &authz_group)
                     .await
                     .unwrap();
             }
@@ -3126,15 +3056,11 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
-        let group = create_affinity_group(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "my-group",
-        )
-        .await
-        .unwrap();
+            create_project(opctx, datastore, "my-project").await;
+        let group =
+            create_affinity_group(opctx, datastore, &authz_project, "my-group")
+                .await
+                .unwrap();
         let (.., authz_group) = LookupPath::new(opctx, datastore)
             .affinity_group_id(group.id())
             .lookup_for(authz::Action::Modify)
@@ -3143,8 +3069,8 @@ mod tests {
 
         // Create an instance
         let instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-instance",
         )
@@ -3152,13 +3078,13 @@ mod tests {
 
         // Add the instance to the group
         datastore
-            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
+            .affinity_group_member_instance_add(opctx, &authz_group, instance)
             .await
             .unwrap();
 
         // Add the instance to the group again
         let err = datastore
-            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
+            .affinity_group_member_instance_add(opctx, &authz_group, instance)
             .await
             .unwrap_err();
         assert!(
@@ -3182,7 +3108,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .affinity_group_member_list(opctx, &authz_group, &pagbyid)
             .await
             .unwrap();
         assert_eq!(members.len(), 1);
@@ -3190,7 +3116,7 @@ mod tests {
         // We should be able to delete the membership idempotently.
         datastore
             .affinity_group_member_instance_delete(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
@@ -3198,7 +3124,7 @@ mod tests {
             .unwrap();
         let err = datastore
             .affinity_group_member_instance_delete(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
@@ -3216,7 +3142,7 @@ mod tests {
         );
 
         let members = datastore
-            .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .affinity_group_member_list(opctx, &authz_group, &pagbyid)
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -3236,10 +3162,10 @@ mod tests {
 
         // Create a project and a group
         let (authz_project, ..) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
         let group = create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-group",
         )
@@ -3253,8 +3179,8 @@ mod tests {
 
         // Create an instance
         let instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-instance",
         )
@@ -3263,7 +3189,7 @@ mod tests {
         // Add the instance to the group
         datastore
             .anti_affinity_group_member_instance_add(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
@@ -3273,7 +3199,7 @@ mod tests {
         // Add the instance to the group again
         let err = datastore
             .anti_affinity_group_member_instance_add(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
@@ -3300,7 +3226,7 @@ mod tests {
             direction: dropshot::PaginationOrder::Ascending,
         });
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .anti_affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert_eq!(members.len(), 1);
@@ -3308,7 +3234,7 @@ mod tests {
         // We should be able to delete the membership idempotently.
         datastore
             .anti_affinity_group_member_instance_delete(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
@@ -3316,7 +3242,7 @@ mod tests {
             .unwrap();
         let err = datastore
             .anti_affinity_group_member_instance_delete(
-                &opctx,
+                opctx,
                 &authz_group,
                 instance,
             )
@@ -3334,7 +3260,7 @@ mod tests {
         );
 
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .anti_affinity_group_member_list(opctx, &authz_group, &pagparams)
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -3353,17 +3279,13 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (authz_project, _) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
 
         // Create an affinity group
-        let group = create_affinity_group(
-            &opctx,
-            &datastore,
-            &authz_project,
-            "my-group",
-        )
-        .await
-        .unwrap();
+        let group =
+            create_affinity_group(opctx, datastore, &authz_project, "my-group")
+                .await
+                .unwrap();
 
         let (.., authz_affinity_group) = LookupPath::new(opctx, datastore)
             .affinity_group_id(group.id())
@@ -3376,8 +3298,8 @@ mod tests {
         for i in 0..AFFINITY_GROUP_MAX_MEMBERS {
             let instance_name = format!("instance-{}", i);
             let instance = create_stopped_instance_record(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 &authz_project,
                 &instance_name,
             )
@@ -3386,7 +3308,7 @@ mod tests {
             // Add the instance to the group
             datastore
                 .affinity_group_member_instance_add(
-                    &opctx,
+                    opctx,
                     &authz_affinity_group,
                     instance,
                 )
@@ -3398,8 +3320,8 @@ mod tests {
 
         // Create one more instance - this should exceed the limit
         let excess_instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "excess-instance",
         )
@@ -3408,7 +3330,7 @@ mod tests {
         // Adding this instance should fail
         let err = datastore
             .affinity_group_member_instance_add(
-                &opctx,
+                opctx,
                 &authz_affinity_group,
                 excess_instance,
             )
@@ -3439,12 +3361,12 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (authz_project, _) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
 
         // Create a new instance
         let multi_group_instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "multi-group-instance",
         )
@@ -3455,8 +3377,8 @@ mod tests {
         for i in 0..INSTANCE_MAX_AFFINITY_GROUPS {
             let group_name = format!("group-{}", i);
             let new_group = create_affinity_group(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 &authz_project,
                 &group_name,
             )
@@ -3472,7 +3394,7 @@ mod tests {
             // Add the instance to each group
             datastore
                 .affinity_group_member_instance_add(
-                    &opctx,
+                    opctx,
                     &authz_new_group,
                     multi_group_instance,
                 )
@@ -3484,8 +3406,8 @@ mod tests {
 
         // Create one more group - this should exceed the limit when we try to add the instance
         let excess_group = create_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "excess-group",
         )
@@ -3501,7 +3423,7 @@ mod tests {
         // Adding the instance to this group should fail
         let err = datastore
             .affinity_group_member_instance_add(
-                &opctx,
+                opctx,
                 &authz_excess_group,
                 multi_group_instance,
             )
@@ -3532,12 +3454,12 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (authz_project, _) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
 
         // Create an anti-affinity group
         let group = create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "my-group",
         )
@@ -3555,8 +3477,8 @@ mod tests {
         for i in 0..ANTI_AFFINITY_GROUP_MAX_MEMBERS {
             let instance_name = format!("instance-{}", i);
             let instance = create_stopped_instance_record(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 &authz_project,
                 &instance_name,
             )
@@ -3565,7 +3487,7 @@ mod tests {
             // Add the instance to the group
             datastore
                 .anti_affinity_group_member_instance_add(
-                    &opctx,
+                    opctx,
                     &authz_anti_affinity_group,
                     instance,
                 )
@@ -3577,8 +3499,8 @@ mod tests {
 
         // Create one more instance - this should exceed the limit
         let excess_instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "excess-instance",
         )
@@ -3587,7 +3509,7 @@ mod tests {
         // Adding this instance should fail
         let err = datastore
             .anti_affinity_group_member_instance_add(
-                &opctx,
+                opctx,
                 &authz_anti_affinity_group,
                 excess_instance,
             )
@@ -3618,12 +3540,12 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (authz_project, _) =
-            create_project(&opctx, &datastore, "my-project").await;
+            create_project(opctx, datastore, "my-project").await;
 
         // Create a new instance
         let multi_group_instance = create_stopped_instance_record(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "multi-group-instance",
         )
@@ -3634,8 +3556,8 @@ mod tests {
         for i in 0..INSTANCE_MAX_ANTI_AFFINITY_GROUPS {
             let group_name = format!("group-{}", i);
             let new_group = create_anti_affinity_group(
-                &opctx,
-                &datastore,
+                opctx,
+                datastore,
                 &authz_project,
                 &group_name,
             )
@@ -3651,7 +3573,7 @@ mod tests {
             // Add the instance to each group
             datastore
                 .anti_affinity_group_member_instance_add(
-                    &opctx,
+                    opctx,
                     &authz_new_group,
                     multi_group_instance,
                 )
@@ -3663,8 +3585,8 @@ mod tests {
 
         // Create one more group - this should exceed the limit when we try to add the instance
         let excess_group = create_anti_affinity_group(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &authz_project,
             "excess-group",
         )
@@ -3680,7 +3602,7 @@ mod tests {
         // Adding the instance to this group should fail
         let err = datastore
             .anti_affinity_group_member_instance_add(
-                &opctx,
+                opctx,
                 &authz_excess_group,
                 multi_group_instance,
             )

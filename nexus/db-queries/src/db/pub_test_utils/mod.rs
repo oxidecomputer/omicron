@@ -114,7 +114,7 @@ impl TestDatabaseBuilder {
                     Interface::Datastore => {
                         let pool = new_pool(log, &db);
                         let datastore = Arc::new(
-                            DataStore::new(&log, pool, None).await.unwrap(),
+                            DataStore::new(log, pool, None).await.unwrap(),
                         );
                         TestDatabase {
                             db,
@@ -299,14 +299,14 @@ async fn datastore_test(
     use crate::authn;
 
     let cfg = db::Config { url: db.pg_config().clone() };
-    let pool = Arc::new(db::Pool::new_single_host(&log, &cfg));
-    let datastore = Arc::new(DataStore::new(&log, pool, None).await.unwrap());
+    let pool = Arc::new(db::Pool::new_single_host(log, &cfg));
+    let datastore = Arc::new(DataStore::new(log, pool, None).await.unwrap());
 
     // Create an OpContext with the credentials of "db-init" just for the
     // purpose of loading the built-in users, roles, and assignments.
     let opctx = OpContext::for_background(
         log.new(o!()),
-        Arc::new(authz::Authz::new(&log)),
+        Arc::new(authz::Authz::new(log)),
         authn::Context::internal_db_init(),
         Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
     );

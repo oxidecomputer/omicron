@@ -94,7 +94,7 @@ mod test {
         );
         // Record the zpools so we don't fail to ensure datasets (unrelated to
         // crdb settings) during blueprint execution.
-        let mut disk_test = DiskTest::new(&cptestctx).await;
+        let mut disk_test = DiskTest::new(cptestctx).await;
         disk_test.add_blueprint_disks(&blueprint).await;
 
         // Execute the initial blueprint.

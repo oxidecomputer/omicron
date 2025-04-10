@@ -365,7 +365,7 @@ impl SetBgpAuthKeyArgs {
             response.data.values().filter(|status| status.is_set()).count();
 
         for (i, key_id) in keys_to_set.iter().enumerate() {
-            let status = response.data.get(&key_id).with_context(|| {
+            let status = response.data.get(key_id).with_context(|| {
                 format!(
                     "info for key {} not returned \
                      (should have produced an HTTP error earlier!)",
@@ -395,7 +395,7 @@ impl SetBgpAuthKeyArgs {
                     let key = read_bgp_md5_key(&prompt)?;
                     let info = key.info().to_string_styled(styles.bold);
                     let response = client
-                        .put_bgp_auth_key(&key_id, &PutBgpAuthKeyBody { key })
+                        .put_bgp_auth_key(key_id, &PutBgpAuthKeyBody { key })
                         .await
                         .context("failed to set BGP auth key")?;
 

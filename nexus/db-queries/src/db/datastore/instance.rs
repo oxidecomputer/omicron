@@ -405,7 +405,7 @@ impl DataStore {
         use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
         Ok(match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::instance, dsl::id, &pagparams)
+                paginated(dsl::instance, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::instance,
@@ -524,7 +524,7 @@ impl DataStore {
         use nexus_db_schema::schema::instance::dsl;
         use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
 
-        let q = paginated(dsl::instance, dsl::id, &pagparams)
+        let q = paginated(dsl::instance, dsl::id, pagparams)
             // Select only those instances which may be reincarnated.
             .filter(InstanceAutoRestart::filter_reincarnatable());
 
@@ -936,7 +936,7 @@ impl DataStore {
                 dsl::time_state_updated.eq(Utc::now()),
             ))
             .check_if_exists::<Instance>(instance_id.into_untyped_uuid())
-            .execute_and_check(&*self.pool_connection_authorized(&opctx).await?)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
@@ -1070,7 +1070,7 @@ impl DataStore {
                     self.instance_set_size_on_conn(
                         &conn,
                         &err,
-                        &authz_instance,
+                        authz_instance,
                         ncpus,
                         memory,
                     )
@@ -1080,7 +1080,7 @@ impl DataStore {
                     self.instance_set_boot_disk_on_conn(
                         &conn,
                         &err,
-                        &authz_instance,
+                        authz_instance,
                         boot_disk_id,
                     )
                     .await?;
@@ -1206,7 +1206,7 @@ impl DataStore {
         let r = query
             .set(instance_dsl::boot_disk_id.eq(boot_disk_id))
             .check_if_exists::<Instance>(authz_instance.id())
-            .execute_and_check(&conn)
+            .execute_and_check(conn)
             .await?;
         match r.status {
             UpdateStatus::NotUpdatedButExists => {
@@ -1279,7 +1279,7 @@ impl DataStore {
                 instance_dsl::memory.eq(memory),
             ))
             .check_if_exists::<Instance>(authz_instance.id())
-            .execute_and_check(&conn)
+            .execute_and_check(conn)
             .await?;
         match r.status {
             UpdateStatus::NotUpdatedButExists => {
@@ -1329,7 +1329,7 @@ impl DataStore {
         // delete operation sets "time_deleted" (just like with other objects)
         // and also sets the state to "destroyed".
         self.project_delete_instance_in_states(
-            &opctx,
+            opctx,
             authz_instance,
             &[InstanceState::NoVmm, InstanceState::Failed],
         )
@@ -2139,7 +2139,7 @@ mod tests {
         let project_id = Uuid::new_v4();
         datastore
             .project_create(
-                &opctx,
+                opctx,
                 Project::new_with_id(
                     project_id,
                     silo_id,
@@ -2165,8 +2165,8 @@ mod tests {
 
         let _ = datastore
             .project_create_instance(
-                &opctx,
-                &authz_project,
+                opctx,
+                authz_project,
                 Instance::new(
                     instance_id,
                     authz_project.id(),
@@ -2194,7 +2194,7 @@ mod tests {
             .await
             .expect("instance must be created successfully");
 
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await
@@ -2210,10 +2210,10 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let saga1 = Uuid::new_v4();
         let saga2 = Uuid::new_v4();
-        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(datastore, opctx).await;
         let authz_instance = create_test_instance(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             &authz_project,
             "my-great-instance",
         )
@@ -2261,7 +2261,7 @@ mod tests {
 
         // unlock the instance from saga 1
         let unlocked = datastore
-            .instance_updater_unlock(&opctx, &authz_instance, &lock1)
+            .instance_updater_unlock(opctx, &authz_instance, &lock1)
             .await
             .expect("instance must be unlocked by saga 1");
         assert!(unlocked, "instance must actually be unlocked");
@@ -2274,7 +2274,7 @@ mod tests {
 
         // unlock the instance from saga 2
         let unlocked = datastore
-            .instance_updater_unlock(&opctx, &authz_instance, &lock2)
+            .instance_updater_unlock(opctx, &authz_instance, &lock2)
             .await
             .expect("instance must be unlocked by saga 2");
         assert!(unlocked, "instance must actually be unlocked");
@@ -2291,10 +2291,10 @@ mod tests {
             dev::test_setup_log("test_instance_updater_lock_is_idempotent");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(datastore, opctx).await;
         let authz_instance = create_test_instance(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             &authz_project,
             "my-great-instance",
         )
@@ -2304,7 +2304,7 @@ mod tests {
         // attempt to lock the instance once.
         let lock1 = dbg!(
             datastore
-                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .instance_updater_lock(opctx, &authz_instance, saga1)
                 .await
         )
         .expect("instance should be locked");
@@ -2313,7 +2313,7 @@ mod tests {
         // doing it again should be fine.
         let lock2 = dbg!(
             datastore
-                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .instance_updater_lock(opctx, &authz_instance, saga1)
                 .await
         )
         .expect(
@@ -2327,7 +2327,7 @@ mod tests {
         // now, unlock the instance.
         let unlocked = dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, &lock1)
+                .instance_updater_unlock(opctx, &authz_instance, &lock1)
                 .await
         )
         .expect("instance should unlock");
@@ -2336,7 +2336,7 @@ mod tests {
         // unlocking it again should also succeed...
         let unlocked = dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, &lock2,)
+                .instance_updater_unlock(opctx, &authz_instance, &lock2,)
                 .await
         )
         .expect("instance should unlock again");
@@ -2356,10 +2356,10 @@ mod tests {
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(datastore, opctx).await;
         let authz_instance = create_test_instance(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             &authz_project,
             "my-great-instance",
         )
@@ -2370,7 +2370,7 @@ mod tests {
         // lock the instance once.
         let lock1 = dbg!(
             datastore
-                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .instance_updater_lock(opctx, &authz_instance, saga1)
                 .await
         )
         .expect("instance should be locked");
@@ -2379,7 +2379,7 @@ mod tests {
         let unlocked = dbg!(
             datastore
                 .instance_updater_unlock(
-                    &opctx,
+                    opctx,
                     &authz_instance,
                     // N.B. that the `UpdaterLock` type's fields are private
                     // specifically to *prevent* callers from accidentally doing
@@ -2397,7 +2397,7 @@ mod tests {
         assert!(!unlocked);
 
         let instance =
-            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+            dbg!(datastore.instance_refetch(opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.updater_id, Some(saga1));
         assert_eq!(instance.updater_gen, lock1.locked_gen);
@@ -2407,14 +2407,14 @@ mod tests {
         // unlocking with the correct ID should succeed.
         let unlocked = dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, &lock1)
+                .instance_updater_unlock(opctx, &authz_instance, &lock1)
                 .await
         )
         .expect("instance should unlock");
         assert!(unlocked, "instance should have unlocked");
 
         let instance =
-            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+            dbg!(datastore.instance_refetch(opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.updater_id, None);
         assert_eq!(instance.updater_gen, next_gen);
@@ -2424,7 +2424,7 @@ mod tests {
         let unlocked = dbg!(
             datastore
                 .instance_updater_unlock(
-                    &opctx,
+                    opctx,
                     &authz_instance,
                     // Again, these fields are private specifically to prevent
                     // you from doing this exact thing. But, we should  still
@@ -2455,10 +2455,10 @@ mod tests {
             dev::test_setup_log("test_instance_deletion_is_idempotent");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(datastore, opctx).await;
         let authz_instance = create_test_instance(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             &authz_project,
             "my-great-instance",
         )
@@ -2482,12 +2482,12 @@ mod tests {
             .expect("should update state successfully");
 
         // This is the first "normal" deletion
-        dbg!(datastore.project_delete_instance(&opctx, &authz_instance).await)
+        dbg!(datastore.project_delete_instance(opctx, &authz_instance).await)
             .expect("instance should be deleted");
 
         // The next deletion should also succeed, even though the instance has already
         // been marked deleted.
-        dbg!(datastore.project_delete_instance(&opctx, &authz_instance).await)
+        dbg!(datastore.project_delete_instance(opctx, &authz_instance).await)
             .expect("instance should remain deleted");
 
         // Clean up.
@@ -2502,10 +2502,10 @@ mod tests {
             dev::test_setup_log("test_unlocking_a_deleted_instance_is_okay");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(datastore, opctx).await;
         let authz_instance = create_test_instance(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             &authz_project,
             "my-great-instance",
         )
@@ -2532,19 +2532,19 @@ mod tests {
         // lock the instance once.
         let lock = dbg!(
             datastore
-                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .instance_updater_lock(opctx, &authz_instance, saga1)
                 .await
         )
         .expect("instance should be locked");
 
         // mark the instance as deleted
-        dbg!(datastore.project_delete_instance(&opctx, &authz_instance).await)
+        dbg!(datastore.project_delete_instance(opctx, &authz_instance).await)
             .expect("instance should be deleted");
 
         // unlocking should still succeed.
         dbg!(
             datastore
-                .instance_updater_unlock(&opctx, &authz_instance, &lock)
+                .instance_updater_unlock(opctx, &authz_instance, &lock)
                 .await
         )
         .expect("instance should unlock");
@@ -2561,10 +2561,10 @@ mod tests {
             dev::test_setup_log("test_instance_commit_update_is_idempotent");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(datastore, opctx).await;
         let authz_instance = create_test_instance(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             &authz_project,
             "my-great-instance",
         )
@@ -2574,7 +2574,7 @@ mod tests {
         // lock the instance once.
         let lock = dbg!(
             datastore
-                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .instance_updater_lock(opctx, &authz_instance, saga1)
                 .await
         )
         .expect("instance should be locked");
@@ -2591,10 +2591,10 @@ mod tests {
         let updated = dbg!(
             datastore
                 .instance_commit_update(
-                    &opctx,
+                    opctx,
                     &authz_instance,
                     &lock,
-                    &new_runtime
+                    new_runtime
                 )
                 .await
         )
@@ -2605,17 +2605,17 @@ mod tests {
         let updated = dbg!(
             datastore
                 .instance_commit_update(
-                    &opctx,
+                    opctx,
                     &authz_instance,
                     &lock,
-                    &new_runtime
+                    new_runtime
                 )
                 .await
         )
         .expect("instance_commit_update should succeed");
         assert!(!updated, "it was already updated");
         let instance =
-            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+            dbg!(datastore.instance_refetch(opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.runtime().propolis_id, new_runtime.propolis_id);
         assert_eq!(instance.runtime().r#gen, new_runtime.r#gen);
@@ -2625,7 +2625,7 @@ mod tests {
         let updated = dbg!(
             datastore
                 .instance_commit_update(
-                    &opctx,
+                    opctx,
                     &authz_instance,
                     &lock,
                     &InstanceRuntimeState {
@@ -2640,7 +2640,7 @@ mod tests {
         .expect("instance_commit_update should succeed");
         assert!(!updated, "it was already updated");
         let instance =
-            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+            dbg!(datastore.instance_refetch(opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.runtime().propolis_id, new_runtime.propolis_id);
         assert_eq!(instance.runtime().dst_propolis_id, None);
@@ -2660,10 +2660,10 @@ mod tests {
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(datastore, opctx).await;
         let authz_instance = create_test_instance(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             &authz_project,
             "my-great-instance",
         )
@@ -2673,7 +2673,7 @@ mod tests {
         // Lock the instance
         let lock = dbg!(
             datastore
-                .instance_updater_lock(&opctx, &authz_instance, saga1)
+                .instance_updater_lock(opctx, &authz_instance, saga1)
                 .await
         )
         .expect("instance should be locked");
@@ -2693,7 +2693,7 @@ mod tests {
             datastore
                 .instance_update_runtime(
                     &InstanceUuid::from_untyped_uuid(authz_instance.id()),
-                    &new_runtime
+                    new_runtime
                 )
                 .await
         )
@@ -2706,7 +2706,7 @@ mod tests {
         let _err = dbg!(
             datastore
                 .instance_commit_update(
-                    &opctx,
+                    opctx,
                     &authz_instance,
                     &lock,
                     &InstanceRuntimeState {
@@ -2727,7 +2727,7 @@ mod tests {
         );
 
         let instance =
-            dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
+            dbg!(datastore.instance_refetch(opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.runtime().propolis_id, new_runtime.propolis_id);
         assert_eq!(
@@ -2748,16 +2748,16 @@ mod tests {
         let logctx = dev::test_setup_log("test_instance_fetch_all");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(datastore, opctx).await;
         let authz_instance = create_test_instance(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             &authz_project,
             "my-great-instance",
         )
         .await;
         let snapshot =
-            dbg!(datastore.instance_fetch_all(&opctx, &authz_instance).await)
+            dbg!(datastore.instance_fetch_all(opctx, &authz_instance).await)
                 .expect("instance fetch must succeed");
 
         assert_eq!(
@@ -2783,7 +2783,7 @@ mod tests {
 
         let active_vmm = datastore
             .vmm_insert(
-                &opctx,
+                opctx,
                 Vmm {
                     id: Uuid::new_v4(),
                     time_created: Utc::now(),
@@ -2819,7 +2819,7 @@ mod tests {
             .await
             .expect("instance update should work");
         let snapshot =
-            dbg!(datastore.instance_fetch_all(&opctx, &authz_instance).await)
+            dbg!(datastore.instance_fetch_all(opctx, &authz_instance).await)
                 .expect("instance fetch must succeed");
 
         assert_eq!(
@@ -2845,7 +2845,7 @@ mod tests {
 
         let target_vmm = datastore
             .vmm_insert(
-                &opctx,
+                opctx,
                 Vmm {
                     id: Uuid::new_v4(),
                     time_created: Utc::now(),
@@ -2865,7 +2865,7 @@ mod tests {
             .expect("target VMM should be inserted successfully!");
         let migration = datastore
             .migration_insert(
-                &opctx,
+                opctx,
                 Migration::new(
                     Uuid::new_v4(),
                     instance_id,
@@ -2893,7 +2893,7 @@ mod tests {
             .await
             .expect("instance update should work");
         let snapshot =
-            dbg!(datastore.instance_fetch_all(&opctx, &authz_instance).await)
+            dbg!(datastore.instance_fetch_all(opctx, &authz_instance).await)
                 .expect("instance fetch must succeed");
 
         assert_eq!(
@@ -2928,10 +2928,10 @@ mod tests {
         let logctx = dev::test_setup_log("test_instance_set_migration_ids");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(datastore, opctx).await;
         let authz_instance = create_test_instance(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             &authz_project,
             "my-great-instance",
         )
@@ -2942,7 +2942,7 @@ mod tests {
         // IDs, and then advance it to Running, when we can start the migration.
         let vmm1 = datastore
             .vmm_insert(
-                &opctx,
+                opctx,
                 Vmm {
                     id: Uuid::new_v4(),
                     time_created: Utc::now(),
@@ -2963,7 +2963,7 @@ mod tests {
 
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
         let instance = datastore
-            .instance_refetch(&opctx, &authz_instance)
+            .instance_refetch(opctx, &authz_instance)
             .await
             .expect("instance should be there");
         datastore
@@ -2982,7 +2982,7 @@ mod tests {
 
         let vmm2 = datastore
             .vmm_insert(
-                &opctx,
+                opctx,
                 Vmm {
                     id: Uuid::new_v4(),
                     time_created: Utc::now(),
@@ -3004,7 +3004,7 @@ mod tests {
         // make a migration...
         let migration = datastore
             .migration_insert(
-                &opctx,
+                opctx,
                 Migration::new(Uuid::new_v4(), instance_id, vmm1.id, vmm2.id),
             )
             .await
@@ -3015,7 +3015,7 @@ mod tests {
         let res = dbg!(
             datastore
                 .instance_set_migration_ids(
-                    &opctx,
+                    opctx,
                     instance_id,
                     PropolisUuid::from_untyped_uuid(vmm1.id),
                     migration.id,
@@ -3045,7 +3045,7 @@ mod tests {
         let instance = dbg!(
             datastore
                 .instance_set_migration_ids(
-                    &opctx,
+                    opctx,
                     instance_id,
                     PropolisUuid::from_untyped_uuid(vmm1.id),
                     migration.id,
@@ -3062,7 +3062,7 @@ mod tests {
         let instance2 = dbg!(
             datastore
                 .instance_set_migration_ids(
-                    &opctx,
+                    opctx,
                     instance_id,
                     PropolisUuid::from_untyped_uuid(vmm1.id),
                     migration.id,
@@ -3084,7 +3084,7 @@ mod tests {
         // is still in place.
         let vmm3 = datastore
             .vmm_insert(
-                &opctx,
+                opctx,
                 Vmm {
                     id: Uuid::new_v4(),
                     time_created: Utc::now(),
@@ -3104,7 +3104,7 @@ mod tests {
             .expect("third VMM should insert");
         let migration2 = datastore
             .migration_insert(
-                &opctx,
+                opctx,
                 Migration::new(Uuid::new_v4(), instance_id, vmm1.id, vmm3.id),
             )
             .await
@@ -3112,7 +3112,7 @@ mod tests {
         dbg!(
             datastore
                 .instance_set_migration_ids(
-                    &opctx,
+                    opctx,
                     instance_id,
                     PropolisUuid::from_untyped_uuid(vmm1.id),
                     migration2.id,
@@ -3145,7 +3145,7 @@ mod tests {
         dbg!(
             datastore
                 .instance_set_migration_ids(
-                    &opctx,
+                    opctx,
                     instance_id,
                     PropolisUuid::from_untyped_uuid(vmm1.id),
                     migration2.id,
@@ -3161,7 +3161,7 @@ mod tests {
         // Now, mark the previous migration as Failed.
         let updated =
             dbg!(datastore
-            .migration_mark_failed(&opctx, migration.id)
+            .migration_mark_failed(opctx, migration.id)
             .await
             .expect(
                 "we should be able to mark the previous migration as failed"
@@ -3173,7 +3173,7 @@ mod tests {
         let instance = dbg!(
             datastore
                 .instance_set_migration_ids(
-                    &opctx,
+                    opctx,
                     instance_id,
                     PropolisUuid::from_untyped_uuid(vmm1.id),
                     migration2.id,
@@ -3198,7 +3198,7 @@ mod tests {
             dev::test_setup_log("test_instance_and_vmm_list_by_sled_agent");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(datastore, opctx).await;
 
         let mut expected_instances = BTreeSet::new();
         const INSTANCES_PER_SLED: usize = 6;
@@ -3221,8 +3221,8 @@ mod tests {
                 // Make sure the instance has a unique name.
                 let instance_name = format!("s{s}i{i}");
                 let authz_instance = create_test_instance(
-                    &datastore,
-                    &opctx,
+                    datastore,
+                    opctx,
                     &authz_project,
                     &instance_name,
                 )
@@ -3230,7 +3230,7 @@ mod tests {
                 let instance_id = authz_instance.id();
                 let vmm = datastore
                     .vmm_insert(
-                        &opctx,
+                        opctx,
                         Vmm {
                             id: Uuid::new_v4(),
                             time_created: Utc::now(),
@@ -3273,8 +3273,8 @@ mod tests {
         for i in 0..INSTANCES_PER_SLED {
             let instance_name = format!("i{i}");
             let _ = create_test_instance(
-                &datastore,
-                &opctx,
+                datastore,
+                opctx,
                 &authz_project,
                 &instance_name,
             )
@@ -3292,7 +3292,7 @@ mod tests {
         while let Some(p) = paginator.next() {
             let batch = datastore
                 .instance_and_vmm_list_by_sled_agent(
-                    &opctx,
+                    opctx,
                     &p.current_pagparams(),
                 )
                 .await

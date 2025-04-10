@@ -2082,7 +2082,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .project_create_instance(
                     &opctx,
                     &project_lookup,
-                    &new_instance_params,
+                    new_instance_params,
                 )
                 .await?;
             Ok(HttpResponseCreated(instance.into()))
@@ -4316,7 +4316,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 }
             };
             let image =
-                nexus.image_create(&opctx, &parent_lookup, &params).await?;
+                nexus.image_create(&opctx, &parent_lookup, params).await?;
             Ok(HttpResponseCreated(image.into()))
         };
         apictx
@@ -4783,7 +4783,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let new_snapshot_params = &new_snapshot.into_inner();
             let project_lookup = nexus.project_lookup(&opctx, query)?;
             let snapshot = nexus
-                .snapshot_create(&opctx, project_lookup, &new_snapshot_params)
+                .snapshot_create(&opctx, project_lookup, new_snapshot_params)
                 .await?;
             Ok(HttpResponseCreated(snapshot.into()))
         };
@@ -4956,7 +4956,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 params::VpcSelector { project: query.project, vpc: path.vpc };
             let vpc_lookup = nexus.vpc_lookup(&opctx, vpc_selector)?;
             let vpc = nexus
-                .project_update_vpc(&opctx, &vpc_lookup, &updated_vpc_params)
+                .project_update_vpc(&opctx, &vpc_lookup, updated_vpc_params)
                 .await?;
             Ok(HttpResponseOk(vpc.into()))
         };
@@ -6815,7 +6815,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let role = nexus.role_builtin_fetch(&opctx, &role_name).await?;
+            let role = nexus.role_builtin_fetch(&opctx, role_name).await?;
             Ok(HttpResponseOk(role.into()))
         };
         apictx
@@ -7364,7 +7364,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let project_lookup =
                 nexus.project_lookup(&opctx, project_selector)?;
             let probe = nexus
-                .probe_create(&opctx, &project_lookup, &new_probe_params)
+                .probe_create(&opctx, &project_lookup, new_probe_params)
                 .await?;
             Ok(HttpResponseCreated(probe.into()))
         };
@@ -7432,7 +7432,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             nexus
                 .login_saml_redirect(
-                    &opctx,
+                    opctx,
                     &path_params.silo_name.into(),
                     &path_params.provider_name.into(),
                     query_params.redirect_uri,
@@ -7523,9 +7523,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             // happen using the Nexus "external authentication" context, which we
             // keep specifically for this purpose.
             let opctx = nexus.opctx_external_authn();
-            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let silo_lookup = nexus.silo_lookup(opctx, silo)?;
             let user =
-                nexus.login_local(&opctx, &silo_lookup, credentials).await?;
+                nexus.login_local(opctx, &silo_lookup, credentials).await?;
 
             let session = nexus.session_create(opctx, &user).await?;
             let mut response = HttpResponseHeaders::new_unnamed(
@@ -7723,7 +7723,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
 
             let model = nexus
-                .device_auth_request_create(&opctx, params.client_id)
+                .device_auth_request_create(opctx, params.client_id)
                 .await?;
             nexus.build_oauth_response(
                 StatusCode::OK,
@@ -7787,7 +7787,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let opctx = nexus.opctx_external_authn();
             let params = params.into_inner();
-            nexus.device_access_token(&opctx, params).await
+            nexus.device_access_token(opctx, params).await
         };
         apictx
             .context

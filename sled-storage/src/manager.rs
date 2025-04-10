@@ -833,7 +833,7 @@ impl StorageManager {
             // Identify which disks should be managed by the control
             // plane, and adopt all requested disks into the control plane
             // in a background task (see: [Self::manage_disks]).
-            self.resources.set_config(&ledger.data());
+            self.resources.set_config(ledger.data());
         } else {
             info!(self.log, "KeyManager ready, but no ledger detected");
         }
@@ -1369,7 +1369,7 @@ impl StorageManager {
 
         // Identify which disks should be managed by the control
         // plane, and adopt all requested disks into the control plane.
-        self.resources.set_config(&config);
+        self.resources.set_config(config);
 
         // Actually try to "manage" those disks, which may involve formatting
         // zpools and conforming partitions to those expected by the control
@@ -1487,7 +1487,7 @@ impl StorageManager {
             compression: config.compression,
         });
         Zfs::ensure_dataset(DatasetEnsureArgs {
-            name: &full_name,
+            name: full_name,
             mountpoint: mountpoint.clone(),
             can_mount: CanMount::On,
             zoned: *zoned,

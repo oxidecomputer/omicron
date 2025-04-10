@@ -122,7 +122,7 @@ async fn cmd_mgs_inventory(
         .into_inner();
     sp_ids.sort();
     show_sp_ids(&sp_ids)?;
-    println!("");
+    println!();
 
     // Report which SPs are visible via Ignition.
     println!("SPs FOUND THROUGH IGNITION\n");
@@ -133,7 +133,7 @@ async fn cmd_mgs_inventory(
         .into_inner();
     sp_list_ignition.sort_by(|a, b| a.id.cmp(&b.id));
     show_sps_from_ignition(&sp_list_ignition)?;
-    println!("");
+    println!();
 
     // Print basic state about each SP that's visible to ignition.
     println!("SERVICE PROCESSOR STATES\n");
@@ -166,7 +166,7 @@ async fn cmd_mgs_inventory(
         .collect::<Vec<_>>();
     sp_infos.sort();
     show_sp_states(&sp_infos)?;
-    println!("");
+    println!();
 
     // Print detailed information about each SP that we've found so far.
     for (sp_id, sp_state) in &sp_infos {
@@ -394,7 +394,7 @@ async fn show_sp_details(
                 .with(tabled::settings::Padding::new(0, 1, 0, 0))
                 .to_string();
             println!("{}", textwrap::indent(&table.to_string(), "        "));
-            println!("");
+            println!();
         }
         RotState::V3 {
             active,
@@ -473,7 +473,7 @@ async fn show_sp_details(
                 .with(tabled::settings::Padding::new(0, 1, 0, 0))
                 .to_string();
             println!("{}", textwrap::indent(&table.to_string(), "        "));
-            println!("");
+            println!();
         }
     }
 
@@ -523,7 +523,7 @@ async fn show_sp_details(
         .to_string();
     println!("    COMPONENTS\n");
     println!("{}", textwrap::indent(&table.to_string(), "        "));
-    println!("");
+    println!();
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -599,7 +599,7 @@ async fn show_sp_details(
         .to_string();
     println!("    COMPONENT CABOOSES\n");
     println!("{}", textwrap::indent(&table.to_string(), "        "));
-    println!("");
+    println!();
 
     Ok(())
 }

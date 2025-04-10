@@ -1267,7 +1267,7 @@ impl ServiceInner {
         // Now that sled agents have been initialized, we can create
         // a service allocation plan.
         let service_plan =
-            ServicePlan::create(&self.log, &config, &sled_plan.sleds).await?;
+            ServicePlan::create(&self.log, config, &sled_plan.sleds).await?;
 
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
@@ -1364,7 +1364,7 @@ impl ServiceInner {
         // At this point, even if we reboot, we must not try to manage sleds,
         // services, or DNS records.
         self.handoff_to_nexus(
-            &config,
+            config,
             &sled_plan,
             &service_plan,
             ExternalPortDiscovery::Auto(switch_mgmt_addrs),

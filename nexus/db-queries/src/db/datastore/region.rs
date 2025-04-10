@@ -134,7 +134,7 @@ impl DataStore {
                     .map_err(|e| Error::invalid_request(&e.to_string()))?)
             }
             params::DiskSource::Snapshot { snapshot_id } => {
-                let (.., db_snapshot) = LookupPath::new(opctx, &self)
+                let (.., db_snapshot) = LookupPath::new(opctx, self)
                     .snapshot_id(*snapshot_id)
                     .fetch()
                     .await?;
@@ -142,7 +142,7 @@ impl DataStore {
                 Ok(db_snapshot.block_size)
             }
             params::DiskSource::Image { image_id } => {
-                let (.., db_image) = LookupPath::new(opctx, &self)
+                let (.., db_image) = LookupPath::new(opctx, self)
                     .image_id(*image_id)
                     .fetch()
                     .await?;
@@ -238,7 +238,7 @@ impl DataStore {
                     size,
                 } => {
                     let block_size = self
-                        .get_block_size_from_disk_source(opctx, &disk_source)
+                        .get_block_size_from_disk_source(opctx, disk_source)
                         .await?;
 
                     let (blocks_per_extent, extent_count) =
@@ -271,7 +271,7 @@ impl DataStore {
             num_regions_required,
         )?;
 
-        let conn = self.pool_connection_authorized(&opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         let dataset_and_regions: Vec<(CrucibleDataset, Region)> =
             query.get_results_async(&*conn).await.map_err(|e| {

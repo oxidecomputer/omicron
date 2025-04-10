@@ -945,7 +945,7 @@ mod tests {
 
             self.initialize_ip_pool(name, range).await;
 
-            LookupPath::new(self.db.opctx(), &self.db.datastore())
+            LookupPath::new(self.db.opctx(), self.db.datastore())
                 .ip_pool_id(pool.id())
                 .lookup_for(authz::Action::Read)
                 .await

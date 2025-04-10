@@ -96,7 +96,7 @@ impl UpdateManager {
                 //
                 // This logic may be tweaked in the future, depending on how we
                 // bundle together zones.
-                components.push(self.component_get_zone_version(&path).await?);
+                components.push(self.component_get_zone_version(path).await?);
             } else if file_type.is_dir() && entry.file_name() == "sled-agent" {
                 // Sled Agent is the only non-zone file recognized as a component.
                 let version_path = path.join("VERSION");
@@ -155,7 +155,7 @@ mod test {
 
         let mut json = NamedUtf8TempFile::new().unwrap();
         json.write_all(
-            &r#"{"v":"1","t":"layer","pkg":"test-pkg","version":"2.0.0"}"#
+            r#"{"v":"1","t":"layer","pkg":"test-pkg","version":"2.0.0"}"#
                 .as_bytes(),
         )
         .unwrap();

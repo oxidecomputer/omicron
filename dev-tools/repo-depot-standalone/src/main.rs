@@ -171,7 +171,7 @@ impl RepoDepotApi for StandaloneApiImpl {
             })?;
 
         let reader = tuf_repo
-            .read_target(&target_name)
+            .read_target(target_name)
             .await
             .map_err(|error| {
                 HttpError::for_internal_error(format!(

@@ -174,7 +174,7 @@ impl HardwareSnapshot {
         while let Some(node) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
         {
-            poll_blkdev_node(&log, &mut disks, node, boot_storage_unit)?;
+            poll_blkdev_node(log, &mut disks, node, boot_storage_unit)?;
         }
 
         Ok(Self { tofino, disks, baseboard })
@@ -277,7 +277,7 @@ impl HardwareView {
 
         // Find new or updated disks.
         for (key, value) in &polled_hw.disks {
-            match self.disks.get(&key) {
+            match self.disks.get(key) {
                 Some(found) => {
                     if value != found {
                         updated.push(value.clone());

@@ -26,13 +26,9 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a silo with a two unprivileged users
-    let silo = create_silo(
-        &client,
-        "authz",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let silo =
+        create_silo(client, "authz", true, shared::SiloIdentityMode::LocalOnly)
+            .await;
 
     let user1 = create_local_user(
         client,
@@ -115,7 +111,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
 
     // it also shouldn't show up in their list
     let user2_keys: ResultsPage<views::SshKey> =
-        NexusRequest::object_get(client, &"/v1/me/ssh-keys")
+        NexusRequest::object_get(client, "/v1/me/ssh-keys")
             .authn_as(AuthnMode::SiloUser(user2))
             .execute()
             .await
@@ -132,13 +128,9 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a silo with an unprivileged user
-    let silo = create_silo(
-        &client,
-        "authz",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let silo =
+        create_silo(client, "authz", true, shared::SiloIdentityMode::LocalOnly)
+            .await;
 
     let new_silo_user_id = create_local_user(
         client,
@@ -150,13 +142,9 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     .id;
 
     // Create another silo with another unprivileged user
-    let silo = create_silo(
-        &client,
-        "other",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let silo =
+        create_silo(client, "other", true, shared::SiloIdentityMode::LocalOnly)
+            .await;
 
     create_local_user(
         client,
@@ -168,7 +156,7 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // Listing users should work
     let users: ResultsPage<views::User> =
-        NexusRequest::object_get(client, &"/v1/users")
+        NexusRequest::object_get(client, "/v1/users")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await
@@ -188,13 +176,9 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a silo with an unprivileged user
-    let silo = create_silo(
-        &client,
-        "authz",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let silo =
+        create_silo(client, "authz", true, shared::SiloIdentityMode::LocalOnly)
+            .await;
 
     let new_silo_user_id = create_local_user(
         client,
@@ -208,7 +192,7 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let _users: ResultsPage<views::IdentityProvider> =
         NexusRequest::object_get(
             client,
-            &"/v1/system/identity-providers?silo=authz",
+            "/v1/system/identity-providers?silo=authz",
         )
         .authn_as(AuthnMode::SiloUser(new_silo_user_id))
         .execute()
@@ -224,13 +208,9 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a silo with an unprivileged user
-    let silo = create_silo(
-        &client,
-        "authz",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let silo =
+        create_silo(client, "authz", true, shared::SiloIdentityMode::LocalOnly)
+            .await;
 
     let new_silo_user_id = create_local_user(
         client,
@@ -241,7 +221,7 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     .await
     .id;
 
-    let _session_user = NexusRequest::object_get(client, &"/v1/me")
+    let _session_user = NexusRequest::object_get(client, "/v1/me")
         .authn_as(AuthnMode::SiloUser(new_silo_user_id))
         .execute()
         .await
@@ -254,13 +234,9 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a silo with an unprivileged user
-    let silo = create_silo(
-        &client,
-        "authz",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let silo =
+        create_silo(client, "authz", true, shared::SiloIdentityMode::LocalOnly)
+            .await;
 
     let new_silo_user_id = create_local_user(
         client,
@@ -272,17 +248,13 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     .id;
 
     // Create another silo
-    let _silo = create_silo(
-        &client,
-        "other",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let _silo =
+        create_silo(client, "other", true, shared::SiloIdentityMode::LocalOnly)
+            .await;
 
     // That user can access their own silo
     let _silo: views::Silo =
-        NexusRequest::object_get(client, &"/v1/system/silos/authz")
+        NexusRequest::object_get(client, "/v1/system/silos/authz")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await
@@ -295,7 +267,7 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             http::Method::GET,
-            &"/v1/system/silos/other",
+            "/v1/system/silos/other",
         )
         .expect_status(Some(http::StatusCode::NOT_FOUND)),
     )

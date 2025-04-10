@@ -214,7 +214,7 @@ mod test {
         let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         {
-            let pool = Pool::new_single_host(&log, &cfg);
+            let pool = Pool::new_single_host(log, &cfg);
             pool.terminate().await;
         }
         db.cleanup().await.unwrap();
@@ -231,7 +231,7 @@ mod test {
         let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         {
-            let pool = Pool::new_single_host(&log, &cfg);
+            let pool = Pool::new_single_host(log, &cfg);
             drop(pool);
         }
         db.cleanup().await.unwrap();

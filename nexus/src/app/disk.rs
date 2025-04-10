@@ -269,7 +269,7 @@ impl super::Nexus {
         new_state: &DiskRuntimeState,
     ) -> Result<(), Error> {
         let log = &self.log;
-        let (.., authz_disk) = LookupPath::new(&opctx, &self.db_datastore)
+        let (.., authz_disk) = LookupPath::new(opctx, &self.db_datastore)
             .disk_id(id)
             .lookup_for(authz::Action::Modify)
             .await?;
@@ -361,8 +361,7 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        self.volume_remove_read_only_parent(&opctx, db_disk.volume_id())
-            .await?;
+        self.volume_remove_read_only_parent(opctx, db_disk.volume_id()).await?;
 
         Ok(())
     }

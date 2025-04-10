@@ -1158,36 +1158,36 @@ impl DbArgs {
                         replacements_to_do(&opctx, &datastore).await
                     }
                     DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
-                        cmd_db_rack_list(&opctx, &datastore, &fetch_opts).await
+                        cmd_db_rack_list(&opctx, &datastore, fetch_opts).await
                     }
                     DbCommands::Disks(DiskArgs {
                         command: DiskCommands::Info(uuid),
                     }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
                     DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
-                        cmd_db_disk_list(&datastore, &fetch_opts).await
+                        cmd_db_disk_list(&datastore, fetch_opts).await
                     }
                     DbCommands::Disks(DiskArgs {
                         command: DiskCommands::Physical(uuid),
                     }) => {
-                        cmd_db_disk_physical(&opctx, &datastore, &fetch_opts, uuid)
+                        cmd_db_disk_physical(&opctx, &datastore, fetch_opts, uuid)
                             .await
                     }
                     DbCommands::Dns(DnsArgs { command: DnsCommands::Show }) => {
-                        cmd_db_dns_show(&opctx, &datastore, &fetch_opts).await
+                        cmd_db_dns_show(&opctx, &datastore, fetch_opts).await
                     }
                     DbCommands::Dns(DnsArgs { command: DnsCommands::Diff(args) }) => {
-                        cmd_db_dns_diff(&opctx, &datastore, &fetch_opts, args)
+                        cmd_db_dns_diff(&opctx, &datastore, fetch_opts, args)
                             .await
                     }
                     DbCommands::Dns(DnsArgs { command: DnsCommands::Names(args) }) => {
-                        cmd_db_dns_names(&opctx, &datastore, &fetch_opts, args)
+                        cmd_db_dns_names(&opctx, &datastore, fetch_opts, args)
                             .await
                     }
                     DbCommands::Inventory(inventory_args) => {
                         cmd_db_inventory(
                             &opctx,
                             &datastore,
-                            &fetch_opts,
+                            fetch_opts,
                             inventory_args,
                         )
                         .await
@@ -1196,7 +1196,7 @@ impl DbArgs {
                         cmd_db_physical_disks(
                             &opctx,
                             &datastore,
-                            &fetch_opts,
+                            fetch_opts,
                             args,
                         )
                         .await
@@ -1209,7 +1209,7 @@ impl DbArgs {
                     }) => {
                         cmd_db_region_list(
                             &datastore,
-                            &fetch_opts,
+                            fetch_opts,
                             region_list_args,
                         )
                         .await
@@ -1219,7 +1219,7 @@ impl DbArgs {
                     }) => {
                         cmd_db_region_used_by(
                             &datastore,
-                            &fetch_opts,
+                            fetch_opts,
                             region_used_by_args,
                         )
                         .await
@@ -1232,7 +1232,7 @@ impl DbArgs {
                     }) => {
                         cmd_db_region_replacement_list(
                             &datastore,
-                            &fetch_opts,
+                            fetch_opts,
                             args,
                         )
                         .await
@@ -1243,7 +1243,7 @@ impl DbArgs {
                         cmd_db_region_replacement_status(
                             &opctx,
                             &datastore,
-                            &fetch_opts,
+                            fetch_opts,
                         )
                         .await
                     }
@@ -1262,28 +1262,28 @@ impl DbArgs {
                         .await
                     }
                     DbCommands::Saga(args) => {
-                        args.exec(&omdb, &opctx, &datastore).await
+                        args.exec(omdb, &opctx, &datastore).await
                     }
                     DbCommands::Sleds(args) => {
-                        cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await
+                        cmd_db_sleds(&opctx, &datastore, fetch_opts, args).await
                     }
                     DbCommands::Instance(InstanceArgs {
                         command: InstanceCommands::List(args),
                     }) => {
-                        cmd_db_instances(&opctx, &datastore, &fetch_opts, args)
+                        cmd_db_instances(&opctx, &datastore, fetch_opts, args)
                             .await
                     }
                     DbCommands::Instance(InstanceArgs {
                         command: InstanceCommands::Info(args),
                     }) => {
-                        cmd_db_instance_info(&opctx, &datastore, &fetch_opts, args)
+                        cmd_db_instance_info(&opctx, &datastore, fetch_opts, args)
                             .await
                     }
                     DbCommands::Instances(instances_options) => {
                         cmd_db_instances(
                             &opctx,
                             &datastore,
-                            &fetch_opts,
+                            fetch_opts,
                             instances_options,
                         )
                         .await
@@ -1292,7 +1292,7 @@ impl DbArgs {
                         command: NetworkCommands::ListEips,
                         verbose,
                     }) => {
-                        cmd_db_eips(&opctx, &datastore, &fetch_opts, *verbose)
+                        cmd_db_eips(&opctx, &datastore, fetch_opts, *verbose)
                             .await
                     }
                     DbCommands::Network(NetworkArgs {
@@ -1301,7 +1301,7 @@ impl DbArgs {
                     }) => {
                         cmd_db_network_list_vnics(
                             &datastore,
-                            &fetch_opts,
+                            fetch_opts,
                             *verbose,
                         )
                         .await
@@ -1309,14 +1309,14 @@ impl DbArgs {
                     DbCommands::Migrations(MigrationsArgs {
                         command: MigrationsCommands::List(args),
                     }) => {
-                        cmd_db_migrations_list(&datastore, &fetch_opts, args).await
+                        cmd_db_migrations_list(&datastore, fetch_opts, args).await
                     }
                     DbCommands::Snapshots(SnapshotArgs {
                         command: SnapshotCommands::Info(uuid),
                     }) => cmd_db_snapshot_info(&opctx, &datastore, uuid).await,
                     DbCommands::Snapshots(SnapshotArgs {
                         command: SnapshotCommands::List,
-                    }) => cmd_db_snapshot_list(&datastore, &fetch_opts).await,
+                    }) => cmd_db_snapshot_list(&datastore, fetch_opts).await,
                     DbCommands::RegionSnapshotReplacement(
                         RegionSnapshotReplacementArgs {
                             command: RegionSnapshotReplacementCommands::List(args),
@@ -1324,7 +1324,7 @@ impl DbArgs {
                     ) => {
                         cmd_db_region_snapshot_replacement_list(
                             &datastore,
-                            &fetch_opts,
+                            fetch_opts,
                             args,
                         )
                         .await
@@ -1337,7 +1337,7 @@ impl DbArgs {
                         cmd_db_region_snapshot_replacement_status(
                             &opctx,
                             &datastore,
-                            &fetch_opts,
+                            fetch_opts,
                         )
                         .await
                     }
@@ -1397,7 +1397,7 @@ impl DbArgs {
                     }) => cmd_db_volume_info(&datastore, args).await,
                     DbCommands::Volumes(VolumeArgs {
                         command: VolumeCommands::List,
-                    }) => cmd_db_volume_list(&datastore, &fetch_opts).await,
+                    }) => cmd_db_volume_list(&datastore, fetch_opts).await,
                     DbCommands::Volumes(VolumeArgs {
                         command: VolumeCommands::LockHolder(args),
                     }) => cmd_db_volume_lock_holder(&datastore, args).await,
@@ -1406,22 +1406,22 @@ impl DbArgs {
                     }) => cmd_db_volume_cannot_activate(&opctx, &datastore).await,
                     DbCommands::Volumes(VolumeArgs {
                         command: VolumeCommands::Reference(args),
-                    }) => cmd_db_volume_reference(&opctx, &datastore, &fetch_opts, &args).await,
+                    }) => cmd_db_volume_reference(&opctx, &datastore, fetch_opts, args).await,
 
                     DbCommands::Vmm(VmmArgs { command: VmmCommands::Info(args) }) => {
-                        cmd_db_vmm_info(&opctx, &datastore, &fetch_opts, &args)
+                        cmd_db_vmm_info(&opctx, &datastore, fetch_opts, args)
                             .await
                     }
                     DbCommands::Vmm(VmmArgs { command: VmmCommands::List(args) })
                     | DbCommands::Vmms(args) => {
-                        cmd_db_vmm_list(&datastore, &fetch_opts, args).await
+                        cmd_db_vmm_list(&datastore, fetch_opts, args).await
                     }
                     DbCommands::Oximeter(OximeterArgs {
                         command: OximeterCommands::ListProducers
                     }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
                     DbCommands::Zpool(ZpoolArgs {
                         command: ZpoolCommands::List(args)
-                    }) => cmd_db_zpool_list(&opctx, &datastore, &args).await,
+                    }) => cmd_db_zpool_list(&opctx, &datastore, args).await,
                     DbCommands::Zpool(ZpoolArgs {
                         command: ZpoolCommands::SetStorageBuffer(args)
                     }) => {
@@ -1429,7 +1429,7 @@ impl DbArgs {
                         cmd_db_zpool_set_storage_buffer(
                             &opctx,
                             &datastore,
-                            &args,
+                            args,
                             token,
                         ).await
                     }
@@ -1932,7 +1932,7 @@ async fn replacements_to_do(
 
     println!("{}", table);
 
-    println!("");
+    println!();
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -2214,7 +2214,7 @@ async fn get_and_display_vcr(
         .context("loading requested volume")?;
 
     for v in volumes {
-        match serde_json::from_str(&v.data()) {
+        match serde_json::from_str(v.data()) {
             Ok(vcr) => {
                 println!("VCR from volume ID {volume_id}");
                 print_vcr(vcr, 0);
@@ -2515,7 +2515,7 @@ async fn cmd_db_physical_disks(
     };
 
     let sleds = datastore
-        .physical_disk_list(&opctx, &first_page(limit), filter)
+        .physical_disk_list(opctx, &first_page(limit), filter)
         .await
         .context("listing physical disks")?;
     check_limit(&sleds, limit, || String::from("listing physical disks"));
@@ -2854,7 +2854,7 @@ async fn cmd_db_volume_info(
 
     let mut vcrs = Vec::new();
     let rows = volumes.into_iter().map(|volume| {
-        match serde_json::from_str(&volume.data()) {
+        match serde_json::from_str(volume.data()) {
             Ok(vcr) => {
                 vcrs.push(vcr);
             }
@@ -2942,7 +2942,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
             for (index, sv) in sub_volumes.iter().enumerate() {
                 println!("{indent}SUB VOLUME {index}");
                 print_vcr(sv.clone(), pad + 4);
-                println!("");
+                println!();
             }
 
             if let Some(rop) = read_only_parent {
@@ -4027,7 +4027,7 @@ async fn cmd_db_sleds(
     };
 
     let sleds = datastore
-        .sled_list(&opctx, &first_page(limit), filter)
+        .sled_list(opctx, &first_page(limit), filter)
         .await
         .context("listing sleds")?;
     check_limit(&sleds, limit, || String::from("listing sleds"));
@@ -4793,7 +4793,7 @@ async fn cmd_db_dns_diff(
             added.len(),
             removed.len()
         );
-        println!("");
+        println!();
 
         for a in added {
             print_name("+", &a.name, a.records().context("parsing records"));
@@ -5597,7 +5597,7 @@ async fn cmd_db_region_snapshot_replacement_waiting(
         if let Some(lock_holder_id) = lock_holder.id() {
             node_indices.entry(lock_holder_id).or_insert_with(|| g.add_node(1));
 
-            let from_ix = node_indices[&replacement_id];
+            let from_ix = node_indices[replacement_id];
             let to_ix = node_indices[&lock_holder_id];
 
             g.add_edge(from_ix, to_ix, 1);
@@ -5714,7 +5714,7 @@ async fn cmd_db_validate_volume_references(
             .into_iter()
             .filter(|volume| {
                 let vcr: VolumeConstructionRequest =
-                    serde_json::from_str(&volume.data()).unwrap();
+                    serde_json::from_str(volume.data()).unwrap();
 
                 let mut targets = CrucibleTargets::default();
                 read_only_resources_associated_with_volume(&vcr, &mut targets);
@@ -6863,7 +6863,7 @@ async fn inv_collection_print_devices(
                     continue;
                 }
 
-                println!("");
+                println!();
                 println!(
                     "{:?} (serial number unknown -- this is a bug)",
                     sp.sp_type
@@ -6875,7 +6875,7 @@ async fn inv_collection_print_devices(
                     continue;
                 }
 
-                println!("");
+                println!();
                 println!("{:?} {}", sp.sp_type, baseboard.serial_number);
                 println!("    part number: {}", baseboard.part_number);
             }
@@ -6887,7 +6887,7 @@ async fn inv_collection_print_devices(
         if let SpType::Sled = sp.sp_type {
             print!(" (cubby {})", sp.sp_slot);
         }
-        println!("");
+        println!();
         println!("    found at: {} from {}", sp.time_collected, sp.source);
 
         #[derive(Tabled)]
@@ -6980,7 +6980,7 @@ async fn inv_collection_print_devices(
         }
     }
 
-    println!("");
+    println!();
     for sp_missing_rot in collection
         .sps
         .keys()
@@ -7125,7 +7125,7 @@ fn inv_collection_print_keeper_membership(collection: &Collection) {
     if collection.clickhouse_keeper_cluster_membership.is_empty() {
         println!("No membership retrieved.");
     }
-    println!("");
+    println!();
 }
 
 #[derive(Debug)]
@@ -7804,7 +7804,7 @@ async fn cmd_db_oximeter_list_producers(
 
 // Display an empty cell for an Option<T> if it's None.
 fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
-    opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
+    opt.as_ref().map(|x| x.to_string()).unwrap_or_default()
 }
 
 // Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using

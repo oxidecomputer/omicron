@@ -140,12 +140,12 @@ impl Filter {
             filter::FilterExpr::Compound(compound) => {
                 Self::ensure_filter_expr_application_is_valid_impl(
                     &compound.left.expr,
-                    &schema,
+                    schema,
                     errors,
                 );
                 Self::ensure_filter_expr_application_is_valid_impl(
                     &compound.right.expr,
-                    &schema,
+                    schema,
                     errors,
                 );
             }

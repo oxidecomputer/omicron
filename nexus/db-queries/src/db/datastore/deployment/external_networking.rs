@@ -593,11 +593,11 @@ mod tests {
             datastore: &DataStore,
         ) {
             let (ip_pool, _) = datastore
-                .ip_pools_service_lookup(&opctx)
+                .ip_pools_service_lookup(opctx)
                 .await
                 .expect("failed to find service IP pool");
             datastore
-                .ip_pool_add_range(&opctx, &ip_pool, &self.external_ips_range)
+                .ip_pool_add_range(opctx, &ip_pool, &self.external_ips_range)
                 .await
                 .expect("failed to expand service IP pool");
         }
@@ -905,7 +905,7 @@ mod tests {
 
         // Generate the test values we care about.
         let mut harness = Harness::new();
-        harness.set_up_service_ip_pool(&opctx, &datastore).await;
+        harness.set_up_service_ip_pool(opctx, datastore).await;
 
         // Build the `zones` map needed by `ensure_zone_resources_allocated`,
         // with an arbitrary sled_id.
@@ -916,7 +916,7 @@ mod tests {
         datastore
             .ensure_zone_external_networking_allocated_on_connection(
                 &datastore.pool_connection_for_tests().await.unwrap(),
-                &opctx,
+                opctx,
                 zones.iter(),
             )
             .await
@@ -924,22 +924,22 @@ mod tests {
             .unwrap();
 
         // Check that the external IP and NIC records were created.
-        harness.assert_ips_exist_in_datastore(&datastore).await;
-        harness.assert_nics_exist_in_datastore(&datastore).await;
+        harness.assert_ips_exist_in_datastore(datastore).await;
+        harness.assert_nics_exist_in_datastore(datastore).await;
 
         // We should be able to run the function again with the same inputs, and
         // it should succeed without inserting any new records.
         datastore
             .ensure_zone_external_networking_allocated_on_connection(
                 &datastore.pool_connection_for_tests().await.unwrap(),
-                &opctx,
+                opctx,
                 zones.iter(),
             )
             .await
             .with_context(|| format!("{zones:#?}"))
             .unwrap();
-        harness.assert_ips_exist_in_datastore(&datastore).await;
-        harness.assert_nics_exist_in_datastore(&datastore).await;
+        harness.assert_ips_exist_in_datastore(datastore).await;
+        harness.assert_nics_exist_in_datastore(datastore).await;
 
         // Now that we've tested the happy path, try some requests that ought to
         // fail because the request includes an external IP that doesn't match
@@ -1025,7 +1025,7 @@ mod tests {
             let err = datastore
                 .ensure_zone_external_networking_allocated_on_connection(
                     &datastore.pool_connection_for_tests().await.unwrap(),
-                    &opctx,
+                    opctx,
                     mutated_zones.iter(),
                 )
                 .await
@@ -1083,7 +1083,7 @@ mod tests {
 
                     let err = datastore.ensure_zone_external_networking_allocated_on_connection(
                         &datastore.pool_connection_for_tests().await.unwrap(),
-                        &opctx,
+                        opctx,
                         mutated_zones.iter(),
                     )
                     .await
@@ -1109,7 +1109,7 @@ mod tests {
 
                     let err = datastore.ensure_zone_external_networking_allocated_on_connection(
                         &datastore.pool_connection_for_tests().await.unwrap(),
-                        &opctx,
+                        opctx,
                         mutated_zones.iter(),
                     )
                     .await
@@ -1135,7 +1135,7 @@ mod tests {
 
                     let err = datastore.ensure_zone_external_networking_allocated_on_connection(
                         &datastore.pool_connection_for_tests().await.unwrap(),
-                        &opctx,
+                        opctx,
                         mutated_zones.iter(),
                     )
                     .await
@@ -1165,7 +1165,7 @@ mod tests {
 
         // Generate the test values we care about.
         let harness = Harness::new();
-        harness.set_up_service_ip_pool(&opctx, &datastore).await;
+        harness.set_up_service_ip_pool(opctx, datastore).await;
 
         // Build the `zones` map needed by `ensure_zone_resources_allocated`,
         // with an arbitrary sled_id.
@@ -1176,7 +1176,7 @@ mod tests {
         datastore
             .ensure_zone_external_networking_allocated_on_connection(
                 &datastore.pool_connection_for_tests().await.unwrap(),
-                &opctx,
+                opctx,
                 zones.iter(),
             )
             .await
@@ -1184,8 +1184,8 @@ mod tests {
             .unwrap();
 
         // Check that the external IP and NIC records were created.
-        harness.assert_ips_exist_in_datastore(&datastore).await;
-        harness.assert_nics_exist_in_datastore(&datastore).await;
+        harness.assert_ips_exist_in_datastore(datastore).await;
+        harness.assert_nics_exist_in_datastore(datastore).await;
 
         // Deallocate resources: this should succeed and mark all relevant db
         // records deleted.
@@ -1199,8 +1199,8 @@ mod tests {
             .with_context(|| format!("{zones:#?}"))
             .unwrap();
 
-        harness.assert_ips_are_deleted_in_datastore(&datastore).await;
-        harness.assert_nics_are_deleted_in_datastore(&datastore).await;
+        harness.assert_ips_are_deleted_in_datastore(datastore).await;
+        harness.assert_nics_are_deleted_in_datastore(datastore).await;
 
         // This operation should be idempotent: we can run it again, and the
         // records remain deleted.
@@ -1214,8 +1214,8 @@ mod tests {
             .with_context(|| format!("{zones:#?}"))
             .unwrap();
 
-        harness.assert_ips_are_deleted_in_datastore(&datastore).await;
-        harness.assert_nics_are_deleted_in_datastore(&datastore).await;
+        harness.assert_ips_are_deleted_in_datastore(datastore).await;
+        harness.assert_nics_are_deleted_in_datastore(datastore).await;
 
         // Clean up.
         db.terminate().await;

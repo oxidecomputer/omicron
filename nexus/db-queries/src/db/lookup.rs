@@ -962,7 +962,7 @@ mod test {
         let project_name: Name = Name("my-project".parse().unwrap());
         let instance_name: Name = Name("my-instance".parse().unwrap());
 
-        let leaf = LookupPath::new(&opctx, &datastore)
+        let leaf = LookupPath::new(opctx, datastore)
             .project_name(&project_name)
             .instance_name(&instance_name);
         assert!(matches!(&leaf,
@@ -970,14 +970,14 @@ mod test {
             if **p == project_name && **i == instance_name));
 
         let leaf =
-            LookupPath::new(&opctx, &datastore).project_name(&project_name);
+            LookupPath::new(opctx, datastore).project_name(&project_name);
         assert!(matches!(&leaf,
             Project::Name(_, p)
             if **p == project_name));
 
         let project_id =
             "006f29d9-0ff0-e2d2-a022-87e152440122".parse().unwrap();
-        let leaf = LookupPath::new(&opctx, &datastore).project_id(project_id);
+        let leaf = LookupPath::new(opctx, datastore).project_id(project_id);
         assert!(matches!(&leaf,
             Project::PrimaryKey(_, p)
             if *p == project_id));

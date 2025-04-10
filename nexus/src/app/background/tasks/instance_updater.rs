@@ -94,7 +94,7 @@ impl InstanceUpdater {
         )
         .await;
         status.destroyed_active_vmms = destroyed_active_vmms.len();
-        self.start_sagas(&opctx, status, &mut sagas, destroyed_active_vmms)
+        self.start_sagas(opctx, status, &mut sagas, destroyed_active_vmms)
             .await;
 
         let failed_active_vmms = find_instances(
@@ -106,7 +106,7 @@ impl InstanceUpdater {
         )
         .await;
         status.failed_active_vmms = failed_active_vmms.len();
-        self.start_sagas(&opctx, status, &mut sagas, failed_active_vmms).await;
+        self.start_sagas(opctx, status, &mut sagas, failed_active_vmms).await;
 
         let terminated_active_migrations = find_instances(
             "terminated active migrations",
@@ -119,7 +119,7 @@ impl InstanceUpdater {
         status.terminated_active_migrations =
             terminated_active_migrations.len();
         self.start_sagas(
-            &opctx,
+            opctx,
             status,
             &mut sagas,
             terminated_active_migrations,
@@ -169,7 +169,7 @@ impl InstanceUpdater {
             let instance_id = instance.id();
             let saga = async {
                 let (.., authz_instance) =
-                    LookupPath::new(&opctx, &self.datastore)
+                    LookupPath::new(opctx, &self.datastore)
                         .instance_id(instance_id)
                         .lookup_for(authz::Action::Modify)
                         .await?;

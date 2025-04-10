@@ -73,7 +73,7 @@ async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
 #[nexus_test]
 async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
@@ -182,7 +182,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
@@ -279,7 +279,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
@@ -387,7 +387,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
     let project_id = create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
@@ -547,12 +547,12 @@ async fn test_reject_creating_disk_from_snapshot(
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
-    let project_id = create_project_and_pool(&client).await;
+    let project_id = create_project_and_pool(client).await;
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_project) = LookupPath::new(&opctx, datastore)
         .project_id(project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -700,12 +700,12 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
-    let project_id = create_project_and_pool(&client).await;
+    let project_id = create_project_and_pool(client).await;
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_project) = LookupPath::new(&opctx, datastore)
         .project_id(project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -796,12 +796,12 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
-    let project_id = create_project_and_pool(&client).await;
+    let project_id = create_project_and_pool(client).await;
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_project) = LookupPath::new(&opctx, datastore)
         .project_id(project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -875,7 +875,7 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
 async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
     // Test that snapshots cannot be created if there is no space for the blocks
     let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
@@ -928,7 +928,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let disk_test = DiskTest::new(&cptestctx).await;
+    let disk_test = DiskTest::new(cptestctx).await;
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
@@ -1026,7 +1026,7 @@ async fn test_create_snapshot_record_idempotent(
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
-    let project_id = create_project_and_pool(&client).await;
+    let project_id = create_project_and_pool(client).await;
     let disk_id = Uuid::new_v4();
     let snapshot_name =
         external::Name::try_from("snapshot".to_string()).unwrap();
@@ -1056,7 +1056,7 @@ async fn test_create_snapshot_record_idempotent(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_project) = LookupPath::new(&opctx, datastore)
         .project_id(project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -1115,7 +1115,7 @@ async fn test_create_snapshot_record_idempotent(
 
     // Move snapshot from Creating to Ready
 
-    let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot_created_1.id())
         .fetch_for(authz::Action::Modify)
         .await
@@ -1133,7 +1133,7 @@ async fn test_create_snapshot_record_idempotent(
 
     // Grab the new snapshot (so generation number is updated)
 
-    let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot_created_1.id())
         .fetch_for(authz::Action::Delete)
         .await
@@ -1158,7 +1158,7 @@ async fn test_create_snapshot_record_idempotent(
 
     {
         // Ensure the snapshot is gone
-        let r = LookupPath::new(&opctx, &datastore)
+        let r = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot_created_1.id())
             .fetch_for(authz::Action::Read)
             .await;
@@ -1241,7 +1241,7 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
     let _project_id = create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
@@ -1324,7 +1324,7 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     let (.., authz_snapshot_1, db_snapshot_1) =
-        LookupPath::new(&opctx, &datastore)
+        LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot_1.identity.id)
             .fetch_for(authz::Action::Delete)
             .await
@@ -1346,7 +1346,7 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     let (.., authz_snapshot_2, db_snapshot_2) =
-        LookupPath::new(&opctx, &datastore)
+        LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot_2.identity.id)
             .fetch_for(authz::Action::Delete)
             .await
@@ -1368,7 +1368,7 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     let (.., authz_snapshot_3, db_snapshot_3) =
-        LookupPath::new(&opctx, &datastore)
+        LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot_3.identity.id)
             .fetch_for(authz::Action::Delete)
             .await
@@ -1466,7 +1466,7 @@ async fn test_region_allocation_for_snapshot(
     // We add one more than the "three" default to avoid failing
     // with "not enough storage".
     let sled_id = cptestctx.first_sled_id();
-    let mut disk_test = DiskTestBuilder::new(&cptestctx)
+    let mut disk_test = DiskTestBuilder::new(cptestctx)
         .on_specific_sled(sled_id)
         .with_zpool_count(4)
         .build()
@@ -1476,11 +1476,11 @@ async fn test_region_allocation_for_snapshot(
     let client = &cptestctx.external_client;
     let _project_id = create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .fetch()
         .await
@@ -1513,7 +1513,7 @@ async fn test_region_allocation_for_snapshot(
     // There shouldn't be any regions for the snapshot volume
 
     let snapshot_id = snapshot.identity.id;
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot_id)
         .fetch()
         .await
@@ -1654,13 +1654,13 @@ async fn test_snapshot_expunge(cptestctx: &ControlPlaneTestContext) {
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     // Create three zpools, each with one dataset.
-    let _disk_test = DiskTest::new(&cptestctx).await;
+    let _disk_test = DiskTest::new(cptestctx).await;
 
     // Create a disk, then a snapshot of that disk
     let client = &cptestctx.external_client;
     let _project_id = create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 

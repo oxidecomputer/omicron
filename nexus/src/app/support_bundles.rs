@@ -41,7 +41,7 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SupportBundle> {
-        self.db_datastore.support_bundle_list(&opctx, pagparams).await
+        self.db_datastore.support_bundle_list(opctx, pagparams).await
     }
 
     pub async fn support_bundle_view(
@@ -62,7 +62,7 @@ impl super::Nexus {
         opctx: &OpContext,
         reason: &'static str,
     ) -> CreateResult<SupportBundle> {
-        self.db_datastore.support_bundle_create(&opctx, reason, self.id).await
+        self.db_datastore.support_bundle_create(opctx, reason, self.id).await
     }
 
     pub async fn support_bundle_download(
@@ -88,7 +88,7 @@ impl super::Nexus {
         // Lookup the sled holding the bundle, forward the request there
         let sled_id = self
             .db_datastore
-            .zpool_get_sled_if_in_service(&opctx, bundle.zpool_id.into())
+            .zpool_get_sled_if_in_service(opctx, bundle.zpool_id.into())
             .await?;
         let client = self.sled_client(&sled_id).await?;
 
@@ -189,7 +189,7 @@ impl super::Nexus {
         // This is a terminal state
         self.db_datastore
             .support_bundle_update(
-                &opctx,
+                opctx,
                 &authz_bundle,
                 SupportBundleState::Destroying,
             )

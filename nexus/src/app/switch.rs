@@ -46,6 +46,6 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Switch> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        self.db_datastore.switch_list(&opctx, pagparams).await
+        self.db_datastore.switch_list(opctx, pagparams).await
     }
 }

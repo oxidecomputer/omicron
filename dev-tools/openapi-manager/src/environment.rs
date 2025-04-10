@@ -51,7 +51,7 @@ impl Environment {
     /// Returns the path to the OpenAPI documents in this workspace
     pub(crate) fn openapi_dir(&self) -> &Utf8Path {
         match &self.local_source {
-            LocalSource::Directory { local_directory } => &local_directory,
+            LocalSource::Directory { local_directory } => local_directory,
         }
     }
 }
@@ -99,8 +99,8 @@ impl BlessedSource {
                 );
                 Ok((
                     BlessedFiles::load_from_git_parent_branch(
-                        &revision,
-                        &directory,
+                        revision,
+                        directory,
                         apis,
                         &mut errors,
                     )?,

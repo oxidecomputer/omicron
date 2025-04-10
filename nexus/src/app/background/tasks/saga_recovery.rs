@@ -425,7 +425,7 @@ async fn list_sagas_in_progress(
     let log = &opctx.log;
     debug!(log, "listing candidate sagas for recovery");
     let result = datastore
-        .saga_list_recovery_candidates_batched(&opctx, sec_id)
+        .saga_list_recovery_candidates_batched(opctx, sec_id)
         .await
         .internal_context("listing in-progress sagas for saga recovery")
         .map(|list| {
@@ -619,7 +619,7 @@ mod test {
         ));
         let sec_client =
             steno::sec(log.new(o!("component" => "SEC")), storage.clone());
-        let uctx = Arc::new(TestContext::new(&log, storage.clone()));
+        let uctx = Arc::new(TestContext::new(log, storage.clone()));
         (storage, sec_client, uctx)
     }
 
@@ -661,7 +661,7 @@ mod test {
         let sec_log = log.new(o!("component" => "SEC"));
         let opctx = OpContext::for_tests(
             log,
-            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
+            Arc::clone(db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let saga_recovery_opctx =
             opctx.child_with_authn(authn::Context::internal_saga_recovery());
@@ -748,7 +748,7 @@ mod test {
         let sec_log = log.new(o!("component" => "SEC"));
         let opctx = OpContext::for_tests(
             log,
-            Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
+            Arc::clone(db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let saga_recovery_opctx =
             opctx.child_with_authn(authn::Context::internal_saga_recovery());

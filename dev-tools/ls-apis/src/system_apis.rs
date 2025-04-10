@@ -285,7 +285,7 @@ impl SystemApis {
                 if filter.should_include(
                     &self.api_metadata,
                     &self.workspaces,
-                    &client,
+                    client,
                     p,
                 )? {
                     include.push(p);
@@ -696,7 +696,7 @@ impl<'a> DagCheck<'a> {
     ) {
         self.proposed_client_managed
             .entry(client_pkgname)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(reason);
     }
 
@@ -707,7 +707,7 @@ impl<'a> DagCheck<'a> {
     ) {
         self.proposed_server_managed
             .entry(client_pkgname)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(reason);
     }
 
@@ -739,7 +739,7 @@ impl<'a> DagCheck<'a> {
         // this order.
         self.proposed_upick
             .entry(client_pkgname1)
-            .or_insert_with(BTreeSet::new)
+            .or_default()
             .insert(client_pkgname2);
     }
 
@@ -955,15 +955,15 @@ impl<'a> ClientDependenciesTracker<'a> {
         let client_pkgname = ClientPackageName::from(pkgname.to_owned());
         self.api_consumers
             .entry(client_pkgname.clone())
-            .or_insert_with(BTreeMap::new)
+            .or_default()
             .entry(server_pkgname.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(dep_path.clone());
         self.apis_consumed
             .entry(server_pkgname.clone())
-            .or_insert_with(BTreeMap::new)
+            .or_default()
             .entry(client_pkgname)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(dep_path.clone());
     }
 }

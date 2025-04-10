@@ -367,7 +367,7 @@ impl StorageResources {
                 // involve formatting it, and emplacing the zpool.
                 ManagedDisk::Unmanaged(raw_disk) => {
                     match Self::begin_disk_management(
-                        &log,
+                        log,
                         &all_disks.mount_config,
                         raw_disk,
                         config,
@@ -434,7 +434,7 @@ impl StorageResources {
     ) -> Result<ManagedDisk, DiskManagementError> {
         info!(log, "Invoking Disk::new on an unmanaged disk");
         let disk = Disk::new(
-            &log,
+            log,
             mount_config,
             raw_disk.clone(),
             Some(config.pool_id),
@@ -532,7 +532,7 @@ impl StorageResources {
             }
             DiskVariant::M2 => {
                 let managed_disk = Disk::new(
-                    &log,
+                    log,
                     &all_disks.mount_config,
                     disk,
                     None,

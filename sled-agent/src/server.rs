@@ -55,7 +55,7 @@ impl Server {
         let nexus_client = make_nexus_client(&log, resolver);
 
         let sled_agent = SledAgent::new(
-            &config,
+            config,
             log.clone(),
             nexus_client,
             request,

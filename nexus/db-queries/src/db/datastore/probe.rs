@@ -66,7 +66,7 @@ impl super::DataStore {
 
         let probes = match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::probe, dsl::id, &pagparams)
+                paginated(dsl::probe, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::probe,

@@ -29,7 +29,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let project_name = "springfield-squidport";
-    create_project(&client, &project_name).await;
+    create_project(client, project_name).await;
 
     let project_selector = format!("project={}", project_name);
     // Each project has a default VPC. Make sure it has the default rules.
@@ -55,7 +55,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let other_vpc_selector = format!("{}&vpc={}", project_selector, other_vpc);
     let other_vpc_firewall =
         format!("/v1/vpc-firewall-rules?{}", other_vpc_selector);
-    let vpc2 = create_vpc(&client, &project_name, &other_vpc).await;
+    let vpc2 = create_vpc(client, project_name, other_vpc).await;
     let rules =
         object_get::<VpcFirewallRules>(client, &other_vpc_firewall).await.rules;
     assert!(rules.iter().all(|r| r.vpc_id == vpc2.identity.id));
@@ -292,7 +292,7 @@ async fn test_firewall_rules_same_name(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let project_name = "my-project";
-    create_project(&client, &project_name).await;
+    create_project(client, project_name).await;
 
     let rule = VpcFirewallRuleUpdate {
         name: "dupe".parse().unwrap(),
@@ -330,7 +330,7 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let project_name = "my-project";
-    create_project(&client, &project_name).await;
+    create_project(client, project_name).await;
 
     let base_rule = VpcFirewallRuleUpdate {
         name: "my-rule".parse().unwrap(),

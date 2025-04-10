@@ -83,7 +83,7 @@ impl BackgroundTask for VpcRouteManager {
                     let client = sled_client_from_address(
                         sled.id(),
                         sled.address(),
-                        &log,
+                        log,
                     );
                     (sled, client)
                 })

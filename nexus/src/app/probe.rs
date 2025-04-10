@@ -45,7 +45,7 @@ impl super::Nexus {
     ) -> LookupResult<ProbeInfo> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
-        self.db_datastore.probe_get(opctx, &authz_project, &name_or_id).await
+        self.db_datastore.probe_get(opctx, &authz_project, name_or_id).await
     }
 
     /// Create a probe. This adds the probe to the data store and sets up the
@@ -63,7 +63,7 @@ impl super::Nexus {
         // resolve NameOrId into authz::IpPool
         let pool = match &new_probe_params.ip_pool {
             Some(pool) => Some(
-                self.ip_pool_lookup(opctx, &pool)?
+                self.ip_pool_lookup(opctx, pool)?
                     .lookup_for(authz::Action::CreateChild)
                     .await?
                     .0,

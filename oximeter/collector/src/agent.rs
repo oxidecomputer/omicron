@@ -570,7 +570,7 @@ async fn refresh_producer_list_once(
     agent: &OximeterAgent,
     nexus_pool: &Pool<NexusClient>,
 ) {
-    let client = claim_nexus_with_backoff(&agent.log, &nexus_pool).await;
+    let client = claim_nexus_with_backoff(&agent.log, nexus_pool).await;
     let mut stream = client.cpapi_assigned_producers_list_stream(
         &agent.id,
         // This is a _total_ limit, not a page size, so `None` means "get

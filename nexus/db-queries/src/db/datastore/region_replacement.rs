@@ -959,11 +959,11 @@ mod test {
         let request_2 = RegionReplacement::new(region_2_id, volume_id);
 
         datastore
-            .insert_region_replacement_request(&opctx, request_1)
+            .insert_region_replacement_request(opctx, request_1)
             .await
             .unwrap();
         datastore
-            .insert_region_replacement_request(&opctx, request_2)
+            .insert_region_replacement_request(opctx, request_2)
             .await
             .unwrap_err();
 
@@ -1006,7 +1006,7 @@ mod test {
         };
 
         datastore
-            .insert_region_replacement_request(&opctx, request.clone())
+            .insert_region_replacement_request(opctx, request.clone())
             .await
             .unwrap();
 
@@ -1015,7 +1015,7 @@ mod test {
         let saga_id = Uuid::new_v4();
 
         datastore
-            .set_region_replacement_driving(&opctx, request.id, saga_id)
+            .set_region_replacement_driving(opctx, request.id, saga_id)
             .await
             .unwrap();
 
@@ -1024,7 +1024,7 @@ mod test {
         // should fail as the record was locked by the saga.
 
         datastore
-            .mark_region_replacement_as_done(&opctx, request.id)
+            .mark_region_replacement_as_done(opctx, request.id)
             .await
             .unwrap_err();
 
@@ -1032,7 +1032,7 @@ mod test {
         // set.
 
         let actual_request = datastore
-            .get_region_replacement_request_by_id(&opctx, request.id)
+            .get_region_replacement_request_by_id(opctx, request.id)
             .await
             .unwrap();
 
@@ -1047,7 +1047,7 @@ mod test {
         // finished ok.
 
         datastore
-            .undo_set_region_replacement_driving(&opctx, request.id, saga_id)
+            .undo_set_region_replacement_driving(opctx, request.id, saga_id)
             .await
             .unwrap();
 
@@ -1055,7 +1055,7 @@ mod test {
         // this time marks the record as replacement done successfully.
 
         datastore
-            .mark_region_replacement_as_done(&opctx, request.id)
+            .mark_region_replacement_as_done(opctx, request.id)
             .await
             .unwrap();
 
@@ -1063,7 +1063,7 @@ mod test {
         // is cleared.
 
         let actual_request = datastore
-            .get_region_replacement_request_by_id(&opctx, request.id)
+            .get_region_replacement_request_by_id(opctx, request.id)
             .await
             .unwrap();
 
@@ -1111,7 +1111,7 @@ mod test {
         };
 
         datastore
-            .insert_region_replacement_request(&opctx, request.clone())
+            .insert_region_replacement_request(opctx, request.clone())
             .await
             .unwrap();
 
@@ -1121,7 +1121,7 @@ mod test {
         let saga_id = Uuid::new_v4();
 
         datastore
-            .set_region_replacement_completing(&opctx, request.id, saga_id)
+            .set_region_replacement_completing(opctx, request.id, saga_id)
             .await
             .unwrap();
 
@@ -1130,7 +1130,7 @@ mod test {
 
         datastore
             .set_region_replacement_completing(
-                &opctx,
+                opctx,
                 request.id,
                 Uuid::new_v4(),
             )
@@ -1142,14 +1142,14 @@ mod test {
         // This should fail as the saga took the lock on this record.
 
         datastore
-            .mark_region_replacement_as_done(&opctx, request.id)
+            .mark_region_replacement_as_done(opctx, request.id)
             .await
             .unwrap_err();
 
         // The first saga has finished and sets the record to Complete.
 
         datastore
-            .set_region_replacement_complete(&opctx, request, saga_id)
+            .set_region_replacement_complete(opctx, request, saga_id)
             .await
             .unwrap();
 

@@ -86,7 +86,7 @@ impl OxqlArgs {
         srv: ServiceName,
     ) -> anyhow::Result<SocketAddr> {
         match maybe_url {
-            Some(cli_or_env_url) => Url::parse(&cli_or_env_url)
+            Some(cli_or_env_url) => Url::parse(cli_or_env_url)
                 .context(
                     "failed parsing URL from command-line or environment variable",
                 )?

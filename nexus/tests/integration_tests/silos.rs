@@ -87,13 +87,13 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // Create two silos: one discoverable, one not
     create_silo(
-        &client,
+        client,
         "discoverable",
         true,
         shared::SiloIdentityMode::LocalOnly,
     )
     .await;
-    create_silo(&client, "hidden", false, shared::SiloIdentityMode::LocalOnly)
+    create_silo(client, "hidden", false, shared::SiloIdentityMode::LocalOnly)
         .await;
 
     // Verify that an external DNS name was propagated for these Silos.
@@ -104,7 +104,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     let discoverable_url = "/v1/system/silos/discoverable";
     let hidden_url = "/v1/system/silos/hidden";
 
-    let silo: Silo = NexusRequest::object_get(&client, &discoverable_url)
+    let silo: Silo = NexusRequest::object_get(client, discoverable_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -113,7 +113,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     assert_eq!(silo.identity.name, "discoverable");
 
-    let silo: Silo = NexusRequest::object_get(&client, &hidden_url)
+    let silo: Silo = NexusRequest::object_get(client, hidden_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -124,10 +124,10 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // Verify 404 if silo doesn't exist
     NexusRequest::expect_failure(
-        &client,
+        client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        &"/v1/system/silos/testpost",
+        "/v1/system/silos/testpost",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -168,7 +168,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     // Create project with built-in user auth
     // Note: this currently goes to the built-in silo!
     let project_name = "someproj";
-    let new_proj_in_default_silo = create_project(&client, project_name).await;
+    let new_proj_in_default_silo = create_project(client, project_name).await;
 
     // default silo project shows up in default silo
     let projects_in_default_silo =
@@ -237,10 +237,10 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // Deleting discoverable silo fails because there's still a project in it
     NexusRequest::expect_failure(
-        &client,
+        client,
         StatusCode::BAD_REQUEST,
         Method::DELETE,
-        &discoverable_url,
+        discoverable_url,
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -248,14 +248,14 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to make request");
 
     // Delete project
-    NexusRequest::object_delete(&client, &"/v1/projects/someproj")
+    NexusRequest::object_delete(client, "/v1/projects/someproj")
         .authn_as(AuthnMode::SiloUser(new_silo_user_id))
         .execute()
         .await
         .expect("failed to make request");
 
     // Verify silo DELETE now works
-    NexusRequest::object_delete(&client, &discoverable_url)
+    NexusRequest::object_delete(client, discoverable_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -265,7 +265,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     verify_silo_dns_name(cptestctx, "discoverable", false).await;
 
     // Verify silo user was also deleted
-    LookupPath::new(&authn_opctx, nexus.datastore())
+    LookupPath::new(authn_opctx, nexus.datastore())
         .silo_user_id(new_silo_user_id)
         .fetch()
         .await
@@ -298,18 +298,17 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
 
     let authn_opctx = nexus.opctx_external_authn();
 
-    let (authz_silo, db_silo) =
-        LookupPath::new(&authn_opctx, &nexus.datastore())
-            .silo_name(&silo.identity.name.into())
-            .fetch()
-            .await
-            .unwrap();
+    let (authz_silo, db_silo) = LookupPath::new(authn_opctx, nexus.datastore())
+        .silo_name(&silo.identity.name.into())
+        .fetch()
+        .await
+        .unwrap();
 
     assert!(
         nexus
             .datastore()
             .silo_group_optional_lookup(
-                &authn_opctx,
+                authn_opctx,
                 &authz_silo,
                 "administrator".into(),
             )
@@ -321,7 +320,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
     // Test that a user is granted privileges from their group membership
     let admin_group_user = nexus
         .silo_user_from_authenticated_subject(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             &db_silo,
             &AuthenticatedSubject {
@@ -335,7 +334,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
     let group_memberships = nexus
         .datastore()
         .silo_group_membership_for_user(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             admin_group_user.id(),
         )
@@ -367,7 +366,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    create_silo(&client, "test-silo", true, shared::SiloIdentityMode::SamlJit)
+    create_silo(client, "test-silo", true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     // List providers - should be none
@@ -392,7 +391,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp_1: SamlIdentityProvider = object_create(
         client,
-        &"/v1/system/identity-providers/saml?silo=test-silo",
+        "/v1/system/identity-providers/saml?silo=test-silo",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -421,7 +420,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp_2: SamlIdentityProvider = object_create(
         client,
-        &"/v1/system/identity-providers/saml?silo=test-silo",
+        "/v1/system/identity-providers/saml?silo=test-silo",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "another-totally-real-saml-provider"
@@ -472,7 +471,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "test-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+    create_silo(client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     let saml_idp_descriptor = SAML_IDP_DESCRIPTOR;
@@ -514,7 +513,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
 
     // Delete the silo
     NexusRequest::object_delete(
-        &client,
+        client,
         &format!("/v1/system/silos/{}", SILO_NAME),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -528,7 +527,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
     let response = nexus
         .datastore()
         .identity_provider_lookup(
-            &nexus.opctx_external_authn(),
+            nexus.opctx_external_authn(),
             &omicron_common::api::external::Name::try_from(
                 SILO_NAME.to_string(),
             )
@@ -583,7 +582,7 @@ async fn test_saml_idp_metadata_data_valid(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "blahblah", true, shared::SiloIdentityMode::SamlJit)
+    create_silo(client, "blahblah", true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     let silo_saml_idp: SamlIdentityProvider = object_create(
@@ -646,7 +645,7 @@ async fn test_saml_idp_metadata_data_truncated(
 ) {
     let client = &cptestctx.external_client;
 
-    create_silo(&client, "blahblah", true, shared::SiloIdentityMode::SamlJit)
+    create_silo(client, "blahblah", true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     NexusRequest::new(
@@ -699,7 +698,7 @@ async fn test_saml_idp_metadata_data_invalid(
     let client = &cptestctx.external_client;
 
     const SILO_NAME: &str = "saml-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
+    create_silo(client, SILO_NAME, true, shared::SiloIdentityMode::SamlJit)
         .await;
 
     NexusRequest::new(
@@ -784,7 +783,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
 
     for test_case in test_cases {
         let silo =
-            create_silo(&client, "test-silo", true, test_case.identity_mode)
+            create_silo(client, "test-silo", true, test_case.identity_mode)
                 .await;
 
         if test_case.existing_silo_user {
@@ -807,7 +806,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
         let authn_opctx = nexus.opctx_external_authn();
 
         let (authz_silo, db_silo) =
-            LookupPath::new(&authn_opctx, &nexus.datastore())
+            LookupPath::new(authn_opctx, nexus.datastore())
                 .silo_name(&silo.identity.name.into())
                 .fetch()
                 .await
@@ -815,7 +814,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
 
         let existing_silo_user = nexus
             .silo_user_from_authenticated_subject(
-                &authn_opctx,
+                authn_opctx,
                 &authz_silo,
                 &db_silo,
                 &AuthenticatedSubject {
@@ -831,7 +830,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
             assert!(existing_silo_user.is_err());
         }
 
-        NexusRequest::object_delete(&client, &"/v1/system/silos/test-silo")
+        NexusRequest::object_delete(client, "/v1/system/silos/test-silo")
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -847,7 +846,7 @@ async fn test_silo_user_fetch_by_external_id(
     let nexus = &cptestctx.server.server_context().nexus;
 
     let silo = create_silo(
-        &client,
+        client,
         "test-silo",
         true,
         shared::SiloIdentityMode::LocalOnly,
@@ -860,7 +859,7 @@ async fn test_silo_user_fetch_by_external_id(
         nexus.datastore().clone(),
     );
 
-    let (authz_silo, _) = LookupPath::new(&opctx, &nexus.datastore())
+    let (authz_silo, _) = LookupPath::new(&opctx, nexus.datastore())
         .silo_name(&Name::try_from("test-silo".to_string()).unwrap().into())
         .fetch_for(authz::Action::Read)
         .await
@@ -879,7 +878,7 @@ async fn test_silo_user_fetch_by_external_id(
     let result = nexus
         .datastore()
         .silo_user_fetch_by_external_id(
-            &opctx_external_authn,
+            opctx_external_authn,
             &authz_silo,
             "123",
         )
@@ -891,7 +890,7 @@ async fn test_silo_user_fetch_by_external_id(
     let result = nexus
         .datastore()
         .silo_user_fetch_by_external_id(
-            &opctx_external_authn,
+            opctx_external_authn,
             &authz_silo,
             "f5513e049dac9468de5bdff36ab17d04f",
         )
@@ -1030,7 +1029,7 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
     let datastore = nexus.datastore();
 
     let silo = create_silo(
-        &client,
+        client,
         "test-silo",
         true,
         shared::SiloIdentityMode::SamlJit,
@@ -1042,17 +1041,16 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
 
     let authn_opctx = nexus.opctx_external_authn();
 
-    let (authz_silo, db_silo) =
-        LookupPath::new(&authn_opctx, &nexus.datastore())
-            .silo_name(&silo.identity.name.into())
-            .fetch()
-            .await
-            .unwrap();
+    let (authz_silo, db_silo) = LookupPath::new(authn_opctx, nexus.datastore())
+        .silo_name(&silo.identity.name.into())
+        .fetch()
+        .await
+        .unwrap();
 
     // Should create two groups from the authenticated subject
     let existing_silo_user = nexus
         .silo_user_from_authenticated_subject(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             &db_silo,
             &AuthenticatedSubject {
@@ -1066,7 +1064,7 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
     let group_memberships = nexus
         .datastore()
         .silo_group_membership_for_user(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             existing_silo_user.id(),
         )
@@ -1078,7 +1076,7 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
     let mut group_names = vec![];
 
     for group_membership in &group_memberships {
-        let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
+        let (.., db_group) = LookupPath::new(authn_opctx, nexus.datastore())
             .silo_group_id(group_membership.silo_group_id)
             .fetch()
             .await
@@ -1097,7 +1095,7 @@ async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.server_context().nexus;
 
     let silo = create_silo(
-        &client,
+        client,
         "test-silo",
         true,
         shared::SiloIdentityMode::LocalOnly,
@@ -1115,17 +1113,16 @@ async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
 
     let authn_opctx = nexus.opctx_external_authn();
 
-    let (authz_silo, db_silo) =
-        LookupPath::new(&authn_opctx, &nexus.datastore())
-            .silo_name(&silo.identity.name.into())
-            .fetch()
-            .await
-            .unwrap();
+    let (authz_silo, db_silo) = LookupPath::new(authn_opctx, nexus.datastore())
+        .silo_name(&silo.identity.name.into())
+        .fetch()
+        .await
+        .unwrap();
 
     // Should not create groups from the authenticated subject
     let existing_silo_user = nexus
         .silo_user_from_authenticated_subject(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             &db_silo,
             &AuthenticatedSubject {
@@ -1139,7 +1136,7 @@ async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
     let group_memberships = nexus
         .datastore()
         .silo_group_membership_for_user(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             existing_silo_user.id(),
         )
@@ -1158,7 +1155,7 @@ async fn test_silo_groups_remove_from_one_group(
     let datastore = nexus.datastore();
 
     let silo = create_silo(
-        &client,
+        client,
         "test-silo",
         true,
         shared::SiloIdentityMode::SamlJit,
@@ -1170,17 +1167,16 @@ async fn test_silo_groups_remove_from_one_group(
 
     let authn_opctx = nexus.opctx_external_authn();
 
-    let (authz_silo, db_silo) =
-        LookupPath::new(&authn_opctx, &nexus.datastore())
-            .silo_name(&silo.identity.name.into())
-            .fetch()
-            .await
-            .unwrap();
+    let (authz_silo, db_silo) = LookupPath::new(authn_opctx, nexus.datastore())
+        .silo_name(&silo.identity.name.into())
+        .fetch()
+        .await
+        .unwrap();
 
     // Add to two groups
     let existing_silo_user = nexus
         .silo_user_from_authenticated_subject(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             &db_silo,
             &AuthenticatedSubject {
@@ -1195,7 +1191,7 @@ async fn test_silo_groups_remove_from_one_group(
     let group_memberships = nexus
         .datastore()
         .silo_group_membership_for_user(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             existing_silo_user.id(),
         )
@@ -1207,7 +1203,7 @@ async fn test_silo_groups_remove_from_one_group(
     let mut group_names = vec![];
 
     for group_membership in &group_memberships {
-        let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
+        let (.., db_group) = LookupPath::new(authn_opctx, nexus.datastore())
             .silo_group_id(group_membership.silo_group_id)
             .fetch()
             .await
@@ -1222,7 +1218,7 @@ async fn test_silo_groups_remove_from_one_group(
     // Then remove their membership from one group
     let existing_silo_user = nexus
         .silo_user_from_authenticated_subject(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             &db_silo,
             &AuthenticatedSubject {
@@ -1236,7 +1232,7 @@ async fn test_silo_groups_remove_from_one_group(
     let group_memberships = nexus
         .datastore()
         .silo_group_membership_for_user(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             existing_silo_user.id(),
         )
@@ -1248,7 +1244,7 @@ async fn test_silo_groups_remove_from_one_group(
     let mut group_names = vec![];
 
     for group_membership in &group_memberships {
-        let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
+        let (.., db_group) = LookupPath::new(authn_opctx, nexus.datastore())
             .silo_group_id(group_membership.silo_group_id)
             .fetch()
             .await
@@ -1269,7 +1265,7 @@ async fn test_silo_groups_remove_from_both_groups(
     let datastore = nexus.datastore();
 
     let silo = create_silo(
-        &client,
+        client,
         "test-silo",
         true,
         shared::SiloIdentityMode::SamlJit,
@@ -1281,17 +1277,16 @@ async fn test_silo_groups_remove_from_both_groups(
 
     let authn_opctx = nexus.opctx_external_authn();
 
-    let (authz_silo, db_silo) =
-        LookupPath::new(&authn_opctx, &nexus.datastore())
-            .silo_name(&silo.identity.name.into())
-            .fetch()
-            .await
-            .unwrap();
+    let (authz_silo, db_silo) = LookupPath::new(authn_opctx, nexus.datastore())
+        .silo_name(&silo.identity.name.into())
+        .fetch()
+        .await
+        .unwrap();
 
     // Add to two groups
     let existing_silo_user = nexus
         .silo_user_from_authenticated_subject(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             &db_silo,
             &AuthenticatedSubject {
@@ -1306,7 +1301,7 @@ async fn test_silo_groups_remove_from_both_groups(
     let group_memberships = nexus
         .datastore()
         .silo_group_membership_for_user(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             existing_silo_user.id(),
         )
@@ -1318,7 +1313,7 @@ async fn test_silo_groups_remove_from_both_groups(
     let mut group_names = vec![];
 
     for group_membership in &group_memberships {
-        let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
+        let (.., db_group) = LookupPath::new(authn_opctx, nexus.datastore())
             .silo_group_id(group_membership.silo_group_id)
             .fetch()
             .await
@@ -1333,7 +1328,7 @@ async fn test_silo_groups_remove_from_both_groups(
     // Then remove from both groups, and add to a new one
     let existing_silo_user = nexus
         .silo_user_from_authenticated_subject(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             &db_silo,
             &AuthenticatedSubject {
@@ -1347,7 +1342,7 @@ async fn test_silo_groups_remove_from_both_groups(
     let group_memberships = nexus
         .datastore()
         .silo_group_membership_for_user(
-            &authn_opctx,
+            authn_opctx,
             &authz_silo,
             existing_silo_user.id(),
         )
@@ -1359,7 +1354,7 @@ async fn test_silo_groups_remove_from_both_groups(
     let mut group_names = vec![];
 
     for group_membership in &group_memberships {
-        let (.., db_group) = LookupPath::new(&authn_opctx, nexus.datastore())
+        let (.., db_group) = LookupPath::new(authn_opctx, nexus.datastore())
             .silo_group_id(group_membership.silo_group_id)
             .fetch()
             .await
@@ -1379,7 +1374,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
 
     // Create a silo
     let silo = create_silo(
-        &client,
+        client,
         "test-silo",
         true,
         shared::SiloIdentityMode::SamlJit,
@@ -1392,7 +1387,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
         nexus.datastore().clone(),
     );
 
-    let (authz_silo, db_silo) = LookupPath::new(&opctx, &nexus.datastore())
+    let (authz_silo, db_silo) = LookupPath::new(&opctx, nexus.datastore())
         .silo_name(&silo.identity.name.into())
         .fetch()
         .await
@@ -1401,7 +1396,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
     // Add a user with a group membership
     let silo_user = nexus
         .silo_user_from_authenticated_subject(
-            &opctx_external_authn,
+            opctx_external_authn,
             &authz_silo,
             &db_silo,
             &AuthenticatedSubject {
@@ -1413,7 +1408,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
         .expect("silo_user_from_authenticated_subject");
 
     // Delete the silo
-    NexusRequest::object_delete(&client, &"/v1/system/silos/test-silo")
+    NexusRequest::object_delete(client, "/v1/system/silos/test-silo")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -1424,7 +1419,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
         nexus
             .datastore()
             .silo_group_optional_lookup(
-                &opctx_external_authn,
+                opctx_external_authn,
                 &authz_silo,
                 "a-group".into(),
             )
@@ -1437,7 +1432,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
     let memberships = nexus
         .datastore()
         .silo_group_membership_for_user(
-            &opctx_external_authn,
+            opctx_external_authn,
             &authz_silo,
             silo_user.id(),
         )
@@ -1447,7 +1442,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
     assert!(memberships.is_empty());
 
     // Expect the user is gone
-    LookupPath::new(&opctx_external_authn, &nexus.datastore())
+    LookupPath::new(opctx_external_authn, nexus.datastore())
         .silo_user_id(silo_user.id())
         .fetch()
         .await
@@ -1462,7 +1457,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
 
     // Create a silo
     let silo = create_silo(
-        &client,
+        client,
         "test-silo",
         true,
         shared::SiloIdentityMode::SamlJit,
@@ -1474,7 +1469,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
         nexus.datastore().clone(),
     );
 
-    let (authz_silo, db_silo) = LookupPath::new(&opctx, &nexus.datastore())
+    let (authz_silo, db_silo) = LookupPath::new(&opctx, nexus.datastore())
         .silo_name(&silo.identity.name.into())
         .fetch()
         .await
@@ -1483,7 +1478,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
     // Add the first user with a group membership
     let _silo_user_1 = nexus
         .silo_user_from_authenticated_subject(
-            &nexus.opctx_external_authn(),
+            nexus.opctx_external_authn(),
             &authz_silo,
             &db_silo,
             &AuthenticatedSubject {
@@ -1497,7 +1492,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
     // Add the first user with a group membership
     let _silo_user_2 = nexus
         .silo_user_from_authenticated_subject(
-            &nexus.opctx_external_authn(),
+            nexus.opctx_external_authn(),
             &authz_silo,
             &db_silo,
             &AuthenticatedSubject {
@@ -1738,13 +1733,13 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let silo =
-        create_silo(&client, "jit", true, shared::SiloIdentityMode::SamlJit)
+        create_silo(client, "jit", true, shared::SiloIdentityMode::SamlJit)
             .await;
 
     // We need one initial user that would in principle have privileges to
     // create other users.
     let admin_username = "admin-user";
-    let admin_user = create_jit_user(&datastore, &silo, admin_username).await;
+    let admin_user = create_jit_user(datastore, &silo, admin_username).await;
 
     // Grant this user "admin" privileges on that Silo.
     grant_iam(
@@ -1868,13 +1863,9 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a "LocalOnly" Silo with its own admin user.
-    let silo = create_silo(
-        &client,
-        "fixed",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let silo =
+        create_silo(client, "fixed", true, shared::SiloIdentityMode::LocalOnly)
+            .await;
     let new_silo_user_id = create_local_user(
         client,
         &silo,
@@ -1969,13 +1960,9 @@ async fn test_local_silo_users(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a "LocalOnly" Silo for testing.
-    let silo1 = create_silo(
-        &client,
-        "silo1",
-        true,
-        shared::SiloIdentityMode::LocalOnly,
-    )
-    .await;
+    let silo1 =
+        create_silo(client, "silo1", true, shared::SiloIdentityMode::LocalOnly)
+            .await;
 
     // We'll run through a battery of tests as each of two different users: the
     // usual "test-privileged" user (which should have full access because
@@ -2532,10 +2519,10 @@ async fn test_silo_delete_cleans_up_ip_pool_links(
 
     // Create a silo
     let silo1 =
-        create_silo(&client, "silo1", true, shared::SiloIdentityMode::SamlJit)
+        create_silo(client, "silo1", true, shared::SiloIdentityMode::SamlJit)
             .await;
     let silo2 =
-        create_silo(&client, "silo2", true, shared::SiloIdentityMode::SamlJit)
+        create_silo(client, "silo2", true, shared::SiloIdentityMode::SamlJit)
             .await;
 
     // link pool1 to both, link pool2 to silo1 only
@@ -2563,12 +2550,12 @@ async fn test_silo_delete_cleans_up_ip_pool_links(
     // we want to make sure the links are there before we make sure they're gone
     let url = "/v1/system/ip-pools/pool1/silos";
     let links =
-        objects_list_page_authz::<views::IpPoolSiloLink>(client, &url).await;
+        objects_list_page_authz::<views::IpPoolSiloLink>(client, url).await;
     assert_eq!(links.items.len(), 2);
 
     let url = "/v1/system/ip-pools/pool2/silos";
     let links =
-        objects_list_page_authz::<views::IpPoolSiloLink>(client, &url).await;
+        objects_list_page_authz::<views::IpPoolSiloLink>(client, url).await;
     assert_eq!(links.items.len(), 1);
 
     // Delete the silo
@@ -2578,17 +2565,17 @@ async fn test_silo_delete_cleans_up_ip_pool_links(
     // Now make sure the links are gone
     let url = "/v1/system/ip-pools/pool1/silos";
     let links =
-        objects_list_page_authz::<views::IpPoolSiloLink>(client, &url).await;
+        objects_list_page_authz::<views::IpPoolSiloLink>(client, url).await;
     assert_eq!(links.items.len(), 1);
 
     let url = "/v1/system/ip-pools/pool2/silos";
     let links =
-        objects_list_page_authz::<views::IpPoolSiloLink>(client, &url).await;
+        objects_list_page_authz::<views::IpPoolSiloLink>(client, url).await;
     assert_eq!(links.items.len(), 0);
 
     // but the pools are of course still there
     let url = "/v1/system/ip-pools";
-    let pools = objects_list_page_authz::<views::IpPool>(client, &url).await;
+    let pools = objects_list_page_authz::<views::IpPool>(client, url).await;
     assert_eq!(pools.items.len(), 2);
     assert_eq!(pools.items[0].identity.name, "pool1");
     assert_eq!(pools.items[1].identity.name, "pool2");

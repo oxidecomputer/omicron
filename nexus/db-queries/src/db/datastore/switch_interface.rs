@@ -176,7 +176,7 @@ impl DataStore {
     ) -> ListResultVec<LoopbackAddress> {
         use nexus_db_schema::schema::loopback_address::dsl;
 
-        paginated(dsl::loopback_address, dsl::id, &pagparams)
+        paginated(dsl::loopback_address, dsl::id, pagparams)
             .select(LoopbackAddress::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await

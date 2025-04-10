@@ -34,7 +34,7 @@ pub(crate) async fn deploy_sled_configs(
                 "generation" => i64::from(&config.sled_agent_generation),
             ));
 
-            let db_sled = match sleds_by_id.get(&sled_id) {
+            let db_sled = match sleds_by_id.get(sled_id) {
                 Some(sled) => sled,
                 None => {
                     if config.are_all_items_expunged() {

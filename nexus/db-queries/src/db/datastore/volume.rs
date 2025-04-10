@@ -285,7 +285,7 @@ impl DataStore {
 
         // After volume creation, validate invariants for all volumes
         #[cfg(any(test, feature = "testing"))]
-        Self::validate_volume_invariants(&conn).await?;
+        Self::validate_volume_invariants(conn).await?;
 
         Ok(volume)
     }
@@ -598,7 +598,7 @@ impl DataStore {
                 // read-only, and will not take over from other read-only
                 // Upstairs.
 
-                match volume_is_read_only(&vcr) {
+                match volume_is_read_only(vcr) {
                     Ok(read_only) => {
                         if !read_only {
                             return Err(
@@ -1308,7 +1308,7 @@ impl DataStore {
         };
 
         let vcr: VolumeConstructionRequest =
-            serde_json::from_str(&volume.data())?;
+            serde_json::from_str(volume.data())?;
 
         let mut crucible_targets = CrucibleTargets::default();
 
@@ -1395,7 +1395,7 @@ impl DataStore {
         };
 
         let vcr: VolumeConstructionRequest =
-            serde_json::from_str(&volume.data())
+            serde_json::from_str(volume.data())
                 .map_err(|e| err.bail(e.into()))?;
 
         // Grab all the targets that the volume construction request references.
@@ -1716,7 +1716,7 @@ impl DataStore {
 
         // After volume deletion, validate invariants for all volumes
         #[cfg(any(test, feature = "testing"))]
-        Self::validate_volume_invariants(&conn).await?;
+        Self::validate_volume_invariants(conn).await?;
 
         Ok(resources_to_delete)
     }
@@ -2015,7 +2015,7 @@ impl DataStore {
         };
 
         let vcr: VolumeConstructionRequest =
-            serde_json::from_str(&volume.data())?;
+            serde_json::from_str(volume.data())?;
 
         let mut targets: Vec<SocketAddrV6> = vec![];
 
@@ -2629,7 +2629,7 @@ fn read_only_target_in_vcr(
     }
 
     let mut parts: VecDeque<Work> = VecDeque::new();
-    parts.push_back(Work { vcr_part: &vcr, under_read_only_parent: false });
+    parts.push_back(Work { vcr_part: vcr, under_read_only_parent: false });
 
     while let Some(work) = parts.pop_front() {
         match work.vcr_part {
@@ -2640,14 +2640,14 @@ fn read_only_target_in_vcr(
             } => {
                 for sub_volume in sub_volumes {
                     parts.push_back(Work {
-                        vcr_part: &sub_volume,
+                        vcr_part: sub_volume,
                         under_read_only_parent: work.under_read_only_parent,
                     });
                 }
 
                 if let Some(read_only_parent) = read_only_parent {
                     parts.push_back(Work {
-                        vcr_part: &read_only_parent,
+                        vcr_part: read_only_parent,
                         under_read_only_parent: true,
                     });
                 }
@@ -2861,7 +2861,7 @@ impl DataStore {
         }
 
         let old_vcr: VolumeConstructionRequest =
-            match serde_json::from_str(&old_volume.data()) {
+            match serde_json::from_str(old_volume.data()) {
                 Ok(vcr) => vcr,
                 Err(e) => {
                     return Err(err.bail(ReplaceRegionError::SerdeError(e)));
@@ -3118,7 +3118,7 @@ impl DataStore {
         }
 
         let old_vcr: VolumeConstructionRequest =
-            match serde_json::from_str(&old_volume.data()) {
+            match serde_json::from_str(old_volume.data()) {
                 Ok(vcr) => vcr,
                 Err(e) => {
                     return Err(err.bail(ReplaceSnapshotError::SerdeError(e)));
@@ -3449,7 +3449,7 @@ pub fn read_only_resources_associated_with_volume(
     crucible_targets: &mut CrucibleTargets,
 ) {
     let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
-    parts.push_back(&vcr);
+    parts.push_back(vcr);
 
     while let Some(vcr_part) = parts.pop_front() {
         match vcr_part {
@@ -3496,7 +3496,7 @@ pub fn read_write_resources_associated_with_volume(
     targets: &mut Vec<String>,
 ) {
     let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
-    parts.push_back(&vcr);
+    parts.push_back(vcr);
 
     while let Some(vcr_part) = parts.pop_front() {
         match vcr_part {
@@ -3796,11 +3796,11 @@ fn region_sets(
                 ..
             } => {
                 for sub_volume in sub_volumes {
-                    parts.push_back(&sub_volume);
+                    parts.push_back(sub_volume);
                 }
 
                 if let Some(read_only_parent) = read_only_parent {
-                    parts.push_back(&read_only_parent);
+                    parts.push_back(read_only_parent);
                 }
             }
 
@@ -3981,7 +3981,7 @@ impl DataStore {
 
             for volume in haystack {
                 let vcr: VolumeConstructionRequest =
-                    match serde_json::from_str(&volume.data()) {
+                    match serde_json::from_str(volume.data()) {
                         Ok(vcr) => vcr,
                         Err(e) => {
                             return Err(Error::internal_error(&format!(
@@ -4033,7 +4033,7 @@ impl DataStore {
 
             for volume in haystack {
                 let vcr: VolumeConstructionRequest =
-                    match serde_json::from_str(&volume.data()) {
+                    match serde_json::from_str(volume.data()) {
                         Ok(vcr) => vcr,
                         Err(e) => {
                             return Err(Error::internal_error(&format!(
@@ -4080,7 +4080,7 @@ impl DataStore {
 
             for volume in haystack {
                 let vcr: VolumeConstructionRequest =
-                    match serde_json::from_str(&volume.data()) {
+                    match serde_json::from_str(volume.data()) {
                         Ok(vcr) => vcr,
                         Err(e) => {
                             return Err(Error::internal_error(&format!(
@@ -4111,7 +4111,7 @@ impl DataStore {
         };
 
         let vcr: VolumeConstructionRequest =
-            match serde_json::from_str(&volume.data()) {
+            match serde_json::from_str(volume.data()) {
                 Ok(vcr) => vcr,
 
                 Err(e) => {
@@ -4143,7 +4143,7 @@ impl DataStore {
         };
 
         let vcr: VolumeConstructionRequest =
-            match serde_json::from_str(&volume.data()) {
+            match serde_json::from_str(volume.data()) {
                 Ok(vcr) => vcr,
 
                 Err(e) => {
@@ -4188,7 +4188,7 @@ impl DataStore {
             for target in &region_set {
                 let maybe_ro_usage =
                     Self::read_only_target_to_volume_resource_usage(
-                        &conn, &target,
+                        &conn, target,
                     )
                     .await
                     .map_err(|e| {
@@ -4197,7 +4197,7 @@ impl DataStore {
 
                 let maybe_region = Self::target_to_region(
                     &conn,
-                    &target,
+                    target,
                     RegionType::ReadWrite,
                 )
                 .await
@@ -4318,7 +4318,7 @@ impl DataStore {
                 p.found_batch(&haystack, &|v| *v.id().as_untyped_uuid());
 
             for volume in haystack {
-                Self::validate_volume_has_all_resources(&conn, &volume).await?;
+                Self::validate_volume_has_all_resources(conn, &volume).await?;
                 Self::validate_volume_region_sets_have_unique_targets(&volume)
                     .await?;
             }
@@ -4337,7 +4337,7 @@ impl DataStore {
             paginator = p.found_batch(&haystack, &|r| r.id());
 
             for region in haystack {
-                Self::validate_read_only_region_has_no_snapshots(&conn, region)
+                Self::validate_read_only_region_has_no_snapshots(conn, region)
                     .await?;
             }
         }
@@ -4357,7 +4357,7 @@ impl DataStore {
         }
 
         let vcr: VolumeConstructionRequest =
-            serde_json::from_str(&volume.data()).unwrap();
+            serde_json::from_str(volume.data()).unwrap();
 
         // validate all read/write resources still exist
 
@@ -4445,7 +4445,7 @@ impl DataStore {
         volume: &Volume,
     ) -> Result<(), diesel::result::Error> {
         let vcr: VolumeConstructionRequest =
-            serde_json::from_str(&volume.data()).unwrap();
+            serde_json::from_str(volume.data()).unwrap();
 
         let mut parts = VecDeque::new();
         parts.push_back(&vcr);
@@ -4662,7 +4662,7 @@ mod tests {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         let _test_datasets = TestDatasets::create(
-            &opctx,
+            opctx,
             datastore.clone(),
             REGION_REDUNDANCY_THRESHOLD,
         )
@@ -4673,11 +4673,11 @@ mod tests {
 
         let datasets_and_regions = datastore
             .disk_region_allocate(
-                &opctx,
+                opctx,
                 volume_id,
                 &DiskSource::Blank { block_size: 512.try_into().unwrap() },
                 ByteCount::from_gibibytes_u32(1),
-                &&RegionAllocationStrategy::RandomWithDistinctSleds {
+                &RegionAllocationStrategy::RandomWithDistinctSleds {
                     seed: None,
                 },
             )
@@ -4899,7 +4899,7 @@ mod tests {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         let _test_datasets = TestDatasets::create(
-            &opctx,
+            opctx,
             datastore.clone(),
             REGION_REDUNDANCY_THRESHOLD,
         )
@@ -4910,11 +4910,11 @@ mod tests {
 
         let datasets_and_regions = datastore
             .disk_region_allocate(
-                &opctx,
+                opctx,
                 volume_id,
                 &DiskSource::Blank { block_size: 512.try_into().unwrap() },
                 ByteCount::from_gibibytes_u32(1),
-                &&RegionAllocationStrategy::RandomWithDistinctSleds {
+                &RegionAllocationStrategy::RandomWithDistinctSleds {
                     seed: None,
                 },
             )
@@ -5514,7 +5514,7 @@ mod tests {
             .unwrap();
 
         let volumes = datastore
-            .find_volumes_referencing_socket_addr(&opctx, address_1.into())
+            .find_volumes_referencing_socket_addr(opctx, address_1.into())
             .await
             .unwrap();
 
@@ -5525,7 +5525,7 @@ mod tests {
 
         let volumes = datastore
             .find_volumes_referencing_socket_addr(
-                &opctx,
+                opctx,
                 "[fd55:1122:3344:104::1]:400".parse().unwrap(),
             )
             .await
@@ -6057,7 +6057,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let _test_datasets = TestDatasets::create(
-            &opctx,
+            opctx,
             datastore.clone(),
             REGION_REDUNDANCY_THRESHOLD,
         )
@@ -6072,11 +6072,11 @@ mod tests {
 
         let _datasets_and_regions = datastore
             .disk_region_allocate(
-                &opctx,
+                opctx,
                 volume_id,
                 &DiskSource::Blank { block_size: 512.try_into().unwrap() },
                 ByteCount::from_gibibytes_u32(1),
-                &&RegionAllocationStrategy::RandomWithDistinctSleds {
+                &RegionAllocationStrategy::RandomWithDistinctSleds {
                     seed: None,
                 },
             )

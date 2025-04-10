@@ -50,7 +50,7 @@ fn get_image_create(source: params::ImageSource) -> params::ImageCreate {
 #[nexus_test]
 async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
 
     let images_url = get_project_images_url(PROJECT_NAME);
 
@@ -101,12 +101,12 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_image_create(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
 
     let silo_images_url = "/v1/images";
 
     // Expect no images in the silo
-    let images = NexusRequest::object_get(client, &silo_images_url)
+    let images = NexusRequest::object_get(client, silo_images_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
         .await
@@ -120,12 +120,12 @@ async fn test_silo_image_create(cptestctx: &ControlPlaneTestContext) {
     );
 
     // Create image
-    NexusRequest::objects_post(client, &silo_images_url, &image_create_params)
+    NexusRequest::objects_post(client, silo_images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap::<views::Image>()
         .await;
 
-    let images = NexusRequest::object_get(client, &silo_images_url)
+    let images = NexusRequest::object_get(client, silo_images_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
         .await
@@ -138,7 +138,7 @@ async fn test_silo_image_create(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
 
     // need a project to post both disk and image to
     create_project(client, PROJECT_NAME).await;
@@ -180,7 +180,7 @@ async fn test_make_disk_from_other_project_image_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
 
     create_project(client, PROJECT_NAME).await;
     let another_project = create_project(client, "another-proj").await;
@@ -226,7 +226,7 @@ async fn test_make_disk_from_image_too_small(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
 
     // need a project to post both disk and image to
     create_project(client, PROJECT_NAME).await;
@@ -281,7 +281,7 @@ async fn test_make_disk_from_image_too_small(
 #[nexus_test]
 async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
 
     let silo_images_url = "/v1/images";
     let images_url = get_project_images_url(PROJECT_NAME);
@@ -334,7 +334,7 @@ async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
     .execute_and_parse_unwrap::<views::Image>()
     .await;
 
-    let silo_images = NexusRequest::object_get(client, &silo_images_url)
+    let silo_images = NexusRequest::object_get(client, silo_images_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
         .await
@@ -396,7 +396,7 @@ async fn test_image_from_other_project_snapshot_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
 
     create_project(client, PROJECT_NAME).await;
     let images_url = get_project_images_url(PROJECT_NAME);
@@ -473,7 +473,7 @@ async fn test_image_from_other_project_snapshot_fails(
 #[nexus_test]
 async fn test_image_deletion_permissions(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
 
     // Create a project
 
@@ -529,7 +529,7 @@ async fn test_image_deletion_permissions(cptestctx: &ControlPlaneTestContext) {
     .execute_and_parse_unwrap::<views::Image>()
     .await;
 
-    let silo_images = NexusRequest::object_get(client, &silo_images_url)
+    let silo_images = NexusRequest::object_get(client, silo_images_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
         .await

@@ -284,7 +284,7 @@ pub(crate) async fn instance_ensure_dpd_config(
     // traffic destined to those IPs, so there's nothing to configure and
     // it's safe to return early.
     let network_interface = match datastore
-        .derive_guest_network_interface_info(&opctx, &authz_instance)
+        .derive_guest_network_interface_info(opctx, &authz_instance)
         .await?
         .into_iter()
         .find(|interface| interface.primary)
@@ -309,7 +309,7 @@ pub(crate) async fn instance_ensure_dpd_config(
             "instance_id" => %instance_id);
 
     let ips =
-        datastore.instance_lookup_external_ips(&opctx, instance_id).await?;
+        datastore.instance_lookup_external_ips(opctx, instance_id).await?;
 
     let (ips_of_interest, must_all_be_attached) = if let Some(wanted_id) =
         ip_filter
@@ -442,7 +442,7 @@ pub(crate) async fn probe_ensure_dpd_config(
     // traffic destined to those IPs, so there's nothing to configure and
     // it's safe to return early.
     let network_interface = match datastore
-        .derive_probe_network_interface_info(&opctx, probe_id)
+        .derive_probe_network_interface_info(opctx, probe_id)
         .await?
         .into_iter()
         .find(|interface| interface.primary)
@@ -466,7 +466,7 @@ pub(crate) async fn probe_ensure_dpd_config(
     info!(log, "looking up probe's external IPs";
             "probe_id" => %probe_id);
 
-    let ips = datastore.probe_lookup_external_ips(&opctx, probe_id).await?;
+    let ips = datastore.probe_lookup_external_ips(opctx, probe_id).await?;
 
     if let Some(wanted_index) = ip_index_filter {
         if let None = ips.get(wanted_index) {
@@ -552,7 +552,7 @@ pub(crate) async fn instance_delete_dpd_config(
         datastore.instance_lookup_external_ips(opctx, instance_id).await?;
 
     for entry in external_ips {
-        external_ip_delete_dpd_config_inner(&datastore, &log, opctx, &entry)
+        external_ip_delete_dpd_config_inner(datastore, log, opctx, &entry)
             .await?;
     }
 
@@ -589,7 +589,7 @@ pub(crate) async fn probe_delete_dpd_config(
     let mut errors = vec![];
     for entry in external_ips {
         // Soft delete the NAT entry
-        match datastore.ipv4_nat_delete_by_external_ip(&opctx, &entry).await {
+        match datastore.ipv4_nat_delete_by_external_ip(opctx, &entry).await {
             Ok(_) => Ok(()),
             Err(err) => match err {
                 Error::ObjectNotFound { .. } => {
@@ -669,7 +669,7 @@ pub(crate) async fn delete_dpd_config_by_entry(
             "id" => ?nat_entry.id,
             "version_added" => %nat_entry.external_address.0);
 
-    match datastore.ipv4_nat_delete(&opctx, nat_entry).await {
+    match datastore.ipv4_nat_delete(opctx, nat_entry).await {
         Ok(_) => {}
         Err(err) => match err {
             Error::ObjectNotFound { .. } => {
@@ -704,7 +704,7 @@ async fn external_ip_delete_dpd_config_inner(
     external_ip: &ExternalIp,
 ) -> Result<(), Error> {
     // Soft delete the NAT entry
-    match datastore.ipv4_nat_delete_by_external_ip(&opctx, external_ip).await {
+    match datastore.ipv4_nat_delete_by_external_ip(opctx, external_ip).await {
         Ok(_) => Ok(()),
         Err(err) => match err {
             Error::ObjectNotFound { .. } => {

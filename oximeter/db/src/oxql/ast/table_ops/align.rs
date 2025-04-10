@@ -160,7 +160,7 @@ fn align_mean_within(
             "Alignment by mean requires a gauge or delta metric, not {}",
             metric_type,
         );
-        verify_max_upsampling_ratio(points.timestamps(), &period)?;
+        verify_max_upsampling_ratio(points.timestamps(), period)?;
 
         // Always convert the output to doubles, when computing the mean. The
         // output is always a gauge, so we do not need the start times of the

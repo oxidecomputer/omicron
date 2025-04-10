@@ -172,7 +172,7 @@ impl BackgroundTask for BfdManager {
             for x in &to_check {
                 let c = current.get(x).unwrap();
                 let t = target.get(x).unwrap();
-                if c.needs_update(&t) {
+                if c.needs_update(t) {
                     to_update.insert(t);
                 }
             }

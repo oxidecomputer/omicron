@@ -51,7 +51,7 @@ pub async fn create_project(
             },
         },
     );
-    datastore.project_create(&opctx, project).await.unwrap()
+    datastore.project_create(opctx, project).await.unwrap()
 }
 
 /// Creates a "fake" [`SledBaseboard`]
@@ -227,7 +227,7 @@ pub async fn create_stopped_instance_record(
     );
 
     let instance = datastore
-        .project_create_instance(&opctx, &authz_project, instance)
+        .project_create_instance(opctx, authz_project, instance)
         .await
         .unwrap();
 
@@ -261,7 +261,7 @@ pub async fn delete_instance_record(
         .lookup_for(authz::Action::Delete)
         .await
         .unwrap();
-    datastore.project_delete_instance(&opctx, &authz_instance).await.unwrap();
+    datastore.project_delete_instance(opctx, &authz_instance).await.unwrap();
 }
 
 pub async fn create_affinity_group(
@@ -272,8 +272,8 @@ pub async fn create_affinity_group(
     policy: external::AffinityPolicy,
 ) -> AffinityGroup {
     db.affinity_group_create(
-        &opctx,
-        &authz_project,
+        opctx,
+        authz_project,
         nexus_db_model::AffinityGroup::new(
             authz_project.id(),
             params::AffinityGroupCreate {
@@ -305,7 +305,7 @@ pub async fn delete_affinity_group(
         .await
         .unwrap();
 
-    db.affinity_group_delete(&opctx, &authz_group).await.unwrap();
+    db.affinity_group_delete(opctx, &authz_group).await.unwrap();
 }
 
 pub async fn create_anti_affinity_group(
@@ -316,8 +316,8 @@ pub async fn create_anti_affinity_group(
     policy: external::AffinityPolicy,
 ) -> AntiAffinityGroup {
     db.anti_affinity_group_create(
-        &opctx,
-        &authz_project,
+        opctx,
+        authz_project,
         nexus_db_model::AntiAffinityGroup::new(
             authz_project.id(),
             params::AntiAffinityGroupCreate {
@@ -349,7 +349,7 @@ pub async fn delete_anti_affinity_group(
         .await
         .unwrap();
 
-    db.anti_affinity_group_delete(&opctx, &authz_group).await.unwrap();
+    db.anti_affinity_group_delete(opctx, &authz_group).await.unwrap();
 }
 
 pub async fn create_affinity_group_member(

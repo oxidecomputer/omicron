@@ -407,7 +407,7 @@ impl Oximeter {
                 args.address,
                 crate::default_refresh_interval(),
                 db_config,
-                &log,
+                log,
             )
             .await?,
         );

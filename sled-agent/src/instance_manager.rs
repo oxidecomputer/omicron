@@ -657,7 +657,7 @@ impl InstanceManagerRunner {
                 )?;
                 let _old = self.jobs.insert(propolis_id, instance);
                 assert!(_old.is_none());
-                &self.jobs.get(&propolis_id).unwrap()
+                self.jobs.get(&propolis_id).unwrap()
             }
         };
         let (tx, rx) = oneshot::channel();

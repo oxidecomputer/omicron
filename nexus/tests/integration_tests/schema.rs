@@ -65,7 +65,7 @@ async fn apply_update_as_transaction_inner(
     sql: &str,
 ) -> Result<(), tokio_postgres::Error> {
     client.batch_execute("BEGIN;").await.expect("Failed to BEGIN transaction");
-    client.batch_execute(&sql).await.expect("Failed to execute update");
+    client.batch_execute(sql).await.expect("Failed to execute update");
     client.batch_execute("COMMIT;").await?;
     Ok(())
 }
@@ -152,7 +152,7 @@ async fn apply_update(
                 semver::Version::new(10, 0, 0),
             ];
 
-            if NOT_IDEMPOTENT_VERSIONS.contains(&version.semver()) {
+            if NOT_IDEMPOTENT_VERSIONS.contains(version.semver()) {
                 break;
             }
         }
@@ -287,10 +287,10 @@ async fn nexus_applies_update_on_boot() {
         .iter_versions()
         .next()
         .expect("missing earliest schema version");
-    apply_update(log, &crdb, earliest, 1).await;
+    apply_update(log, crdb, earliest, 1).await;
     assert_eq!(
         EARLIEST_SUPPORTED_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
+        query_crdb_schema_version(crdb).await
     );
 
     // Start Nexus. It should auto-format itself to the latest version,
@@ -313,7 +313,7 @@ async fn nexus_applies_update_on_boot() {
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
     assert_eq!(
         LATEST_SCHEMA_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
+        query_crdb_schema_version(crdb).await
     );
 
     builder.teardown().await;
@@ -329,7 +329,7 @@ async fn dbinit_version_matches_version_known_to_nexus() {
         &config.pkg.log,
     );
     let log = &logctx.log;
-    let db = TestDatabase::new_populate_schema_only(&log).await;
+    let db = TestDatabase::new_populate_schema_only(log).await;
     let crdb = db.crdb();
 
     assert_eq!(
@@ -361,10 +361,10 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
         .iter_versions()
         .next()
         .expect("missing earliest schema version");
-    apply_update(log, &crdb, earliest, 1).await;
+    apply_update(log, crdb, earliest, 1).await;
     assert_eq!(
         EARLIEST_SUPPORTED_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
+        query_crdb_schema_version(crdb).await
     );
 
     // This version is not valid; it does not exist.
@@ -386,7 +386,7 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
 
     // The version remains invalid.
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
-    assert_eq!("0.0.0", query_crdb_schema_version(&crdb).await);
+    assert_eq!("0.0.0", query_crdb_schema_version(crdb).await);
 
     builder.teardown().await;
 }
@@ -407,15 +407,15 @@ async fn versions_have_idempotent_up() {
 
     let all_versions = read_all_schema_versions();
     for version in all_versions.iter_versions() {
-        apply_update(log, &crdb, &version, 2).await;
+        apply_update(log, crdb, version, 2).await;
         assert_eq!(
             version.semver().to_string(),
-            query_crdb_schema_version(&crdb).await
+            query_crdb_schema_version(crdb).await
         );
     }
     assert_eq!(
         LATEST_SCHEMA_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
+        query_crdb_schema_version(crdb).await
     );
 
     db.terminate().await;
@@ -739,37 +739,37 @@ async fn dbinit_equals_sum_of_all_up() {
     // Apply the very first schema migration. In particular, this creates the
     // `omicron` database, which allows us to construct a `db::Pool` below.
     for version in all_versions.iter_versions().take(1) {
-        apply_update(log, &crdb, version, 1).await;
+        apply_update(log, crdb, version, 1).await;
         assert_eq!(
             version.semver().to_string(),
-            query_crdb_schema_version(&crdb).await
+            query_crdb_schema_version(crdb).await
         );
     }
 
     // Go from the second version to the latest version.
     for version in all_versions.iter_versions().skip(1) {
-        apply_update(log, &crdb, version, 1).await;
+        apply_update(log, crdb, version, 1).await;
         assert_eq!(
             version.semver().to_string(),
-            query_crdb_schema_version(&crdb).await
+            query_crdb_schema_version(crdb).await
         );
     }
     assert_eq!(
         LATEST_SCHEMA_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
+        query_crdb_schema_version(crdb).await
     );
 
     // Query the newly constructed DB for information about its schema
-    let observed_schema = InformationSchema::new(&crdb).await;
-    let observed_data = observed_schema.query_all_tables(log, &crdb).await;
+    let observed_schema = InformationSchema::new(crdb).await;
+    let observed_data = observed_schema.query_all_tables(log, crdb).await;
 
     db.terminate().await;
 
     // Create a new DB with data populated from dbinit.sql for comparison
     let db = TestDatabase::new_populate_schema_only(&logctx.log).await;
     let crdb = db.crdb();
-    let expected_schema = InformationSchema::new(&crdb).await;
-    let expected_data = expected_schema.query_all_tables(log, &crdb).await;
+    let expected_schema = InformationSchema::new(crdb).await;
+    let expected_data = expected_schema.query_all_tables(log, crdb).await;
 
     // Validate that the schema is identical
     observed_schema.pretty_assert_eq(&expected_schema);
@@ -2153,10 +2153,10 @@ async fn validate_data_migration() {
             before(&ctx).await;
         }
 
-        apply_update(log, &crdb, version, 1).await;
+        apply_update(log, crdb, version, 1).await;
         assert_eq!(
             version.semver().to_string(),
-            query_crdb_schema_version(&crdb).await
+            query_crdb_schema_version(crdb).await
         );
 
         // If this check has postconditions (or cleanup), run them.
@@ -2166,7 +2166,7 @@ async fn validate_data_migration() {
     }
     assert_eq!(
         LATEST_SCHEMA_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
+        query_crdb_schema_version(crdb).await
     );
 
     // If any version changes want to query the system post-upgrade, they can.
@@ -2183,13 +2183,13 @@ async fn validate_data_migration() {
 
 // Returns the InformationSchema object for a database populated via `sql`.
 async fn get_information_schema(log: &Logger, sql: &str) -> InformationSchema {
-    let db = TestDatabase::new_populate_nothing(&log).await;
+    let db = TestDatabase::new_populate_nothing(log).await;
     let crdb = db.crdb();
 
     let client = crdb.connect().await.expect("failed to connect");
     client.batch_execute(sql).await.expect("failed to apply SQL");
 
-    let observed_schema = InformationSchema::new(&crdb).await;
+    let observed_schema = InformationSchema::new(crdb).await;
     db.terminate().await;
     observed_schema
 }

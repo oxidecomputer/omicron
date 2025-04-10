@@ -211,10 +211,7 @@ impl PropertyGroupBuilder {
             self.properties_seen.push(name.to_string());
         }
 
-        let values = self
-            .property_values
-            .entry(name.to_string())
-            .or_insert_with(Vec::new);
+        let values = self.property_values.entry(name.to_string()).or_default();
         values.push(value.into());
         self
     }

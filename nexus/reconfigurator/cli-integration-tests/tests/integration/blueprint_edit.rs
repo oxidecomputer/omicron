@@ -66,7 +66,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         .blueprint_target_get_current_full(&opctx)
         .await
         .expect("failed to read current target blueprint");
-    let mut disk_test = DiskTest::new(&cptestctx).await;
+    let mut disk_test = DiskTest::new(cptestctx).await;
     disk_test.add_blueprint_disks(&initial_blueprint).await;
 
     let tmpdir = camino_tempfile::tempdir().expect("failed to create tmpdir");

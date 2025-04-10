@@ -220,7 +220,7 @@ impl SimSystemBuilder {
 
     #[inline]
     pub fn description(&self) -> &SystemDescription {
-        &self.inner.system.description()
+        self.inner.system.description()
     }
 
     #[inline]
@@ -586,7 +586,7 @@ impl SimSystemBuilderInner {
                     let inv_rot = primary_collection.rots.get(baseboard_id);
                     if let (Some(inv_sp), Some(inv_rot)) = (inv_sp, inv_rot) {
                         Some(SledHwInventory {
-                            baseboard_id: &baseboard_id,
+                            baseboard_id,
                             sp: inv_sp,
                             rot: inv_rot,
                         })

@@ -21,7 +21,7 @@ pub fn validate(
     generated: &GeneratedApiSpecFile,
 ) -> anyhow::Result<Vec<(Utf8PathBuf, CheckStatus)>> {
     let openapi = generated.openapi();
-    let validation_result = validate_generated_openapi_document(api, &openapi)?;
+    let validation_result = validate_generated_openapi_document(api, openapi)?;
     let extra_files = validation_result
         .extra_files
         .into_iter()
@@ -40,8 +40,8 @@ fn validate_generated_openapi_document(
 ) -> anyhow::Result<ValidationResult> {
     // Check for lint errors.
     let errors = match api.boundary() {
-        ApiBoundary::Internal => openapi_lint::validate(&openapi_doc),
-        ApiBoundary::External => openapi_lint::validate_external(&openapi_doc),
+        ApiBoundary::Internal => openapi_lint::validate(openapi_doc),
+        ApiBoundary::External => openapi_lint::validate_external(openapi_doc),
     };
     if !errors.is_empty() {
         return Err(anyhow::anyhow!("{}", errors.join("\n\n")));
@@ -51,7 +51,7 @@ fn validate_generated_openapi_document(
     let mut validation_context =
         ValidationContextImpl { errors: Vec::new(), files: Vec::new() };
     api.extra_validation(
-        &openapi_doc,
+        openapi_doc,
         ValidationContext::new(&mut validation_context),
     );
 

@@ -706,14 +706,14 @@ fn decrypt_and_send_share_response(
     // If decryption fails, we log it locally. The peer will timeout and move to
     // the next one. This is really bad and should be impossible.
     let shares = pkg
-        .decrypt_shares(&rack_secret)
+        .decrypt_shares(rack_secret)
         .map_err(|_| ApiError::FailedToDecryptExtraShares)?;
 
     if let Some(idx) = distributed_shares.get(&from) {
         // The share was already handed out to this peer. Give back the same
         // one.
         let share = &shares.expose_secret()[idx.0];
-        queue_pkg_response(from, request_id, pkg, &share, envelopes);
+        queue_pkg_response(from, request_id, pkg, share, envelopes);
         // No state was updated, so no need to persist
         Ok(None)
     } else {

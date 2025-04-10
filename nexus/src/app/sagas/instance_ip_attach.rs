@@ -127,7 +127,7 @@ async fn siia_begin_attach_ip(
         }
         // Set the parent of an existing floating IP to the new instance's ID.
         ExternalIpAttach::Floating { floating_ip } => datastore
-            .floating_ip_begin_attach(&opctx, &floating_ip, instance_id, false)
+            .floating_ip_begin_attach(&opctx, floating_ip, instance_id, false)
             .await
             .map_err(ActionError::action_failed)
             .map(|(external_ip, do_saga)| ModifyStateForExternalIp {
@@ -349,7 +349,7 @@ pub(crate) mod test {
     const FIP_NAME: &str = "affogato";
 
     pub async fn ip_manip_test_setup(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pool(client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_floating_ip(
             client,
@@ -408,7 +408,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let _project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
@@ -523,7 +523,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let _project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
@@ -538,7 +538,7 @@ pub(crate) mod test {
             test_helpers::action_failure_can_unwind::<SagaInstanceIpAttach, _, _>(
                 nexus,
                 || Box::pin(new_test_params(&opctx, datastore, use_float) ),
-                || Box::pin(verify_clean_slate(&cptestctx, instance_id)),
+                || Box::pin(verify_clean_slate(cptestctx, instance_id)),
                 log,
             )
             .await;
@@ -556,7 +556,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let _project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
@@ -575,7 +575,7 @@ pub(crate) mod test {
             >(
                 nexus,
                 || Box::pin(new_test_params(&opctx, datastore, use_float)),
-                || Box::pin(verify_clean_slate(&cptestctx, instance_id)),
+                || Box::pin(verify_clean_slate(cptestctx, instance_id)),
                 log,
             )
             .await;
@@ -592,7 +592,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let _project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 

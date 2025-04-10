@@ -59,8 +59,8 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
         instance_name: &str,
     ) -> external::Instance {
         create_instance_with(
-            &self.client,
-            &self.project.as_ref().expect("Need to specify project name"),
+            self.client,
+            self.project.as_ref().expect("Need to specify project name"),
             instance_name,
             &params::InstanceNetworkInterfaceAttachment::None,
             // Disks=
@@ -77,12 +77,12 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
 
     async fn instance_groups_list(&self, instance: &str) -> Vec<T::Group> {
         let url = instance_groups_url(T::URL_COMPONENT, instance, self.project);
-        objects_list_page_authz(&self.client, &url).await.items
+        objects_list_page_authz(self.client, &url).await.items
     }
 
     async fn groups_list(&self) -> Vec<T::Group> {
         let url = groups_url(T::URL_COMPONENT, self.project);
-        objects_list_page_authz(&self.client, &url).await.items
+        objects_list_page_authz(self.client, &url).await.items
     }
 
     async fn groups_list_expect_error(
@@ -90,13 +90,13 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
         status: StatusCode,
     ) -> HttpErrorResponseBody {
         let url = groups_url(T::URL_COMPONENT, self.project);
-        object_get_error(&self.client, &url, status).await
+        object_get_error(self.client, &url, status).await
     }
 
     async fn group_create(&self, group: &str) -> T::Group {
         let url = groups_url(T::URL_COMPONENT, self.project);
         let params = T::make_create_params(group);
-        object_create(&self.client, &url, &params).await
+        object_create(self.client, &url, &params).await
     }
 
     async fn group_create_expect_error(
@@ -106,12 +106,12 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
     ) -> HttpErrorResponseBody {
         let url = groups_url(T::URL_COMPONENT, self.project);
         let params = T::make_create_params(group);
-        object_create_error(&self.client, &url, &params, status).await
+        object_create_error(self.client, &url, &params, status).await
     }
 
     async fn group_get(&self, group: &str) -> T::Group {
         let url = group_url(T::URL_COMPONENT, self.project, group);
-        object_get(&self.client, &url).await
+        object_get(self.client, &url).await
     }
 
     async fn group_get_expect_error(
@@ -120,13 +120,13 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
         status: StatusCode,
     ) -> HttpErrorResponseBody {
         let url = group_url(T::URL_COMPONENT, self.project, group);
-        object_get_error(&self.client, &url, status).await
+        object_get_error(self.client, &url, status).await
     }
 
     async fn group_update(&self, group: &str) -> T::Group {
         let url = group_url(T::URL_COMPONENT, self.project, group);
         let params = T::make_update_params();
-        object_put(&self.client, &url, &params).await
+        object_put(self.client, &url, &params).await
     }
 
     async fn group_update_expect_error(
@@ -136,12 +136,12 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
     ) -> HttpErrorResponseBody {
         let url = group_url(T::URL_COMPONENT, self.project, group);
         let params = T::make_update_params();
-        object_put_error(&self.client, &url, &params, status).await
+        object_put_error(self.client, &url, &params, status).await
     }
 
     async fn group_delete(&self, group: &str) {
         let url = group_url(T::URL_COMPONENT, self.project, group);
-        object_delete(&self.client, &url).await
+        object_delete(self.client, &url).await
     }
 
     async fn group_delete_expect_error(
@@ -150,12 +150,12 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
         status: StatusCode,
     ) -> HttpErrorResponseBody {
         let url = group_url(T::URL_COMPONENT, self.project, group);
-        object_delete_error(&self.client, &url, status).await
+        object_delete_error(self.client, &url, status).await
     }
 
     async fn group_members_list(&self, group: &str) -> Vec<T::Member> {
         let url = group_members_url(T::URL_COMPONENT, self.project, group);
-        objects_list_page_authz(&self.client, &url).await.items
+        objects_list_page_authz(self.client, &url).await.items
     }
 
     async fn group_members_list_expect_error(
@@ -164,7 +164,7 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
         status: StatusCode,
     ) -> HttpErrorResponseBody {
         let url = group_members_url(T::URL_COMPONENT, self.project, group);
-        object_get_error(&self.client, &url, status).await
+        object_get_error(self.client, &url, status).await
     }
 
     async fn group_member_add(&self, group: &str, instance: &str) -> T::Member {
@@ -174,7 +174,7 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
             group,
             instance,
         );
-        object_create(&self.client, &url, &()).await
+        object_create(self.client, &url, &()).await
     }
 
     async fn group_member_add_expect_error(
@@ -189,7 +189,7 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
             group,
             instance,
         );
-        object_create_error(&self.client, &url, &(), status).await
+        object_create_error(self.client, &url, &(), status).await
     }
 
     async fn group_member_get(&self, group: &str, instance: &str) -> T::Member {
@@ -199,7 +199,7 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
             group,
             instance,
         );
-        object_get(&self.client, &url).await
+        object_get(self.client, &url).await
     }
 
     async fn group_member_get_expect_error(
@@ -214,7 +214,7 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
             group,
             instance,
         );
-        object_get_error(&self.client, &url, status).await
+        object_get_error(self.client, &url, status).await
     }
 
     async fn group_member_delete(&self, group: &str, instance: &str) {
@@ -224,7 +224,7 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
             group,
             instance,
         );
-        object_delete(&self.client, &url).await
+        object_delete(self.client, &url).await
     }
 
     async fn group_member_delete_expect_error(
@@ -239,7 +239,7 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
             group,
             instance,
         );
-        object_delete_error(&self.client, &url, status).await
+        object_delete_error(self.client, &url, status).await
     }
 }
 
@@ -268,17 +268,17 @@ impl<'a> ApiHelper<'a> {
     }
 
     async fn create_project(&self, name: &str) {
-        create_project(&self.client, name).await;
+        create_project(self.client, name).await;
     }
 
     async fn sleds_list(&self) -> Vec<Sled> {
         let url = "/v1/system/hardware/sleds";
-        objects_list_page_authz(&self.client, url).await.items
+        objects_list_page_authz(self.client, url).await.items
     }
 
     async fn sled_instance_list(&self, sled: &str) -> Vec<SledInstance> {
         let url = format!("/v1/system/hardware/sleds/{sled}/instances");
-        objects_list_page_authz(&self.client, &url).await.items
+        objects_list_page_authz(self.client, &url).await.items
     }
 
     async fn start_instance(
@@ -288,7 +288,7 @@ impl<'a> ApiHelper<'a> {
         let uri = format!("/v1/instances/{}/start", instance.identity.id);
 
         NexusRequest::new(
-            RequestBuilder::new(&self.client, http::Method::POST, &uri)
+            RequestBuilder::new(self.client, http::Method::POST, &uri)
                 .expect_status(Some(http::StatusCode::ACCEPTED)),
         )
         .authn_as(AuthnMode::PrivilegedUser)
@@ -462,7 +462,7 @@ async fn test_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&external_client).await;
+    create_default_ip_pool(external_client).await;
     api.create_project(PROJECT_NAME).await;
 
     let project_api = api.use_project::<AffinityType>(PROJECT_NAME);
@@ -518,7 +518,7 @@ async fn test_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
     // We don't actually care that they're "running" from the perspective of the
     // simulated sled agent, we just want placement to be triggered from Nexus.
     for instance in &instances {
-        api.start_instance(&instance).await;
+        api.start_instance(instance).await;
     }
 
     // Use a BTreeSet so we can ignore ordering when comparing instance
@@ -573,7 +573,7 @@ async fn test_anti_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&external_client).await;
+    create_default_ip_pool(external_client).await;
     api.create_project(PROJECT_NAME).await;
 
     let project_api = api.use_project::<AntiAffinityType>(PROJECT_NAME);
@@ -629,7 +629,7 @@ async fn test_anti_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
     // We don't actually care that they're "running" from the perspective of the
     // simulated sled agent, we just want placement to be triggered from Nexus.
     for instance in &instances {
-        api.start_instance(&instance).await;
+        api.start_instance(instance).await;
     }
 
     let mut expected_instances = instances
@@ -685,7 +685,7 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
     let api = ApiHelper::new(client);
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
     api.create_project(PROJECT_NAME).await;
 
     let project_api = api.use_project::<T>(PROJECT_NAME);
@@ -716,11 +716,11 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
 
     // Add the instance to the affinity group
     let instance_name = &instance.identity.name.to_string();
-    project_api.group_member_add(GROUP_NAME, &instance_name).await;
+    project_api.group_member_add(GROUP_NAME, instance_name).await;
     let response = project_api
         .group_member_add_expect_error(
             GROUP_NAME,
-            &instance_name,
+            instance_name,
             StatusCode::BAD_REQUEST,
         )
         .await;
@@ -741,11 +741,11 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
         .await;
 
     // Delete the member, observe that it is gone
-    project_api.group_member_delete(GROUP_NAME, &instance_name).await;
+    project_api.group_member_delete(GROUP_NAME, instance_name).await;
     project_api
         .group_member_delete_expect_error(
             GROUP_NAME,
-            &instance_name,
+            instance_name,
             StatusCode::NOT_FOUND,
         )
         .await;
@@ -754,7 +754,7 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
     project_api
         .group_member_get_expect_error(
             GROUP_NAME,
-            &instance_name,
+            instance_name,
             StatusCode::NOT_FOUND,
         )
         .await;
@@ -793,7 +793,7 @@ async fn test_instance_group_list<T: AffinityGroupish>(
     let api = ApiHelper::new(client);
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
     api.create_project(PROJECT_NAME).await;
 
     let project_api = api.use_project::<T>(PROJECT_NAME);
@@ -837,7 +837,7 @@ async fn test_group_project_selector<T: AffinityGroupish>(
     let api = ApiHelper::new(client);
 
     // Create an IP pool and project that we'll use for testing.
-    create_default_ip_pool(&client).await;
+    create_default_ip_pool(client).await;
     api.create_project(PROJECT_NAME).await;
 
     // All requests use the "?project={PROJECT_NAME}" query parameter

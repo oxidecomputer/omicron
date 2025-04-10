@@ -77,7 +77,7 @@ pub(crate) async fn call_pantry_attach_for_disk(
     disk_id: Uuid,
     pantry_address: SocketAddrV6,
 ) -> Result<(), ActionError> {
-    let (.., disk) = LookupPath::new(opctx, &nexus.datastore())
+    let (.., disk) = LookupPath::new(opctx, nexus.datastore())
         .disk_id(disk_id)
         .fetch_for(authz::Action::Modify)
         .await
@@ -93,7 +93,7 @@ pub(crate) async fn call_pantry_attach_for_disk(
         .map_err(ActionError::action_failed)?;
 
     let volume_construction_request: VolumeConstructionRequest =
-        serde_json::from_str(&disk_volume.data()).map_err(|e| {
+        serde_json::from_str(disk_volume.data()).map_err(|e| {
             ActionError::action_failed(Error::internal_error(&format!(
                 "failed to deserialize disk {} volume data: {}",
                 disk.id(),

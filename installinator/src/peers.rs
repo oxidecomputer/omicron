@@ -175,7 +175,7 @@ impl FetchedArtifact {
                 peers.peer_count(),
                 peers.display(),
             );
-            match peers.fetch_artifact(&cx, artifact_hash_id).await {
+            match peers.fetch_artifact(cx, artifact_hash_id).await {
                 Some((addr, artifact)) => {
                     return Ok(Self { attempt, addr, artifact });
                 }

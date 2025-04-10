@@ -201,7 +201,7 @@ impl DataStore {
         use nexus_db_schema::schema::snapshot::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::snapshot, dsl::id, &pagparams)
+                paginated(dsl::snapshot, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::snapshot,
@@ -250,7 +250,7 @@ impl DataStore {
                 dsl::state.eq(SnapshotState::Destroyed),
             ))
             .check_if_exists::<Snapshot>(snapshot_id)
-            .execute_and_check(&*self.pool_connection_authorized(&opctx).await?)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel(

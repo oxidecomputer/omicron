@@ -142,7 +142,7 @@ impl DataStore {
             },
         );
 
-        match self.vpc_create_internet_gateway(&opctx, &authz_vpc, igw).await {
+        match self.vpc_create_internet_gateway(opctx, &authz_vpc, igw).await {
             Ok(_) => Ok(()),
             Err(e) => match e {
                 Error::ObjectAlreadyExists { .. } => Ok(()),
@@ -332,7 +332,7 @@ impl DataStore {
             if let Some((.., subnet)) = subnet {
                 self.vpc_create_subnet_route(
                     opctx,
-                    &authz_router,
+                    authz_router,
                     &subnet,
                     route_id,
                 )
@@ -363,7 +363,7 @@ impl DataStore {
         use nexus_db_schema::schema::vpc::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::vpc, dsl::id, &pagparams)
+                paginated(dsl::vpc, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::vpc,
@@ -838,7 +838,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::vpc_subnet, dsl::id, &pagparams)
+                paginated(dsl::vpc_subnet, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::vpc_subnet,
@@ -1228,7 +1228,7 @@ impl DataStore {
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::instance_network_interface, dsl::id, &pagparams)
+                paginated(dsl::instance_network_interface, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::instance_network_interface,
@@ -2749,7 +2749,7 @@ impl DataStore {
                     (None, Some(RouterTarget::Ip(*ip)))
                 }
                 (RouteTarget::Subnet(n), _) => subnets_by_name
-                    .get(&n)
+                    .get(n)
                     .map(|s| {
                         (
                             Some(RouterTarget::VpcSubnet(
@@ -2762,7 +2762,7 @@ impl DataStore {
                     })
                     .unwrap_or_default(),
                 (RouteTarget::Instance(n), _) => instances
-                    .get(&n)
+                    .get(n)
                     .map(|i| match i.1.ip {
                         // TODO: update for dual-stack v4/6.
                         ip @ IpNetwork::V4(_) => {
@@ -2780,7 +2780,7 @@ impl DataStore {
                 // Internet gateways tag matching packets with their ID, for
                 // NAT IP selection.
                 (RouteTarget::InternetGateway(n), _) => inetgws
-                    .get(&n)
+                    .get(n)
                     .map(|igw| {
                         let gateway_target = if is_services_vpc_gateway(igw) {
                             InternetGatewayRouterTarget::System
@@ -2919,7 +2919,7 @@ mod tests {
         };
         let project = Project::new(Uuid::new_v4(), project_params);
         let (authz_project, _) = datastore
-            .project_create(&opctx, project)
+            .project_create(opctx, project)
             .await
             .expect("failed to create project");
 
@@ -2954,7 +2954,7 @@ mod tests {
             );
             let query = InsertVpcQuery::new(incomplete_vpc);
             let (_, db_vpc) = datastore
-                .project_create_vpc_raw(&opctx, &authz_project, query)
+                .project_create_vpc_raw(opctx, &authz_project, query)
                 .await
                 .expect("failed to create initial set of VPCs")
                 .expect("expected an actual VPC");
@@ -2993,7 +2993,7 @@ mod tests {
         );
         let query = InsertVpcQuery::new(incomplete_vpc);
         let Ok(None) = datastore
-            .project_create_vpc_raw(&opctx, &authz_project, query)
+            .project_create_vpc_raw(opctx, &authz_project, query)
             .await
         else {
             panic!(
@@ -3024,7 +3024,7 @@ mod tests {
         };
         let project = Project::new(Uuid::new_v4(), project_params);
         let (authz_project, _) = datastore
-            .project_create(&opctx, project)
+            .project_create(opctx, project)
             .await
             .expect("failed to create project");
 
@@ -3059,7 +3059,7 @@ mod tests {
             );
             let query = InsertVpcQuery::new(incomplete_vpc);
             let (_, db_vpc) = datastore
-                .project_create_vpc_raw(&opctx, &authz_project, query)
+                .project_create_vpc_raw(opctx, &authz_project, query)
                 .await
                 .expect("failed to create initial set of VPCs")
                 .expect("expected an actual VPC");
@@ -3098,7 +3098,7 @@ mod tests {
             "vni" => ?this_vni,
         );
         match datastore
-            .project_create_vpc(&opctx, &authz_project, incomplete_vpc.clone())
+            .project_create_vpc(opctx, &authz_project, incomplete_vpc.clone())
             .await
         {
             Ok((_, vpc)) => {
@@ -3205,11 +3205,11 @@ mod tests {
             sled_ids.iter().copied(),
             "test",
         );
-        bp_insert_and_make_target(&opctx, &datastore, &bp0).await;
+        bp_insert_and_make_target(opctx, datastore, &bp0).await;
 
         // Our blueprint doesn't describe any services, so we shouldn't find any
         // sled IDs running services.
-        assert_service_sled_ids(&datastore, &[]).await;
+        assert_service_sled_ids(datastore, &[]).await;
 
         // Build an initial empty collection
         let collection =
@@ -3241,17 +3241,17 @@ mod tests {
                 .expect("added nexus to third sled");
             builder.build()
         };
-        bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
+        bp_insert_and_make_target(opctx, datastore, &bp1).await;
 
         // bp1 is the target, but we haven't yet inserted a vNIC record, so
         // we still won't see any services on sleds.
-        assert_service_sled_ids(&datastore, &[]).await;
+        assert_service_sled_ids(datastore, &[]).await;
 
         // Insert the relevant service NIC record (normally performed by the
         // reconfigurator's executor).
         let bp1_nic = datastore
             .service_create_network_interface_raw(
-                &opctx,
+                opctx,
                 db_nic_from_zone(
                     bp1.sleds[&sled_ids[2]].zones.first().unwrap(),
                 ),
@@ -3259,7 +3259,7 @@ mod tests {
             .await
             .expect("failed to insert service VNIC");
         // We should now see our third sled running a service.
-        assert_service_sled_ids(&datastore, &[sled_ids[2]]).await;
+        assert_service_sled_ids(datastore, &[sled_ids[2]]).await;
 
         // Create another blueprint, remove the one nexus we added, and make it
         // the target.
@@ -3273,16 +3273,16 @@ mod tests {
             sled2.sled_agent_generation = sled2.sled_agent_generation.next();
             bp2
         };
-        bp_insert_and_make_target(&opctx, &datastore, &bp2).await;
+        bp_insert_and_make_target(opctx, datastore, &bp2).await;
 
         // We haven't removed the service NIC record, but we should no longer
         // see the third sled here. We should be back to no sleds with services.
-        assert_service_sled_ids(&datastore, &[]).await;
+        assert_service_sled_ids(datastore, &[]).await;
 
         // Delete the service NIC record so we can reuse this IP later.
         datastore
             .service_delete_network_interface(
-                &opctx,
+                opctx,
                 bp1.sleds[&sled_ids[2]]
                     .zones
                     .first()
@@ -3316,7 +3316,7 @@ mod tests {
         for &sled_id in &sled_ids {
             datastore
                 .service_create_network_interface_raw(
-                    &opctx,
+                    opctx,
                     db_nic_from_zone(
                         bp3.sleds[&sled_id].zones.first().unwrap(),
                     ),
@@ -3327,12 +3327,12 @@ mod tests {
 
         // We haven't made bp3 the target yet, so our resolution is still based
         // on bp2; more service vNICs shouldn't matter.
-        assert_service_sled_ids(&datastore, &[]).await;
+        assert_service_sled_ids(datastore, &[]).await;
 
         // Make bp3 the target; we should immediately resolve that there are
         // services on the sleds we set up in bp3.
-        bp_insert_and_make_target(&opctx, &datastore, &bp3).await;
-        assert_service_sled_ids(&datastore, &sled_ids).await;
+        bp_insert_and_make_target(opctx, datastore, &bp3).await;
+        assert_service_sled_ids(datastore, &sled_ids).await;
 
         // ---
 
@@ -3345,19 +3345,19 @@ mod tests {
             non_provisionable: sled_ids[3],
         };
         ineligible
-            .setup(&opctx, &datastore)
+            .setup(opctx, datastore)
             .await
             .expect("failed to set up ineligible sleds");
-        assert_service_sled_ids(&datastore, &sled_ids[3..=4]).await;
+        assert_service_sled_ids(datastore, &sled_ids[3..=4]).await;
 
         // ---
 
         // Bring the sleds marked above back to life.
         ineligible
-            .undo(&opctx, &datastore)
+            .undo(opctx, datastore)
             .await
             .expect("failed to undo ineligible sleds");
-        assert_service_sled_ids(&datastore, &sled_ids).await;
+        assert_service_sled_ids(datastore, &sled_ids).await;
 
         // Make a new blueprint marking one of the zones as expunged. Ensure
         // that the sled  the expunged zone is not returned by
@@ -3379,9 +3379,9 @@ mod tests {
 
             bp4
         };
-        bp_insert_and_make_target(&opctx, &datastore, &bp4).await;
+        bp_insert_and_make_target(opctx, datastore, &bp4).await;
         assert_service_sled_ids(
-            &datastore,
+            datastore,
             &[sled_ids[0], sled_ids[1], sled_ids[2], sled_ids[4]],
         )
         .await;
@@ -3404,7 +3404,7 @@ mod tests {
         };
         let project = Project::new(DEFAULT_SILO.id(), project_params);
         let (authz_project, _) = datastore
-            .project_create(&opctx, project)
+            .project_create(opctx, project)
             .await
             .expect("failed to create project");
 
@@ -3433,7 +3433,7 @@ mod tests {
         );
         let query = InsertVpcQuery::new(incomplete_vpc);
         let (authz_vpc, db_vpc) = datastore
-            .project_create_vpc_raw(&opctx, &authz_project, query)
+            .project_create_vpc_raw(opctx, &authz_project, query)
             .await
             .expect("failed to create initial set of VPCs")
             .expect("expected an actual VPC");
@@ -3458,7 +3458,7 @@ mod tests {
         );
 
         let (authz_router, db_router) = datastore
-            .vpc_create_router(&opctx, &authz_vpc, router)
+            .vpc_create_router(opctx, &authz_vpc, router)
             .await
             .unwrap();
 
@@ -3488,7 +3488,7 @@ mod tests {
 
         let out = datastore
             .vpc_create_subnet(
-                &opctx,
+                opctx,
                 authz_vpc,
                 db::model::VpcSubnet::new(
                     Uuid::new_v4(),
@@ -3507,7 +3507,7 @@ mod tests {
 
         datastore
             .vpc_create_subnet_route(
-                &opctx,
+                opctx,
                 authz_router,
                 &out.1,
                 Uuid::new_v4(),
@@ -3516,7 +3516,7 @@ mod tests {
             .unwrap();
 
         datastore
-            .vpc_increment_rpw_version(&opctx, authz_vpc.id())
+            .vpc_increment_rpw_version(opctx, authz_vpc.id())
             .await
             .unwrap();
 
@@ -3537,7 +3537,7 @@ mod tests {
             .unwrap();
         datastore.vpc_delete_subnet_route(opctx, authz_subnet).await.unwrap();
         datastore
-            .vpc_increment_rpw_version(&opctx, db_subnet.vpc_id)
+            .vpc_increment_rpw_version(opctx, db_subnet.vpc_id)
             .await
             .unwrap();
     }
@@ -3554,13 +3554,13 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (_, authz_vpc, db_vpc, authz_router, db_router) =
-            create_initial_vpc(log, &opctx, &datastore).await;
+            create_initial_vpc(log, opctx, datastore).await;
 
         // InternetGateway route creation is handled by the saga proper,
         // so we'll only have subnet routes here. Initially, we start with none:
         verify_all_subnet_routes_in_router(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             db_router.id(),
             &[],
         )
@@ -3568,8 +3568,8 @@ mod tests {
 
         // Add a new subnet and we should get a new route.
         let (authz_sub0, sub0) = new_subnet_ez(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &db_vpc,
             &authz_vpc,
             &authz_router,
@@ -3580,8 +3580,8 @@ mod tests {
         .await;
 
         verify_all_subnet_routes_in_router(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             db_router.id(),
             &[&sub0],
         )
@@ -3589,8 +3589,8 @@ mod tests {
 
         // Add another, and get another route.
         let (authz_sub1, sub1) = new_subnet_ez(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &db_vpc,
             &authz_vpc,
             &authz_router,
@@ -3601,8 +3601,8 @@ mod tests {
         .await;
 
         verify_all_subnet_routes_in_router(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             db_router.id(),
             &[&sub0, &sub1],
         )
@@ -3611,7 +3611,7 @@ mod tests {
         // Rename one subnet, and our invariants should hold.
         let sub0 = datastore
             .vpc_update_subnet(
-                &opctx,
+                opctx,
                 &authz_sub0,
                 None,
                 VpcSubnetUpdate {
@@ -3627,24 +3627,24 @@ mod tests {
             .unwrap();
 
         datastore
-            .vpc_increment_rpw_version(&opctx, authz_vpc.id())
+            .vpc_increment_rpw_version(opctx, authz_vpc.id())
             .await
             .unwrap();
 
         verify_all_subnet_routes_in_router(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             db_router.id(),
             &[&sub0, &sub1],
         )
         .await;
 
         // Delete one, and routes should stay in sync.
-        del_subnet_ez(&opctx, &datastore, &authz_sub0, &sub0).await;
+        del_subnet_ez(opctx, datastore, &authz_sub0, &sub0).await;
 
         verify_all_subnet_routes_in_router(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             db_router.id(),
             &[&sub1],
         )
@@ -3653,7 +3653,7 @@ mod tests {
         // If we use a reserved name, we should be able to update the table.
         let sub1 = datastore
             .vpc_update_subnet(
-                &opctx,
+                opctx,
                 &authz_sub1,
                 None,
                 VpcSubnetUpdate {
@@ -3669,13 +3669,13 @@ mod tests {
             .unwrap();
 
         datastore
-            .vpc_increment_rpw_version(&opctx, authz_vpc.id())
+            .vpc_increment_rpw_version(opctx, authz_vpc.id())
             .await
             .unwrap();
 
         verify_all_subnet_routes_in_router(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             db_router.id(),
             &[&sub1],
         )
@@ -3683,8 +3683,8 @@ mod tests {
 
         // Ditto for adding such a route.
         let (_, sub0) = new_subnet_ez(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &db_vpc,
             &authz_vpc,
             &authz_router,
@@ -3695,8 +3695,8 @@ mod tests {
         .await;
 
         verify_all_subnet_routes_in_router(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             db_router.id(),
             &[&sub0, &sub1],
         )
@@ -3751,10 +3751,8 @@ mod tests {
         }
 
         // Resolve the routes: we should have two for each entry:
-        let resolved = datastore
-            .vpc_resolve_router_rules(&opctx, router_id)
-            .await
-            .unwrap();
+        let resolved =
+            datastore.vpc_resolve_router_rules(opctx, router_id).await.unwrap();
         assert_eq!(resolved.len(), 2 * subnets.len());
 
         // And each subnet generates a v4->v4 and v6->v6.
@@ -3797,12 +3795,12 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (authz_project, authz_vpc, db_vpc, authz_router, _) =
-            create_initial_vpc(log, &opctx, &datastore).await;
+            create_initial_vpc(log, opctx, datastore).await;
 
         // Create a subnet for an instance to live in.
         let (authz_sub0, sub0) = new_subnet_ez(
-            &opctx,
-            &datastore,
+            opctx,
+            datastore,
             &db_vpc,
             &authz_vpc,
             &authz_router,
@@ -3818,7 +3816,7 @@ mod tests {
         let inst_name = "insty".parse::<external::Name>().unwrap();
         let _ = datastore
             .router_create_route(
-                &opctx,
+                opctx,
                 &authz_router,
                 RouterRoute::new(
                     Uuid::new_v4(),
@@ -3845,7 +3843,7 @@ mod tests {
         // VPC subnet (v4, v6). The absence of an instance does not cause
         // us to bail, it is simply a name resolution failure.
         let routes = datastore
-            .vpc_resolve_router_rules(&opctx, authz_router.id())
+            .vpc_resolve_router_rules(opctx, authz_router.id())
             .await
             .unwrap();
 
@@ -3855,7 +3853,7 @@ mod tests {
         // the instance lacks a NIC.
         let db_inst = datastore
             .project_create_instance(
-                &opctx,
+                opctx,
                 &authz_project,
                 db::model::Instance::new(
                     InstanceUuid::new_v4(),
@@ -3884,14 +3882,14 @@ mod tests {
             .await
             .unwrap();
         let (.., authz_instance) =
-            db::lookup::LookupPath::new(&opctx, &datastore)
+            db::lookup::LookupPath::new(opctx, datastore)
                 .instance_id(db_inst.id())
                 .lookup_for(authz::Action::CreateChild)
                 .await
                 .unwrap();
 
         let routes = datastore
-            .vpc_resolve_router_rules(&opctx, authz_router.id())
+            .vpc_resolve_router_rules(opctx, authz_router.id())
             .await
             .unwrap();
 
@@ -3901,7 +3899,7 @@ mod tests {
         // to the instance's IP.
         let nic = datastore
             .instance_create_network_interface(
-                &opctx,
+                opctx,
                 &authz_sub0,
                 &authz_instance,
                 IncompleteNetworkInterface::new_instance(
@@ -3920,7 +3918,7 @@ mod tests {
             .unwrap();
 
         let routes = datastore
-            .vpc_resolve_router_rules(&opctx, authz_router.id())
+            .vpc_resolve_router_rules(opctx, authz_router.id())
             .await
             .unwrap();
 

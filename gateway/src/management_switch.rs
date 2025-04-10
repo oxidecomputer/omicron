@@ -202,7 +202,7 @@ impl ManagementSwitch {
                             shared_socket = Some(
                                 SharedSocket::bind(
                                     config.udp_listen_port,
-                                    Arc::clone(&host_phase2_provider),
+                                    Arc::clone(host_phase2_provider),
                                     log.clone(),
                                 )
                                 .await?,
@@ -215,7 +215,7 @@ impl ManagementSwitch {
                     };
 
                     SingleSp::new(
-                        &socket,
+                        socket,
                         gateway_sp_comms::SwitchPortConfig {
                             discovery_addr: default_discovery_addr(),
                             interface: interface.clone(),

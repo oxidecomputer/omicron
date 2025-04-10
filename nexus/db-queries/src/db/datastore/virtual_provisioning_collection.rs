@@ -385,7 +385,7 @@ mod test {
 
         let (authz_project, _project) = datastore
             .project_create(
-                &opctx,
+                opctx,
                 Project::new_with_id(
                     project_id,
                     silo_id,
@@ -411,14 +411,14 @@ mod test {
             storage: Some(1 << 50),
             time_modified: chrono::Utc::now(),
         };
-        let authz_silo = LookupPath::new(&opctx, &datastore)
+        let authz_silo = LookupPath::new(opctx, datastore)
             .silo_id(silo_id)
             .lookup_for(crate::authz::Action::Modify)
             .await
             .unwrap()
             .0;
         datastore
-            .silo_update_quota(&opctx, &authz_silo, quotas_update)
+            .silo_update_quota(opctx, &authz_silo, quotas_update)
             .await
             .unwrap();
 
@@ -436,8 +436,8 @@ mod test {
     ) {
         datastore
             .project_create_instance(
-                &opctx,
-                &authz_project,
+                opctx,
+                authz_project,
                 Instance::new(
                     instance_id,
                     project_id,
@@ -472,7 +472,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let test_data = setup_collections(&datastore, &opctx).await;
+        let test_data = setup_collections(datastore, opctx).await;
         let ids = test_data.ids();
         let project_id = test_data.project_id;
         let authz_project = test_data.authz_project;
@@ -484,12 +484,12 @@ mod test {
         let ram = ByteCount::try_from(1 << 30).unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 0).await;
         }
 
         create_instance_record(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             &authz_project,
             instance_id,
             project_id,
@@ -500,7 +500,7 @@ mod test {
 
         datastore
             .virtual_provisioning_collection_insert_instance(
-                &opctx,
+                opctx,
                 instance_id,
                 project_id,
                 cpus,
@@ -510,15 +510,14 @@ mod test {
             .unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 12, 1 << 30, 0)
-                .await;
+            verify_collection_usage(datastore, opctx, id, 12, 1 << 30, 0).await;
         }
 
         // Delete the instance
 
         datastore
             .virtual_provisioning_collection_delete_instance(
-                &opctx,
+                opctx,
                 instance_id,
                 project_id,
                 cpus,
@@ -528,7 +527,7 @@ mod test {
             .unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 0).await;
         }
 
         db.terminate().await;
@@ -542,7 +541,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let test_data = setup_collections(&datastore, &opctx).await;
+        let test_data = setup_collections(datastore, opctx).await;
         let ids = test_data.ids();
         let project_id = test_data.project_id;
         let authz_project = test_data.authz_project;
@@ -554,12 +553,12 @@ mod test {
         let ram = ByteCount::try_from(1 << 30).unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 0).await;
         }
 
         create_instance_record(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             &authz_project,
             instance_id,
             project_id,
@@ -570,7 +569,7 @@ mod test {
 
         datastore
             .virtual_provisioning_collection_insert_instance(
-                &opctx,
+                opctx,
                 instance_id,
                 project_id,
                 cpus,
@@ -580,8 +579,7 @@ mod test {
             .unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 12, 1 << 30, 0)
-                .await;
+            verify_collection_usage(datastore, opctx, id, 12, 1 << 30, 0).await;
         }
 
         // Attempt to provision that same instance once more.
@@ -592,7 +590,7 @@ mod test {
 
         datastore
             .virtual_provisioning_collection_insert_instance(
-                &opctx,
+                opctx,
                 instance_id,
                 project_id,
                 cpus,
@@ -603,15 +601,14 @@ mod test {
 
         // Verify that the usage is the same as before the call
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 12, 1 << 30, 0)
-                .await;
+            verify_collection_usage(datastore, opctx, id, 12, 1 << 30, 0).await;
         }
 
         // Delete the instance
 
         datastore
             .virtual_provisioning_collection_delete_instance(
-                &opctx,
+                opctx,
                 instance_id,
                 project_id,
                 cpus,
@@ -621,7 +618,7 @@ mod test {
             .unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 0).await;
         }
 
         // Attempt to delete the same instance once more.
@@ -631,7 +628,7 @@ mod test {
 
         datastore
             .virtual_provisioning_collection_delete_instance(
-                &opctx,
+                opctx,
                 instance_id,
                 project_id,
                 cpus,
@@ -641,7 +638,7 @@ mod test {
             .unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 0).await;
         }
 
         db.terminate().await;
@@ -654,7 +651,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let test_data = setup_collections(&datastore, &opctx).await;
+        let test_data = setup_collections(datastore, opctx).await;
         let ids = test_data.ids();
         let project_id = test_data.project_id;
 
@@ -664,12 +661,12 @@ mod test {
         let disk_byte_diff = ByteCount::try_from(1 << 30).unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 0).await;
         }
 
         datastore
             .virtual_provisioning_collection_insert_storage(
-                &opctx,
+                opctx,
                 disk_id,
                 project_id,
                 disk_byte_diff,
@@ -679,15 +676,14 @@ mod test {
             .unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 1 << 30)
-                .await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 1 << 30).await;
         }
 
         // Delete the disk
 
         datastore
             .virtual_provisioning_collection_delete_storage(
-                &opctx,
+                opctx,
                 disk_id,
                 project_id,
                 disk_byte_diff,
@@ -696,7 +692,7 @@ mod test {
             .unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 0).await;
         }
 
         db.terminate().await;
@@ -710,7 +706,7 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let test_data = setup_collections(&datastore, &opctx).await;
+        let test_data = setup_collections(datastore, opctx).await;
         let ids = test_data.ids();
         let project_id = test_data.project_id;
 
@@ -720,12 +716,12 @@ mod test {
         let disk_byte_diff = ByteCount::try_from(1 << 30).unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 0).await;
         }
 
         datastore
             .virtual_provisioning_collection_insert_storage(
-                &opctx,
+                opctx,
                 disk_id,
                 project_id,
                 disk_byte_diff,
@@ -735,8 +731,7 @@ mod test {
             .unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 1 << 30)
-                .await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 1 << 30).await;
         }
 
         // Attempt to provision that same disk once more.
@@ -747,7 +742,7 @@ mod test {
 
         datastore
             .virtual_provisioning_collection_insert_storage(
-                &opctx,
+                opctx,
                 disk_id,
                 project_id,
                 disk_byte_diff,
@@ -758,15 +753,14 @@ mod test {
 
         // Verify that the usage is the same as before the call
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 1 << 30)
-                .await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 1 << 30).await;
         }
 
         // Delete the disk
 
         datastore
             .virtual_provisioning_collection_delete_storage(
-                &opctx,
+                opctx,
                 disk_id,
                 project_id,
                 disk_byte_diff,
@@ -775,7 +769,7 @@ mod test {
             .unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 0).await;
         }
 
         // Attempt to delete the same disk once more.
@@ -785,7 +779,7 @@ mod test {
 
         datastore
             .virtual_provisioning_collection_delete_storage(
-                &opctx,
+                opctx,
                 disk_id,
                 project_id,
                 disk_byte_diff,
@@ -794,7 +788,7 @@ mod test {
             .unwrap();
 
         for id in ids {
-            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+            verify_collection_usage(datastore, opctx, id, 0, 0, 0).await;
         }
 
         db.terminate().await;

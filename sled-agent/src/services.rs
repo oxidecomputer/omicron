@@ -1200,7 +1200,7 @@ impl ServiceManager {
 
     /// Returns the metrics queue for the sled agent.
     fn metrics_queue(&self) -> &MetricsRequestQueue {
-        &self.maybe_metrics_queue().expect("Sled agent should have started")
+        self.maybe_metrics_queue().expect("Sled agent should have started")
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -1743,8 +1743,8 @@ impl ServiceManager {
             .with_zone_image_paths(zone_image_paths.as_slice())
             .with_zone_type(zone_type_str)
             .with_datasets(datasets.as_slice())
-            .with_filesystems(&filesystems)
-            .with_data_links(&data_links)
+            .with_filesystems(filesystems)
+            .with_data_links(data_links)
             .with_devices(&devices)
             .with_opte_ports(opte_ports)
             .with_links(links)
@@ -3457,7 +3457,7 @@ impl ServiceManager {
         //
         // This ensures that old "partially booted/stopped" zones do not
         // interfere with our installation.
-        self.ensure_removed(&zone).await?;
+        self.ensure_removed(zone).await?;
 
         // If this zone requires timesync and we aren't ready, fail it early.
         if zone.zone_type.requires_timesync() && !time_is_synchronized {
@@ -3468,8 +3468,8 @@ impl ServiceManager {
         let zone_root_path = self
             .validate_storage_and_pick_mountpoint(
                 mount_config,
-                &zone,
-                &all_u2_pools,
+                zone,
+                all_u2_pools,
             )
             .await?;
 
@@ -3519,7 +3519,7 @@ impl ServiceManager {
         let futures = requests.map(|zone| async move {
             self.start_omicron_zone(
                 mount_config,
-                &zone,
+                zone,
                 time_is_synchronized,
                 all_u2_pools,
             )
@@ -3739,7 +3739,7 @@ impl ServiceManager {
         let mount_config = storage.mount_config();
         let all_u2_pools = storage.all_u2_zpools();
         let time_is_synchronized =
-            match self.timesync_get_locked(&existing_zones).await {
+            match self.timesync_get_locked(existing_zones).await {
                 // Time is synchronized
                 Ok(TimeSync { sync: true, .. }) => true,
                 // Time is not synchronized, or we can't check
@@ -3960,7 +3960,7 @@ impl ServiceManager {
             }
 
             let data_pool = dataset.pool();
-            if !all_u2_pools.contains(&data_pool) {
+            if !all_u2_pools.contains(data_pool) {
                 warn!(
                     self.inner.log,
                     "zone dataset requested on a zpool which doesn't exist";
@@ -4396,9 +4396,9 @@ impl ServiceManager {
         };
 
         info!(self.inner.log, "ensuring scrimlet uplinks");
-        let usmfh = SmfHelper::new(&zone, &SwitchService::Uplink);
+        let usmfh = SmfHelper::new(zone, &SwitchService::Uplink);
         let lsmfh = SmfHelper::new(
-            &zone,
+            zone,
             &SwitchService::Lldpd { baseboard: Baseboard::Unknown },
         );
 
@@ -4605,7 +4605,7 @@ impl ServiceManager {
                 }
 
                 for service in &request.services {
-                    let smfh = SmfHelper::new(&zone, service);
+                    let smfh = SmfHelper::new(zone, service);
 
                     match service {
                         SwitchService::ManagementGatewayService => {
@@ -4940,7 +4940,7 @@ impl ServiceManager {
         let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let zone_root_path =
             PathInPool { pool: ZpoolOrRamdisk::Ramdisk, path: root.clone() };
-        let zone_args = ZoneArgs::Switch(&request);
+        let zone_args = ZoneArgs::Switch(request);
         info!(self.inner.log, "Starting switch zone");
         let zone = self
             .initialize_zone(zone_args, zone_root_path, filesystems, data_links)
@@ -5335,7 +5335,7 @@ mod illumos_tests {
     }
 
     async fn setup_storage(log: &Logger) -> StorageManagerTestHarness {
-        let mut harness = StorageManagerTestHarness::new(&log).await;
+        let mut harness = StorageManagerTestHarness::new(log).await;
         let raw_disks =
             harness.add_vdevs(&["u2_test.vdev", "m2_test.vdev"]).await;
         harness.handle().key_manager_ready().await;

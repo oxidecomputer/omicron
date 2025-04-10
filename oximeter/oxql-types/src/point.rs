@@ -1504,7 +1504,7 @@ impl ValueArray {
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
-                            .push(Some(new.checked_sub(&last)?));
+                            .push(Some(new.checked_sub(last)?));
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
@@ -1512,7 +1512,7 @@ impl ValueArray {
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
-                            .push(Some(new.checked_sub(&last)?));
+                            .push(Some(new.checked_sub(last)?));
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
@@ -1520,7 +1520,7 @@ impl ValueArray {
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
-                            .push(Some(new.checked_sub(&last)?));
+                            .push(Some(new.checked_sub(last)?));
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
@@ -1528,7 +1528,7 @@ impl ValueArray {
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
-                            .push(Some(new.checked_sub(&last)?));
+                            .push(Some(new.checked_sub(last)?));
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
@@ -1536,7 +1536,7 @@ impl ValueArray {
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
-                            .push(Some(new.checked_sub(&last)?));
+                            .push(Some(new.checked_sub(last)?));
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
@@ -1544,7 +1544,7 @@ impl ValueArray {
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
-                            .push(Some(new.checked_sub(&last)?));
+                            .push(Some(new.checked_sub(last)?));
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
@@ -1552,7 +1552,7 @@ impl ValueArray {
                     ) => {
                         let new = Distribution::from(new);
                         self.as_integer_distribution_mut()?
-                            .push(Some(new.checked_sub(&last)?));
+                            .push(Some(new.checked_sub(last)?));
                     }
                     (
                         CumulativeDatum::IntegerDistribution(last),
@@ -1560,7 +1560,7 @@ impl ValueArray {
                     ) => {
                         let new = Distribution::try_from(new)?;
                         self.as_integer_distribution_mut()?
-                            .push(Some(new.checked_sub(&last)?));
+                            .push(Some(new.checked_sub(last)?));
                     }
                     (
                         CumulativeDatum::DoubleDistribution(last),
@@ -1568,7 +1568,7 @@ impl ValueArray {
                     ) => {
                         let new = Distribution::<f64>::from(new);
                         self.as_double_distribution_mut()?
-                            .push(Some(new.checked_sub(&last)?));
+                            .push(Some(new.checked_sub(last)?));
                     }
                     (
                         CumulativeDatum::DoubleDistribution(last),
@@ -1576,7 +1576,7 @@ impl ValueArray {
                     ) => {
                         let new = Distribution::<f64>::from(new);
                         self.as_double_distribution_mut()?
-                            .push(Some(new.checked_sub(&last)?));
+                            .push(Some(new.checked_sub(last)?));
                     }
                     (_, _) => unreachable!(),
                 }

@@ -331,7 +331,7 @@ impl Client {
             // internal cache. Since we check the internal cache first for
             // schema, if we fail here but _don't_ remove the schema, we'll
             // never end up inserting the schema, but we will insert samples.
-            if let Err(e) = self.insert_native(handle, &body, block).await {
+            if let Err(e) = self.insert_native(handle, body, block).await {
                 debug!(
                     self.log,
                     "failed to insert new schema, removing from cache";

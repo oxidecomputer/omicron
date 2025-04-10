@@ -427,7 +427,7 @@ impl Fix<'_> {
                 Ok(vec![format!(
                     "wrote {}: {:?}",
                     &path,
-                    overwrite_file(&path, expected_contents)?
+                    overwrite_file(path, expected_contents)?
                 )])
             }
             Fix::FixSymlink { api_ident, link } => {

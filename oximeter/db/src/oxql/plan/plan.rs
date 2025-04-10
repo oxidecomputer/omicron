@@ -218,7 +218,7 @@ impl Plan {
     ) -> anyhow::Result<Self> {
         let start = Instant::now();
         let mut nodes = Vec::with_capacity(query.table_ops().len());
-        Self::plan_query(&query, &schema, &mut nodes)?;
+        Self::plan_query(&query, schema, &mut nodes)?;
         let optimized = Self::optimize_plan(&nodes)?;
         let duration = start.elapsed();
         if let OptimizedPlan::Optimized(optimized_plan) = &optimized {
@@ -304,10 +304,10 @@ impl Plan {
         for table_op in query.table_ops() {
             match table_op {
                 TableOp::Basic(basic) => {
-                    Self::plan_basic_table_op(&schema, basic, nodes)?
+                    Self::plan_basic_table_op(schema, basic, nodes)?
                 }
                 TableOp::Grouped(grouped) => {
-                    Self::plan_subquery(&schema, grouped, nodes)?
+                    Self::plan_subquery(schema, grouped, nodes)?
                 }
             }
         }
@@ -921,7 +921,7 @@ pub(super) mod test_utils {
             .lines()
             .map(|line| {
                 let schema: DbTimeseriesSchema =
-                    serde_json::from_str(&line).unwrap();
+                    serde_json::from_str(line).unwrap();
                 (
                     TimeseriesName::try_from(schema.timeseries_name.as_str())
                         .unwrap(),
@@ -955,7 +955,7 @@ mod tests {
         let query =
             query_parser::query(&format!("get {TIMESERIES_NAME}")).unwrap();
         let all_schema = all_schema().await;
-        let plan = Plan::new(query, &all_schema).unwrap();
+        let plan = Plan::new(query, all_schema).unwrap();
 
         assert_eq!(
             plan.nodes.len(),
@@ -990,7 +990,7 @@ mod tests {
         let query =
             query_parser::query(&format!("get {TIMESERIES_NAME}")).unwrap();
         let all_schema = all_schema().await;
-        let plan = Plan::new(query, &all_schema).unwrap();
+        let plan = Plan::new(query, all_schema).unwrap();
 
         assert_eq!(
             plan.nodes.len(),

@@ -42,11 +42,11 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let vpcs_url = format!("/v1/vpcs?project={}", PROJECT_NAME);
-    let _ = create_project(&client, &PROJECT_NAME).await;
-    let _ = create_project(&client, &PROJECT_NAME_2).await;
+    let _ = create_project(client, PROJECT_NAME).await;
+    let _ = create_project(client, PROJECT_NAME_2).await;
 
     // List vpcs.  We see the default VPC, and nothing else.
-    let mut vpcs = vpcs_list(&client, &vpcs_url).await;
+    let mut vpcs = vpcs_list(client, &vpcs_url).await;
     assert_eq!(vpcs.len(), 1);
     assert_eq!(vpcs[0].identity.name, "default");
     assert_eq!(vpcs[0].dns_name, "default");
@@ -95,7 +95,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
 
     // Create a VPC.
     let vpc_name = "just-rainsticks";
-    let vpc = create_vpc(&client, PROJECT_NAME, vpc_name).await;
+    let vpc = create_vpc(client, PROJECT_NAME, vpc_name).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
     assert_eq!(vpc.identity.description, "vpc description");
     assert_eq!(vpc.dns_name, "abc");
@@ -111,7 +111,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
 
     // Attempt to create a second VPC with a conflicting name.
     let error = create_vpc_with_error(
-        &client,
+        client,
         PROJECT_NAME,
         vpc_name,
         StatusCode::BAD_REQUEST,
@@ -120,17 +120,17 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "already exists: vpc \"just-rainsticks\"");
 
     // creating a VPC with the same name in another project works, though
-    let vpc2: Vpc = create_vpc(&client, PROJECT_NAME_2, vpc_name).await;
+    let vpc2: Vpc = create_vpc(client, PROJECT_NAME_2, vpc_name).await;
     assert_eq!(vpc2.identity.name, "just-rainsticks");
 
     // List VPCs again and expect to find the one we just created.
-    let vpcs = vpcs_list(&client, &vpcs_url).await;
+    let vpcs = vpcs_list(client, &vpcs_url).await;
     assert_eq!(vpcs.len(), 2);
     vpcs_eq(&vpcs[0], &default_vpc);
     vpcs_eq(&vpcs[1], &vpc);
 
     // Fetch the VPC and expect it to match.
-    let vpc = vpc_get(&client, &vpc_url).await;
+    let vpc = vpc_get(client, &vpc_url).await;
     vpcs_eq(&vpcs[1], &vpc);
 
     // Update the VPC
@@ -141,7 +141,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
         },
         dns_name: Some("def".parse().unwrap()),
     };
-    let updated_vpc = vpc_put(&client, &vpc_url, update_params).await;
+    let updated_vpc = vpc_put(client, &vpc_url, update_params).await;
     assert_eq!(updated_vpc.identity.name, "new-name");
     assert_eq!(updated_vpc.identity.description, "another description");
     assert_eq!(updated_vpc.dns_name, "def");
@@ -165,7 +165,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     let vpc_url = get_vpc_url("new-name");
 
     // Fetch the VPC again. It should have the updated properties.
-    let vpc = vpc_get(&client, &vpc_url).await;
+    let vpc = vpc_get(client, &vpc_url).await;
     assert_eq!(vpc.identity.name, "new-name");
     assert_eq!(vpc.identity.description, "another description");
     assert_eq!(vpc.dns_name, "def");
@@ -214,7 +214,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "not found: vpc with name \"new-name\"");
 
     // And the list should be empty (aside from default VPC) again
-    let vpcs = vpcs_list(&client, &vpcs_url).await;
+    let vpcs = vpcs_list(client, &vpcs_url).await;
     assert_eq!(vpcs.len(), 1);
     vpcs_eq(&vpcs[0], &default_vpc);
 }

@@ -43,7 +43,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // logout always gives the same response whether you have a session or not
-    RequestBuilder::new(&testctx, Method::POST, "/v1/logout")
+    RequestBuilder::new(testctx, Method::POST, "/v1/logout")
         .expect_status(Some(StatusCode::NO_CONTENT))
         .expect_response_header(
             header::SET_COOKIE,
@@ -64,7 +64,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     };
 
     // hitting auth-gated API endpoint without session cookie 401s
-    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
+    RequestBuilder::new(testctx, Method::POST, "/v1/projects")
         .body(Some(&project_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
@@ -72,7 +72,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to 401 on unauthed API request");
 
     // console pages don't 401, they 302
-    RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
+    RequestBuilder::new(testctx, Method::GET, "/projects/whatever")
         .expect_status(Some(StatusCode::FOUND))
         .execute()
         .await
@@ -102,7 +102,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // now make same requests with cookie
-    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
+    RequestBuilder::new(testctx, Method::POST, "/v1/projects")
         .header(header::COOKIE, &session_token)
         .body(Some(&project_params))
         // TODO: explicit expect_status not needed. decide whether to keep it anyway
@@ -111,7 +111,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to create org with session cookie");
 
-    RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
+    RequestBuilder::new(testctx, Method::GET, "/projects/whatever")
         .header(header::COOKIE, &session_token)
         .expect_console_asset()
         .execute()
@@ -125,7 +125,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to restore Silo policy");
 
     // logout with an actual session should delete the session in the db
-    RequestBuilder::new(&testctx, Method::POST, "/v1/logout")
+    RequestBuilder::new(testctx, Method::POST, "/v1/logout")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::NO_CONTENT))
         // logout also clears the cookie client-side
@@ -139,7 +139,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
-    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
+    RequestBuilder::new(testctx, Method::POST, "/v1/projects")
         .header(header::COOKIE, &session_token)
         .body(Some(&project_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
@@ -147,7 +147,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to get 401 for unauthed API request");
 
-    RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
+    RequestBuilder::new(testctx, Method::GET, "/projects/whatever")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::FOUND))
         .execute()
@@ -236,28 +236,28 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 
     // nonexistent file 404s
     let _ =
-        RequestBuilder::new(&testctx, Method::GET, "/assets/nonexistent.svg")
+        RequestBuilder::new(testctx, Method::GET, "/assets/nonexistent.svg")
             .expect_status(Some(StatusCode::NOT_FOUND))
             .execute()
             .await
             .expect("failed to 404 on nonexistent asset");
 
     // existing file with disallowed extension 404s
-    let _ = RequestBuilder::new(&testctx, Method::GET, "/assets/blocked.ext")
+    let _ = RequestBuilder::new(testctx, Method::GET, "/assets/blocked.ext")
         .expect_status(Some(StatusCode::NOT_FOUND))
         .execute()
         .await
         .expect("failed to 404 on disallowed extension");
 
     // symlink 404s
-    let _ = RequestBuilder::new(&testctx, Method::GET, "/assets/a_symlink")
+    let _ = RequestBuilder::new(testctx, Method::GET, "/assets/a_symlink")
         .expect_status(Some(StatusCode::NOT_FOUND))
         .execute()
         .await
         .expect("failed to 404 on symlink");
 
     // existing file is returned
-    let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
+    let resp = RequestBuilder::new(testctx, Method::GET, "/assets/hello.txt")
         .expect_console_asset()
         .expect_response_header(
             http::header::CACHE_CONTROL,
@@ -274,7 +274,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 
     // file in a directory is returned
     let resp = RequestBuilder::new(
-        &testctx,
+        testctx,
         Method::GET,
         "/assets/a_directory/another_file.txt",
     )
@@ -293,14 +293,14 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(resp.headers.get(http::header::CONTENT_ENCODING), None);
 
     // file with only gzipped version 404s if request doesn't have accept-encoding: gzip
-    let _ = RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-only.txt")
+    let _ = RequestBuilder::new(testctx, Method::GET, "/assets/gzip-only.txt")
         .expect_status(Some(StatusCode::NOT_FOUND))
         .execute()
         .await
         .expect("failed to 404 on gzip file without accept-encoding: gzip");
 
     // file with only non-gzipped version is returned even if accept requests gzip
-    let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
+    let resp = RequestBuilder::new(testctx, Method::GET, "/assets/hello.txt")
         .header(http::header::ACCEPT_ENCODING, "gzip")
         .expect_console_asset()
         .expect_response_header(
@@ -318,7 +318,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 
     // file with only gzipped version is returned if request accepts gzip
     let resp =
-        RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-only.txt")
+        RequestBuilder::new(testctx, Method::GET, "/assets/gzip-only.txt")
             .header(http::header::ACCEPT_ENCODING, "gzip")
             .expect_console_asset()
             .expect_response_header(http::header::CONTENT_ENCODING, "gzip")
@@ -331,7 +331,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 
     // file with both gzip and not returns gzipped if request accepts gzip
     let resp =
-        RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-and-not.txt")
+        RequestBuilder::new(testctx, Method::GET, "/assets/gzip-and-not.txt")
             .header(http::header::ACCEPT_ENCODING, "gzip")
             .expect_console_asset()
             .expect_response_header(http::header::CONTENT_ENCODING, "gzip")
@@ -348,7 +348,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 
     // returns non-gzipped if request doesn't accept gzip
     let resp =
-        RequestBuilder::new(&testctx, Method::GET, "/assets/gzip-and-not.txt")
+        RequestBuilder::new(testctx, Method::GET, "/assets/gzip-and-not.txt")
             .expect_console_asset()
             .expect_response_header(http::header::CONTENT_LENGTH, 28)
             .execute()
@@ -362,7 +362,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
     // test that `..` is not allowed in paths. (Dropshot handles this, so we
     // test to ensure this hasn't gone away.)
     let _ = RequestBuilder::new(
-        &testctx,
+        testctx,
         Method::GET,
         "/assets/../assets/hello.txt",
     )
@@ -390,7 +390,7 @@ async fn test_absolute_static_dir() {
     let testctx = &cptestctx.external_client;
 
     // existing file is returned
-    let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
+    let resp = RequestBuilder::new(testctx, Method::GET, "/assets/hello.txt")
         .expect_console_asset()
         .execute()
         .await
@@ -406,7 +406,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // hitting /v1/me without being logged in is a 401
-    RequestBuilder::new(&testctx, Method::GET, "/v1/me")
+    RequestBuilder::new(testctx, Method::GET, "/v1/me")
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
@@ -456,7 +456,7 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // hitting /v1/me without being logged in is a 401
-    RequestBuilder::new(&testctx, Method::GET, "/v1/me/groups")
+    RequestBuilder::new(testctx, Method::GET, "/v1/me/groups")
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
@@ -568,13 +568,13 @@ async fn test_login_redirect_multiple_silos(
 
     let client = &cptestctx.external_client;
     let silo_saml0 =
-        create_silo(&client, "saml-0-idps", false, SiloIdentityMode::SamlJit)
+        create_silo(client, "saml-0-idps", false, SiloIdentityMode::SamlJit)
             .await;
     let silo_saml1 =
-        create_silo(&client, "saml-1-idp", false, SiloIdentityMode::SamlJit)
+        create_silo(client, "saml-1-idp", false, SiloIdentityMode::SamlJit)
             .await;
     let silo_saml2 =
-        create_silo(&client, "saml-2-idps", false, SiloIdentityMode::SamlJit)
+        create_silo(client, "saml-2-idps", false, SiloIdentityMode::SamlJit)
             .await;
 
     for (i, silo) in [&silo_saml1, &silo_saml2].into_iter().enumerate() {
@@ -829,7 +829,7 @@ async fn test_login_redirect_multiple_silos(
         &silo_saml2.identity.name,
     ] {
         let url = format!("/v1/system/silos/{}", silo_name);
-        NexusRequest::object_delete(&client, &url)
+        NexusRequest::object_delete(client, &url)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -882,7 +882,7 @@ async fn log_in_and_extract_token(
         username: cptestctx.user_name.as_ref().parse().unwrap(),
         password: TEST_SUITE_PASSWORD.parse().unwrap(),
     };
-    let login = RequestBuilder::new(&testctx, Method::POST, &url)
+    let login = RequestBuilder::new(testctx, Method::POST, &url)
         .body(Some(&credentials))
         .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()
@@ -899,7 +899,7 @@ async fn log_in_and_extract_token(
 }
 
 async fn expect_redirect(testctx: &ClientTestContext, from: &str, to: &str) {
-    let _ = RequestBuilder::new(&testctx, Method::GET, from)
+    let _ = RequestBuilder::new(testctx, Method::GET, from)
         .expect_status(Some(StatusCode::FOUND))
         .expect_response_header(header::LOCATION, to)
         .execute()

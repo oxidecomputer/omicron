@@ -88,7 +88,7 @@ pub(crate) trait NexusSaga {
         params: &Self::Params,
     ) -> Result<SagaDag, omicron_common::api::external::Error> {
         let builder = DagBuilder::new(SagaName::new(Self::NAME));
-        let dag = Self::make_saga_dag(&params, builder)?;
+        let dag = Self::make_saga_dag(params, builder)?;
         let params = serde_json::to_value(&params).map_err(|e| {
             SagaInitError::SerializeError(format!("saga params: {params:?}"), e)
         })?;

@@ -238,13 +238,13 @@ impl VpcFirewallRule {
         ensure_max_len(&rule.targets, "targets", MAX_FW_RULE_PARTS)?;
 
         if let Some(hosts) = rule.filters.hosts.as_ref() {
-            ensure_max_len(&hosts, "filters.hosts", MAX_FW_RULE_PARTS)?;
+            ensure_max_len(hosts, "filters.hosts", MAX_FW_RULE_PARTS)?;
         }
         if let Some(ports) = rule.filters.ports.as_ref() {
-            ensure_max_len(&ports, "filters.ports", MAX_FW_RULE_PARTS)?;
+            ensure_max_len(ports, "filters.ports", MAX_FW_RULE_PARTS)?;
         }
         if let Some(protocols) = rule.filters.protocols.as_ref() {
-            ensure_max_len(&protocols, "filters.protocols", MAX_FW_RULE_PARTS)?;
+            ensure_max_len(protocols, "filters.protocols", MAX_FW_RULE_PARTS)?;
         }
 
         Ok(Self {

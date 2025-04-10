@@ -154,7 +154,7 @@ async fn sdc_create_disk_record(
             }
             params::DiskSource::Snapshot { snapshot_id } => {
                 let (.., db_snapshot) =
-                    LookupPath::new(&opctx, &osagactx.datastore())
+                    LookupPath::new(&opctx, osagactx.datastore())
                         .snapshot_id(*snapshot_id)
                         .fetch()
                         .await
@@ -167,16 +167,15 @@ async fn sdc_create_disk_record(
                 db_snapshot.block_size
             }
             params::DiskSource::Image { image_id } => {
-                let (.., image) =
-                    LookupPath::new(&opctx, &osagactx.datastore())
-                        .image_id(*image_id)
-                        .fetch()
-                        .await
-                        .map_err(|e| {
-                            ActionError::action_failed(Error::internal_error(
-                                &e.to_string(),
-                            ))
-                        })?;
+                let (.., image) = LookupPath::new(&opctx, osagactx.datastore())
+                    .image_id(*image_id)
+                    .fetch()
+                    .await
+                    .map_err(|e| {
+                        ActionError::action_failed(Error::internal_error(
+                            &e.to_string(),
+                        ))
+                    })?;
 
                 image.block_size
             }
@@ -201,7 +200,7 @@ async fn sdc_create_disk_record(
         ActionError::action_failed(Error::invalid_request(&e.to_string()))
     })?;
 
-    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_project) = LookupPath::new(&opctx, osagactx.datastore())
         .project_id(params.project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -264,7 +263,7 @@ async fn sdc_alloc_regions(
             volume_id,
             &params.create_params.disk_source,
             params.create_params.size,
-            &strategy,
+            strategy,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -352,7 +351,7 @@ async fn sdc_regions_ensure(
     let datasets_and_regions = osagactx
         .nexus()
         .ensure_all_datasets_and_regions(
-            &log,
+            log,
             sagactx
                 .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
                     "datasets_and_regions",
@@ -380,7 +379,7 @@ async fn sdc_regions_ensure(
                 debug!(log, "grabbing snapshot {}", snapshot_id);
 
                 let (.., db_snapshot) =
-                    LookupPath::new(&opctx, &osagactx.datastore())
+                    LookupPath::new(&opctx, osagactx.datastore())
                         .snapshot_id(*snapshot_id)
                         .fetch()
                         .await
@@ -423,12 +422,11 @@ async fn sdc_regions_ensure(
             params::DiskSource::Image { image_id } => {
                 debug!(log, "grabbing image {}", image_id);
 
-                let (.., image) =
-                    LookupPath::new(&opctx, &osagactx.datastore())
-                        .image_id(*image_id)
-                        .fetch()
-                        .await
-                        .map_err(ActionError::action_failed)?;
+                let (.., image) = LookupPath::new(&opctx, osagactx.datastore())
+                    .image_id(*image_id)
+                    .fetch()
+                    .await
+                    .map_err(ActionError::action_failed)?;
 
                 debug!(log, "retrieved project image {}", image.id());
 
@@ -472,7 +470,7 @@ async fn sdc_regions_ensure(
     // Each ID should be unique to this disk
     if let Some(read_only_parent) = &mut read_only_parent {
         *read_only_parent = Box::new(
-            randomize_volume_construction_request_ids(&read_only_parent)
+            randomize_volume_construction_request_ids(read_only_parent)
                 .map_err(|e| {
                     ActionError::action_failed(Error::internal_error(&format!(
                         "failed to randomize ids: {}",
@@ -575,7 +573,7 @@ async fn sdc_regions_ensure_undo(
             );
 
             let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-            let (.., authz_disk, db_disk) = LookupPath::new(&opctx, &datastore)
+            let (.., authz_disk, db_disk) = LookupPath::new(&opctx, datastore)
                 .disk_id(disk_id)
                 .fetch_for(authz::Action::Modify)
                 .await
@@ -647,7 +645,7 @@ async fn sdc_finalize_disk_record(
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
-    let (.., authz_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .lookup_for(authz::Action::Modify)
         .await
@@ -713,7 +711,7 @@ async fn sdc_get_pantry_address(
         "using pantry at {} for importing to disk {}", pantry_address, disk_id
     );
 
-    let (.., authz_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .lookup_for(authz::Action::Modify)
         .await
@@ -742,9 +740,9 @@ async fn sdc_call_pantry_attach_for_disk(
     let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
 
     call_pantry_attach_for_disk(
-        &log,
+        log,
         &opctx,
-        &osagactx.nexus(),
+        osagactx.nexus(),
         disk_id,
         pantry_address,
     )
@@ -763,7 +761,7 @@ async fn sdc_call_pantry_attach_for_disk_undo(
 
     call_pantry_detach(
         sagactx.user_data().nexus(),
-        &log,
+        log,
         disk_id,
         pantry_address,
     )
@@ -884,8 +882,7 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
 
         // Build the saga DAG with the provided test parameters and run it.
         let opctx = test_opctx(cptestctx);
@@ -1061,8 +1058,8 @@ pub(crate) mod test {
             no_virtual_provisioning_collection_records_using_storage(datastore)
                 .await
         );
-        assert!(no_region_allocations_exist(datastore, &test).await);
-        assert!(no_regions_ensured(&sled_agent, &test));
+        assert!(no_region_allocations_exist(datastore, test).await);
+        assert!(no_regions_ensured(sled_agent, test));
 
         assert!(test.crucible_resources_deleted().await);
     }
@@ -1076,8 +1073,7 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
         let opctx = test_opctx(cptestctx);
 
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
@@ -1089,7 +1085,7 @@ pub(crate) mod test {
             || Box::pin(async { new_test_params(&opctx, project_id) }),
             || {
                 Box::pin(async {
-                    verify_clean_slate(&cptestctx, &test).await;
+                    verify_clean_slate(cptestctx, &test).await;
                 })
             },
             log,
@@ -1106,9 +1102,8 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
-        let opctx = test_opctx(&cptestctx);
+        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
+        let opctx = test_opctx(cptestctx);
 
         crate::app::sagas::test_helpers::action_failure_can_unwind_idempotently::<
             SagaDiskCreate,
@@ -1117,14 +1112,14 @@ pub(crate) mod test {
         >(
             nexus,
             || Box::pin(async { new_test_params(&opctx, project_id) }),
-            || Box::pin(async { verify_clean_slate(&cptestctx, &test).await; }),
+            || Box::pin(async { verify_clean_slate(cptestctx, &test).await; }),
             log
         ).await;
     }
 
     async fn destroy_disk(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         let disk_selector = params::DiskSelector {
             project: Some(
                 Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
@@ -1147,11 +1142,10 @@ pub(crate) mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
 
         let params = new_test_params(&opctx, project_id);
         let dag = create_saga_dag::<SagaDiskCreate>(params).unwrap();
@@ -1160,7 +1154,7 @@ pub(crate) mod test {
         )
         .await;
 
-        destroy_disk(&cptestctx).await;
-        verify_clean_slate(&cptestctx, &test).await;
+        destroy_disk(cptestctx).await;
+        verify_clean_slate(cptestctx, &test).await;
     }
 }

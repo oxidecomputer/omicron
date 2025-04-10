@@ -221,7 +221,7 @@ async fn test_region_replacement_does_not_create_freed_region(
     // Create four zpools, each with one dataset. This is required for region
     // and region snapshot replacement to have somewhere to move the data.
     let sled_id = cptestctx.first_sled_id();
-    let disk_test = DiskTestBuilder::new(&cptestctx)
+    let disk_test = DiskTestBuilder::new(cptestctx)
         .on_specific_sled(sled_id)
         .with_zpool_count(4)
         .build()
@@ -231,10 +231,10 @@ async fn test_region_replacement_does_not_create_freed_region(
     let client = &cptestctx.external_client;
     let _project_id = create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
     // Before expunging the physical disk, save the DB model
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -273,7 +273,7 @@ async fn test_region_replacement_does_not_create_freed_region(
     let internal_client = &cptestctx.internal_client;
 
     let _ =
-        activate_background_task(&internal_client, "region_replacement").await;
+        activate_background_task(internal_client, "region_replacement").await;
 
     // Assert there are no freed crucible regions that result from that
     assert!(datastore.find_deleted_volume_regions().await.unwrap().is_empty());
@@ -307,7 +307,7 @@ mod region_replacement {
             // Create one zpool per sled, each with one dataset. This is
             // required for region and region snapshot replacement to have
             // somewhere to move the data.
-            let disk_test = DiskTestBuilder::new(&cptestctx)
+            let disk_test = DiskTestBuilder::new(cptestctx)
                 .on_all_sleds()
                 .with_zpool_count(1)
                 .build()
@@ -325,7 +325,7 @@ mod region_replacement {
             // Create a disk
             let _project_id = create_project_and_pool(client).await;
 
-            let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+            let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
             // Manually create the region replacement request for the first
             // allocated region of that disk
@@ -345,7 +345,7 @@ mod region_replacement {
             let (_, region) = &disk_allocated_regions[0];
 
             let replacement_request_id = datastore
-                .create_region_replacement_request_for_region(&opctx, &region)
+                .create_region_replacement_request_for_region(&opctx, region)
                 .await
                 .unwrap();
 
@@ -715,7 +715,7 @@ async fn test_delete_volume_region_replacement_state_replacement_done(
 
     test_harness.attach_request_volume_to_pantry().await;
 
-    test_harness.manually_activate_attached_volume(&cptestctx).await;
+    test_harness.manually_activate_attached_volume(cptestctx).await;
 
     test_harness.transition_request_to_replacement_done().await;
 
@@ -737,7 +737,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     // Create one zpool per sled, each with one dataset. This is required for
     // region and region snapshot replacement to have somewhere to move the
     // data.
-    let mut disk_test = DiskTestBuilder::new(&cptestctx)
+    let mut disk_test = DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -747,7 +747,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     let client = &cptestctx.external_client;
     let _project_id = create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
@@ -765,7 +765,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     .await;
 
     // Before deleting the disk, save the DB model
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -867,7 +867,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     let internal_client = &cptestctx.internal_client;
 
     let _ =
-        activate_background_task(&internal_client, "region_replacement").await;
+        activate_background_task(internal_client, "region_replacement").await;
 
     // After that task invocation, there should be one running region
     // replacement for the disk's region. Filter out the replacement request for
@@ -919,7 +919,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     //    the snapshot volume
 
     let _ = activate_background_task(
-        &internal_client,
+        internal_client,
         "region_snapshot_replacement_start",
     )
     .await;
@@ -1003,7 +1003,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     //    reference count to zero.
 
     let _ = activate_background_task(
-        &internal_client,
+        internal_client,
         "region_snapshot_replacement_garbage_collection",
     )
     .await;
@@ -1066,7 +1066,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     // ReplacementDone
 
     let last_background_task =
-        activate_background_task(&internal_client, "region_replacement_driver")
+        activate_background_task(internal_client, "region_replacement_driver")
             .await;
 
     assert!(match last_background_task.last {
@@ -1146,7 +1146,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     let mut count = 0;
     loop {
         let actions_taken =
-            run_region_snapshot_replacement_step(&internal_client).await;
+            run_region_snapshot_replacement_step(internal_client).await;
 
         if actions_taken == 0 {
             break;
@@ -1160,7 +1160,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     }
 
     let _ = activate_background_task(
-        &internal_client,
+        internal_client,
         "region_snapshot_replacement_finish",
     )
     .await;
@@ -1212,19 +1212,19 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
     let disks_url = get_disks_url();
     assert_eq!(
-        collection_list::<external::Disk>(&client, &disks_url).await.len(),
+        collection_list::<external::Disk>(client, &disks_url).await.len(),
         0
     );
 
     let snapshots_url = get_snapshots_url();
     assert_eq!(
-        collection_list::<views::Snapshot>(&client, &snapshots_url).await.len(),
+        collection_list::<views::Snapshot>(client, &snapshots_url).await.len(),
         0
     );
 
     // Make sure that all the background tasks can run to completion.
 
-    wait_for_all_replacements(datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, internal_client).await;
 
     // The disk volume should be deleted by the snapshot delete: wait until this
     // happens
@@ -1290,7 +1290,7 @@ mod region_snapshot_replacement {
             // Create one zpool per sled, each with one dataset. This is
             // required for region and region snapshot replacement to have
             // somewhere to move the data.
-            let disk_test = DiskTestBuilder::new(&cptestctx)
+            let disk_test = DiskTestBuilder::new(cptestctx)
                 .on_all_sleds()
                 .with_zpool_count(1)
                 .build()
@@ -1309,14 +1309,13 @@ mod region_snapshot_replacement {
             // snapshot
             let _project_id = create_project_and_pool(client).await;
 
-            let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+            let disk = create_disk(client, PROJECT_NAME, "disk").await;
 
             let snapshot =
-                create_snapshot(&client, PROJECT_NAME, "disk", "snapshot")
-                    .await;
+                create_snapshot(client, PROJECT_NAME, "disk", "snapshot").await;
 
             let disk_from_snapshot = create_disk_from_snapshot(
-                &client,
+                client,
                 PROJECT_NAME,
                 "disk-from-snapshot",
                 snapshot.identity.id,
@@ -1977,7 +1976,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     // Create one zpool per sled, each with one dataset. This is required for
     // region and region snapshot replacement to have somewhere to move the
     // data.
-    let disk_test = DiskTestBuilder::new(&cptestctx)
+    let disk_test = DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -1987,10 +1986,10 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let _project_id = create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
-    let snapshot = create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
+    let snapshot = create_snapshot(client, PROJECT_NAME, "disk", "snap").await;
     let _disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snap",
         snapshot.identity.id,
@@ -1998,7 +1997,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Before expunging the physical disk, save the DB model
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -2045,7 +2044,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
 
     // Now, run all replacement tasks to completion
     let internal_client = &cptestctx.internal_client;
-    wait_for_all_replacements(&datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, internal_client).await;
 
     // Validate all regions are on non-expunged physical disks
     assert!(
@@ -2077,7 +2076,7 @@ async fn test_region_replacement_triple_sanity(
     // Create one zpool, each with one dataset, on each of the 6 sleds. This is
     // required for region and region snapshot replacement to have somewhere to
     // move the data, and for this test we're doing two expungements.
-    let disk_test = DiskTestBuilder::new(&cptestctx)
+    let disk_test = DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -2098,10 +2097,10 @@ async fn test_region_replacement_triple_sanity(
     let client = &cptestctx.external_client;
     let _project_id = create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
-    let snapshot = create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
+    let snapshot = create_snapshot(client, PROJECT_NAME, "disk", "snap").await;
     let _disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snap",
         snapshot.identity.id,
@@ -2109,13 +2108,13 @@ async fn test_region_replacement_triple_sanity(
     .await;
 
     // Before expunging any physical disk, save some DB models
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
         .unwrap();
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -2155,7 +2154,7 @@ async fn test_region_replacement_triple_sanity(
             .unwrap();
 
         // Now, run all replacement tasks to completion
-        wait_for_all_replacements(&datastore, &internal_client).await;
+        wait_for_all_replacements(datastore, internal_client).await;
     }
 
     let disk_allocated_regions =
@@ -2203,7 +2202,7 @@ async fn test_region_replacement_triple_sanity_2(
     // Create one zpool, each with one dataset, on each of the 6 sleds. This is
     // required for region and region snapshot replacement to have somewhere to
     // move the data, and for this test we're doing two expungements.
-    let disk_test = DiskTestBuilder::new(&cptestctx)
+    let disk_test = DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -2224,10 +2223,10 @@ async fn test_region_replacement_triple_sanity_2(
     let client = &cptestctx.external_client;
     let _project_id = create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
-    let snapshot = create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
+    let snapshot = create_snapshot(client, PROJECT_NAME, "disk", "snap").await;
     let _disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snap",
         snapshot.identity.id,
@@ -2235,13 +2234,13 @@ async fn test_region_replacement_triple_sanity_2(
     .await;
 
     // Before expunging any physical disk, save some DB models
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
         .unwrap();
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -2287,7 +2286,7 @@ async fn test_region_replacement_triple_sanity_2(
     info!(log, "waiting for all replacements");
 
     // Now, run all replacement tasks to completion
-    wait_for_all_replacements(&datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, internal_client).await;
 
     // Expunge the last physical disk
     {
@@ -2319,7 +2318,7 @@ async fn test_region_replacement_triple_sanity_2(
     info!(log, "waiting for all replacements");
 
     // Now, run all replacement tasks to completion
-    wait_for_all_replacements(&datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, internal_client).await;
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2364,7 +2363,7 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
     // Create one zpool per sled, each with one dataset. This is required for
     // region and region snapshot replacement to have somewhere to move the
     // data.
-    DiskTestBuilder::new(&cptestctx)
+    DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -2384,10 +2383,10 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let _project_id = create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
-    let snapshot = create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
+    let snapshot = create_snapshot(client, PROJECT_NAME, "disk", "snap").await;
     let _disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snap",
         snapshot.identity.id,
@@ -2397,7 +2396,7 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
     // Manually create region snapshot replacement requests for each region
     // snapshot.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -2427,12 +2426,12 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
             .await
             .unwrap();
 
-        wait_for_all_replacements(&datastore, &internal_client).await;
+        wait_for_all_replacements(datastore, internal_client).await;
     }
 
     // Now, do it again, except this time specifying the read-only regions
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -2452,7 +2451,7 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
             .await
             .unwrap();
 
-        wait_for_all_replacements(&datastore, &internal_client).await;
+        wait_for_all_replacements(datastore, internal_client).await;
     }
 }
 
@@ -2471,7 +2470,7 @@ async fn test_read_only_replacement_sanity(
     // Create one zpool per sled, each with one dataset. This is required for
     // region and region snapshot replacement to have somewhere to move the
     // data.
-    DiskTestBuilder::new(&cptestctx)
+    DiskTestBuilder::new(cptestctx)
         .on_all_sleds()
         .with_zpool_count(1)
         .build()
@@ -2491,10 +2490,10 @@ async fn test_read_only_replacement_sanity(
     let client = &cptestctx.external_client;
     let _project_id = create_project_and_pool(client).await;
 
-    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
-    let snapshot = create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+    let disk = create_disk(client, PROJECT_NAME, "disk").await;
+    let snapshot = create_snapshot(client, PROJECT_NAME, "disk", "snap").await;
     let _disk_from_snapshot = create_disk_from_snapshot(
-        &client,
+        client,
         PROJECT_NAME,
         "disk-from-snap",
         snapshot.identity.id,
@@ -2504,7 +2503,7 @@ async fn test_read_only_replacement_sanity(
     // Manually create region snapshot replacement requests for each region
     // snapshot.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -2534,12 +2533,12 @@ async fn test_read_only_replacement_sanity(
             .await
             .unwrap();
 
-        wait_for_all_replacements(&datastore, &internal_client).await;
+        wait_for_all_replacements(datastore, internal_client).await;
     }
 
     // Now expunge a sled with read-only regions on it.
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -2568,7 +2567,7 @@ async fn test_read_only_replacement_sanity(
         .await
         .unwrap();
 
-    wait_for_all_replacements(&datastore, &internal_client).await;
+    wait_for_all_replacements(datastore, internal_client).await;
 
     // Validate all regions are on non-expunged physical disks
     assert!(

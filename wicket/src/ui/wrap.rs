@@ -103,7 +103,7 @@ fn wrap_single_line_slow_path<'a>(
         options.width.saturating_sub(options.subsequent_indent.width());
     let line_widths = [initial_width, subsequent_width];
 
-    let split_words = find_words_in_line(&line);
+    let split_words = find_words_in_line(line);
 
     // We don't perform any word splitting.
     let broken_words = if options.break_words {

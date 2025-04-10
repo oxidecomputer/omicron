@@ -140,7 +140,7 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Sled> {
         self.db_datastore
-            .sled_list(&opctx, pagparams, SledFilter::InService)
+            .sled_list(opctx, pagparams, SledFilter::InService)
             .await
     }
 
@@ -214,7 +214,7 @@ impl super::Nexus {
         disk_selector: &params::PhysicalDiskPath,
     ) -> Result<lookup::PhysicalDisk<'a>, Error> {
         // XXX how to do typed UUID as part of dropshot path?
-        Ok(lookup::LookupPath::new(&opctx, &self.db_datastore).physical_disk(
+        Ok(lookup::LookupPath::new(opctx, &self.db_datastore).physical_disk(
             PhysicalDiskUuid::from_untyped_uuid(disk_selector.disk_id),
         ))
     }
@@ -226,7 +226,7 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::PhysicalDisk> {
         self.db_datastore
-            .sled_list_physical_disks(&opctx, sled_id, pagparams)
+            .sled_list_physical_disks(opctx, sled_id, pagparams)
             .await
     }
 
@@ -236,7 +236,7 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::PhysicalDisk> {
         self.db_datastore
-            .physical_disk_list(&opctx, pagparams, DiskFilter::InService)
+            .physical_disk_list(opctx, pagparams, DiskFilter::InService)
             .await
     }
 
@@ -259,7 +259,7 @@ impl super::Nexus {
             "model" => %request.model,
         );
 
-        match LookupPath::new(&opctx, &self.db_datastore)
+        match LookupPath::new(opctx, &self.db_datastore)
             .physical_disk(request.id)
             .fetch()
             .await
@@ -287,7 +287,7 @@ impl super::Nexus {
             request.variant.into(),
             request.sled_id,
         );
-        self.db_datastore.physical_disk_insert(&opctx, disk).await?;
+        self.db_datastore.physical_disk_insert(opctx, disk).await?;
         Ok(())
     }
 
@@ -335,7 +335,7 @@ impl super::Nexus {
             // real value here.
             ByteCount::from_gibibytes_u32(0).into(),
         );
-        self.db_datastore.zpool_insert(&opctx, zpool).await?;
+        self.db_datastore.zpool_insert(opctx, zpool).await?;
         Ok(())
     }
 

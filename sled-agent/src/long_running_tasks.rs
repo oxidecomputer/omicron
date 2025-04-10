@@ -80,7 +80,7 @@ pub async fn spawn_all_longrunning_tasks(
         spawn_storage_monitor(log, storage_manager.clone());
 
     let nongimlet_observed_disks =
-        config.nongimlet_observed_disks.clone().unwrap_or(vec![]);
+        config.nongimlet_observed_disks.clone().unwrap_or_default();
 
     let hardware_manager =
         spawn_hardware_manager(log, sled_mode, nongimlet_observed_disks).await;
@@ -90,7 +90,7 @@ pub async fn spawn_all_longrunning_tasks(
         spawn_hardware_monitor(log, &hardware_manager, &storage_manager);
 
     // Add some synthetic disks if necessary.
-    upsert_synthetic_disks_if_needed(&log, &storage_manager, &config).await;
+    upsert_synthetic_disks_if_needed(log, &storage_manager, config).await;
 
     // Wait for the boot disk so that we can work with any ledgers,
     // such as those needed by the bootstore and sled-agent

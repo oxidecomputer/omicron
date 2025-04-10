@@ -48,7 +48,7 @@ async fn expect_not_found(
         client,
         StatusCode::NOT_FOUND,
         method.clone(),
-        &bundle_url,
+        bundle_url,
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -269,7 +269,7 @@ async fn test_support_bundle_not_found(cptestctx: &ControlPlaneTestContext) {
     let id = SupportBundleUuid::new_v4();
 
     expect_not_found(
-        &client,
+        client,
         id,
         &format!("{BUNDLES_URL}/{id}"),
         Method::DELETE,
@@ -277,12 +277,12 @@ async fn test_support_bundle_not_found(cptestctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
-    expect_not_found(&client, id, &format!("{BUNDLES_URL}/{id}"), Method::GET)
+    expect_not_found(client, id, &format!("{BUNDLES_URL}/{id}"), Method::GET)
         .await
         .unwrap();
 
     expect_not_found(
-        &client,
+        client,
         id,
         &format!("{BUNDLES_URL}/{id}/download"),
         Method::GET,
@@ -291,7 +291,7 @@ async fn test_support_bundle_not_found(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     expect_not_found(
-        &client,
+        client,
         id,
         &format!("{BUNDLES_URL}/{id}/download/single-file"),
         Method::GET,
@@ -300,7 +300,7 @@ async fn test_support_bundle_not_found(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     expect_not_found(
-        &client,
+        client,
         id,
         &format!("{BUNDLES_URL}/{id}/download"),
         Method::HEAD,
@@ -309,7 +309,7 @@ async fn test_support_bundle_not_found(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     expect_not_found(
-        &client,
+        client,
         id,
         &format!("{BUNDLES_URL}/{id}/download/single-file"),
         Method::HEAD,
@@ -318,7 +318,7 @@ async fn test_support_bundle_not_found(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     expect_not_found(
-        &client,
+        client,
         id,
         &format!("{BUNDLES_URL}/{id}/download/index"),
         Method::HEAD,
@@ -326,10 +326,10 @@ async fn test_support_bundle_not_found(cptestctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
-    assert!(bundles_list(&client).await.unwrap().is_empty());
+    assert!(bundles_list(client).await.unwrap().is_empty());
 
     bundle_create_expect_fail(
-        &client,
+        client,
         StatusCode::INSUFFICIENT_STORAGE,
         "Insufficient capacity: Current policy limits support bundle creation to 'one per external disk', and no disks are available. You must delete old support bundles before new ones can be created",
     ).await.unwrap();
@@ -340,7 +340,7 @@ async fn test_support_bundle_not_found(cptestctx: &ControlPlaneTestContext) {
 async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let mut disk_test = DiskTest::new(&cptestctx).await;
+    let mut disk_test = DiskTest::new(cptestctx).await;
 
     // We really care about just "getting a debug dataset" here.
     let sled_id = cptestctx.first_sled_id();
@@ -377,17 +377,17 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(debug_dataset_count, 1);
 
     // We should see no bundles before we start creation.
-    assert!(bundles_list(&client).await.unwrap().is_empty());
-    let bundle = bundle_create(&client).await.unwrap();
+    assert!(bundles_list(client).await.unwrap().is_empty());
+    let bundle = bundle_create(client).await.unwrap();
 
     assert_eq!(bundle.reason_for_creation, "Created by external API");
     assert_eq!(bundle.reason_for_failure, None);
     assert_eq!(bundle.state, SupportBundleState::Collecting);
 
-    let bundles = bundles_list(&client).await.unwrap();
+    let bundles = bundles_list(client).await.unwrap();
     assert_eq!(bundles.len(), 1);
     assert_eq!(bundles[0].id, bundle.id);
-    assert_eq!(bundle_get(&client, bundle.id).await.unwrap().id, bundle.id);
+    assert_eq!(bundle_get(client, bundle.id).await.unwrap().id, bundle.id);
 
     // We can't collect a second bundle because the debug dataset already fully
     // occupied.
@@ -395,14 +395,14 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     // We'll retry this at the end of the test, and see that we can create
     // another bundle when the first is cleared.
     bundle_create_expect_fail(
-        &client,
+        client,
         StatusCode::INSUFFICIENT_STORAGE,
         "Insufficient capacity: Current policy limits support bundle creation to 'one per external disk', and no disks are available. You must delete old support bundles before new ones can be created",
     ).await.unwrap();
 
     // The bundle is "Collecting", not "Active", so we can't download it yet.
     bundle_download_expect_fail(
-        &client,
+        client,
         bundle.id,
         StatusCode::BAD_REQUEST,
         "Cannot download bundle in non-active state",
@@ -412,7 +412,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
 
     // If we prompt the background task to run, the bundle should transition to
     // "Active".
-    let output = activate_bundle_collection_background_task(&cptestctx).await;
+    let output = activate_bundle_collection_background_task(cptestctx).await;
     assert_eq!(output.cleanup_err, None);
     assert_eq!(output.collection_err, None);
     assert_eq!(
@@ -427,11 +427,11 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
             activated_in_db_ok: true,
         })
     );
-    let bundle = bundle_get(&client, bundle.id).await.unwrap();
+    let bundle = bundle_get(client, bundle.id).await.unwrap();
     assert_eq!(bundle.state, SupportBundleState::Active);
 
     // Now we should be able to download the bundle
-    let contents = bundle_download(&client, bundle.id).await.unwrap();
+    let contents = bundle_download(client, bundle.id).await.unwrap();
     let archive = ZipArchive::new(Cursor::new(&contents)).unwrap();
     let mut names = archive.file_names();
     assert_eq!(names.next(), Some("bundle_id.txt"));
@@ -440,13 +440,13 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     // of this test, which cares more about bundle lifecycle.
 
     // We are also able to delete the bundle
-    bundle_delete(&client, bundle.id).await.unwrap();
-    let observed = bundle_get(&client, bundle.id).await.unwrap();
+    bundle_delete(client, bundle.id).await.unwrap();
+    let observed = bundle_get(client, bundle.id).await.unwrap();
     assert_eq!(observed.state, SupportBundleState::Destroying);
 
     // We cannot download anything after bundle deletion starts
     bundle_download_expect_fail(
-        &client,
+        client,
         bundle.id,
         StatusCode::BAD_REQUEST,
         "Cannot download bundle in non-active state",
@@ -455,7 +455,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // If we prompt the background task to run, the bundle will be cleaned up.
-    let output = activate_bundle_collection_background_task(&cptestctx).await;
+    let output = activate_bundle_collection_background_task(cptestctx).await;
     assert_eq!(output.cleanup_err, None);
     assert_eq!(output.collection_err, None);
     assert_eq!(
@@ -470,7 +470,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
 
     // The bundle is now fully deleted, so it should no longer appear.
     bundle_get_expect_fail(
-        &client,
+        client,
         bundle.id,
         StatusCode::NOT_FOUND,
         &format!("not found: support-bundle with id \"{}\"", bundle.id),
@@ -479,7 +479,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // We can now create a second bundle, as the first has been freed.
-    let second_bundle = bundle_create(&client).await.unwrap();
+    let second_bundle = bundle_create(client).await.unwrap();
 
     assert_ne!(
         second_bundle.id, bundle.id,

@@ -395,7 +395,7 @@ mod test {
 
         let devfs_path = Utf8PathBuf::from("/devfs/path");
         let result = internal_ensure_partition_layout::<LabelNotFoundGPT>(
-            &log,
+            log,
             illumos_utils::fakes::zpool::Zpool::new().as_ref(),
             &DiskPaths { devfs_path, dev_path: None },
             DiskVariant::U2,
@@ -420,7 +420,7 @@ mod test {
         const DEV_PATH: &'static str = "/dev/path";
 
         let partitions = internal_ensure_partition_layout::<LabelNotFoundGPT>(
-            &log,
+            log,
             illumos_utils::fakes::zpool::Zpool::new().as_ref(),
             &DiskPaths {
                 devfs_path,
@@ -448,7 +448,7 @@ mod test {
 
         assert!(
             internal_ensure_partition_layout::<LabelNotFoundGPT>(
-                &log,
+                log,
                 illumos_utils::fakes::zpool::Zpool::new().as_ref(),
                 &DiskPaths {
                     devfs_path,
@@ -489,7 +489,7 @@ mod test {
         const DEV_PATH: &'static str = "/dev/path";
 
         let partitions = internal_ensure_partition_layout::<FakeU2GPT>(
-            &log,
+            log,
             illumos_utils::fakes::zpool::Zpool::new().as_ref(),
             &DiskPaths {
                 devfs_path,
@@ -534,7 +534,7 @@ mod test {
         const DEV_PATH: &'static str = "/dev/path";
 
         let partitions = internal_ensure_partition_layout::<FakeM2GPT>(
-            &log,
+            log,
             illumos_utils::fakes::zpool::Zpool::new().as_ref(),
             &DiskPaths {
                 devfs_path,
@@ -576,7 +576,7 @@ mod test {
 
         assert!(matches!(
             internal_ensure_partition_layout::<EmptyGPT>(
-                &log,
+                log,
                 illumos_utils::fakes::zpool::Zpool::new().as_ref(),
                 &DiskPaths {
                     devfs_path,
@@ -604,7 +604,7 @@ mod test {
 
         assert!(matches!(
             internal_ensure_partition_layout::<EmptyGPT>(
-                &log,
+                log,
                 illumos_utils::fakes::zpool::Zpool::new().as_ref(),
                 &DiskPaths {
                     devfs_path,

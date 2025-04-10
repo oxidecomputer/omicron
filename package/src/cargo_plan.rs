@@ -243,14 +243,14 @@ impl fmt::Display for DisplayCargoPlan<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "release command: ")?;
         if let Some(command) = &self.plan.release.build_command(self.command) {
-            writeln!(f, "{}", command_to_string(&command))?;
+            writeln!(f, "{}", command_to_string(command))?;
         } else {
             writeln!(f, "(none)")?;
         }
 
         write!(f, "debug command: ")?;
         if let Some(command) = &self.plan.debug.build_command(self.command) {
-            writeln!(f, "{}", command_to_string(&command))?;
+            writeln!(f, "{}", command_to_string(command))?;
         } else {
             writeln!(f, "(none)")?;
         }

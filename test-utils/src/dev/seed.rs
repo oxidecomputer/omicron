@@ -19,8 +19,8 @@ pub fn digest_unique_to_schema() -> String {
     let schema = include_str!("../../../schema/crdb/dbinit.sql");
     let crdb_version = include_str!("../../../tools/cockroachdb_version");
     let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
-    ctx.update(&schema.as_bytes());
-    ctx.update(&crdb_version.as_bytes());
+    ctx.update(schema.as_bytes());
+    ctx.update(crdb_version.as_bytes());
     let digest = ctx.finish();
     hex::encode(digest.as_ref())
 }

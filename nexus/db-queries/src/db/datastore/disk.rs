@@ -65,7 +65,7 @@ impl DataStore {
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::disk, dsl::id, &pagparams)
+                paginated(dsl::disk, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::disk,
@@ -140,7 +140,7 @@ impl DataStore {
         use nexus_db_schema::schema::disk::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::disk, dsl::id, &pagparams)
+                paginated(dsl::disk, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::disk,
@@ -862,7 +862,7 @@ mod tests {
 
         let (authz_project, _db_project) = db_datastore
             .project_create(
-                &opctx,
+                opctx,
                 Project::new(
                     silo_id,
                     params::ProjectCreate {
@@ -878,7 +878,7 @@ mod tests {
 
         let disk = db_datastore
             .project_create_disk(
-                &opctx,
+                opctx,
                 &authz_project,
                 Disk::new(
                     Uuid::new_v4(),
@@ -903,7 +903,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (.., authz_disk, db_disk) = LookupPath::new(&opctx, &db_datastore)
+        let (.., authz_disk, db_disk) = LookupPath::new(opctx, db_datastore)
             .disk_id(disk.id())
             .fetch()
             .await
@@ -911,7 +911,7 @@ mod tests {
 
         db_datastore
             .disk_update_runtime(
-                &opctx,
+                opctx,
                 &authz_disk,
                 &db_disk.runtime().detach(),
             )
@@ -929,7 +929,7 @@ mod tests {
         // Assert initial state - deleting the Disk will make LookupPath::fetch
         // not work.
         {
-            LookupPath::new(&opctx, &db_datastore)
+            LookupPath::new(opctx, db_datastore)
                 .disk_id(disk.id())
                 .fetch()
                 .await
@@ -946,7 +946,7 @@ mod tests {
         // Assert state change
 
         {
-            let (.., db_disk) = LookupPath::new(&opctx, &db_datastore)
+            let (.., db_disk) = LookupPath::new(opctx, db_datastore)
                 .disk_id(disk.id())
                 .fetch()
                 .await
@@ -967,7 +967,7 @@ mod tests {
         // Assert state is the same after the second call
 
         {
-            let (.., db_disk) = LookupPath::new(&opctx, &db_datastore)
+            let (.., db_disk) = LookupPath::new(opctx, db_datastore)
                 .disk_id(disk.id())
                 .fetch()
                 .await

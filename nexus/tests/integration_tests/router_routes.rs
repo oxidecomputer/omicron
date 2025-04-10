@@ -126,10 +126,10 @@ async fn test_router_routes_crud_operations(
     let vpc_name = "vpc1";
     let router_name = "router1";
 
-    let _ = create_project(&client, PROJECT_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
 
     // Create a vpc
-    create_vpc(&client, PROJECT_NAME, vpc_name).await;
+    create_vpc(client, PROJECT_NAME, vpc_name).await;
 
     // Get the system router's routes
     let [v4_route, v6_route, subnet_route] =
@@ -155,7 +155,7 @@ async fn test_router_routes_crud_operations(
     }
 
     // Create a custom router
-    create_router(&client, PROJECT_NAME, vpc_name, router_name).await;
+    create_router(client, PROJECT_NAME, vpc_name, router_name).await;
 
     // Get routes list for custom router
     let routes = objects_list_page_authz::<RouterRoute>(
@@ -268,12 +268,12 @@ async fn test_router_routes_disallow_mixed_v4_v6(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let _ = create_project(&client, PROJECT_NAME).await;
-    let _ = create_vpc(&client, PROJECT_NAME, VPC_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
+    let _ = create_vpc(client, PROJECT_NAME, VPC_NAME).await;
 
     let router_name = ROUTER_NAMES[0];
     let _router =
-        create_router(&client, PROJECT_NAME, VPC_NAME, router_name).await;
+        create_router(client, PROJECT_NAME, VPC_NAME, router_name).await;
 
     // Some targets/strings refer to a mixed v4/v6 entity, e.g.,
     // subnet or instance. Others refer to one kind only (ipnet, ip).
@@ -350,8 +350,8 @@ async fn test_router_routes_modify_system_routes(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let _ = create_project(&client, PROJECT_NAME).await;
-    let _ = create_vpc(&client, PROJECT_NAME, VPC_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
+    let _ = create_vpc(client, PROJECT_NAME, VPC_NAME).await;
 
     // Attempting to add a new route to a system router should fail.
     let err = create_route_with_error(
@@ -378,7 +378,7 @@ async fn test_router_routes_modify_system_routes(
     // Deletes are tested above.
     let err = object_put_error(
         client,
-        &get_route_url(VPC_NAME, "system", subnet_route.name().as_str())
+        get_route_url(VPC_NAME, "system", subnet_route.name().as_str())
             .as_str(),
         &RouterRouteUpdate {
             identity: IdentityMetadataUpdateParams {
@@ -399,7 +399,7 @@ async fn test_router_routes_modify_system_routes(
     // Modifying the target of a Default (gateway) route should succeed.
     let v4_route: RouterRoute = object_put(
         client,
-        &get_route_url(VPC_NAME, "system", v4_route.name().as_str()).as_str(),
+        get_route_url(VPC_NAME, "system", v4_route.name().as_str()).as_str(),
         &RouterRouteUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
@@ -414,7 +414,7 @@ async fn test_router_routes_modify_system_routes(
 
     let v6_route: RouterRoute = object_put(
         client,
-        &get_route_url(VPC_NAME, "system", v6_route.name().as_str()).as_str(),
+        get_route_url(VPC_NAME, "system", v6_route.name().as_str()).as_str(),
         &RouterRouteUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
@@ -430,7 +430,7 @@ async fn test_router_routes_modify_system_routes(
     // Modifying the *destination* should not.
     let err = object_put_error(
         client,
-        &get_route_url(VPC_NAME, "system", v4_route.name().as_str()).as_str(),
+        get_route_url(VPC_NAME, "system", v4_route.name().as_str()).as_str(),
         &RouterRouteUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
@@ -453,11 +453,11 @@ async fn test_router_routes_internet_gateway_target(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let _ = create_project(&client, PROJECT_NAME).await;
-    let _ = create_vpc(&client, PROJECT_NAME, VPC_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
+    let _ = create_vpc(client, PROJECT_NAME, VPC_NAME).await;
     let router_name = ROUTER_NAMES[0];
     let _router =
-        create_router(&client, PROJECT_NAME, VPC_NAME, router_name).await;
+        create_router(client, PROJECT_NAME, VPC_NAME, router_name).await;
 
     let dest: RouteDestination = "ipnet:240.0.0.0/8".parse().unwrap();
 
@@ -483,11 +483,11 @@ async fn test_router_routes_disallow_custom_targets(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let _ = create_project(&client, PROJECT_NAME).await;
-    let _ = create_vpc(&client, PROJECT_NAME, VPC_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
+    let _ = create_vpc(client, PROJECT_NAME, VPC_NAME).await;
     let router_name = ROUTER_NAMES[0];
     let _router =
-        create_router(&client, PROJECT_NAME, VPC_NAME, router_name).await;
+        create_router(client, PROJECT_NAME, VPC_NAME, router_name).await;
 
     let valid_dest: RouteDestination = "ipnet:240.0.0.0/8".parse().unwrap();
     let pairs: &[(RouteDestination, RouteTarget, &str)] = &[
@@ -528,7 +528,7 @@ async fn test_router_routes_disallow_custom_targets(
                 client,
                 PROJECT_NAME,
                 VPC_NAME,
-                &router_name,
+                router_name,
                 "bad-route",
                 dest.clone(),
                 target.clone(),
@@ -540,7 +540,7 @@ async fn test_router_routes_disallow_custom_targets(
                 client,
                 PROJECT_NAME,
                 VPC_NAME,
-                &router_name,
+                router_name,
                 "good-route",
                 dest.clone(),
                 target.clone(),

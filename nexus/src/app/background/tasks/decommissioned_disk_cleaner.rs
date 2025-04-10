@@ -211,7 +211,7 @@ mod tests {
             sled_id.into_untyped_uuid(),
         );
         datastore
-            .physical_disk_insert(&opctx, physical_disk.clone())
+            .physical_disk_insert(opctx, physical_disk.clone())
             .await
             .unwrap();
         id
@@ -290,18 +290,18 @@ mod tests {
     impl TestFixture {
         async fn setup(datastore: &Arc<DataStore>, opctx: &OpContext) -> Self {
             let sled_id = SledUuid::from_untyped_uuid(
-                Uuid::from_str(&SLED_AGENT_UUID).unwrap(),
+                Uuid::from_str(SLED_AGENT_UUID).unwrap(),
             );
 
             let disk_id = make_disk_in_db(datastore, opctx, 0, sled_id).await;
             let (zpool_id, dataset_id, region_id) =
                 add_zpool_dataset_and_region(
-                    &datastore, &opctx, disk_id, sled_id,
+                    datastore, opctx, disk_id, sled_id,
                 )
                 .await;
             datastore
                 .physical_disk_update_policy(
-                    &opctx,
+                    opctx,
                     disk_id,
                     PhysicalDiskPolicy::Expunged,
                 )
@@ -388,7 +388,7 @@ mod tests {
         assert_eq!(results.deleted, 0);
         assert_eq!(results.error_count, 0);
 
-        assert!(!fixture.has_been_cleaned(&datastore).await);
+        assert!(!fixture.has_been_cleaned(datastore).await);
     }
 
     #[nexus_test(server = crate::Server)]
@@ -422,7 +422,7 @@ mod tests {
         assert_eq!(results.deleted, 0);
         assert_eq!(results.error_count, 0);
 
-        assert!(!fixture.has_been_cleaned(&datastore).await);
+        assert!(!fixture.has_been_cleaned(datastore).await);
     }
 
     #[nexus_test(server = crate::Server)]
@@ -444,7 +444,7 @@ mod tests {
             .await
             .unwrap();
 
-        fixture.delete_region(&datastore).await;
+        fixture.delete_region(datastore).await;
 
         // Setup: Disk is decommissioned and has no regions.
         // Expectation: We clean it.
@@ -458,6 +458,6 @@ mod tests {
         assert_eq!(results.deleted, 1);
         assert_eq!(results.error_count, 0);
 
-        assert!(fixture.has_been_cleaned(&datastore).await);
+        assert!(fixture.has_been_cleaned(datastore).await);
     }
 }

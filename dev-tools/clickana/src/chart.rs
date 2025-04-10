@@ -225,7 +225,7 @@ struct YAxisValues {
 impl YAxisValues {
     fn new(unit: Unit, raw_data: &Vec<SystemTimeSeries>) -> Result<Self> {
         // Retrieve values only to create Y axis bounds and labels
-        let values = TimeSeriesValues::new(&raw_data);
+        let values = TimeSeriesValues::new(raw_data);
         let max_value = values.max()?;
         let min_value = values.min()?;
 
@@ -322,7 +322,7 @@ pub struct XAxisTimestamps {
 impl XAxisTimestamps {
     fn new(raw_data: &Vec<SystemTimeSeries>) -> Result<Self> {
         // Retrieve timestamps only to create chart bounds and labels
-        let timestamps = TimeSeriesTimestamps::new(&raw_data);
+        let timestamps = TimeSeriesTimestamps::new(raw_data);
         // These timestamps will be used to calculate start and end timestamps in order
         // to create labels and set bounds for the X axis. As above, some of these conversions
         // may lose precision, but it's OK as these values are only used to make sure the

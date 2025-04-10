@@ -79,12 +79,9 @@ impl InternalServer {
 
         let ctxlog = log.new(o!("component" => "ServerContext"));
 
-        let context = ApiContext::for_internal(
-            config.deployment.rack_id,
-            ctxlog,
-            &config,
-        )
-        .await?;
+        let context =
+            ApiContext::for_internal(config.deployment.rack_id, ctxlog, config)
+                .await?;
 
         // Launch the internal server.
         let http_server_internal = match dropshot::ServerBuilder::new(
@@ -231,7 +228,7 @@ impl nexus_test_interface::NexusServer for Server {
         config: &NexusConfig,
         log: &Logger,
     ) -> Result<(InternalServer, SocketAddr), String> {
-        let internal_server = InternalServer::start(config, &log).await?;
+        let internal_server = InternalServer::start(config, log).await?;
         internal_server.apictx.context.nexus.wait_for_populate().await.unwrap();
         let addr = internal_server.http_server_internal.local_addr();
         Ok((internal_server, addr))

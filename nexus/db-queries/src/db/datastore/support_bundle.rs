@@ -613,7 +613,7 @@ mod test {
         pool_count: usize,
     ) -> TestSled {
         let sled = TestSled::new_with_pool_count(pool_count);
-        sled.create_database_records(&datastore, &opctx).await;
+        sled.create_database_records(datastore, opctx).await;
         sled
     }
 
@@ -623,7 +623,7 @@ mod test {
         this_nexus_id: OmicronZoneUuid,
     ) {
         let err = datastore
-            .support_bundle_create(&opctx, "for tests", this_nexus_id)
+            .support_bundle_create(opctx, "for tests", this_nexus_id)
             .await
             .expect_err("Shouldn't provision bundle without datasets");
         let Error::InsufficientCapacity { message } = err else {
@@ -647,7 +647,7 @@ mod test {
         let nexus_a = OmicronZoneUuid::new_v4();
         let nexus_b = OmicronZoneUuid::new_v4();
 
-        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 5).await;
+        let _test_sled = create_sled_and_zpools(datastore, opctx, 5).await;
 
         let pagparams = DataPageParams::max_page();
 
@@ -656,7 +656,7 @@ mod test {
         assert_eq!(
             datastore
                 .support_bundle_list_assigned_to_nexus(
-                    &opctx,
+                    opctx,
                     &pagparams,
                     nexus_a,
                     vec![SupportBundleState::Collecting]
@@ -669,22 +669,22 @@ mod test {
         // Create two bundles on "nexus A", one bundle on "nexus B"
 
         let bundle_a1 = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_a)
+            .support_bundle_create(opctx, "for the test", nexus_a)
             .await
             .expect("Should be able to create bundle");
         let bundle_a2 = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_a)
+            .support_bundle_create(opctx, "for the test", nexus_a)
             .await
             .expect("Should be able to create bundle");
         let bundle_b1 = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_b)
+            .support_bundle_create(opctx, "for the test", nexus_b)
             .await
             .expect("Should be able to create bundle");
 
         assert_eq!(
             datastore
                 .support_bundle_list_assigned_to_nexus(
-                    &opctx,
+                    opctx,
                     &pagparams,
                     nexus_a,
                     vec![SupportBundleState::Collecting]
@@ -699,7 +699,7 @@ mod test {
         assert_eq!(
             datastore
                 .support_bundle_list_assigned_to_nexus(
-                    &opctx,
+                    opctx,
                     &pagparams,
                     nexus_b,
                     vec![SupportBundleState::Collecting]
@@ -717,7 +717,7 @@ mod test {
         let authz_bundle = authz_support_bundle_from_id(bundle_a1.id.into());
         datastore
             .support_bundle_update(
-                &opctx,
+                opctx,
                 &authz_bundle,
                 SupportBundleState::Active,
             )
@@ -728,7 +728,7 @@ mod test {
         assert_eq!(
             datastore
                 .support_bundle_list_assigned_to_nexus(
-                    &opctx,
+                    opctx,
                     &pagparams,
                     nexus_a,
                     vec![SupportBundleState::Collecting]
@@ -745,7 +745,7 @@ mod test {
         assert_eq!(
             datastore
                 .support_bundle_list_assigned_to_nexus(
-                    &opctx,
+                    opctx,
                     &pagparams,
                     nexus_a,
                     vec![
@@ -776,8 +776,8 @@ mod test {
         // No sleds, no datasets. Allocation should fail.
 
         support_bundle_create_expect_no_capacity(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             this_nexus_id,
         )
         .await;
@@ -786,16 +786,12 @@ mod test {
 
         const POOL_COUNT: usize = 2;
         let _test_sled =
-            create_sled_and_zpools(&datastore, &opctx, POOL_COUNT).await;
+            create_sled_and_zpools(datastore, opctx, POOL_COUNT).await;
         let mut bundles = vec![];
         for _ in 0..POOL_COUNT {
             bundles.push(
                 datastore
-                    .support_bundle_create(
-                        &opctx,
-                        "for the test",
-                        this_nexus_id,
-                    )
+                    .support_bundle_create(opctx, "for the test", this_nexus_id)
                     .await
                     .expect("Should be able to create bundle"),
             );
@@ -804,8 +800,8 @@ mod test {
         // If we try to allocate any more bundles, we'll run out of capacity.
 
         support_bundle_create_expect_no_capacity(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             this_nexus_id,
         )
         .await;
@@ -819,15 +815,15 @@ mod test {
         let authz_bundle = authz_support_bundle_from_id(bundles[0].id.into());
         datastore
             .support_bundle_update(
-                &opctx,
+                opctx,
                 &authz_bundle,
                 SupportBundleState::Destroying,
             )
             .await
             .expect("Should be able to destroy this bundle");
         support_bundle_create_expect_no_capacity(
-            &datastore,
-            &opctx,
+            datastore,
+            opctx,
             this_nexus_id,
         )
         .await;
@@ -837,11 +833,11 @@ mod test {
 
         let authz_bundle = authz_support_bundle_from_id(bundles[0].id.into());
         datastore
-            .support_bundle_delete(&opctx, &authz_bundle)
+            .support_bundle_delete(opctx, &authz_bundle)
             .await
             .expect("Should be able to destroy this bundle");
         datastore
-            .support_bundle_create(&opctx, "for the test", this_nexus_id)
+            .support_bundle_create(opctx, "for the test", this_nexus_id)
             .await
             .expect("Should be able to create bundle");
 
@@ -855,14 +851,14 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let test_sled = create_sled_and_zpools(&datastore, &opctx, 1).await;
+        let test_sled = create_sled_and_zpools(datastore, opctx, 1).await;
         let reason = "Bundle for test";
         let this_nexus_id = OmicronZoneUuid::new_v4();
 
         // Create the bundle, then observe it through the "getter" APIs
 
         let mut bundle = datastore
-            .support_bundle_create(&opctx, reason, this_nexus_id)
+            .support_bundle_create(opctx, reason, this_nexus_id)
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.reason_for_creation, reason);
@@ -873,7 +869,7 @@ mod test {
         assert_eq!(bundle.dataset_id, test_sled.pools[0].dataset.into());
 
         let observed_bundle = datastore
-            .support_bundle_get(&opctx, bundle.id.into())
+            .support_bundle_get(opctx, bundle.id.into())
             .await
             .expect("Should be able to get bundle we just created");
         // Overwrite this column; it is modified slightly upon database insertion.
@@ -882,7 +878,7 @@ mod test {
 
         let pagparams = DataPageParams::max_page();
         let observed_bundles = datastore
-            .support_bundle_list(&opctx, &pagparams)
+            .support_bundle_list(opctx, &pagparams)
             .await
             .expect("Should be able to get bundle we just created");
         assert_eq!(1, observed_bundles.len());
@@ -892,14 +888,14 @@ mod test {
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
-                &opctx,
+                opctx,
                 &authz_bundle,
                 SupportBundleState::Destroying,
             )
             .await
             .expect("Should be able to destroy our bundle");
         let observed_bundle = datastore
-            .support_bundle_get(&opctx, bundle.id.into())
+            .support_bundle_get(opctx, bundle.id.into())
             .await
             .expect("Should be able to get bundle we just created");
         assert_eq!(SupportBundleState::Destroying, observed_bundle.state);
@@ -908,11 +904,11 @@ mod test {
 
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
-            .support_bundle_delete(&opctx, &authz_bundle)
+            .support_bundle_delete(opctx, &authz_bundle)
             .await
             .expect("Should be able to destroy our bundle");
         let observed_bundles = datastore
-            .support_bundle_list(&opctx, &pagparams)
+            .support_bundle_list(opctx, &pagparams)
             .await
             .expect("Should be able to query when no bundles exist");
         assert!(observed_bundles.is_empty());
@@ -1006,13 +1002,13 @@ mod test {
         //
         // Regardless, make this starter blueprint our target.
         bp1.parent_blueprint_id = None;
-        bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
+        bp_insert_and_make_target(opctx, datastore, &bp1).await;
 
         // Manually perform the equivalent of blueprint execution to populate
         // database records.
         let sleds = TestSled::new_from_blueprint(&bp1);
         for sled in &sleds {
-            sled.create_database_records(&datastore, &opctx).await;
+            sled.create_database_records(datastore, opctx).await;
         }
 
         // Extract Nexus and Dataset information from the generated blueprint.
@@ -1026,7 +1022,7 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", this_nexus_id)
+            .support_bundle_create(opctx, "for the test", this_nexus_id)
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
@@ -1038,7 +1034,7 @@ mod test {
         // If we try to "fail support bundles" from expunged datasets/nexuses,
         // we should see a no-op. Nothing has been expunged yet!
         let report = datastore
-            .support_bundle_fail_expunged(&opctx, &bp1, this_nexus_id)
+            .support_bundle_fail_expunged(opctx, &bp1, this_nexus_id)
             .await
             .expect(
                 "Should have been able to perform no-op support bundle failure",
@@ -1053,14 +1049,14 @@ mod test {
             expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
         };
-        bp_insert_and_make_target(&opctx, &datastore, &bp2).await;
+        bp_insert_and_make_target(opctx, datastore, &bp2).await;
 
         datastore
-            .support_bundle_fail_expunged(&opctx, &bp1, this_nexus_id)
+            .support_bundle_fail_expunged(opctx, &bp1, this_nexus_id)
             .await
             .expect_err("bp1 is no longer the target; this should fail");
         let report = datastore
-            .support_bundle_fail_expunged(&opctx, &bp2, this_nexus_id)
+            .support_bundle_fail_expunged(opctx, &bp2, this_nexus_id)
             .await
             .expect("Should have been able to mark bundle state as failed");
         assert_eq!(
@@ -1072,7 +1068,7 @@ mod test {
         );
 
         let observed_bundle = datastore
-            .support_bundle_get(&opctx, bundle.id.into())
+            .support_bundle_get(opctx, bundle.id.into())
             .await
             .expect("Should be able to get bundle we just failed");
         assert_eq!(SupportBundleState::Failed, observed_bundle.state);
@@ -1111,13 +1107,13 @@ mod test {
         //
         // Regardless, make this starter blueprint our target.
         bp1.parent_blueprint_id = None;
-        bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
+        bp_insert_and_make_target(opctx, datastore, &bp1).await;
 
         // Manually perform the equivalent of blueprint execution to populate
         // database records.
         let sleds = TestSled::new_from_blueprint(&bp1);
         for sled in &sleds {
-            sled.create_database_records(&datastore, &opctx).await;
+            sled.create_database_records(datastore, opctx).await;
         }
 
         // Extract Nexus and Dataset information from the generated blueprint.
@@ -1131,7 +1127,7 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", this_nexus_id)
+            .support_bundle_create(opctx, "for the test", this_nexus_id)
             .await
             .expect("Should be able to create bundle");
         assert_eq!(bundle.assigned_nexus, Some(this_nexus_id.into()));
@@ -1144,7 +1140,7 @@ mod test {
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
-                &opctx,
+                opctx,
                 &authz_bundle,
                 SupportBundleState::Destroying,
             )
@@ -1154,7 +1150,7 @@ mod test {
         // If we try to "fail support bundles" from expunged datasets/nexuses,
         // we should see a no-op. Nothing has been expunged yet!
         let report = datastore
-            .support_bundle_fail_expunged(&opctx, &bp1, this_nexus_id)
+            .support_bundle_fail_expunged(opctx, &bp1, this_nexus_id)
             .await
             .expect(
                 "Should have been able to perform no-op support bundle failure",
@@ -1169,14 +1165,14 @@ mod test {
             expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
         };
-        bp_insert_and_make_target(&opctx, &datastore, &bp2).await;
+        bp_insert_and_make_target(opctx, datastore, &bp2).await;
 
         datastore
-            .support_bundle_fail_expunged(&opctx, &bp1, this_nexus_id)
+            .support_bundle_fail_expunged(opctx, &bp1, this_nexus_id)
             .await
             .expect_err("bp1 is no longer the target; this should fail");
         let report = datastore
-            .support_bundle_fail_expunged(&opctx, &bp2, this_nexus_id)
+            .support_bundle_fail_expunged(opctx, &bp2, this_nexus_id)
             .await
             .expect("Should have been able to mark bundle state as failed");
         assert_eq!(
@@ -1190,7 +1186,7 @@ mod test {
         // Should observe no bundles (it should have been deleted)
         let pagparams = DataPageParams::max_page();
         let observed_bundles = datastore
-            .support_bundle_list(&opctx, &pagparams)
+            .support_bundle_list(opctx, &pagparams)
             .await
             .expect("Should be able to query when no bundles exist");
         assert!(observed_bundles.is_empty());
@@ -1215,13 +1211,13 @@ mod test {
         .build();
 
         bp1.parent_blueprint_id = None;
-        bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
+        bp_insert_and_make_target(opctx, datastore, &bp1).await;
 
         // Manually perform the equivalent of blueprint execution to populate
         // database records.
         let sleds = TestSled::new_from_blueprint(&bp1);
         for sled in &sleds {
-            sled.create_database_records(&datastore, &opctx).await;
+            sled.create_database_records(datastore, opctx).await;
         }
 
         // Extract Nexus and Dataset information from the generated blueprint.
@@ -1232,7 +1228,7 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_ids[0])
+            .support_bundle_create(opctx, "for the test", nexus_ids[0])
             .await
             .expect("Should be able to create bundle");
 
@@ -1252,10 +1248,10 @@ mod test {
             expunge_dataset_for_bundle(&mut bp2, &bundle);
             bp2
         };
-        bp_insert_and_make_target(&opctx, &datastore, &bp2).await;
+        bp_insert_and_make_target(opctx, datastore, &bp2).await;
 
         let report = datastore
-            .support_bundle_fail_expunged(&opctx, &bp2, nexus_ids[0])
+            .support_bundle_fail_expunged(opctx, &bp2, nexus_ids[0])
             .await
             .expect("Should have been able to mark bundle state as failed");
         assert_eq!(
@@ -1267,7 +1263,7 @@ mod test {
         );
 
         let observed_bundle = datastore
-            .support_bundle_get(&opctx, bundle.id.into())
+            .support_bundle_get(opctx, bundle.id.into())
             .await
             .expect("Should be able to get bundle we just failed");
         assert_eq!(SupportBundleState::Failed, observed_bundle.state);
@@ -1286,10 +1282,10 @@ mod test {
             expunge_nexus_for_bundle(&mut bp3, &bundle);
             bp3
         };
-        bp_insert_and_make_target(&opctx, &datastore, &bp3).await;
+        bp_insert_and_make_target(opctx, datastore, &bp3).await;
 
         let report = datastore
-            .support_bundle_fail_expunged(&opctx, &bp3, nexus_ids[1])
+            .support_bundle_fail_expunged(opctx, &bp3, nexus_ids[1])
             .await
             .expect("Should have been able to mark bundle state as failed");
 
@@ -1299,7 +1295,7 @@ mod test {
         assert_eq!(SupportBundleExpungementReport::default(), report);
 
         let observed_bundle = datastore
-            .support_bundle_get(&opctx, bundle.id.into())
+            .support_bundle_get(opctx, bundle.id.into())
             .await
             .expect("Should be able to get bundle we just failed");
         assert_eq!(SupportBundleState::Failed, observed_bundle.state);
@@ -1312,7 +1308,7 @@ mod test {
 
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
-            .support_bundle_delete(&opctx, &authz_bundle)
+            .support_bundle_delete(opctx, &authz_bundle)
             .await
             .expect("Should have been able to delete support bundle");
 
@@ -1336,13 +1332,13 @@ mod test {
         .build();
 
         bp1.parent_blueprint_id = None;
-        bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
+        bp_insert_and_make_target(opctx, datastore, &bp1).await;
 
         // Manually perform the equivalent of blueprint execution to populate
         // database records.
         let sleds = TestSled::new_from_blueprint(&bp1);
         for sled in &sleds {
-            sled.create_database_records(&datastore, &opctx).await;
+            sled.create_database_records(datastore, opctx).await;
         }
 
         // Extract Nexus and Dataset information from the generated blueprint.
@@ -1353,7 +1349,7 @@ mod test {
         // When we create a bundle, it should exist on a dataset provisioned by
         // the blueprint.
         let bundle = datastore
-            .support_bundle_create(&opctx, "for the test", nexus_ids[0])
+            .support_bundle_create(opctx, "for the test", nexus_ids[0])
             .await
             .expect("Should be able to create bundle");
 
@@ -1371,7 +1367,7 @@ mod test {
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
             .support_bundle_update(
-                &opctx,
+                opctx,
                 &authz_bundle,
                 SupportBundleState::Active,
             )
@@ -1386,10 +1382,10 @@ mod test {
             expunge_nexus_for_bundle(&mut bp2, &bundle);
             bp2
         };
-        bp_insert_and_make_target(&opctx, &datastore, &bp2).await;
+        bp_insert_and_make_target(opctx, datastore, &bp2).await;
 
         let report = datastore
-            .support_bundle_fail_expunged(&opctx, &bp2, nexus_ids[1])
+            .support_bundle_fail_expunged(opctx, &bp2, nexus_ids[1])
             .await
             .expect("Should have been able to mark bundle state as destroying");
 
@@ -1403,7 +1399,7 @@ mod test {
         );
 
         let observed_bundle = datastore
-            .support_bundle_get(&opctx, bundle.id.into())
+            .support_bundle_get(opctx, bundle.id.into())
             .await
             .expect("Should be able to get bundle we just failed");
         assert_eq!(SupportBundleState::Failing, observed_bundle.state);

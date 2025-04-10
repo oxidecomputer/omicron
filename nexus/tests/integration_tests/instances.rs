@@ -145,10 +145,10 @@ async fn test_instances_access_before_create_returns_not_found(
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    let _ = create_project(&client, PROJECT_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
 
     // List instances.  There aren't any yet.
-    let instances = instances_list(&client, &get_instances_url()).await;
+    let instances = instances_list(client, &get_instances_url()).await;
     assert_eq!(instances.len(), 0);
 
     // Make sure we get a 404 if we fetch one.
@@ -262,7 +262,7 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
 
     // Fetch instance by id
     let fetched_instance = instance_get(
-        &client,
+        client,
         format!("/v1/instances/{}", instance.identity.id).as_str(),
     )
     .await;
@@ -270,7 +270,7 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
 
     // Fetch instance by name and project_id
     let fetched_instance = instance_get(
-        &client,
+        client,
         format!(
             "/v1/instances/{}?project={}",
             instance.identity.name, project.identity.id
@@ -282,7 +282,7 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
 
     // Fetch instance by name and project_name
     let fetched_instance = instance_get(
-        &client,
+        client,
         format!(
             "/v1/instances/{}?project={}",
             instance.identity.name, project.identity.name
@@ -302,7 +302,7 @@ async fn test_instances_create_reboot_halt(
     let nexus = &apictx.nexus;
     let instance_name = "just-rainsticks";
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
 
     // Create an instance.
     let instance_url = get_instance_url(instance_name);
@@ -358,12 +358,12 @@ async fn test_instances_create_reboot_halt(
     );
 
     // List instances again and expect to find the one we just created.
-    let instances = instances_list(&client, &get_instances_url()).await;
+    let instances = instances_list(client, &get_instances_url()).await;
     assert_eq!(instances.len(), 1);
     instances_eq(&instances[0], &instance);
 
     // Fetch the instance and expect it to match.
-    let instance = instance_get(&client, &instance_url).await;
+    let instance = instance_get(client, &instance_url).await;
     instances_eq(&instances[0], &instance);
     assert_eq!(instance.runtime.run_state, InstanceState::Starting);
 
@@ -386,7 +386,7 @@ async fn test_instances_create_reboot_halt(
     // Now, simulate completion of instance boot and check the state reported.
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     identity_eq(&instance.identity, &instance_next.identity);
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
@@ -398,15 +398,15 @@ async fn test_instances_create_reboot_halt(
     // not even the state timestamp.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, instance_name, InstanceOp::Start).await;
+        instance_post(client, instance_name, InstanceOp::Start).await;
     instances_eq(&instance, &instance_next);
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     instances_eq(&instance, &instance_next);
 
     // Reboot the instance.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, instance_name, InstanceOp::Reboot).await;
+        instance_post(client, instance_name, InstanceOp::Reboot).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Rebooting);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -415,7 +415,7 @@ async fn test_instances_create_reboot_halt(
 
     let instance = instance_next;
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -425,7 +425,7 @@ async fn test_instances_create_reboot_halt(
     // Request a halt and verify both the immediate state and the finished state.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, instance_name, InstanceOp::Stop).await;
+        instance_post(client, instance_name, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -446,9 +446,9 @@ async fn test_instances_create_reboot_halt(
     // not even the state timestamp.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, instance_name, InstanceOp::Stop).await;
+        instance_post(client, instance_name, InstanceOp::Stop).await;
     instances_eq(&instance, &instance_next);
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     instances_eq(&instance, &instance_next);
     assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
 
@@ -471,14 +471,14 @@ async fn test_instances_create_reboot_halt(
     // assert_eq!(error.message, "cannot reboot instance in state \"stopped\"");
 
     // State should still be stopped.
-    let instance = instance_get(&client, &instance_url).await;
+    let instance = instance_get(client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
 
     // Start the instance.  While it's starting, issue a reboot.  This should
     // succeed, having stopped in between.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, instance_name, InstanceOp::Start).await;
+        instance_post(client, instance_name, InstanceOp::Start).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Starting);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -487,7 +487,7 @@ async fn test_instances_create_reboot_halt(
 
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, instance_name, InstanceOp::Reboot).await;
+        instance_post(client, instance_name, InstanceOp::Reboot).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Rebooting);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -496,7 +496,7 @@ async fn test_instances_create_reboot_halt(
 
     let instance = instance_next;
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -508,7 +508,7 @@ async fn test_instances_create_reboot_halt(
     // state.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, instance_name, InstanceOp::Stop).await;
+        instance_post(client, instance_name, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -616,14 +616,14 @@ async fn test_instance_start_creates_networking_state(
     // This test requires some additional sleds that can receive V2P mappings.
     let additional_sleds: Vec<_> = cptestctx.extra_sled_agents().collect();
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
     let instance_url = get_instance_url(instance_name);
     let instance = create_instance(client, PROJECT_NAME, instance_name).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Drive the instance to Running, then stop it.
     instance_simulate(nexus, &instance_id).await;
-    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
@@ -632,15 +632,15 @@ async fn test_instance_start_creates_networking_state(
     let mut sled_agents: Vec<&Arc<SledAgent>> =
         additional_sleds.iter().map(|x| &x.sled_agent).collect();
 
-    sled_agents.push(&cptestctx.first_sled_agent());
+    sled_agents.push(cptestctx.first_sled_agent());
     for agent in &sled_agents {
         agent.v2p_mappings.lock().unwrap().clear();
     }
 
     // Start the instance and make sure that it gets to Running.
-    instance_post(&client, instance_name, InstanceOp::Start).await;
+    instance_post(client, instance_name, InstanceOp::Start).await;
     instance_simulate(nexus, &instance_id).await;
-    let instance = instance_get(&client, &instance_url).await;
+    let instance = instance_get(client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
 
     // Now ensure the V2P mappings have been reestablished everywhere.
@@ -657,7 +657,7 @@ async fn test_instance_start_creates_networking_state(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance.identity.id)
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
@@ -739,7 +739,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let default_sled_id = cptestctx.first_sled_id();
     let other_sled_id = cptestctx.second_sled_id();
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
     let instance_url = get_instance_url(instance_name);
 
     // Explicitly create an instance with no disks. Simulated sled agent assumes
@@ -759,7 +759,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
 
     // Poke the instance into an active state.
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
     let sled_info = nexus
@@ -807,7 +807,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
             cptestctx.logctx.log.new(o!()),
             datastore.clone(),
         );
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance.identity.id)
             .lookup_for(nexus_db_queries::authz::Action::Read)
             .await
@@ -854,7 +854,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.source_state, MigrationState::InProgress.into());
     assert_eq!(migration.target_state, MigrationState::Pending.into());
-    let instance = instance_get(&client, &instance_url).await;
+    let instance = instance_get(client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
     // Move target to "migrating".
@@ -866,7 +866,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.source_state, MigrationState::InProgress.into());
     assert_eq!(migration.target_state, MigrationState::InProgress.into());
-    let instance = instance_get(&client, &instance_url).await;
+    let instance = instance_get(client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
     // Move the source to "completed"
@@ -876,13 +876,13 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.source_state, MigrationState::Completed.into());
     assert_eq!(migration.target_state, MigrationState::InProgress.into());
-    let instance = dbg!(instance_get(&client, &instance_url).await);
+    let instance = dbg!(instance_get(client, &instance_url).await);
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
     // Move the target to "completed".
     vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
 
-    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     let current_sled = nexus
         .active_instance_info(&instance_id, None)
@@ -943,11 +943,11 @@ async fn test_instance_migrate_v2p_and_routes(
     // Poke the instance into an active state.
     instance_simulate(nexus, &instance_id).await;
     let instance_url = get_instance_url(instance_name);
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
     // Ensure that all of the V2P information is correct.
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
@@ -1000,7 +1000,7 @@ async fn test_instance_migrate_v2p_and_routes(
             cptestctx.logctx.log.new(o!()),
             datastore.clone(),
         );
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance.identity.id)
             .lookup_for(nexus_db_queries::authz::Action::Read)
             .await
@@ -1035,7 +1035,7 @@ async fn test_instance_migrate_v2p_and_routes(
     vmm_simulate_on_sled(cptestctx, nexus, original_sled_id, src_propolis_id)
         .await;
     vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
-    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     let current_sled = nexus
         .active_instance_info(&instance_id, None)
@@ -1081,7 +1081,7 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_restarted(
 
     let instance_name = "losing-is-fun";
     let instance_id = make_forgotten_instance(
-        &cptestctx,
+        cptestctx,
         instance_name,
         InstanceAutoRestartPolicy::Never,
     )
@@ -1114,7 +1114,7 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_deleted(
 
     let instance_name = "losing-is-fun";
     let instance_id = make_forgotten_instance(
-        &cptestctx,
+        cptestctx,
         instance_name,
         InstanceAutoRestartPolicy::Never,
     )
@@ -1147,7 +1147,7 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_stopped(
 
     let instance_name = "losing-is-fun";
     let instance_id = make_forgotten_instance(
-        &cptestctx,
+        cptestctx,
         instance_name,
         InstanceAutoRestartPolicy::Never,
     )
@@ -1167,7 +1167,7 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_stopped(
 
     // Now, it should be possible to stop the instance.
     let instance_next =
-        instance_post(&client, instance_name, InstanceOp::Stop).await;
+        instance_post(client, instance_name, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
 
     // Now, the Stopped nstance should be deleteable..
@@ -1184,7 +1184,7 @@ async fn test_instance_failed_by_instance_watcher_can_be_deleted(
     let client = &cptestctx.external_client;
     let instance_name = "losing-is-fun";
     let instance_id = make_forgotten_instance(
-        &cptestctx,
+        cptestctx,
         instance_name,
         InstanceAutoRestartPolicy::Never,
     )
@@ -1200,7 +1200,7 @@ async fn test_instance_failed_by_instance_watcher_can_be_deleted(
     instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
 
     // Now, the instance should be deleteable.
-    expect_instance_delete_ok(&client, instance_name).await;
+    expect_instance_delete_ok(client, instance_name).await;
 }
 
 // Verifies that the instance-watcher background task transitions an instance
@@ -1213,7 +1213,7 @@ async fn test_instance_failed_by_instance_watcher_can_be_restarted(
     let client = &cptestctx.external_client;
     let instance_name = "losing-is-fun";
     let instance_id = make_forgotten_instance(
-        &cptestctx,
+        cptestctx,
         instance_name,
         InstanceAutoRestartPolicy::Never,
     )
@@ -1229,7 +1229,7 @@ async fn test_instance_failed_by_instance_watcher_can_be_restarted(
     instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
 
     // Now, the instance should be deleteable.
-    expect_instance_delete_ok(&client, instance_name).await;
+    expect_instance_delete_ok(client, instance_name).await;
 }
 
 // Verified that instances currently on Expunged sleds are marked as failed.
@@ -1244,7 +1244,7 @@ async fn test_instance_failed_when_on_expunged_sled(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
 
     // Make sure all instances allocate to the first sled - make the second sled
     // agent non-provisionable.
@@ -1287,7 +1287,7 @@ async fn test_instance_failed_when_on_expunged_sled(
             let instance_id =
                 InstanceUuid::from_untyped_uuid(instance.identity.id);
             instance_simulate(nexus, &instance_id).await;
-            let instance_next = instance_get(&client, &instance_url).await;
+            let instance_next = instance_get(client, &instance_url).await;
             assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
             slog::info!(
@@ -1347,14 +1347,14 @@ async fn test_instance_failed_when_on_expunged_sled(
     instance_wait_for_state(client, instance2_id, InstanceState::Failed).await;
 
     // Now, the instances should be deleteable...
-    expect_instance_delete_ok(&client, instance1_name).await;
+    expect_instance_delete_ok(client, instance1_name).await;
     // ...or restartable.
     expect_instance_start_ok(client, instance2_name).await;
 
     // The restarted instance should now transition back to `Running`, on its
     // new sled.
     instance_wait_for_simulated_transition(
-        &cptestctx,
+        cptestctx,
         &instance2_id,
         InstanceState::Running,
     )
@@ -1362,7 +1362,7 @@ async fn test_instance_failed_when_on_expunged_sled(
 
     // The auto-restartable instance should be...restarted automatically.
     instance_wait_for_simulated_transition(
-        &cptestctx,
+        cptestctx,
         &instance3_id,
         InstanceState::Running,
     )
@@ -1379,7 +1379,7 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
     let client = &cptestctx.external_client;
     let instance_id = dbg!(
         make_forgotten_instance(
-            &cptestctx,
+            cptestctx,
             "resurgam",
             InstanceAutoRestartPolicy::BestEffort,
         )
@@ -1415,7 +1415,7 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
     // Now, we can actually poke the instance.
     dbg!(
         instance_wait_for_simulated_transition(
-            &cptestctx,
+            cptestctx,
             &instance_id,
             InstanceState::Running
         )
@@ -1433,12 +1433,12 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors(
     let instance_name = "my-cool-instance";
 
     // Create and start the test instance.
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
     let instance_url = get_instance_url(instance_name);
     let instance = create_instance(client, PROJECT_NAME, instance_name).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
     let sled_agent = cptestctx.first_sled_agent();
@@ -1459,7 +1459,7 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors(
     )
     .await;
 
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
     sled_agent.set_instance_ensure_state_error(None).await;
@@ -1477,12 +1477,12 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors_by_inst
     let instance_name = "my-cool-instance";
 
     // Create and start the test instance.
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
     let instance_url = get_instance_url(instance_name);
     let instance = create_instance(client, PROJECT_NAME, instance_name).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
     let sled_agent = cptestctx.first_sled_agent();
@@ -1500,7 +1500,7 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors_by_inst
     )
     .await;
 
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 }
 
@@ -1516,7 +1516,7 @@ async fn make_forgotten_instance(
     let nexus = &apictx.nexus;
 
     // Create and start the test instance.
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
     let instance_url = get_instance_url(instance_name);
     let instance = create_instance_with(
         client,
@@ -1533,7 +1533,7 @@ async fn make_forgotten_instance(
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
     // Forcibly unregister the instance from the sled-agent without telling
@@ -1558,7 +1558,7 @@ async fn expect_instance_delete_ok(
     client: &ClientTestContext,
     instance_name: &str,
 ) {
-    NexusRequest::object_delete(&client, &get_instance_url(instance_name))
+    NexusRequest::object_delete(client, &get_instance_url(instance_name))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -1621,7 +1621,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     let datastore = nexus.datastore();
 
     // Create an IP pool and project that we'll use for testing.
-    let project = create_project_and_pool(&client).await;
+    let project = create_project_and_pool(client).await;
     let project_id = project.identity.id;
 
     // Wait until Nexus is registered as a metric producer with Oximeter.
@@ -1654,8 +1654,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Stop the instance. This should cause the relevant resources to be
     // deprovisioned.
-    let instance =
-        instance_post(&client, instance_name, InstanceOp::Stop).await;
+    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
@@ -1675,7 +1674,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_metrics(cptestctx, project_id, 0, expected_cpus, expected_ram).await;
 
     // Delete the instance.
-    NexusRequest::object_delete(client, &get_instance_url(&instance_name))
+    NexusRequest::object_delete(client, &get_instance_url(instance_name))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -1711,7 +1710,7 @@ async fn test_instance_metrics_with_migration(
     let default_sled_id = cptestctx.first_sled_id();
     let other_sled_id = cptestctx.second_sled_id();
 
-    let project = create_project_and_pool(&client).await;
+    let project = create_project_and_pool(client).await;
     let project_id = project.identity.id;
     let instance_url = get_instance_url(instance_name);
 
@@ -1732,7 +1731,7 @@ async fn test_instance_metrics_with_migration(
 
     // Poke the instance into an active state.
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
     // The instance should be provisioned while it's in the running state.
@@ -1797,7 +1796,7 @@ async fn test_instance_metrics_with_migration(
             cptestctx.logctx.log.new(o!()),
             datastore.clone(),
         );
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance.identity.id)
             .lookup_for(nexus_db_queries::authz::Action::Read)
             .await
@@ -1836,7 +1835,7 @@ async fn test_instance_metrics_with_migration(
         .await;
     vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
         .await;
-    instance_wait_for_state(&client, instance_id, InstanceState::Migrating)
+    instance_wait_for_state(client, instance_id, InstanceState::Migrating)
         .await;
 
     check_provisioning_state(4, 1).await;
@@ -1847,7 +1846,7 @@ async fn test_instance_metrics_with_migration(
     vmm_simulate_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
         .await;
     vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
-    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     check_provisioning_state(4, 1).await;
 
@@ -1857,9 +1856,9 @@ async fn test_instance_metrics_with_migration(
     // instance (whose demise wasn't simulated here), but this is intentionally
     // not reflected in the virtual provisioning counters (which reflect the
     // logical states of instances ignoring migration).
-    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     check_provisioning_state(0, 0).await;
 }
@@ -1873,7 +1872,7 @@ async fn test_instances_create_stopped_start(
     let nexus = &apictx.nexus;
     let instance_name = "just-rainsticks";
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
 
     // Create an instance in a stopped state.
     let instance: Instance = object_create(
@@ -1905,12 +1904,12 @@ async fn test_instances_create_stopped_start(
     // Start the instance.
     let instance_url = get_instance_url(instance_name);
     let instance =
-        instance_post(&client, instance_name, InstanceOp::Start).await;
+        instance_post(client, instance_name, InstanceOp::Start).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Now, simulate completion of instance boot and check the state reported.
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     identity_eq(&instance.identity, &instance_next.identity);
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
@@ -1928,7 +1927,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     let nexus = &apictx.nexus;
     let instance_name = "just-rainsticks";
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
 
     // Create an instance.
     let instance_url = get_instance_url(instance_name);
@@ -1937,7 +1936,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
 
     // Simulate the instance booting.
     instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_next = instance_get(client, &instance_url).await;
     identity_eq(&instance.identity, &instance_next.identity);
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
@@ -1960,12 +1959,12 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     );
 
     // Stop the instance
-    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Now deletion should succeed.
-    NexusRequest::object_delete(&client, &instance_url)
+    NexusRequest::object_delete(client, &instance_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -2025,7 +2024,7 @@ async fn test_instance_using_image_from_other_project_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
 
     // Create an image in springfield-squidport.
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
@@ -2110,7 +2109,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     let client = &cptestctx.external_client;
 
     // Create test IP pool, organization and project
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
 
     // The network interface parameters.
     let default_name = "default".parse::<Name>().unwrap();
@@ -2233,7 +2232,7 @@ async fn test_instance_with_single_explicit_ip_address(
 ) {
     let client = &cptestctx.external_client;
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
 
     // Create the parameters for the interface.
     let default_name = "default".parse::<Name>().unwrap();
@@ -2312,7 +2311,7 @@ async fn test_instance_with_new_custom_network_interfaces(
 ) {
     let client = &cptestctx.external_client;
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
     // Create a VPC Subnet other than the default.
     //
     // We'll create one interface in the default VPC Subnet and one in this new
@@ -2467,7 +2466,7 @@ async fn test_instance_create_delete_network_interface(
     let nexus = &cptestctx.server.server_context().nexus;
     let instance_name = "nic-attach-test-inst";
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -2714,7 +2713,7 @@ async fn test_instance_update_network_interfaces(
     let nexus = &cptestctx.server.server_context().nexus;
     let instance_name = "nic-update-test-inst";
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -3063,7 +3062,7 @@ async fn test_instance_update_network_interfaces(
     // secondary.
     let url_interface =
         format!("/v1/network-interfaces/{}", new_secondary_iface.identity.id);
-    NexusRequest::object_delete(&client, &url_interface)
+    NexusRequest::object_delete(client, &url_interface)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -3106,11 +3105,11 @@ async fn test_instance_update_network_interface_transit_ips(
     let instance_name = "transit-ips-test";
     let nic_name = "net0";
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
 
     // Create a stopped instance with a single network interface.
     let instance = create_instance_with(
-        &client,
+        client,
         PROJECT_NAME,
         instance_name,
         &params::InstanceNetworkInterfaceAttachment::Default,
@@ -3337,7 +3336,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    let _ = create_project(&client, PROJECT_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
 
     // Create two interfaces, in the same VPC Subnet. This will trigger an
     // error on creation of the second NIC, and we'll make sure that both are
@@ -3421,11 +3420,11 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     let instance_name = "nifs";
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
     // Create the "probablydata" disk
-    create_disk(&client, PROJECT_NAME, "probablydata").await;
+    create_disk(client, PROJECT_NAME, "probablydata").await;
 
     // Verify disk is there and currently detached
     let disks: Vec<Disk> =
@@ -3495,10 +3494,10 @@ async fn test_instance_create_attach_disks(
     let client = &cptestctx.external_client;
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
     let attachable_disk =
-        create_disk(&client, PROJECT_NAME, "attachable-disk").await;
+        create_disk(client, PROJECT_NAME, "attachable-disk").await;
 
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -3587,10 +3586,10 @@ async fn test_instance_create_attach_disks_undo(
     let client = &cptestctx.external_client;
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
-    let regular_disk = create_disk(&client, PROJECT_NAME, "a-reg-disk").await;
-    let faulted_disk = create_disk(&client, PROJECT_NAME, "faulted-disk").await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
+    let regular_disk = create_disk(client, PROJECT_NAME, "a-reg-disk").await;
+    let faulted_disk = create_disk(client, PROJECT_NAME, "faulted-disk").await;
 
     // set `faulted_disk` to the faulted state
     let apictx = &cptestctx.server.server_context();
@@ -3683,13 +3682,12 @@ async fn test_attach_eight_disks_to_instance(
     let client = &cptestctx.external_client;
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
     // Make 8 disks
     for i in 0..8 {
-        create_disk(&client, PROJECT_NAME, &format!("probablydata{}", i,))
-            .await;
+        create_disk(client, PROJECT_NAME, &format!("probablydata{}", i,)).await;
     }
 
     // Assert we created 8 disks
@@ -3769,13 +3767,12 @@ async fn test_cannot_attach_nine_disks_to_instance(
     let project_name = "bit-barrel";
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
     create_project(client, project_name).await;
 
     // Make 9 disks
     for i in 0..9 {
-        create_disk(&client, project_name, &format!("probablydata{}", i,))
-            .await;
+        create_disk(client, project_name, &format!("probablydata{}", i,)).await;
     }
 
     let disks_url = format!("/v1/disks?project={}", project_name,);
@@ -3852,13 +3849,12 @@ async fn test_cannot_attach_nine_disks_to_instance(
 async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
     // Make 8 disks
     for i in 0..8 {
-        create_disk(&client, PROJECT_NAME, &format!("probablydata{}", i,))
-            .await;
+        create_disk(client, PROJECT_NAME, &format!("probablydata{}", i,)).await;
     }
 
     // Assert we created 8 disks
@@ -3960,13 +3956,12 @@ async fn test_disks_detached_when_instance_destroyed(
     let instance_name = "nfs";
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
     // Make 8 disks
     for i in 0..8 {
-        create_disk(&client, PROJECT_NAME, &format!("probablydata{}", i,))
-            .await;
+        create_disk(client, PROJECT_NAME, &format!("probablydata{}", i,)).await;
     }
 
     // Assert we created 8 disks
@@ -4041,7 +4036,7 @@ async fn test_disks_detached_when_instance_destroyed(
     // needs to be done before the instance is stopped and dissociated from its
     // sled.
     let instance_url = format!("/v1/instances/nfs?project={}", PROJECT_NAME);
-    let instance = instance_get(&client, &instance_url).await;
+    let instance = instance_get(client, &instance_url).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
@@ -4053,12 +4048,12 @@ async fn test_disks_detached_when_instance_destroyed(
         .sled_client;
 
     // Stop and delete instance
-    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_post(client, instance_name, InstanceOp::Stop).await;
 
     instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
-    NexusRequest::object_delete(&client, &instance_url)
+    NexusRequest::object_delete(client, &instance_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -4149,11 +4144,11 @@ async fn test_duplicate_disk_attach_requests_ok(
     let client = &cptestctx.external_client;
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
-    create_disk(&client, PROJECT_NAME, "probablydata").await;
-    create_disk(&client, PROJECT_NAME, "alsodata").await;
+    create_disk(client, PROJECT_NAME, "probablydata").await;
+    create_disk(client, PROJECT_NAME, "alsodata").await;
 
     // Verify disk is there and currently detached
     let disks: Vec<Disk> =
@@ -4267,11 +4262,11 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
     let instance_name = "nifs";
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
     // Create the "probablydata" disk
-    create_disk(&client, PROJECT_NAME, "probablydata0").await;
+    create_disk(client, PROJECT_NAME, "probablydata0").await;
 
     // Create the instance
     let instance_params = params::InstanceCreate {
@@ -4349,7 +4344,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
 
     // Change the instance's boot disk.
     let instance = expect_instance_reconfigure_ok(
-        &client,
+        client,
         &instance.identity.id,
         params::InstanceUpdate {
             boot_disk: None,
@@ -4384,11 +4379,11 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
     let instance_name = "immediately-running";
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
-    create_disk(&client, PROJECT_NAME, "probablydata").await;
-    create_disk(&client, PROJECT_NAME, "alsodata").await;
+    create_disk(client, PROJECT_NAME, "probablydata").await;
+    create_disk(client, PROJECT_NAME, "alsodata").await;
 
     // Verify disk is there and currently detached
     let disks: Vec<Disk> =
@@ -4452,7 +4447,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     let error = expect_instance_reconfigure_err(
-        &client,
+        client,
         &instance_id.into_untyped_uuid(),
         params::InstanceUpdate {
             boot_disk: Some(alsodata.clone().into()),
@@ -4468,7 +4463,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
     // However, we can freely change the auto-restart policy of a running
     // instance.
     expect_instance_reconfigure_ok(
-        &client,
+        client,
         &instance_id.into_untyped_uuid(),
         params::InstanceUpdate {
             // Leave the boot disk the same as the one with which the instance
@@ -4492,7 +4487,7 @@ async fn test_updating_missing_instance_is_not_found(
     let client = &cptestctx.external_client;
 
     let error = expect_instance_reconfigure_err(
-        &client,
+        client,
         &UUID_THAT_DOESNT_EXIST,
         params::InstanceUpdate {
             boot_disk: None,
@@ -4568,7 +4563,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let instance_name = "downloading-more-ram";
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
 
     let initial_ncpus = InstanceCpuCount::try_from(2).unwrap();
     let initial_memory = ByteCount::from_gibibytes_u32(4);
@@ -4627,7 +4622,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(err.message, "instance must be stopped to be resized");
 
-    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_post(client, instance_name, InstanceOp::Stop).await;
     let nexus = &cptestctx.server.server_context().nexus;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
@@ -4778,7 +4773,7 @@ async fn test_auto_restart_policy_can_be_changed(
     let client = &cptestctx.external_client;
     let instance_name = "reincarnation-station";
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
 
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -4851,12 +4846,12 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let instance_name = "nifs";
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
     // Create the "probablydata" disk
-    create_disk(&client, PROJECT_NAME, "probablydata0").await;
-    create_disk(&client, PROJECT_NAME, "probablydata1").await;
+    create_disk(client, PROJECT_NAME, "probablydata0").await;
+    create_disk(client, PROJECT_NAME, "probablydata1").await;
 
     // Verify disks are there and currently detached
     let disks: Vec<Disk> =
@@ -4913,7 +4908,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     // Change the instance's boot disk.ity.id);
 
     let instance = expect_instance_reconfigure_ok(
-        &client,
+        client,
         &instance.identity.id,
         params::InstanceUpdate {
             boot_disk: Some(disks[1].identity.id.into()),
@@ -4934,11 +4929,11 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
     let instance_name = "nifs";
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
     // Create the "probablydata" disk
-    create_disk(&client, PROJECT_NAME, "probablydata0").await;
+    create_disk(client, PROJECT_NAME, "probablydata0").await;
 
     let disks: Vec<Disk> =
         NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
@@ -4980,7 +4975,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
 
     // Update the instance's boot disk to the unattached disk. This should fail.
     let error = expect_instance_reconfigure_err(
-        &client,
+        client,
         &instance.identity.id,
         params::InstanceUpdate {
             boot_disk: Some(disks[0].identity.id.into()),
@@ -5013,7 +5008,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
 
     // And now it can be made the boot disk.
     let instance = expect_instance_reconfigure_ok(
-        &client,
+        client,
         &instance.identity.id,
         params::InstanceUpdate {
             boot_disk: Some(disks[0].identity.id.into()),
@@ -5237,13 +5232,13 @@ async fn test_instance_create_with_anti_affinity_groups(
         .unwrap();
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
     // Create anti-affinity groups
     let anti_affinity_groups = ["anti-affinity1", "anti-affinity2"];
 
-    create_anti_affinity_groups(&client, &anti_affinity_groups).await;
+    create_anti_affinity_groups(client, &anti_affinity_groups).await;
 
     let anti_affinity_groups_param: Vec<_> = anti_affinity_groups
         .iter()
@@ -5303,13 +5298,13 @@ async fn test_instance_create_with_duplicate_anti_affinity_groups(
         .unwrap();
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
     // Create anti-affinity groups
     let anti_affinity_groups = ["anti-affinity1", "anti-affinity2"];
 
-    create_anti_affinity_groups(&client, &anti_affinity_groups).await;
+    create_anti_affinity_groups(client, &anti_affinity_groups).await;
 
     let mut anti_affinity_groups_param: Vec<_> = anti_affinity_groups
         .iter()
@@ -5374,8 +5369,8 @@ async fn test_instance_create_with_anti_affinity_groups_that_do_not_exist(
         .unwrap();
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
     // Create anti-affinity groups
     let anti_affinity_groups = ["anti-affinity1", "anti-affinity2"];
@@ -5437,8 +5432,8 @@ async fn test_instance_create_with_ssh_keys(
         .unwrap();
 
     // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_project_and_pool(&client).await;
+    DiskTest::new(cptestctx).await;
+    create_project_and_pool(client).await;
 
     // Add some SSH keys
     let key_configs = vec![
@@ -5657,7 +5652,7 @@ async fn expect_instance_creation_ok(
     instance_params: &params::InstanceCreate,
 ) {
     let builder =
-        RequestBuilder::new(client, http::Method::POST, &url_instances)
+        RequestBuilder::new(client, http::Method::POST, url_instances)
             .body(Some(&instance_params))
             .expect_status(Some(http::StatusCode::CREATED));
     let _ = NexusRequest::new(builder)
@@ -5716,7 +5711,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
         let url_instances = get_instances_url();
         expect_instance_creation_ok(client, &url_instances, &params).await;
 
-        let instance = instance_get(&client, &get_instance_url(config.0)).await;
+        let instance = instance_get(client, &get_instance_url(config.0)).await;
         instances.push(instance);
     }
 
@@ -5831,7 +5826,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
         let url_instances = get_instances_url();
         expect_instance_creation_ok(client, &url_instances, &params).await;
 
-        let instance = instance_get(&client, &get_instance_url(config.0)).await;
+        let instance = instance_get(client, &get_instance_url(config.0)).await;
         instances.push(instance);
     }
 
@@ -5868,7 +5863,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
 
-    create_project_and_pool(&client).await;
+    create_project_and_pool(client).await;
     let instance_url = get_instance_url(instance_name);
 
     // Make sure we get a 404 if we try to access the serial console before creation.
@@ -5897,7 +5892,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let instance_next = poll::wait_for_condition(
         || async {
             instance_simulate(nexus, &instance_id).await;
-            let instance_next = instance_get(&client, &instance_url).await;
+            let instance_next = instance_get(client, &instance_url).await;
             if instance_next.runtime.run_state == InstanceState::Running {
                 Ok(instance_next)
             } else {
@@ -5922,7 +5917,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
-    let (.., db_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., db_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance.identity.id)
         .fetch()
         .await
@@ -5964,7 +5959,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     // Request a halt and verify both the immediate state and the finished state.
     let instance = instance_next;
     let instance_next =
-        instance_post(&client, instance_name, InstanceOp::Stop).await;
+        instance_post(client, instance_name, InstanceOp::Stop).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Stopping);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -5974,7 +5969,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let instance = instance_next;
     instance_simulate(nexus, &instance_id).await;
     let instance_next =
-        instance_wait_for_state(&client, instance_id, InstanceState::Stopped)
+        instance_wait_for_state(client, instance_id, InstanceState::Stopped)
             .await;
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -5995,7 +5990,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 ) {
     let client = &cptestctx.external_client;
 
-    let _ = create_project(&client, PROJECT_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
 
     // Create two IP pools.
     //
@@ -6017,14 +6012,14 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     );
 
     // make first pool the default for the priv user's silo
-    create_ip_pool(&client, "pool1", Some(range1)).await;
-    link_ip_pool(&client, "pool1", &DEFAULT_SILO.id(), /*default*/ true).await;
+    create_ip_pool(client, "pool1", Some(range1)).await;
+    link_ip_pool(client, "pool1", &DEFAULT_SILO.id(), /*default*/ true).await;
 
     assert_ip_pool_utilization(client, "pool1", 0, 5, 0, 0).await;
 
     // second pool is associated with the silo but not default
-    create_ip_pool(&client, "pool2", Some(range2)).await;
-    link_ip_pool(&client, "pool2", &DEFAULT_SILO.id(), /*default*/ false).await;
+    create_ip_pool(client, "pool2", Some(range2)).await;
+    link_ip_pool(client, "pool2", &DEFAULT_SILO.id(), /*default*/ false).await;
 
     assert_ip_pool_utilization(client, "pool2", 0, 5, 0, 0).await;
 
@@ -6092,8 +6087,8 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     // stop and delete instances with IPs from pool1. perhaps surprisingly, that
     // includes pool2-inst also because the SNAT IP comes from the default pool
     // even when different pool is specified for the ephemeral IP
-    stop_and_delete_instance(&cptestctx, "pool1-inst").await;
-    stop_and_delete_instance(&cptestctx, "pool2-inst").await;
+    stop_and_delete_instance(cptestctx, "pool1-inst").await;
+    stop_and_delete_instance(cptestctx, "pool2-inst").await;
 
     // pool1 is down to 0 because it had 1 snat + 1 ephemeral from pool1-inst
     // and 1 snat from pool2-inst
@@ -6142,8 +6137,7 @@ async fn stop_and_delete_instance(
     instance_name: &str,
 ) {
     let client = &cptestctx.external_client;
-    let instance =
-        instance_post(&client, instance_name, InstanceOp::Stop).await;
+    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     let nexus = &cptestctx.server.server_context().nexus;
     instance_simulate(nexus, &instance_id).await;
@@ -6161,11 +6155,11 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
 ) {
     let client = &cptestctx.external_client;
 
-    let _ = create_project(&client, PROJECT_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
 
     // make first pool the default for the priv user's silo
-    create_ip_pool(&client, "default", None).await;
-    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
+    create_ip_pool(client, "default", None).await;
+    link_ip_pool(client, "default", &DEFAULT_SILO.id(), true).await;
 
     let orphan_pool_range = IpRange::V4(
         Ipv4Range::new(
@@ -6174,7 +6168,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         )
         .unwrap(),
     );
-    create_ip_pool(&client, "orphan-pool", Some(orphan_pool_range)).await;
+    create_ip_pool(client, "orphan-pool", Some(orphan_pool_range)).await;
 
     let instance_name = "orphan-pool-inst";
     let body = params::InstanceCreate {
@@ -6237,7 +6231,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
 ) {
     let client = &cptestctx.external_client;
 
-    let _ = create_project(&client, PROJECT_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
 
     // important: no pool create, so there is no pool
 
@@ -6286,7 +6280,7 @@ async fn test_instance_attach_several_external_ips(
 ) {
     let client = &cptestctx.external_client;
 
-    let _ = create_project(&client, PROJECT_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
 
     // Create a single (large) IP pool
     let default_pool_range = IpRange::V4(
@@ -6296,8 +6290,8 @@ async fn test_instance_attach_several_external_ips(
         )
         .unwrap(),
     );
-    create_ip_pool(&client, "default", Some(default_pool_range)).await;
-    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
+    create_ip_pool(client, "default", Some(default_pool_range)).await;
+    link_ip_pool(client, "default", &DEFAULT_SILO.id(), true).await;
 
     assert_ip_pool_utilization(client, "default", 0, 10, 0, 0).await;
 
@@ -6308,7 +6302,7 @@ async fn test_instance_attach_several_external_ips(
     for i in 1..8 {
         let name = format!("fip-{i}");
         fips.push(
-            create_floating_ip(&client, &name, PROJECT_NAME, None, None).await,
+            create_floating_ip(client, &name, PROJECT_NAME, None, None).await,
         );
         external_ip_create.push(params::ExternalIpCreate::Floating {
             floating_ip: name.parse::<Name>().unwrap().into(),
@@ -6318,7 +6312,7 @@ async fn test_instance_attach_several_external_ips(
     // Create an instance with pool name blank, expect IP from default pool
     let instance_name = "many-fips";
     let instance = create_instance_with(
-        &client,
+        client,
         PROJECT_NAME,
         instance_name,
         &params::InstanceNetworkInterfaceAttachment::Default,
@@ -6335,7 +6329,7 @@ async fn test_instance_attach_several_external_ips(
     // Verify that all external IPs are visible on the instance and have
     // been allocated in order.
     let external_ips =
-        fetch_instance_external_ips(&client, instance_name, PROJECT_NAME).await;
+        fetch_instance_external_ips(client, instance_name, PROJECT_NAME).await;
     assert_eq!(external_ips.len(), 8);
     eprintln!("{external_ips:?}");
     for (i, eip) in external_ips
@@ -6358,7 +6352,7 @@ async fn test_instance_attach_several_external_ips(
     // Verify that all floating IPs are bound to their parent instance.
     for fip in fips {
         let fetched_fip = floating_ip_get(
-            &client,
+            client,
             &get_floating_ip_by_id_url(&fip.identity.id),
         )
         .await;
@@ -6372,7 +6366,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
 ) {
     let client = &cptestctx.external_client;
 
-    let _ = create_project(&client, PROJECT_NAME).await;
+    let _ = create_project(client, PROJECT_NAME).await;
 
     // don't need any IP pools because request fails at parse time
 
@@ -6468,7 +6462,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
 
     // Create a silo with a Collaborator User
     let silo =
-        create_silo(&client, "authz", true, SiloIdentityMode::LocalOnly).await;
+        create_silo(client, "authz", true, SiloIdentityMode::LocalOnly).await;
     let user_id = create_local_user(
         client,
         &silo,
@@ -6487,8 +6481,8 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // can't use create_default_ip_pool because we need to link to the silo we just made
-    create_ip_pool(&client, "default", None).await;
-    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+    create_ip_pool(client, "default", None).await;
+    link_ip_pool(client, "default", &silo.identity.id, true).await;
 
     assert_ip_pool_utilization(client, "default", 0, 65536, 0, 0).await;
 
@@ -6548,7 +6542,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     let nexus = &apictx.nexus;
     let authn = AuthnMode::SiloUser(user_id);
     let instance_url = get_instance_url(instance_name);
-    let instance = instance_get_as(&client, &instance_url, authn.clone()).await;
+    let instance = instance_get_as(client, &instance_url, authn.clone()).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     info!(&cptestctx.logctx.log, "test got instance"; "instance" => ?instance);
     assert_eq!(instance.runtime.run_state, InstanceState::Starting);
@@ -6568,7 +6562,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         nexus.datastore().clone(),
     );
     instance_simulate_with_opctx(nexus, &instance_id, &opctx).await;
-    let instance = instance_get_as(&client, &instance_url, authn).await;
+    let instance = instance_get_as(client, &instance_url, authn).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
 
     // Stop the instance
@@ -6637,7 +6631,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance.identity.id)
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
@@ -6652,7 +6646,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
 
     let mut sled_agents: Vec<&Arc<SledAgent>> =
         additional_sleds.iter().map(|x| &x.sled_agent).collect();
-    sled_agents.push(&cptestctx.first_sled_agent());
+    sled_agents.push(cptestctx.first_sled_agent());
 
     for sled_agent in &sled_agents {
         assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
@@ -6660,7 +6654,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
 
     // Delete the instance
     instance_simulate(nexus, &instance_id).await;
-    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_post(client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
@@ -6811,7 +6805,7 @@ pub async fn instance_wait_for_vmm_registration(
     let datastore = cptestctx.server.server_context().nexus.datastore();
     let log = &cptestctx.logctx.log;
     let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
@@ -7124,7 +7118,7 @@ async fn instance_wait_for_simulated_transition(
     let url = format!("/v1/instances/{id}");
     let result = wait_for_condition(
         || async {
-            let instance: Instance = NexusRequest::object_get(&client, &url)
+            let instance: Instance = NexusRequest::object_get(client, &url)
                 .authn_as(AuthnMode::PrivilegedUser)
                 .execute()
                 .await?

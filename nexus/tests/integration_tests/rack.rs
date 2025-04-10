@@ -76,7 +76,7 @@ async fn test_rack_initialization(cptestctx: &ControlPlaneTestContext) {
     let login_url = format!("/v1/login/{}/local", cptestctx.silo_name);
     let username = cptestctx.user_name.clone();
     let password: params::Password = TEST_SUITE_PASSWORD.parse().unwrap();
-    let _ = RequestBuilder::new(&client, Method::POST, &login_url)
+    let _ = RequestBuilder::new(client, Method::POST, &login_url)
         .body(Some(&params::UsernamePasswordCredentials { username, password }))
         .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()
@@ -98,7 +98,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     let external_client = &cptestctx.external_client;
     let list_url = "/v1/system/hardware/sleds-uninitialized";
     let mut uninitialized_sleds =
-        NexusRequest::object_get(external_client, &list_url)
+        NexusRequest::object_get(external_client, list_url)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -140,7 +140,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     // Ensure there's only one unintialized sled remaining, and it's not
     // the one that was just added into the `sled` table
     let uninitialized_sleds_2 =
-        NexusRequest::object_get(external_client, &list_url)
+        NexusRequest::object_get(external_client, list_url)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await

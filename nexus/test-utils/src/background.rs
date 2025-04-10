@@ -177,7 +177,7 @@ pub async fn run_region_replacement(
     internal_client: &ClientTestContext,
 ) -> usize {
     let last_background_task =
-        activate_background_task(&internal_client, "region_replacement").await;
+        activate_background_task(internal_client, "region_replacement").await;
 
     let LastResult::Completed(last_result_completed) =
         last_background_task.last
@@ -206,7 +206,7 @@ pub async fn run_region_replacement_driver(
     internal_client: &ClientTestContext,
 ) -> usize {
     let last_background_task =
-        activate_background_task(&internal_client, "region_replacement_driver")
+        activate_background_task(internal_client, "region_replacement_driver")
             .await;
 
     let LastResult::Completed(last_result_completed) =
@@ -234,7 +234,7 @@ pub async fn run_region_snapshot_replacement_start(
     internal_client: &ClientTestContext,
 ) -> usize {
     let last_background_task = activate_background_task(
-        &internal_client,
+        internal_client,
         "region_snapshot_replacement_start",
     )
     .await;
@@ -266,7 +266,7 @@ pub async fn run_region_snapshot_replacement_garbage_collection(
     internal_client: &ClientTestContext,
 ) -> usize {
     let last_background_task = activate_background_task(
-        &internal_client,
+        internal_client,
         "region_snapshot_replacement_garbage_collection",
     )
     .await;
@@ -297,7 +297,7 @@ pub async fn run_region_snapshot_replacement_step(
     internal_client: &ClientTestContext,
 ) -> usize {
     let last_background_task = activate_background_task(
-        &internal_client,
+        internal_client,
         "region_snapshot_replacement_step",
     )
     .await;
@@ -330,7 +330,7 @@ pub async fn run_region_snapshot_replacement_finish(
     internal_client: &ClientTestContext,
 ) -> usize {
     let last_background_task = activate_background_task(
-        &internal_client,
+        internal_client,
         "region_snapshot_replacement_finish",
     )
     .await;
@@ -362,7 +362,7 @@ pub async fn run_read_only_region_replacement_start(
     internal_client: &ClientTestContext,
 ) -> usize {
     let last_background_task = activate_background_task(
-        &internal_client,
+        internal_client,
         "read_only_region_replacement_start",
     )
     .await;
@@ -408,8 +408,7 @@ pub async fn wait_tuf_artifact_replication_step(
     internal_client: &ClientTestContext,
 ) -> TufArtifactReplicationStatus {
     let last_background_task =
-        wait_background_task(&internal_client, "tuf_artifact_replication")
-            .await;
+        wait_background_task(internal_client, "tuf_artifact_replication").await;
 
     let LastResult::Completed(last_result_completed) =
         last_background_task.last
@@ -432,7 +431,7 @@ pub async fn run_tuf_artifact_replication_step(
     internal_client: &ClientTestContext,
 ) -> TufArtifactReplicationStatus {
     let last_background_task =
-        activate_background_task(&internal_client, "tuf_artifact_replication")
+        activate_background_task(internal_client, "tuf_artifact_replication")
             .await;
 
     let LastResult::Completed(last_result_completed) =

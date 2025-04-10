@@ -372,7 +372,7 @@ async fn srrs_new_region_ensure(
 
     let mut ensured_dataset_and_region = osagactx
         .nexus()
-        .ensure_all_datasets_and_regions(&log, vec![new_dataset_and_region])
+        .ensure_all_datasets_and_regions(log, vec![new_dataset_and_region])
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -808,15 +808,15 @@ pub(crate) mod test {
         let opctx = test_opctx(cptestctx);
 
         let _project_id =
-            create_project(&client, PROJECT_NAME).await.identity.id;
+            create_project(client, PROJECT_NAME).await.identity.id;
 
         // Create a disk
         let client = &cptestctx.external_client;
-        let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+        let disk = create_disk(client, PROJECT_NAME, DISK_NAME).await;
 
         // Assert disk has three allocated regions
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk_id)
             .fetch()
             .await
@@ -970,7 +970,7 @@ pub(crate) mod test {
         ];
 
         let only_new_region = find_only_new_region(
-            &log,
+            log,
             existing_datasets_and_regions,
             new_datasets_and_regions,
         );
@@ -1009,13 +1009,13 @@ pub(crate) mod test {
         )
         .await;
 
-        assert!(three_region_allocations_exist(&datastore, &test).await);
+        assert!(three_region_allocations_exist(datastore, test).await);
         assert_region_replacement_request_untouched(
-            cptestctx, &datastore, &request,
+            cptestctx, datastore, request,
         )
         .await;
-        assert_volume_untouched(&datastore, &affected_volume_original).await;
-        assert_region_untouched(&datastore, &affected_region_original).await;
+        assert_volume_untouched(datastore, affected_volume_original).await;
+        assert_region_untouched(datastore, affected_region_original).await;
     }
 
     async fn three_region_allocations_exist(
@@ -1094,10 +1094,10 @@ pub(crate) mod test {
             .unwrap();
 
         let mut actual: VolumeConstructionRequest =
-            serde_json::from_str(&affected_volume.data()).unwrap();
+            serde_json::from_str(affected_volume.data()).unwrap();
 
         let mut expected: VolumeConstructionRequest =
-            serde_json::from_str(&affected_volume_original.data()).unwrap();
+            serde_json::from_str(affected_volume_original.data()).unwrap();
 
         zero_out_gen_number(&mut actual);
         zero_out_gen_number(&mut expected);
@@ -1127,17 +1127,17 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
 
-        let _ = create_project(&client, PROJECT_NAME).await.identity.id;
-        let opctx = test_opctx(&cptestctx);
+        let _ = create_project(client, PROJECT_NAME).await.identity.id;
+        let opctx = test_opctx(cptestctx);
 
         // Create a disk, and use the first region as input to the replacement
         // start saga
 
         let client = &cptestctx.external_client;
-        let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+        let disk = create_disk(client, PROJECT_NAME, DISK_NAME).await;
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk_id)
             .fetch()
             .await
@@ -1180,11 +1180,11 @@ pub(crate) mod test {
             || Box::pin(async { new_test_params(&opctx, &request) }),
             || Box::pin(async {
                 verify_clean_slate(
-                    &cptestctx,
+                    cptestctx,
                     &disk_test,
                     &request,
                     &affected_volume_original,
-                    &region_to_replace,
+                    region_to_replace,
                 ).await;
             }),
             log
@@ -1202,17 +1202,17 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
 
-        let _ = create_project(&client, PROJECT_NAME).await.identity.id;
-        let opctx = test_opctx(&cptestctx);
+        let _ = create_project(client, PROJECT_NAME).await.identity.id;
+        let opctx = test_opctx(cptestctx);
 
         // Create a disk, and use the first region as input to the replacement
         // start saga
 
         let client = &cptestctx.external_client;
-        let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+        let disk = create_disk(client, PROJECT_NAME, DISK_NAME).await;
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk_id)
             .fetch()
             .await

@@ -96,7 +96,7 @@ mod tests {
 
         // Should have the default to start with.
         let record = datastore
-            .allow_list_view(&opctx)
+            .allow_list_view(opctx)
             .await
             .expect("Expected default data populated in dbinit.sql");
         assert!(
@@ -110,7 +110,7 @@ mod tests {
         let allowed_ips =
             external::AllowedSourceIps::try_from(ips.as_slice()).unwrap();
         let record = datastore
-            .allow_list_upsert(&opctx, allowed_ips)
+            .allow_list_upsert(opctx, allowed_ips)
             .await
             .expect("Expected this insert to succeed");
         assert_eq!(
@@ -129,7 +129,7 @@ mod tests {
         let allowed_ips =
             external::AllowedSourceIps::try_from(new_ips.as_slice()).unwrap();
         let new_record = datastore
-            .allow_list_upsert(&opctx, allowed_ips)
+            .allow_list_upsert(opctx, allowed_ips)
             .await
             .expect("Expected this insert to succeed");
         assert_eq!(
@@ -154,7 +154,7 @@ mod tests {
         let record = new_record;
         let allowed_ips = external::AllowedSourceIps::Any;
         let new_record = datastore
-            .allow_list_upsert(&opctx, allowed_ips)
+            .allow_list_upsert(opctx, allowed_ips)
             .await
             .expect("Expected this insert to succeed");
         assert_eq!(
@@ -179,7 +179,7 @@ mod tests {
         let allowed_ips =
             external::AllowedSourceIps::try_from(new_ips.as_slice()).unwrap();
         let new_record = datastore
-            .allow_list_upsert(&opctx, allowed_ips)
+            .allow_list_upsert(opctx, allowed_ips)
             .await
             .expect("Expected this insert to succeed");
         assert_eq!(

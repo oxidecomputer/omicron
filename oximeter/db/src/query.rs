@@ -165,48 +165,46 @@ impl SelectQueryBuilder {
         }
         let field_value = match field_type {
             FieldType::String => FieldValue::from(&selector.value),
-            FieldType::I8 => parse_selector_field_value::<i8>(
-                &field_schema,
-                &selector.value,
-            )?,
-            FieldType::U8 => parse_selector_field_value::<u8>(
-                &field_schema,
-                &selector.value,
-            )?,
+            FieldType::I8 => {
+                parse_selector_field_value::<i8>(field_schema, &selector.value)?
+            }
+            FieldType::U8 => {
+                parse_selector_field_value::<u8>(field_schema, &selector.value)?
+            }
             FieldType::I16 => parse_selector_field_value::<i16>(
-                &field_schema,
+                field_schema,
                 &selector.value,
             )?,
             FieldType::U16 => parse_selector_field_value::<u16>(
-                &field_schema,
+                field_schema,
                 &selector.value,
             )?,
             FieldType::I32 => parse_selector_field_value::<i32>(
-                &field_schema,
+                field_schema,
                 &selector.value,
             )?,
             FieldType::U32 => parse_selector_field_value::<u32>(
-                &field_schema,
+                field_schema,
                 &selector.value,
             )?,
             FieldType::I64 => parse_selector_field_value::<i64>(
-                &field_schema,
+                field_schema,
                 &selector.value,
             )?,
             FieldType::U64 => parse_selector_field_value::<u64>(
-                &field_schema,
+                field_schema,
                 &selector.value,
             )?,
             FieldType::IpAddr => parse_selector_field_value::<IpAddr>(
-                &field_schema,
+                field_schema,
                 &selector.value,
             )?,
             FieldType::Uuid => parse_selector_field_value::<Uuid>(
-                &field_schema,
+                field_schema,
                 &selector.value,
             )?,
             FieldType::Bool => parse_selector_field_value::<bool>(
-                &field_schema,
+                field_schema,
                 &selector.value,
             )?,
         };
@@ -657,7 +655,7 @@ impl SelectQuery {
                             &format!(
                                 "INNER JOIN ({subquery}) AS filter{i} ON ({join_on}) ",
                                 subquery = subquery,
-                                join_on = create_join_on_condition(&JOIN_COLUMNS, i),
+                                join_on = create_join_on_condition(JOIN_COLUMNS, i),
                                 i = i,
                         ));
                     }

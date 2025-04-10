@@ -214,7 +214,7 @@ impl SledAgent {
         let ncpus: i64 = (&hardware.properties.ncpus).into();
         if ncpus > 16 {
             return Err(Error::internal_error(
-                &"could not allocate an instance: ran out of CPUs!",
+                "could not allocate an instance: ran out of CPUs!",
             ));
         };
 
@@ -684,7 +684,7 @@ impl SledAgent {
         let mut eips = self.external_ips.lock().unwrap();
         let my_eips = eips.entry(propolis_id).or_default();
 
-        my_eips.remove(&body_args);
+        my_eips.remove(body_args);
 
         Ok(())
     }

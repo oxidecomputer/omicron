@@ -376,7 +376,7 @@ mod test {
         // complete and report a successful (empty) summary.
         let generation = Generation::new();
         let blueprint = Arc::new(
-            create_blueprint(&datastore, &opctx, BTreeMap::new(), generation)
+            create_blueprint(datastore, &opctx, BTreeMap::new(), generation)
                 .await,
         );
         let blueprint_id = blueprint.1.id;
@@ -435,7 +435,7 @@ mod test {
         //
         // TODO: add expunged zones to the test (should not be deployed).
         let mut blueprint = create_blueprint(
-            &datastore,
+            datastore,
             &opctx,
             BTreeMap::from([
                 (sled_id1, make_zones(BlueprintZoneDisposition::InService)),

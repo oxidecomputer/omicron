@@ -230,7 +230,7 @@ impl Workspace {
                     &self.workspace_root,
                 )
             })?;
-        let path = cargo_toml_parent(&relative_path, &manifest_path)?;
+        let path = cargo_toml_parent(relative_path, manifest_path)?;
         Ok(path)
     }
 

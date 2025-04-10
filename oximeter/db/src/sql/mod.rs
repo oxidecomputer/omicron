@@ -226,7 +226,7 @@ impl RestrictedQuery {
     /// Construct a new restricted query.
     pub fn new(sql: impl AsRef<str>) -> Result<Self, OxdbError> {
         let safe_sql = SafeSql::new(sql);
-        let statements = Parser::parse_sql(&OxdbDialect, &safe_sql.safe_sql())
+        let statements = Parser::parse_sql(&OxdbDialect, safe_sql.safe_sql())
             .map_err(Error::from)?;
         if statements.len() != 1 {
             return unsupported!("Only a single SQL statement is supported");
@@ -267,7 +267,7 @@ impl RestrictedQuery {
         &self,
         timeseries_schema: &BTreeMap<TimeseriesName, TimeseriesSchema>,
     ) -> Result<String, OxdbError> {
-        self.generate_timeseries_ctes(&timeseries_schema).map(|cte_tables| {
+        self.generate_timeseries_ctes(timeseries_schema).map(|cte_tables| {
             if cte_tables.is_empty() {
                 // The query didn't reference any timeseries at all, let's just
                 // return it

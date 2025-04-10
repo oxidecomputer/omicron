@@ -171,7 +171,7 @@ impl CrucibleDataInner {
         }
 
         if let Some(region) = self.regions.get(&id) {
-            if let Some(mismatch) = mismatch(&params, &region) {
+            if let Some(mismatch) = mismatch(&params, region) {
                 let s = format!(
                     "region {region:?} already exists as {params:?}: {mismatch}"
                 );
@@ -1410,7 +1410,7 @@ impl StorageInner {
             });
         }
         self.nested_datasets
-            .retain(|dataset, _| dataset_names.contains(&dataset));
+            .retain(|dataset, _| dataset_names.contains(dataset));
 
         Ok(DatasetsManagementResult {
             status: config

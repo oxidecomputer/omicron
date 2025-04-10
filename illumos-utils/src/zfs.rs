@@ -937,12 +937,12 @@ impl Zfs {
                 if let (CanMount::On, Mountpoint::Path(path)) =
                     (&can_mount, &mountpoint)
                 {
-                    ensure_empty_immutable_mountpoint(&path).map_err(
-                        |err| EnsureDatasetErrorRaw::MountpointCreation {
+                    ensure_empty_immutable_mountpoint(path).map_err(|err| {
+                        EnsureDatasetErrorRaw::MountpointCreation {
                             mountpoint: path.to_path_buf(),
                             err,
-                        },
-                    )?;
+                        }
+                    })?;
                     Self::mount_dataset(name)?;
                 }
             }
@@ -963,7 +963,7 @@ impl Zfs {
             if let (CanMount::On, Mountpoint::Path(path)) =
                 (&can_mount, &mountpoint)
             {
-                ensure_empty_immutable_mountpoint(&path).map_err(|err| {
+                ensure_empty_immutable_mountpoint(path).map_err(|err| {
                     EnsureDatasetErrorRaw::MountpointCreation {
                         mountpoint: path.to_path_buf(),
                         err,
@@ -1000,7 +1000,7 @@ impl Zfs {
 
         if let Some(opts) = additional_options {
             for o in &opts {
-                cmd.args(&["-o", &o]);
+                cmd.args(&["-o", o]);
             }
         }
 
@@ -1300,8 +1300,7 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
     }
 
     // Collect all datasets for ramdisk-based Oxide zones, if any exist.
-    if let Ok(ramdisk_datasets) = Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)
-    {
+    if let Ok(ramdisk_datasets) = Zfs::list_datasets(ZONE_ZFS_RAMDISK_DATASET) {
         for dataset in &ramdisk_datasets {
             datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
         }
@@ -1377,7 +1376,7 @@ mod test {
              dataset_name\tname\tI_AM_IGNORED\t-\n\
              dataset_name\tmounted\tyes\t-\n\
              dataset_name\tcompression\toff\tinherited from parent";
-        let props = DatasetProperties::parse_many(&input)
+        let props = DatasetProperties::parse_many(input)
             .expect("Should have parsed data");
         assert_eq!(props.len(), 1);
 
@@ -1398,7 +1397,7 @@ mod test {
              dataset_name\tname\tI_AM_IGNORED\t-\n\
              dataset_name\tmounted\tyes\t-\n\
              dataset_name\tcompression\toff\tinherited from parent";
-        let err = DatasetProperties::parse_many(&input)
+        let err = DatasetProperties::parse_many(input)
             .expect_err("Should have parsed data");
         assert!(
             err.to_string().contains("Unexpected column data: 'EXTRA'"),
@@ -1415,7 +1414,7 @@ mod test {
              dataset_name\tquota\t111\t-\n\
              dataset_name\treservation\t222\t-\n\
              dataset_name\tcompression\toff\tinherited from parent";
-        let props = DatasetProperties::parse_many(&input)
+        let props = DatasetProperties::parse_many(input)
             .expect("Should have parsed data");
         assert_eq!(props.len(), 1);
         assert_eq!(
@@ -1437,7 +1436,7 @@ mod test {
              dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-";
 
-        let err = DatasetProperties::parse_many(&input)
+        let err = DatasetProperties::parse_many(input)
             .expect_err("Should have failed to parse");
         assert!(
             format!("{err:#}").contains("error parsing UUID (dataset)"),
@@ -1450,7 +1449,7 @@ mod test {
         let input = "dataset_name\tavailable\tBADAVAIL\t-\n\
              dataset_name\tmounted\t-\t-\n\
              dataset_name\tused\t5678\t-";
-        let err = DatasetProperties::parse_many(&input)
+        let err = DatasetProperties::parse_many(input)
             .expect_err("Should have failed to parse");
         assert!(
             format!("{err:#}").contains("invalid digit found in string"),
@@ -1463,7 +1462,7 @@ mod test {
         let input = "dataset_name\tavailable\t1234\t-\n\
              dataset_name\tmounted\t-\t-\n\
              dataset_name\tused\tBADUSAGE\t-";
-        let err = DatasetProperties::parse_many(&input)
+        let err = DatasetProperties::parse_many(input)
             .expect_err("Should have failed to parse");
         assert!(
             format!("{err:#}").contains("invalid digit found in string"),
@@ -1477,7 +1476,7 @@ mod test {
              dataset_name\tused\t5678\t-\n\
              dataset_name\tmounted\t-\t-\n\
              dataset_name\tquota\tBADQUOTA\t-";
-        let err = DatasetProperties::parse_many(&input)
+        let err = DatasetProperties::parse_many(input)
             .expect_err("Should have failed to parse");
         assert!(
             format!("{err:#}").contains("invalid digit found in string"),
@@ -1492,7 +1491,7 @@ mod test {
              dataset_name\tquota\t111\t-\n\
              dataset_name\tmounted\t-\t-\n\
              dataset_name\treservation\tBADRES\t-";
-        let err = DatasetProperties::parse_many(&input)
+        let err = DatasetProperties::parse_many(input)
             .expect_err("Should have failed to parse");
         assert!(
             format!("{err:#}").contains("invalid digit found in string"),
@@ -1549,7 +1548,7 @@ mod test {
              dataset_name\tused\t5678\t-\n\
              dataset_name\tmounted\t-\t-\n\
              dataset_name\tcompression\toff\t-";
-        let props = DatasetProperties::parse_many(&input)
+        let props = DatasetProperties::parse_many(input)
             .expect("Should have parsed data");
         assert_eq!(props.len(), 1);
         assert_eq!(props[0].id, None);
@@ -1562,7 +1561,7 @@ mod test {
              dataset_name\tused\t5678\t-\n\
              dataset_name\tmounted\t-\t-\n\
              dataset_name\tcompression\toff\t-";
-        let props = DatasetProperties::parse_many(&input)
+        let props = DatasetProperties::parse_many(input)
             .expect("Should have parsed data");
         assert_eq!(props.len(), 1);
         assert_eq!(props[0].id, None);
@@ -1575,7 +1574,7 @@ mod test {
              dataset_name\tused\t5678\t-\n\
              dataset_name\tmounted\t-\t-\n\
              dataset_name\tcompression\toff\t-";
-        let props = DatasetProperties::parse_many(&input)
+        let props = DatasetProperties::parse_many(input)
             .expect("Should have parsed data");
         assert_eq!(props.len(), 1);
         assert_eq!(props[0].quota, None);
@@ -1588,7 +1587,7 @@ mod test {
              dataset_name\tused\t5678\t-\n\
              dataset_name\tmounted\t-\t-\n\
              dataset_name\tcompression\toff\t-";
-        let props = DatasetProperties::parse_many(&input)
+        let props = DatasetProperties::parse_many(input)
             .expect("Should have parsed data");
         assert_eq!(props.len(), 1);
         assert_eq!(props[0].reservation, None);
@@ -1609,7 +1608,7 @@ mod test {
              bar\tused\t222\t-\n\
              bar\tcompression\toff\t-";
 
-        let props = DatasetProperties::parse_many(&input)
+        let props = DatasetProperties::parse_many(input)
             .expect("Should have parsed data");
         assert_eq!(props.len(), 2);
         assert_eq!(props[0].name, "bar");

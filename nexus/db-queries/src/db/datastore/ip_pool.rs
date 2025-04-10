@@ -194,7 +194,7 @@ impl DataStore {
         opctx: &OpContext,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
         let name = SERVICE_IP_POOL_NAME.parse().unwrap();
-        LookupPath::new(&opctx, self).ip_pool_name(&Name(name)).fetch().await
+        LookupPath::new(opctx, self).ip_pool_name(&Name(name)).fetch().await
     }
 
     /// Creates a new IP pool.
@@ -586,7 +586,7 @@ impl DataStore {
                             )
                             .values(igw_pool),
                         )
-                        .insert_and_get_result_async(&conn)
+                        .insert_and_get_result_async(conn)
                         .await {
                             Ok(x) => x,
                             Err(e) => match e {
@@ -985,7 +985,7 @@ impl DataStore {
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
             let batch = self
-                .ip_pool_list_ranges(opctx, &authz_pool, &p.current_pagparams())
+                .ip_pool_list_ranges(opctx, authz_pool, &p.current_pagparams())
                 .await?;
             // The use of `last_address` here assumes `paginator` is sorting
             // in Ascending order (which it does - see the implementation of
@@ -1164,7 +1164,7 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // we start out with no default pool, so we expect not found
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
+        let error = datastore.ip_pools_fetch_default(opctx).await.unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
         let pagparams_id = DataPageParams {
@@ -1175,7 +1175,7 @@ mod test {
         let pagbyid = PaginatedBy::Id(pagparams_id);
 
         let all_pools = datastore
-            .ip_pools_list(&opctx, &pagbyid)
+            .ip_pools_list(opctx, &pagbyid)
             .await
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 0);
@@ -1183,7 +1183,7 @@ mod test {
         let authz_silo = opctx.authn.silo_required().unwrap();
 
         let silo_pools = datastore
-            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
+            .silo_ip_pool_list(opctx, &authz_silo, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -1197,18 +1197,18 @@ mod test {
             description: "".to_string(),
         };
         let pool1_for_silo = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .ip_pool_create(opctx, IpPool::new(&identity))
             .await
             .expect("Failed to create IP pool");
 
         // shows up in full list but not silo list
         let all_pools = datastore
-            .ip_pools_list(&opctx, &pagbyid)
+            .ip_pools_list(opctx, &pagbyid)
             .await
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 1);
         let silo_pools = datastore
-            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
+            .silo_ip_pool_list(opctx, &authz_silo, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -1220,7 +1220,7 @@ mod test {
             LookupType::ById(pool1_for_silo.id()),
         );
         let error = datastore
-            .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, true)
+            .ip_pool_set_default(opctx, &authz_pool, &authz_silo, true)
             .await
             .expect_err("Should not be able to make non-existent link default");
         assert_matches!(error, Error::ObjectNotFound { .. });
@@ -1233,18 +1233,18 @@ mod test {
             is_default: false,
         };
         datastore
-            .ip_pool_link_silo(&opctx, link_body.clone())
+            .ip_pool_link_silo(opctx, link_body.clone())
             .await
             .expect("Failed to associate IP pool with silo");
 
         // because that one was not a default, when we ask for the silo default
         // pool, we still get nothing
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
+        let error = datastore.ip_pools_fetch_default(opctx).await.unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
         // now it shows up in the silo list
         let silo_pools = datastore
-            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
+            .silo_ip_pool_list(opctx, &authz_silo, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 1);
@@ -1253,26 +1253,26 @@ mod test {
 
         // linking an already linked silo errors due to PK conflict
         let err = datastore
-            .ip_pool_link_silo(&opctx, link_body)
+            .ip_pool_link_silo(opctx, link_body)
             .await
             .expect_err("Creating the same link again should conflict");
         assert_matches!(err, Error::ObjectAlreadyExists { .. });
 
         // now make it default
         datastore
-            .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, true)
+            .ip_pool_set_default(opctx, &authz_pool, &authz_silo, true)
             .await
             .expect("Should be able to make pool default");
 
         // setting default if already default is allowed
         datastore
-            .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, true)
+            .ip_pool_set_default(opctx, &authz_pool, &authz_silo, true)
             .await
             .expect("Should be able to make pool default again");
 
         // now when we ask for the default pool again, we get that one
         let (authz_pool1_for_silo, ip_pool) = datastore
-            .ip_pools_fetch_default(&opctx)
+            .ip_pools_fetch_default(opctx)
             .await
             .expect("Failed to get silo's default IP pool");
         assert_eq!(ip_pool.name().as_str(), "pool1-for-silo");
@@ -1283,12 +1283,12 @@ mod test {
             description: "".to_string(),
         };
         let second_silo_default = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .ip_pool_create(opctx, IpPool::new(&identity))
             .await
             .expect("Failed to create pool");
         let err = datastore
             .ip_pool_link_silo(
-                &opctx,
+                opctx,
                 IpPoolResource {
                     ip_pool_id: second_silo_default.id(),
                     resource_type: IpPoolResourceType::Silo,
@@ -1304,17 +1304,17 @@ mod test {
         let authz_silo =
             authz::Silo::new(authz::Fleet, silo_id, LookupType::ById(silo_id));
         datastore
-            .ip_pool_unlink_silo(&opctx, &authz_pool1_for_silo, &authz_silo)
+            .ip_pool_unlink_silo(opctx, &authz_pool1_for_silo, &authz_silo)
             .await
             .expect("Failed to unlink IP pool from silo");
 
         // no default
-        let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
+        let error = datastore.ip_pools_fetch_default(opctx).await.unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
         // and silo pools list is empty again
         let silo_pools = datastore
-            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
+            .silo_ip_pool_list(opctx, &authz_silo, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -1331,10 +1331,10 @@ mod test {
 
         // confirm internal pool appears as internal
         let (authz_pool, _pool) =
-            datastore.ip_pools_service_lookup(&opctx).await.unwrap();
+            datastore.ip_pools_service_lookup(opctx).await.unwrap();
 
         let is_internal =
-            datastore.ip_pool_is_internal(&opctx, &authz_pool).await;
+            datastore.ip_pool_is_internal(opctx, &authz_pool).await;
         assert_eq!(is_internal, Ok(true));
 
         // another random pool should not be considered internal
@@ -1343,7 +1343,7 @@ mod test {
             description: "".to_string(),
         };
         let other_pool = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .ip_pool_create(opctx, IpPool::new(&identity))
             .await
             .expect("Failed to create IP pool");
 
@@ -1353,7 +1353,7 @@ mod test {
             LookupType::ById(other_pool.id()),
         );
         let is_internal =
-            datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
+            datastore.ip_pool_is_internal(opctx, &authz_other_pool).await;
         assert_eq!(is_internal, Ok(false));
 
         // now link it to the current silo, and it is still not internal
@@ -1365,12 +1365,12 @@ mod test {
             is_default: true,
         };
         datastore
-            .ip_pool_link_silo(&opctx, link)
+            .ip_pool_link_silo(opctx, link)
             .await
             .expect("Failed to make IP pool default for silo");
 
         let is_internal =
-            datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
+            datastore.ip_pool_is_internal(opctx, &authz_other_pool).await;
         assert_eq!(is_internal, Ok(false));
 
         db.terminate().await;
@@ -1394,7 +1394,7 @@ mod test {
             },
         );
         let (.., project) =
-            datastore.project_create(&opctx, project).await.unwrap();
+            datastore.project_create(opctx, project).await.unwrap();
 
         // create an IP pool for the silo, add a range to it, and link it to the silo
         let identity = IdentityMetadataCreateParams {
@@ -1402,7 +1402,7 @@ mod test {
             description: "".to_string(),
         };
         let pool = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity))
+            .ip_pool_create(opctx, IpPool::new(&identity))
             .await
             .expect("Failed to create IP pool");
         let authz_pool = authz::IpPool::new(
@@ -1412,10 +1412,8 @@ mod test {
         );
 
         // capacity of zero because there are no ranges
-        let max_ips = datastore
-            .ip_pool_total_capacity(&opctx, &authz_pool)
-            .await
-            .unwrap();
+        let max_ips =
+            datastore.ip_pool_total_capacity(opctx, &authz_pool).await.unwrap();
         assert_eq!(max_ips.ipv4, 0);
         assert_eq!(max_ips.ipv6, 0);
 
@@ -1427,15 +1425,13 @@ mod test {
             .unwrap(),
         );
         datastore
-            .ip_pool_add_range(&opctx, &authz_pool, &range)
+            .ip_pool_add_range(opctx, &authz_pool, &range)
             .await
             .expect("Could not add range");
 
         // now it has a capacity of 5 because we added the range
-        let max_ips = datastore
-            .ip_pool_total_capacity(&opctx, &authz_pool)
-            .await
-            .unwrap();
+        let max_ips =
+            datastore.ip_pool_total_capacity(opctx, &authz_pool).await.unwrap();
         assert_eq!(max_ips.ipv4, 5);
         assert_eq!(max_ips.ipv6, 0);
 
@@ -1446,12 +1442,12 @@ mod test {
             is_default: true,
         };
         datastore
-            .ip_pool_link_silo(&opctx, link)
+            .ip_pool_link_silo(opctx, link)
             .await
             .expect("Could not link pool to silo");
 
         let ip_count = datastore
-            .ip_pool_allocated_count(&opctx, &authz_pool)
+            .ip_pool_allocated_count(opctx, &authz_pool)
             .await
             .unwrap();
         assert_eq!(ip_count.ipv4, 0);
@@ -1462,23 +1458,21 @@ mod test {
             description: "".to_string(),
         };
         let ip = datastore
-            .allocate_floating_ip(&opctx, project.id(), identity, None, None)
+            .allocate_floating_ip(opctx, project.id(), identity, None, None)
             .await
             .expect("Could not allocate floating IP");
         assert_eq!(ip.ip.to_string(), "10.0.0.1/32");
 
         let ip_count = datastore
-            .ip_pool_allocated_count(&opctx, &authz_pool)
+            .ip_pool_allocated_count(opctx, &authz_pool)
             .await
             .unwrap();
         assert_eq!(ip_count.ipv4, 1);
         assert_eq!(ip_count.ipv6, 0);
 
         // allocating one has nothing to do with total capacity
-        let max_ips = datastore
-            .ip_pool_total_capacity(&opctx, &authz_pool)
-            .await
-            .unwrap();
+        let max_ips =
+            datastore.ip_pool_total_capacity(opctx, &authz_pool).await.unwrap();
         assert_eq!(max_ips.ipv4, 5);
         assert_eq!(max_ips.ipv6, 0);
 
@@ -1490,15 +1484,13 @@ mod test {
             .unwrap(),
         );
         datastore
-            .ip_pool_add_range(&opctx, &authz_pool, &ipv6_range)
+            .ip_pool_add_range(opctx, &authz_pool, &ipv6_range)
             .await
             .expect("Could not add range");
 
         // now test with additional v6 range
-        let max_ips = datastore
-            .ip_pool_total_capacity(&opctx, &authz_pool)
-            .await
-            .unwrap();
+        let max_ips =
+            datastore.ip_pool_total_capacity(opctx, &authz_pool).await.unwrap();
         assert_eq!(max_ips.ipv4, 5);
         assert_eq!(max_ips.ipv6, 11 + 65536);
 
@@ -1513,14 +1505,12 @@ mod test {
             .unwrap(),
         );
         datastore
-            .ip_pool_add_range(&opctx, &authz_pool, &ipv6_range)
+            .ip_pool_add_range(opctx, &authz_pool, &ipv6_range)
             .await
             .expect("Could not add range");
 
-        let max_ips = datastore
-            .ip_pool_total_capacity(&opctx, &authz_pool)
-            .await
-            .unwrap();
+        let max_ips =
+            datastore.ip_pool_total_capacity(opctx, &authz_pool).await.unwrap();
         assert_eq!(max_ips.ipv4, 5);
         assert_eq!(max_ips.ipv6, 1208925819614629174706166);
 

@@ -709,7 +709,7 @@ async fn sp_data_mgs(
     for sp_id in metadata.sensors_by_sp.keys() {
         let mgs_client = mgs_client.clone();
         let id = *sp_id;
-        let metadata = Arc::clone(&metadata);
+        let metadata = Arc::clone(metadata);
 
         let handle = tokio::spawn(async move {
             sp_read_sensors(&mgs_client, &id, &metadata).await
@@ -811,7 +811,7 @@ pub(crate) async fn sensor_data<R: std::io::Read + std::io::Seek>(
             sp_data_mgs(mgs_client, metadata).await
         }
         SensorInput::CsvReader(reader, position) => {
-            sp_data_csv(reader, position, &metadata)
+            sp_data_csv(reader, position, metadata)
         }
     }
 }

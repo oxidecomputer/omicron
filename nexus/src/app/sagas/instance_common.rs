@@ -104,7 +104,7 @@ pub async fn create_and_insert_vmm_record(
     );
 
     let vmm = datastore
-        .vmm_insert(&opctx, vmm)
+        .vmm_insert(opctx, vmm)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -153,7 +153,7 @@ pub async fn instance_ip_move_state(
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let opctx =
-        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+        crate::context::op_context_for_saga_action(sagactx, serialized_authn);
 
     if !new_ip.do_saga {
         return Ok(true);
@@ -199,7 +199,7 @@ pub(super) async fn instance_ip_get_instance_state(
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let opctx =
-        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+        crate::context::op_context_for_saga_action(sagactx, serialized_authn);
 
     let inst_and_vmm = datastore
         .instance_fetch_with_vmm(&opctx, authz_instance)
@@ -337,7 +337,7 @@ pub async fn instance_ip_add_nat(
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let opctx =
-        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+        crate::context::op_context_for_saga_action(sagactx, serialized_authn);
 
     // No physical sled? Don't push NAT.
     let Some(sled_uuid) = sled_uuid else {
@@ -355,7 +355,7 @@ pub async fn instance_ip_add_nat(
 
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
-    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
+    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
         .sled_id(sled_uuid.into_untyped_uuid())
         .fetch()
         .await
@@ -392,7 +392,7 @@ pub async fn instance_ip_remove_nat(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let opctx =
-        crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
+        crate::context::op_context_for_saga_action(sagactx, serialized_authn);
 
     // No physical sled? Don't push NAT.
     if sled_uuid.is_none() {

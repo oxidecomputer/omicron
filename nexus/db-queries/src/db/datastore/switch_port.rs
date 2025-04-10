@@ -267,7 +267,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    do_switch_port_settings_delete(&conn, &selector, err).await
+                    do_switch_port_settings_delete(&conn, selector, err).await
                 }
         })
         .await
@@ -357,7 +357,7 @@ impl DataStore {
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::switch_port_settings, dsl::id, &pagparams)
+                paginated(dsl::switch_port_settings, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::switch_port_settings,
@@ -1332,7 +1332,7 @@ async fn do_switch_port_settings_create(
     let mut bgp_peer_config = Vec::new();
     for (interface_name, peer_config) in &params.bgp_peers {
         for p in &peer_config.peers {
-            peer_by_addr.insert(p.addr, &p);
+            peer_by_addr.insert(p.addr, p);
             use nexus_db_schema::schema::bgp_config;
             let bgp_config_id = match &p.bgp_config {
                 NameOrId::Id(id) => bgp_config::table
@@ -1471,7 +1471,7 @@ async fn do_switch_port_settings_create(
             communities: peer_by_addr
                 .get(&p.addr.ip())
                 .map(|x| x.communities.clone())
-                .unwrap_or(Vec::new())
+                .unwrap_or_default()
                 .clone(),
         };
         result.bgp_peers.push(view);
@@ -1521,7 +1521,7 @@ async fn do_switch_port_settings_create(
                     // TODO: Should we allow anycast addresses for switch_ports?
                     // anycast
                     false,
-                    &conn,
+                    conn,
                 )
                 .await
                 .map_err(|e| match e {
@@ -1767,7 +1767,7 @@ mod test {
         let qsfp0: Name = "qsfp0".parse().expect("parse qsfp0");
 
         let port_result = datastore
-            .switch_port_create(&opctx, rack_id, switch0.into(), qsfp0.into())
+            .switch_port_create(opctx, rack_id, switch0.into(), qsfp0.into())
             .await
             .expect("switch port create");
 
@@ -1779,7 +1779,7 @@ mod test {
             announcement: Vec::new(),
         };
 
-        datastore.bgp_create_announce_set(&opctx, &announce_set).await.unwrap();
+        datastore.bgp_create_announce_set(opctx, &announce_set).await.unwrap();
 
         let bgp_config = BgpConfigCreate {
             identity: IdentityMetadataCreateParams {
@@ -1795,7 +1795,7 @@ mod test {
             shaper: None,
         };
 
-        datastore.bgp_config_create(&opctx, &bgp_config).await.unwrap();
+        datastore.bgp_config_create(opctx, &bgp_config).await.unwrap();
 
         let settings = SwitchPortSettingsCreate {
             identity: IdentityMetadataCreateParams {
@@ -1840,13 +1840,13 @@ mod test {
         };
 
         let settings_result = datastore
-            .switch_port_settings_create(&opctx, &settings, None)
+            .switch_port_settings_create(opctx, &settings, None)
             .await
             .unwrap();
 
         datastore
             .switch_port_set_settings_id(
-                &opctx,
+                opctx,
                 port_result.id,
                 Some(settings_result.settings.identity.id),
                 UpdatePrecondition::DontCare,
@@ -1855,7 +1855,7 @@ mod test {
             .unwrap();
 
         let uplink_ports =
-            datastore.switch_ports_with_uplinks(&opctx).await.unwrap();
+            datastore.switch_ports_with_uplinks(opctx).await.unwrap();
 
         assert_eq!(uplink_ports.len(), 1);
 

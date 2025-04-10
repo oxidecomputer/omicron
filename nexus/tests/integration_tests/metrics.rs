@@ -121,7 +121,7 @@ async fn test_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
 ) {
     let client = &cptestctx.external_client;
-    create_default_ip_pool(&client).await; // needed for instance create to work
+    create_default_ip_pool(client).await; // needed for instance create to work
     DiskTest::new(cptestctx).await; // needed for disk create to work
 
     // Wait until Nexus registers as a producer with Oximeter.
@@ -132,15 +132,15 @@ async fn test_metrics(
     .await;
 
     // silo metrics start out zero
-    assert_system_metrics(&cptestctx, None, 0, 0, 0).await;
-    assert_system_metrics(&cptestctx, Some(DEFAULT_SILO_ID), 0, 0, 0).await;
-    assert_silo_metrics(&cptestctx, None, 0, 0, 0).await;
+    assert_system_metrics(cptestctx, None, 0, 0, 0).await;
+    assert_system_metrics(cptestctx, Some(DEFAULT_SILO_ID), 0, 0, 0).await;
+    assert_silo_metrics(cptestctx, None, 0, 0, 0).await;
 
-    let project1_id = create_project(&client, "p-1").await.identity.id;
-    assert_silo_metrics(&cptestctx, Some(project1_id), 0, 0, 0).await;
+    let project1_id = create_project(client, "p-1").await.identity.id;
+    assert_silo_metrics(cptestctx, Some(project1_id), 0, 0, 0).await;
 
-    let project2_id = create_project(&client, "p-2").await.identity.id;
-    assert_silo_metrics(&cptestctx, Some(project2_id), 0, 0, 0).await;
+    let project2_id = create_project(client, "p-2").await.identity.id;
+    assert_silo_metrics(cptestctx, Some(project2_id), 0, 0, 0).await;
 
     // 404 if given ID of the wrong kind of thing. Normally this would be pretty
     // obvious, but all the different resources are stored the same way in
@@ -151,42 +151,42 @@ async fn test_metrics(
         Utc::now(),
         DEFAULT_SILO_ID,
     );
-    assert_404(&cptestctx, &bad_silo_metrics_url).await;
+    assert_404(cptestctx, &bad_silo_metrics_url).await;
     let bad_system_metrics_url = format!(
         "/v1/system/metrics/cpus_provisioned?start_time={:?}&end_time={:?}&order=descending&limit=1&silo={}",
         cptestctx.start_time,
         Utc::now(),
         project1_id,
     );
-    assert_404(&cptestctx, &bad_system_metrics_url).await;
+    assert_404(cptestctx, &bad_system_metrics_url).await;
 
     // create instance in project 1
-    create_instance(&client, "p-1", "i-1").await;
-    assert_silo_metrics(&cptestctx, Some(project1_id), 0, 4, GIB).await;
-    assert_silo_metrics(&cptestctx, None, 0, 4, GIB).await;
-    assert_system_metrics(&cptestctx, None, 0, 4, GIB).await;
-    assert_system_metrics(&cptestctx, Some(DEFAULT_SILO_ID), 0, 4, GIB).await;
+    create_instance(client, "p-1", "i-1").await;
+    assert_silo_metrics(cptestctx, Some(project1_id), 0, 4, GIB).await;
+    assert_silo_metrics(cptestctx, None, 0, 4, GIB).await;
+    assert_system_metrics(cptestctx, None, 0, 4, GIB).await;
+    assert_system_metrics(cptestctx, Some(DEFAULT_SILO_ID), 0, 4, GIB).await;
 
     // create disk in project 1
-    create_disk(&client, "p-1", "d-1").await;
-    assert_silo_metrics(&cptestctx, Some(project1_id), GIB, 4, GIB).await;
-    assert_silo_metrics(&cptestctx, None, GIB, 4, GIB).await;
-    assert_system_metrics(&cptestctx, None, GIB, 4, GIB).await;
-    assert_system_metrics(&cptestctx, Some(DEFAULT_SILO_ID), GIB, 4, GIB).await;
+    create_disk(client, "p-1", "d-1").await;
+    assert_silo_metrics(cptestctx, Some(project1_id), GIB, 4, GIB).await;
+    assert_silo_metrics(cptestctx, None, GIB, 4, GIB).await;
+    assert_system_metrics(cptestctx, None, GIB, 4, GIB).await;
+    assert_system_metrics(cptestctx, Some(DEFAULT_SILO_ID), GIB, 4, GIB).await;
 
     // project 2 metrics still empty
-    assert_silo_metrics(&cptestctx, Some(project2_id), 0, 0, 0).await;
+    assert_silo_metrics(cptestctx, Some(project2_id), 0, 0, 0).await;
 
     // create instance and disk in project 2
-    create_instance(&client, "p-2", "i-2").await;
-    create_disk(&client, "p-2", "d-2").await;
-    assert_silo_metrics(&cptestctx, Some(project2_id), GIB, 4, GIB).await;
+    create_instance(client, "p-2", "i-2").await;
+    create_disk(client, "p-2", "d-2").await;
+    assert_silo_metrics(cptestctx, Some(project2_id), GIB, 4, GIB).await;
 
     // both instances show up in silo and fleet metrics
-    assert_silo_metrics(&cptestctx, None, 2 * GIB, 8, 2 * GIB).await;
-    assert_system_metrics(&cptestctx, None, 2 * GIB, 8, 2 * GIB).await;
+    assert_silo_metrics(cptestctx, None, 2 * GIB, 8, 2 * GIB).await;
+    assert_system_metrics(cptestctx, None, 2 * GIB, 8, 2 * GIB).await;
     assert_system_metrics(
-        &cptestctx,
+        cptestctx,
         Some(DEFAULT_SILO_ID),
         2 * GIB,
         8,
@@ -195,7 +195,7 @@ async fn test_metrics(
     .await;
 
     // project 1 unaffected by project 2's resources
-    assert_silo_metrics(&cptestctx, Some(project1_id), GIB, 4, GIB).await;
+    assert_silo_metrics(cptestctx, Some(project1_id), GIB, 4, GIB).await;
 }
 
 /// Test that we can correctly list some timeseries schema.
@@ -213,7 +213,7 @@ async fn test_system_timeseries_schema_list(
     // Nexus's HTTP latency distribution. This is defined in Nexus itself, and
     // should always exist after we've registered as a producer and start
     // producing data.
-    MetricsQuerier::new(&cptestctx)
+    MetricsQuerier::new(cptestctx)
         .wait_for_timeseries_schema(|schemas: Vec<TimeseriesSchema>| {
             if schemas.iter().any(|sc| {
                 sc.timeseries_name == "http_service:request_latency_histogram"
@@ -264,8 +264,8 @@ async fn test_instance_watcher_metrics(
     let activate_instance_watcher = || async {
         use nexus_test_utils::background::activate_background_task;
 
-        let _ = activate_background_task(&internal_client, "instance_watcher")
-            .await;
+        let _ =
+            activate_background_task(internal_client, "instance_watcher").await;
     };
 
     #[track_caller]
@@ -307,20 +307,20 @@ async fn test_instance_watcher_metrics(
 
     // N.B. that we've gotta use the project name that this function hardcodes
     // if we're going to use the `instance_post` test helper later.
-    let project = create_project_and_pool(&client).await;
+    let project = create_project_and_pool(client).await;
     let project_name = project.identity.name.as_str();
     // Wait until Nexus registers as a producer with Oximeter.
-    wait_for_producer(&oximeter, cptestctx.server.server_context().nexus.id())
+    wait_for_producer(oximeter, cptestctx.server.server_context().nexus.id())
         .await;
 
     eprintln!("--- creating instance 1 ---");
-    let instance1 = create_instance(&client, project_name, "i-1").await;
+    let instance1 = create_instance(client, project_name, "i-1").await;
     let instance1_uuid = InstanceUuid::from_untyped_uuid(instance1.identity.id);
 
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics_querier = MetricsQuerier::new(&cptestctx);
+    let metrics_querier = MetricsQuerier::new(cptestctx);
     metrics_querier
         .system_timeseries_query_until(OXQL_QUERY, |metrics| {
             let checks = metrics
@@ -329,8 +329,7 @@ async fn test_instance_watcher_metrics(
                 .ok_or_else(|| {
                     MetricsNotYet::new("missing virtual_machine:check")
                 })?;
-            let ts =
-                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+            let ts = dbg!(count_state(checks, instance1_uuid, STATE_STARTING)?);
             check_gte!(ts, 1);
             Ok(())
         })
@@ -338,7 +337,7 @@ async fn test_instance_watcher_metrics(
 
     // okay, make another instance
     eprintln!("--- creating instance 2 ---");
-    let instance2 = create_instance(&client, project_name, "i-2").await;
+    let instance2 = create_instance(client, project_name, "i-2").await;
     let instance2_uuid = InstanceUuid::from_untyped_uuid(instance2.identity.id);
 
     // activate the instance watcher background task.
@@ -351,9 +350,9 @@ async fn test_instance_watcher_metrics(
                 .find(|t| t.name() == "virtual_machine:check")
                 .expect("missing virtual_machine:check");
             let ts1 =
-                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+                dbg!(count_state(checks, instance1_uuid, STATE_STARTING)?);
             let ts2 =
-                dbg!(count_state(&checks, instance2_uuid, STATE_STARTING)?);
+                dbg!(count_state(checks, instance2_uuid, STATE_STARTING)?);
             check_gte!(ts1, 2);
             check_gte!(ts2, 1);
             Ok(())
@@ -374,11 +373,11 @@ async fn test_instance_watcher_metrics(
                 .find(|t| t.name() == "virtual_machine:check")
                 .expect("missing virtual_machine:check");
             let ts1_starting =
-                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+                dbg!(count_state(checks, instance1_uuid, STATE_STARTING)?);
             let ts1_running =
-                dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING)?);
+                dbg!(count_state(checks, instance1_uuid, STATE_RUNNING)?);
             let ts2 =
-                dbg!(count_state(&checks, instance2_uuid, STATE_STARTING)?);
+                dbg!(count_state(checks, instance2_uuid, STATE_STARTING)?);
             check_gte!(ts1_starting, 2);
             check_gte!(ts1_running, 1);
             check_gte!(ts2, 2);
@@ -392,7 +391,7 @@ async fn test_instance_watcher_metrics(
     // stop instance 1
     eprintln!("--- start stopping instance 1 ---");
     instance_simulate(nexus, &instance1_uuid).await;
-    instance_post(&client, &instance1.identity.name.as_str(), InstanceOp::Stop)
+    instance_post(client, instance1.identity.name.as_str(), InstanceOp::Stop)
         .await;
 
     // activate the instance watcher background task.
@@ -406,15 +405,15 @@ async fn test_instance_watcher_metrics(
                 .expect("missing virtual_machine:check");
 
             let ts1_starting =
-                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+                dbg!(count_state(checks, instance1_uuid, STATE_STARTING)?);
             let ts1_running =
-                dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING)?);
+                dbg!(count_state(checks, instance1_uuid, STATE_RUNNING)?);
             let ts1_stopping =
-                dbg!(count_state(&checks, instance1_uuid, STATE_STOPPING)?);
+                dbg!(count_state(checks, instance1_uuid, STATE_STOPPING)?);
             let ts2_starting =
-                dbg!(count_state(&checks, instance2_uuid, STATE_STARTING)?);
+                dbg!(count_state(checks, instance2_uuid, STATE_STARTING)?);
             let ts2_running =
-                dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING)?);
+                dbg!(count_state(checks, instance2_uuid, STATE_RUNNING)?);
             check_gte!(ts1_starting, 2);
             check_gte!(ts1_running, 1);
             check_gte!(ts1_stopping, 1);
@@ -440,15 +439,15 @@ async fn test_instance_watcher_metrics(
                 .find(|t| t.name() == "virtual_machine:check")
                 .expect("missing virtual_machine:check");
             let ts1_starting =
-                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+                dbg!(count_state(checks, instance1_uuid, STATE_STARTING)?);
             let ts1_running =
-                dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING)?);
+                dbg!(count_state(checks, instance1_uuid, STATE_RUNNING)?);
             let ts1_stopping =
-                dbg!(count_state(&checks, instance1_uuid, STATE_STOPPING)?);
+                dbg!(count_state(checks, instance1_uuid, STATE_STOPPING)?);
             let ts2_starting =
-                dbg!(count_state(&checks, instance2_uuid, STATE_STARTING)?);
+                dbg!(count_state(checks, instance2_uuid, STATE_STARTING)?);
             let ts2_running =
-                dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING)?);
+                dbg!(count_state(checks, instance2_uuid, STATE_RUNNING)?);
             check_gte!(ts1_starting, 2);
             check_gte!(ts1_running, 1);
             check_gte!(ts1_stopping, 1);
@@ -465,28 +464,27 @@ async fn test_project_timeseries_query(
 ) {
     let client = &cptestctx.external_client;
 
-    create_default_ip_pool(&client).await; // needed for instance create to work
+    create_default_ip_pool(client).await; // needed for instance create to work
 
     // Create two projects
-    let p1 = create_project(&client, "project1").await;
-    let _p2 = create_project(&client, "project2").await;
+    let p1 = create_project(client, "project1").await;
+    let _p2 = create_project(client, "project2").await;
 
     // Create resources in each project
-    let i1p1 = create_instance(&client, "project1", "instance1").await;
+    let i1p1 = create_instance(client, "project1", "instance1").await;
     // need a second instance to test group_by
-    let i2p1 = create_instance(&client, "project1", "instance2").await;
-    let _i3p2 = create_instance(&client, "project2", "instance3").await;
+    let i2p1 = create_instance(client, "project1", "instance2").await;
+    let _i3p2 = create_instance(client, "project2", "instance3").await;
 
     let internal_client = &cptestctx.internal_client;
 
     // get the instance metrics to show up
-    let _ =
-        activate_background_task(&internal_client, "instance_watcher").await;
+    let _ = activate_background_task(internal_client, "instance_watcher").await;
 
     // Query with no project specified
     let q1 = "get virtual_machine:check";
 
-    let metrics_querier = MetricsQuerier::new(&cptestctx);
+    let metrics_querier = MetricsQuerier::new(cptestctx);
 
     // We only use project_timeseries_query_until for this first check; all the
     // remaining queries are hitting the same metrics, so we only need to wait
@@ -837,7 +835,7 @@ async fn test_mgs_metrics(
     // Wait until the MGS registers as a producer with Oximeter.
     wait_for_producer(&cptestctx.oximeter, mgs.gateway_id).await;
 
-    let querier = MetricsQuerier::new(&cptestctx);
+    let querier = MetricsQuerier::new(cptestctx);
     check_all_timeseries_present(&querier, "temperature", temp_sensors).await;
     check_all_timeseries_present(&querier, "voltage", voltage_sensors).await;
     check_all_timeseries_present(&querier, "current", current_sensors).await;

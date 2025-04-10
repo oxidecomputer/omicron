@@ -568,7 +568,7 @@ impl ArtifactReplication {
     async fn list_sleds(&self, opctx: &OpContext) -> Result<Vec<Sled>> {
         Ok(self
             .datastore
-            .sled_list_all_batched(&opctx, SledFilter::TufArtifactReplication)
+            .sled_list_all_batched(opctx, SledFilter::TufArtifactReplication)
             .await?
             .into_iter()
             .map(|sled| Sled {

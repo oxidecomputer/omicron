@@ -97,7 +97,7 @@ impl SharePkg {
     ) -> Result<Secret<Vec<Vec<u8>>>, TrustQuorumError> {
         let cipher = derive_encryption_key(
             &self.common.rack_uuid,
-            &rack_secret,
+            rack_secret,
             &self.salt,
         );
         decrypt_shares(self.nonce, &cipher, &self.encrypted_shares)

@@ -390,7 +390,7 @@ async fn sic_associate_ssh_keys(
         .internal_context("loading current user's ssh keys for new Instance")
         .map_err(ActionError::action_failed)?;
 
-    let (.., authz_user) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_user) = LookupPath::new(&opctx, datastore)
         .silo_user_id(actor.actor_id())
         .lookup_for(authz::Action::ListChildren)
         .await
@@ -492,7 +492,7 @@ async fn sic_create_network_interface(
             ref create_params,
         ) => match create_params.get(nic_index) {
             None => Ok(()),
-            Some(ref prs) => {
+            Some(prs) => {
                 create_custom_network_interface(
                     &sagactx,
                     &saga_params,
@@ -520,13 +520,13 @@ async fn sic_create_network_interface_undo(
         &saga_params.serialized_authn,
     );
     let interface_id = repeat_saga_params.new_id;
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
 
-    let interface_deleted = match LookupPath::new(&opctx, &datastore)
+    let interface_deleted = match LookupPath::new(&opctx, datastore)
         .instance_network_interface_id(interface_id)
         .lookup_for(authz::Action::Delete)
         .await
@@ -574,17 +574,17 @@ async fn create_custom_network_interface(
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
+        sagactx,
         &saga_params.serialized_authn,
     );
 
     // Lookup authz objects, used in the call to create the NIC itself.
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
-    let (.., authz_vpc) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_vpc) = LookupPath::new(&opctx, datastore)
         .project_id(saga_params.project_id)
         .vpc_name(&db::model::Name::from(interface_params.vpc_name.clone()))
         .lookup_for(authz::Action::Read)
@@ -596,7 +596,7 @@ async fn create_custom_network_interface(
     // should probably either be in a transaction, or the
     // `instance_create_network_interface` function/query needs some JOIN
     // on the `vpc_subnet` table.
-    let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, datastore)
         .vpc_id(authz_vpc.id())
         .vpc_subnet_name(&db::model::Name::from(
             interface_params.subnet_name.clone(),
@@ -656,7 +656,7 @@ async fn create_default_primary_network_interface(
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
+        sagactx,
         &saga_params.serialized_authn,
     );
 
@@ -685,12 +685,12 @@ async fn create_default_primary_network_interface(
     };
 
     // Lookup authz objects, used in the call to actually create the NIC.
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
-    let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, datastore)
         .project_id(saga_params.project_id)
         .vpc_name(&internal_default_name)
         .vpc_subnet_name(&internal_default_name)
@@ -911,7 +911,7 @@ async fn sic_allocate_instance_external_ip_undo(
             datastore.deallocate_external_ip(&opctx, ip.id).await?;
         }
         params::ExternalIpCreate::Floating { .. } => {
-            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
+            let (.., authz_fip) = LookupPath::new(&opctx, datastore)
                 .floating_ip_id(ip.id)
                 .lookup_for(authz::Action::Modify)
                 .await?;
@@ -984,16 +984,15 @@ async fn ensure_instance_disk_attach_state(
         }
     };
 
-    let (.., authz_instance, _db_instance) =
-        LookupPath::new(&opctx, &datastore)
-            .instance_id(instance_id.into_untyped_uuid())
-            .fetch()
-            .await
-            .map_err(ActionError::action_failed)?;
+    let (.., authz_instance, _db_instance) = LookupPath::new(&opctx, datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
 
     // TODO-correctness TODO-security It's not correct to re-resolve the
     // disk name now.  See oxidecomputer/omicron#1536.
-    let (.., authz_disk, _db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_disk, _db_disk) = LookupPath::new(&opctx, datastore)
         .project_id(project_id)
         .disk_name(&disk_name)
         .fetch()
@@ -1037,7 +1036,7 @@ async fn sic_create_instance_record(
         &params.create_params,
     );
 
-    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_project) = LookupPath::new(&opctx, osagactx.datastore())
         .project_id(params.project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -1065,7 +1064,7 @@ async fn sic_delete_instance_record(
 
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
-    let result = LookupPath::new(&opctx, &datastore)
+    let result = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await;
@@ -1141,7 +1140,7 @@ async fn sic_set_boot_disk(
 
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
@@ -1175,7 +1174,7 @@ async fn sic_set_boot_disk_undo(
 
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
@@ -1264,9 +1263,9 @@ pub mod test {
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pool(client).await;
         let project = create_project(client, PROJECT_NAME).await;
-        create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+        create_disk(client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id
     }
 
@@ -1311,10 +1310,10 @@ pub mod test {
         DiskTest::new(cptestctx).await;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_org_project_and_disk(&client).await;
+        let project_id = create_org_project_and_disk(client).await;
 
         // Build the saga DAG with the provided test parameters and run it
-        let opctx = test_helpers::test_opctx(&cptestctx);
+        let opctx = test_helpers::test_opctx(cptestctx);
         let params = new_test_params(&opctx, project_id);
         nexus
             .sagas
@@ -1422,7 +1421,7 @@ pub mod test {
             .await
         );
         assert!(disk_is_detached(datastore).await);
-        assert!(no_instances_or_disks_on_sled(&sled_agent).await);
+        assert!(no_instances_or_disks_on_sled(sled_agent).await);
 
         let v2p_mappings = &*sled_agent.v2p_mappings.lock().unwrap();
         assert!(v2p_mappings.is_empty());
@@ -1437,10 +1436,10 @@ pub mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_org_project_and_disk(&client).await;
+        let project_id = create_org_project_and_disk(client).await;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = test_helpers::test_opctx(&cptestctx);
+        let opctx = test_helpers::test_opctx(cptestctx);
 
         test_helpers::action_failure_can_unwind::<SagaInstanceCreate, _, _>(
             nexus,
@@ -1448,7 +1447,7 @@ pub mod test {
             || {
                 Box::pin({
                     async {
-                        verify_clean_slate(&cptestctx).await;
+                        verify_clean_slate(cptestctx).await;
                     }
                 })
             },
@@ -1466,8 +1465,8 @@ pub mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_org_project_and_disk(&client).await;
-        let opctx = test_helpers::test_opctx(&cptestctx);
+        let project_id = create_org_project_and_disk(client).await;
+        let opctx = test_helpers::test_opctx(cptestctx);
 
         test_helpers::action_failure_can_unwind_idempotently::<
             SagaInstanceCreate,
@@ -1476,7 +1475,7 @@ pub mod test {
         >(
             nexus,
             || Box::pin(async { new_test_params(&opctx, project_id) }),
-            || Box::pin(async { verify_clean_slate(&cptestctx).await }),
+            || Box::pin(async { verify_clean_slate(cptestctx).await }),
             log,
         )
         .await;
@@ -1490,10 +1489,10 @@ pub mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_id = create_org_project_and_disk(&client).await;
+        let project_id = create_org_project_and_disk(client).await;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = test_helpers::test_opctx(&cptestctx);
+        let opctx = test_helpers::test_opctx(cptestctx);
 
         let params = new_test_params(&opctx, project_id);
         let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
@@ -1503,11 +1502,11 @@ pub mod test {
         // This is important to ensure that our original saga didn't
         // double-allocate during repeated actions.
         test_helpers::instance_delete_by_name(
-            &cptestctx,
+            cptestctx,
             INSTANCE_NAME,
             PROJECT_NAME,
         )
         .await;
-        verify_clean_slate(&cptestctx).await;
+        verify_clean_slate(cptestctx).await;
     }
 }

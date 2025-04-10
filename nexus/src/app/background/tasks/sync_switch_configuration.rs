@@ -1402,8 +1402,8 @@ async fn ensure_loopback_deleted(
     address: IpAddr,
 ) -> Result<(), serde_json::Value> {
     let result = match &address {
-        IpAddr::V4(a) => client.loopback_ipv4_delete(&a).await,
-        IpAddr::V6(a) => client.loopback_ipv6_delete(&a).await,
+        IpAddr::V4(a) => client.loopback_ipv4_delete(a).await,
+        IpAddr::V6(a) => client.loopback_ipv6_delete(a).await,
     };
 
     match result {
@@ -1687,7 +1687,7 @@ fn static_routes_to_add(
 
     // find routes to add
     for (switch_location, routes_wanted) in desired_static_routes {
-        let routes_on_switch = match current_static_routes.get(&switch_location)
+        let routes_on_switch = match current_static_routes.get(switch_location)
         {
             Some(routes) => routes,
             None => {
@@ -1787,7 +1787,7 @@ async fn apply_switch_port_changes(
     log: &slog::Logger,
 ) {
     for (location, switch_port, change) in changes {
-        let client = match dpd_clients.get(&location) {
+        let client = match dpd_clients.get(location) {
             Some(client) => client,
             None => {
                 error!(
@@ -1839,9 +1839,8 @@ async fn apply_switch_port_changes(
 
         match change {
             PortSettingsChange::Apply(settings) => {
-                let dpd_port_settings = match api_to_dpd_port_settings(
-                    &settings,
-                ) {
+                let dpd_port_settings = match api_to_dpd_port_settings(settings)
+                {
                     Ok(settings) => settings,
                     Err(e) => {
                         error!(

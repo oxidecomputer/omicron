@@ -42,17 +42,17 @@ impl super::Nexus {
         validate_switch_location(params.switch_location.as_str())?;
 
         // Just a check to make sure a valid rack id was passed in.
-        self.rack_lookup(&opctx, &params.rack_id).await?;
+        self.rack_lookup(opctx, &params.rack_id).await?;
 
         let address_lot_lookup =
-            self.address_lot_lookup(&opctx, params.address_lot.clone())?;
+            self.address_lot_lookup(opctx, params.address_lot.clone())?;
 
         let (.., authz_address_lot) =
             address_lot_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         let value = self
             .db_datastore
-            .loopback_address_create(&opctx, &params, None, &authz_address_lot)
+            .loopback_address_create(opctx, &params, None, &authz_address_lot)
             .await?;
 
         // eagerly propagate changes via rpw
@@ -70,7 +70,7 @@ impl super::Nexus {
         address: IpNet,
     ) -> DeleteResult {
         let loopback_address_lookup = self.loopback_address_lookup(
-            &opctx,
+            opctx,
             rack_id,
             switch_location,
             address,
@@ -80,7 +80,7 @@ impl super::Nexus {
             loopback_address_lookup.lookup_for(authz::Action::Delete).await?;
 
         self.db_datastore
-            .loopback_address_delete(&opctx, &authz_loopback_address)
+            .loopback_address_delete(opctx, &authz_loopback_address)
             .await?;
 
         // eagerly propagate changes via rpw

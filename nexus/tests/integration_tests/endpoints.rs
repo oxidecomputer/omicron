@@ -1298,8 +1298,8 @@ impl AllowedMethod {
             | AllowedMethod::GetUnimplemented
             | AllowedMethod::GetVolatile
             | AllowedMethod::GetWebsocket => None,
-            AllowedMethod::Post(body) => Some(&body),
-            AllowedMethod::Put(body) => Some(&body),
+            AllowedMethod::Post(body) => Some(body),
+            AllowedMethod::Put(body) => Some(body),
         }
     }
 }
@@ -1314,7 +1314,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
         vec![
             // Global IAM policy
             VerifyEndpoint {
-                url: &SYSTEM_POLICY_URL,
+                url: SYSTEM_POLICY_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
@@ -1331,7 +1331,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             // IP Pools top-level endpoint
             VerifyEndpoint {
-                url: &DEMO_IP_POOLS_URL,
+                url: DEMO_IP_POOLS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
@@ -1425,7 +1425,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             // IP Pool endpoint (Oxide services)
             VerifyEndpoint {
-                url: &DEMO_IP_POOL_SERVICE_URL,
+                url: DEMO_IP_POOL_SERVICE_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
@@ -2280,7 +2280,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
-                url: &HARDWARE_UNINITIALIZED_SLEDS,
+                url: HARDWARE_UNINITIALIZED_SLEDS,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
@@ -2331,7 +2331,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &HARDWARE_DISKS_URL,
+                url: HARDWARE_DISKS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
@@ -2350,7 +2350,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             /* Support Bundles */
             VerifyEndpoint {
-                url: &SUPPORT_BUNDLES_URL,
+                url: SUPPORT_BUNDLES_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
@@ -2435,13 +2435,13 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             /* Silo identity providers */
             VerifyEndpoint {
-                url: &IDENTITY_PROVIDERS_URL,
+                url: IDENTITY_PROVIDERS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::ReadOnly,
                 allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
-                url: &SAML_IDENTITY_PROVIDERS_URL,
+                url: SAML_IDENTITY_PROVIDERS_URL,
                 // The visibility here deserves some explanation.  In order to
                 // create a real SAML identity provider for doing tests, we have to
                 // do it in a non-default Silo (because the default one does not
@@ -2476,7 +2476,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             /* SSH keys */
             VerifyEndpoint {
-                url: &DEMO_SSHKEYS_URL,
+                url: DEMO_SSHKEYS_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::Full,
                 allowed_methods: vec![
@@ -2497,7 +2497,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             /* Certificates */
             VerifyEndpoint {
-                url: &DEMO_CERTIFICATES_URL,
+                url: DEMO_CERTIFICATES_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
@@ -2509,7 +2509,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 ],
             },
             VerifyEndpoint {
-                url: &DEMO_CERTIFICATE_URL,
+                url: DEMO_CERTIFICATE_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
@@ -2519,7 +2519,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             /* External Networking */
             VerifyEndpoint {
-                url: &DEMO_SWITCH_PORT_URL,
+                url: DEMO_SWITCH_PORT_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
@@ -2547,7 +2547,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 ],
             },
             VerifyEndpoint {
-                url: &DEMO_ADDRESS_LOTS_URL,
+                url: DEMO_ADDRESS_LOTS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
@@ -2559,13 +2559,13 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 ],
             },
             VerifyEndpoint {
-                url: &DEMO_ADDRESS_LOT_URL,
+                url: DEMO_ADDRESS_LOT_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Delete],
             },
             VerifyEndpoint {
-                url: &DEMO_ADDRESS_LOT_BLOCKS_URL,
+                url: DEMO_ADDRESS_LOT_BLOCKS_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
@@ -2588,7 +2588,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 allowed_methods: vec![AllowedMethod::Delete],
             },
             VerifyEndpoint {
-                url: &DEMO_SWITCH_PORT_SETTINGS_URL,
+                url: DEMO_SWITCH_PORT_SETTINGS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
@@ -2603,13 +2603,13 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 ],
             },
             VerifyEndpoint {
-                url: &DEMO_SWITCH_PORT_SETTINGS_INFO_URL,
+                url: DEMO_SWITCH_PORT_SETTINGS_INFO_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &DEMO_BGP_CONFIG_CREATE_URL,
+                url: DEMO_BGP_CONFIG_CREATE_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
@@ -2621,7 +2621,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 ],
             },
             VerifyEndpoint {
-                url: &DEMO_BGP_ANNOUNCE_SET_URL,
+                url: DEMO_BGP_ANNOUNCE_SET_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
@@ -2632,49 +2632,49 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 ],
             },
             VerifyEndpoint {
-                url: &DEMO_BGP_ANNOUNCE_SET_DELETE_URL,
+                url: DEMO_BGP_ANNOUNCE_SET_DELETE_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Delete],
             },
             VerifyEndpoint {
-                url: &DEMO_BGP_ANNOUNCEMENT_URL,
+                url: DEMO_BGP_ANNOUNCEMENT_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &DEMO_BGP_STATUS_URL,
+                url: DEMO_BGP_STATUS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &DEMO_BGP_EXPORTED_URL,
+                url: DEMO_BGP_EXPORTED_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &DEMO_BGP_ROUTES_IPV4_URL,
+                url: DEMO_BGP_ROUTES_IPV4_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &DEMO_BGP_MESSAGE_HISTORY_URL,
+                url: DEMO_BGP_MESSAGE_HISTORY_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &DEMO_BFD_STATUS_URL,
+                url: DEMO_BFD_STATUS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
-                url: &DEMO_BFD_ENABLE_URL,
+                url: DEMO_BFD_ENABLE_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Post(
@@ -2682,7 +2682,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 )],
             },
             VerifyEndpoint {
-                url: &DEMO_BFD_DISABLE_URL,
+                url: DEMO_BFD_DISABLE_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Post(

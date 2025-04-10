@@ -200,7 +200,7 @@ mod test {
 
         // Now write generation 2, activate again, and verify that the update
         // was sent to the watcher.
-        write_test_dns_generation(&opctx, &datastore).await;
+        write_test_dns_generation(&opctx, datastore).await;
         assert_eq!(
             watcher.borrow().as_ref().unwrap().generation,
             Generation::from_u32(1)

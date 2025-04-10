@@ -1893,14 +1893,14 @@ mod tests {
 
         let instance = Instance::new(instance_id, project_id, &params);
 
-        let (.., authz_project) = LookupPath::new(&opctx, &db_datastore)
+        let (.., authz_project) = LookupPath::new(opctx, db_datastore)
             .project_id(project_id)
             .lookup_for(authz::Action::CreateChild)
             .await
             .expect("Failed to lookup project for instance creation");
 
         db_datastore
-            .project_create_instance(&opctx, &authz_project, instance)
+            .project_create_instance(opctx, &authz_project, instance)
             .await
             .expect("Failed to create new instance record")
     }
@@ -2017,11 +2017,11 @@ mod tests {
                 },
             );
             let (.., project) =
-                datastore.project_create(&opctx, project).await.unwrap();
+                datastore.project_create(opctx, project).await.unwrap();
 
             use nexus_db_schema::schema::vpc_subnet::dsl::vpc_subnet;
             let conn =
-                datastore.pool_connection_authorized(&opctx).await.unwrap();
+                datastore.pool_connection_authorized(opctx).await.unwrap();
             let net1 = Network::new(n_subnets);
             let net2 = Network::new(n_subnets);
             for subnet in net1.subnets.iter().chain(net2.subnets.iter()) {

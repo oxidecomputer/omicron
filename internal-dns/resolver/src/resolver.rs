@@ -516,7 +516,7 @@ mod test {
             dns_config: &DnsConfigParams,
         ) -> anyhow::Result<()> {
             self.config_client
-                .dns_config_put(&dns_config)
+                .dns_config_put(dns_config)
                 .await
                 .context("updating DNS")
                 .map(|_| ())

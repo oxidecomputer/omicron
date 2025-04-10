@@ -89,7 +89,7 @@ impl TestInterfaces for super::Nexus {
             }
         };
 
-        let (.., authz_instance) = LookupPath::new(&opctx, &self.db_datastore)
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
             .instance_id(id.into_untyped_uuid())
             .lookup_for(nexus_db_queries::authz::Action::Read)
             .await?;

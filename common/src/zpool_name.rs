@@ -281,7 +281,7 @@ mod test {
 
         for bad_name in &bad_names {
             assert!(
-                parse_name(&bad_name).is_err(),
+                parse_name(bad_name).is_err(),
                 "Parsing {} should fail",
                 bad_name
             );

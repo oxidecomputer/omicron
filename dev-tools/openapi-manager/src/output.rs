@@ -410,7 +410,7 @@ fn summarize_one(
         eprintln!(
             "{:>HEADER_WIDTH$} {}",
             FRESH.style(styles.success_header),
-            display_api_spec_version(api, version, &styles, resolution),
+            display_api_spec_version(api, version, styles, resolution),
         );
     } else {
         // There were one or more problems, some of which may be unfixable.
@@ -422,7 +422,7 @@ fn summarize_one(
                 assert!(resolution.has_problems());
                 STALE.style(styles.warning_header)
             },
-            display_api_spec_version(api, version, &styles, resolution),
+            display_api_spec_version(api, version, styles, resolution),
         );
 
         display_resolution_problems(env, problems, styles);
@@ -533,7 +533,7 @@ pub fn display_resolution_problems<'a, T>(
                     std::io::stderr(),
                 ),
             );
-            eprintln!("");
+            eprintln!();
         }
     }
 }

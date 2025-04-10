@@ -228,7 +228,7 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
     // Note that we don't currently delete the VNICs in any particular
     // order. That should be OK, since we're definitely deleting the guest
     // VNICs before the xde devices, which is the main constraint.
-    sled_hardware::cleanup::delete_omicron_vnics(&log)
+    sled_hardware::cleanup::delete_omicron_vnics(log)
         .await
         .map_err(StartError::DeleteOmicronVnics)?;
 
@@ -239,7 +239,7 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
     //
     // This is also tracked by
     // https://github.com/oxidecomputer/omicron/issues/725.
-    illumos_utils::opte::delete_all_xde_devices(&log)
+    illumos_utils::opte::delete_all_xde_devices(log)
         .map_err(StartError::DeleteXdeDevices)?;
 
     Ok(())

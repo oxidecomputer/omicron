@@ -104,7 +104,7 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
     println!("|Consumers (`repo:path`; excluding omdb and tests)");
     println!("|Versioning");
     println!("|Notes");
-    println!("");
+    println!();
 
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
@@ -135,7 +135,7 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
         };
 
         print!("|{}", api.notes.as_deref().unwrap_or("-\n"));
-        println!("");
+        println!();
     }
 
     println!("|===\n");
@@ -174,7 +174,7 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
                 }
             }
         }
-        println!("");
+        println!();
     }
     Ok(())
 }
@@ -195,7 +195,7 @@ fn run_deployment_units(apis: &SystemApis, args: DotArgs) -> Result<()> {
                     args.show_deps,
                     args.filter,
                 )?;
-                println!("");
+                println!();
             }
         }
     };
@@ -232,7 +232,7 @@ fn print_server_components<'a>(
             }
         }
 
-        println!("");
+        println!();
     }
     Ok(())
 }

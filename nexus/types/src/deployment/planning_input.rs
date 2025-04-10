@@ -1065,7 +1065,7 @@ impl PlanningInputBuilder {
     ) -> Result<(), PlanningInputBuildError> {
         let sled_details = self
             .sleds_mut()
-            .get_mut(&sled_id)
+            .get_mut(sled_id)
             .ok_or(PlanningInputBuildError::SledNotFound(*sled_id))?;
         sled_details.policy = SledPolicy::Expunged;
         for (_, sled_disk) in sled_details.resources.zpools.iter_mut() {

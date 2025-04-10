@@ -223,7 +223,7 @@ impl nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'_> {
             Ok(self
                 .datastore
                 .sled_list_all_batched(
-                    &self.opctx,
+                    self.opctx,
                     SledFilter::QueryDuringInventory,
                 )
                 .await
@@ -386,8 +386,7 @@ mod test {
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
-        let db_enum =
-            DbSledAgentEnumerator { opctx: &opctx, datastore: &datastore };
+        let db_enum = DbSledAgentEnumerator { opctx: &opctx, datastore };
 
         // There will be two sled agents set up as part of the test context.
         let initial_found_urls = db_enum.list_sled_agents().await.unwrap();

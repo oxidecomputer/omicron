@@ -791,7 +791,7 @@ impl Zones {
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), crate::ExecutionError> {
-        if let Ok(()) = Self::has_link_local_v6_address(zone, &addrobj) {
+        if let Ok(()) = Self::has_link_local_v6_address(zone, addrobj) {
             return Ok(());
         }
 

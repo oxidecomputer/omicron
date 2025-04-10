@@ -344,7 +344,7 @@ impl UpdatePane {
                     body.lines.push(Line::default());
                     let prefix =
                         vec![Span::styled("Message: ", style::selected())];
-                    push_text_lines(&message, prefix, &mut body.lines);
+                    push_text_lines(message, prefix, &mut body.lines);
                 }
             }
             StepStatus::Completed { reason: _ } => {
@@ -2632,7 +2632,7 @@ impl Control for UpdatePane {
                             scroll_offset,
                         } => Some(self.draw_start_update_failed_popup(
                             state,
-                            &message,
+                            message,
                             frame,
                             *scroll_offset,
                         )),
@@ -2655,7 +2655,7 @@ impl Control for UpdatePane {
                             scroll_offset,
                         } => Some(self.draw_abort_update_failed_popup(
                             state,
-                            &message,
+                            message,
                             frame,
                             *scroll_offset,
                         )),

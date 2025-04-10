@@ -410,7 +410,7 @@ pub(crate) async fn ensure_zpool_datasets_are_encrypted(
 ) -> Result<(), DatasetEncryptionMigrationError> {
     info!(log, "Looking for unencrypted datasets in {zpool_name}");
     let unencrypted_datasets =
-        find_all_unencrypted_datasets_directly_within_pool(&log, &zpool_name)
+        find_all_unencrypted_datasets_directly_within_pool(log, zpool_name)
             .await?;
 
     // TODO: Could do this in parallel?
@@ -418,7 +418,7 @@ pub(crate) async fn ensure_zpool_datasets_are_encrypted(
         let log = &log.new(slog::o!("dataset" => dataset.clone()));
         info!(log, "Found unencrypted dataset");
 
-        ensure_zpool_dataset_is_encrypted(&log, &zpool_name, &dataset).await?;
+        ensure_zpool_dataset_is_encrypted(log, zpool_name, &dataset).await?;
     }
     Ok(())
 }
@@ -438,7 +438,7 @@ async fn find_all_unencrypted_datasets_directly_within_pool(
         &pool_name,
     ]);
     let output = cmd.output().await?;
-    status_ok_or_get_stderr(&cmd, &output)?;
+    status_ok_or_get_stderr(cmd, &output)?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let lines = stdout.trim().split('\n');
@@ -489,7 +489,7 @@ async fn ensure_zpool_dataset_is_encrypted(
     zpool_name: &ZpoolName,
     unencrypted_dataset: &str,
 ) -> Result<(), DatasetEncryptionMigrationError> {
-    let Ok(kind) = DatasetKind::from_str(&unencrypted_dataset) else {
+    let Ok(kind) = DatasetKind::from_str(unencrypted_dataset) else {
         info!(log, "Unrecognized dataset kind");
         return Ok(());
     };
@@ -531,7 +531,7 @@ async fn ensure_zpool_dataset_is_encrypted(
                 "Dataset already has encrypted variant, resuming migration"
             );
             return finalize_encryption_migration(
-                &log,
+                log,
                 &encrypted_dataset,
                 &unencrypted_dataset,
             )
@@ -587,7 +587,7 @@ async fn ensure_zpool_dataset_is_encrypted(
     zfs_rename(&encrypted_dataset_tmp, &encrypted_dataset).await?;
 
     return finalize_encryption_migration(
-        &log,
+        log,
         &encrypted_dataset,
         &unencrypted_dataset,
     )
@@ -610,7 +610,7 @@ async fn zfs_destroy(
     let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
     let cmd = command.args(&["destroy", "-r", dataset]);
     let output = cmd.output().await?;
-    status_ok_or_get_stderr(&cmd, &output)?;
+    status_ok_or_get_stderr(cmd, &output)?;
     Ok(())
 }
 
@@ -621,7 +621,7 @@ async fn zfs_create_snapshot(
     let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
     let cmd = command.args(&["snapshot", dataset_snapshot]);
     let output = cmd.output().await?;
-    status_ok_or_get_stderr(&cmd, &output)?;
+    status_ok_or_get_stderr(cmd, &output)?;
     Ok(())
 }
 
@@ -664,9 +664,9 @@ async fn zfs_transfer_to_unmountable_dataset(
     let receiver = receiver_cmd.spawn()?;
 
     let output = receiver.wait_with_output().await?;
-    status_ok_or_get_stderr(&receiver_cmd, &output)?;
+    status_ok_or_get_stderr(receiver_cmd, &output)?;
     let output = sender.wait_with_output().await?;
-    status_ok_or_get_stderr(&sender_cmd, &output)?;
+    status_ok_or_get_stderr(sender_cmd, &output)?;
 
     Ok(())
 }
@@ -686,7 +686,7 @@ async fn zfs_set(
     cmd.arg(dataset);
 
     let output = cmd.output().await?;
-    status_ok_or_get_stderr(&cmd, &output)?;
+    status_ok_or_get_stderr(cmd, &output)?;
     Ok(())
 }
 
@@ -694,7 +694,7 @@ async fn zfs_set(
 async fn zfs_set_zoned_and_mountable(
     dataset: &str,
 ) -> Result<(), DatasetEncryptionMigrationError> {
-    zfs_set(&dataset, &["zoned=on", "canmount=on"]).await
+    zfs_set(dataset, &["zoned=on", "canmount=on"]).await
 }
 
 // Renames a dataset from "from" to "to".
@@ -705,7 +705,7 @@ async fn zfs_rename(
     let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
     let cmd = command.args(&["rename", from, to]);
     let output = cmd.output().await?;
-    status_ok_or_get_stderr(&cmd, &output)?;
+    status_ok_or_get_stderr(cmd, &output)?;
     Ok(())
 }
 
@@ -714,10 +714,10 @@ async fn finalize_encryption_migration(
     encrypted_dataset: &str,
     unencrypted_dataset: &str,
 ) -> Result<(), DatasetEncryptionMigrationError> {
-    zfs_set_zoned_and_mountable(&encrypted_dataset).await?;
+    zfs_set_zoned_and_mountable(encrypted_dataset).await?;
     info!(log, "Dataset is encrypted, zoned, and mountable"; "dataset" => encrypted_dataset);
 
-    zfs_destroy(&unencrypted_dataset).await?;
+    zfs_destroy(unencrypted_dataset).await?;
     info!(log, "Destroyed unencrypted dataset"; "dataset" => unencrypted_dataset);
     Ok(())
 }

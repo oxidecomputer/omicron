@@ -720,7 +720,7 @@ impl RunningZone {
 
     /// Return a reference to the links for this zone.
     pub fn links(&self) -> &Vec<Link> {
-        &self.inner.links()
+        self.inner.links()
     }
 
     /// Return a mutable reference to the links for this zone.

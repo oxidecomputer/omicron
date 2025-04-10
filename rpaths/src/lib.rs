@@ -259,7 +259,7 @@ mod internal {
 
             let error = configure_rpaths_from_path(
                 &mut v,
-                &OsStr::from_bytes(b"/foo/b\x80ar"),
+                OsStr::from_bytes(b"/foo/b\x80ar"),
             )
             .unwrap_err();
             assert_eq!(error, "contains non-UTF8 data");

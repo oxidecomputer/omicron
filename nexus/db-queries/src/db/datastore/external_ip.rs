@@ -499,7 +499,7 @@ impl DataStore {
                 }
 
                 Err(match &collection.runtime_state.nexus_state {
-                    state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
+                    state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(state) => {
                         if attached_count >= i64::from(MAX_EXTERNAL_IPS_PLUS_SNAT) {
                             Error::invalid_request(&format!(
                                 "an instance may not have more than \
@@ -853,7 +853,7 @@ impl DataStore {
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::floating_ip, dsl::id, &pagparams)
+                paginated(dsl::floating_ip, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::floating_ip,
@@ -1171,7 +1171,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // No IPs, to start
-        let ips = read_all_service_ips(&datastore, opctx).await;
+        let ips = read_all_service_ips(datastore, opctx).await;
         assert_eq!(ips, vec![]);
 
         // Set up service IP pool range
@@ -1224,7 +1224,7 @@ mod tests {
         external_ips.sort_by_key(|ip| ip.id);
 
         // Ensure we see them all.
-        let ips = read_all_service_ips(&datastore, opctx).await;
+        let ips = read_all_service_ips(datastore, opctx).await;
         assert_eq!(ips, external_ips);
 
         // Deallocate a few, and ensure we don't see them anymore.
@@ -1246,7 +1246,7 @@ mod tests {
         external_ips.retain(|ip| !removed_ip_ids.contains(&ip.id));
 
         // Ensure we see them all remaining IPs.
-        let ips = read_all_service_ips(&datastore, opctx).await;
+        let ips = read_all_service_ips(datastore, opctx).await;
         assert_eq!(ips, external_ips);
 
         db.terminate().await;

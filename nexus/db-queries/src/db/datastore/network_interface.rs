@@ -115,7 +115,7 @@ impl DataStore {
             .authorize(authz::Action::CreateChild, authz_subnet)
             .await
             .map_err(network_interface::InsertError::External)?;
-        self.instance_create_network_interface_raw(&opctx, interface).await
+        self.instance_create_network_interface_raw(opctx, interface).await
     }
 
     pub async fn probe_create_network_interface(
@@ -123,7 +123,7 @@ impl DataStore {
         opctx: &OpContext,
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, network_interface::InsertError> {
-        self.create_network_interface_raw(&opctx, interface).await
+        self.create_network_interface_raw(opctx, interface).await
     }
 
     pub(crate) async fn instance_create_network_interface_raw(
@@ -613,7 +613,7 @@ impl DataStore {
         use nexus_db_schema::schema::instance_network_interface::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::instance_network_interface, dsl::id, &pagparams)
+                paginated(dsl::instance_network_interface, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::instance_network_interface,
@@ -933,7 +933,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // No IPs, to start
-        let nics = read_all_service_nics(&datastore, &opctx).await;
+        let nics = read_all_service_nics(datastore, opctx).await;
         assert_eq!(nics, vec![]);
 
         // Insert 10 Nexus NICs
@@ -959,7 +959,7 @@ mod tests {
             )
             .unwrap();
             let nic = datastore
-                .service_create_network_interface(&opctx, interface)
+                .service_create_network_interface(opctx, interface)
                 .await
                 .expect("failed to insert service nic");
             service_nics.push(nic);
@@ -967,7 +967,7 @@ mod tests {
         service_nics.sort_by_key(|nic| nic.id());
 
         // Ensure we see them all.
-        let nics = read_all_service_nics(&datastore, &opctx).await;
+        let nics = read_all_service_nics(datastore, opctx).await;
         assert_eq!(nics, service_nics);
 
         // Delete a few, and ensure we don't see them anymore.
@@ -976,11 +976,7 @@ mod tests {
             if i % 3 == 0 {
                 let id = nic.id();
                 datastore
-                    .service_delete_network_interface(
-                        &opctx,
-                        nic.service_id,
-                        id,
-                    )
+                    .service_delete_network_interface(opctx, nic.service_id, id)
                     .await
                     .expect("failed to delete NIC");
                 removed_nic_ids.insert(id);
@@ -993,7 +989,7 @@ mod tests {
         service_nics.retain(|nic| !removed_nic_ids.contains(&nic.id()));
 
         // Ensure we see them all remaining IPs.
-        let nics = read_all_service_nics(&datastore, &opctx).await;
+        let nics = read_all_service_nics(datastore, opctx).await;
         assert_eq!(nics, service_nics);
 
         db.terminate().await;

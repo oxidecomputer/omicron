@@ -399,7 +399,7 @@ async fn sim_ensure_destination_propolis(
           "dst_vmm_state" => ?vmm);
 
     let (authz_silo, authz_project, authz_instance) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .instance_id(db_instance.id())
             .lookup_for(authz::Action::Modify)
             .await
@@ -584,8 +584,8 @@ mod tests {
     const INSTANCE_NAME: &str = "test-instance";
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
-        let project = create_project(&client, PROJECT_NAME).await;
+        create_default_ip_pool(client).await;
+        let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }
 
@@ -625,7 +625,7 @@ mod tests {
     ) {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let _project_id = setup_test_project(&client).await;
+        let _project_id = setup_test_project(client).await;
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;
@@ -673,7 +673,7 @@ mod tests {
         let log = &cptestctx.logctx.log;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        let _project_id = setup_test_project(&client).await;
+        let _project_id = setup_test_project(client).await;
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let instance = create_instance(client).await;

@@ -123,7 +123,7 @@ impl super::Nexus {
         );
         let (_, router) = self
             .db_datastore
-            .vpc_create_router(&opctx, &authz_vpc, router)
+            .vpc_create_router(opctx, &authz_vpc, router)
             .await?;
 
         // Note: we don't trigger the route RPW here as it's impossible
@@ -256,7 +256,7 @@ impl super::Nexus {
         );
         let route = self
             .db_datastore
-            .router_create_route(&opctx, &authz_router, route)
+            .router_create_route(opctx, &authz_router, route)
             .await?;
 
         self.vpc_router_increment_rpw_version(opctx, &authz_router).await?;
@@ -318,7 +318,7 @@ impl super::Nexus {
 
         let out = self
             .db_datastore
-            .router_update_route(&opctx, &authz_route, params.clone().into())
+            .router_update_route(opctx, &authz_route, params.clone().into())
             .await?;
 
         self.vpc_router_increment_rpw_version(opctx, &authz_router).await?;

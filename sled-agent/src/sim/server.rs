@@ -103,7 +103,7 @@ impl Server {
             "server" => config.id.clone().to_string()
         ));
         let sled_agent = SledAgent::new_simulated_with_id(
-            &config,
+            config,
             sa_log,
             config.nexus_address,
             Arc::clone(&nexus_client),
@@ -272,7 +272,7 @@ async fn handoff_to_nexus(
 
     let notify_nexus = || async {
         nexus_client
-            .rack_initialization_complete(&rack_id, &request)
+            .rack_initialization_complete(&rack_id, request)
             .await
             .map_err(BackoffError::transient)
     };
@@ -599,7 +599,7 @@ pub async fn run_standalone_server(
         allowed_source_ips: NexusTypes::AllowedSourceIps::Any,
     };
 
-    handoff_to_nexus(&log, &config, &rack_init_request).await?;
+    handoff_to_nexus(&log, config, &rack_init_request).await?;
     info!(log, "Handoff to Nexus is complete");
 
     server.wait_for_finish().await

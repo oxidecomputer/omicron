@@ -362,7 +362,7 @@ pub async fn reconfigurator_state_load(
     let blueprints_list = &blueprints;
     let fetch_dns_group = |dns_group: DnsGroup| async move {
         let latest_version = datastore
-            .dns_group_latest_version(&opctx, dns_group)
+            .dns_group_latest_version(opctx, dns_group)
             .await
             .with_context(|| {
                 format!("reading latest {:?} version", dns_group)
@@ -378,7 +378,7 @@ pub async fn reconfigurator_state_load(
         let mut rv = BTreeMap::new();
         for gen in dns_generations_needed {
             let config = datastore
-                .dns_config_read_version(&opctx, dns_group, gen)
+                .dns_config_read_version(opctx, dns_group, gen)
                 .await
                 .with_context(|| {
                     format!("reading {:?} DNS version {}", dns_group, gen)
@@ -392,14 +392,14 @@ pub async fn reconfigurator_state_load(
     let internal_dns = fetch_dns_group(DnsGroup::Internal).await?;
     let external_dns = fetch_dns_group(DnsGroup::External).await?;
     let silo_names = datastore
-        .silo_list_all_batched(&opctx, Discoverability::All)
+        .silo_list_all_batched(opctx, Discoverability::All)
         .await
         .context("listing all Silos")?
         .into_iter()
         .map(|s| s.name().clone())
         .collect();
     let external_dns_zone_names = datastore
-        .dns_zones_list_all(&opctx, DnsGroup::External)
+        .dns_zones_list_all(opctx, DnsGroup::External)
         .await
         .context("listing external DNS zone names")?
         .into_iter()

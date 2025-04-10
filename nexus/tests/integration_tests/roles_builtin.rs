@@ -20,7 +20,7 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // Success cases
-    let roles = NexusRequest::object_get(&testctx, "/v1/system/roles")
+    let roles = NexusRequest::object_get(testctx, "/v1/system/roles")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -51,7 +51,7 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     // This endpoint uses a custom pagination scheme that is easy to get wrong.
     // Let's test that all markers do work.
     let roles_paginated = NexusRequest::iter_collection_authn(
-        &testctx,
+        testctx,
         "/v1/system/roles",
         "",
         Some(1),
@@ -67,7 +67,7 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     // Success cases
     for r in &roles {
         let one_role = NexusRequest::object_get(
-            &testctx,
+            testctx,
             &format!("/v1/system/roles/{}", r.name),
         )
         .authn_as(AuthnMode::PrivilegedUser)

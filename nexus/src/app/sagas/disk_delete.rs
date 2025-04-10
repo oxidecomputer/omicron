@@ -208,7 +208,7 @@ pub(crate) mod test {
 
     async fn create_disk(cptestctx: &ControlPlaneTestContext) -> Disk {
         let nexus = &cptestctx.server.server_context().nexus;
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
 
         let project_selector = params::ProjectSelector {
             project: Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
@@ -235,10 +235,10 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_project(client, PROJECT_NAME).await.identity.id;
-        let disk = create_disk(&cptestctx).await;
+        let disk = create_disk(cptestctx).await;
 
         // Build the saga DAG with the provided test parameters and run it.
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             project_id,
@@ -257,10 +257,10 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_project(client, PROJECT_NAME).await.identity.id;
-        let disk = create_disk(&cptestctx).await;
+        let disk = create_disk(cptestctx).await;
 
         // Build the saga DAG with the provided test parameters
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             project_id,
@@ -274,7 +274,7 @@ pub(crate) mod test {
         .await;
 
         crate::app::sagas::disk_create::test::verify_clean_slate(
-            &cptestctx, &test,
+            cptestctx, &test,
         )
         .await;
     }

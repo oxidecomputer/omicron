@@ -1248,7 +1248,7 @@ impl super::Nexus {
         futures::stream::iter(datasets_and_snapshots)
             .map(|(dataset, region_snapshot)| async move {
                 self.delete_crucible_running_snapshot_impl(
-                    &log,
+                    log,
                     &dataset,
                     region_snapshot.region_id,
                     region_snapshot.snapshot_id,
@@ -1286,7 +1286,7 @@ impl super::Nexus {
         futures::stream::iter(datasets_and_snapshots)
             .map(|(dataset, region_snapshot)| async move {
                 self.delete_crucible_snapshot_impl(
-                    &log,
+                    log,
                     &dataset,
                     region_snapshot.region_id,
                     region_snapshot.snapshot_id,
@@ -1342,7 +1342,7 @@ impl super::Nexus {
         futures::stream::iter(datasets_and_snapshots)
             .map(|(dataset, region_snapshot)| async move {
                 self.ensure_crucible_running_snapshot_impl(
-                    &log,
+                    log,
                     &dataset,
                     region_snapshot.region_id,
                     region_snapshot.snapshot_id,

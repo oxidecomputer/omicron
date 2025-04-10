@@ -723,7 +723,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         };
 
         let (nexus_internal, nexus_internal_addr) =
-            N::start_internal(&self.config, &log).await?;
+            N::start_internal(self.config, log).await?;
 
         let address = SocketAddrV6::new(
             match nexus_internal_addr.ip() {

@@ -139,7 +139,7 @@ impl DataStore {
         let err = OptionalError::new();
         let r = self
             .transaction_retry_wrapper(name)
-            .transaction(&conn, |conn| {
+            .transaction(conn, |conn| {
                 let err = err.clone();
                 let f = f.clone();
                 async move {
@@ -306,7 +306,7 @@ impl DataStore {
         // modifications of existing tables.
         #[allow(clippy::disallowed_methods)]
         self.transaction_non_retry_wrapper("blueprint_insert")
-            .transaction(&conn, |conn| async move {
+            .transaction(conn, |conn| async move {
             // Insert the row for the blueprint.
             {
                 use nexus_db_schema::schema::blueprint::dsl;
@@ -1385,7 +1385,7 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<BlueprintTarget, TransactionError<Error>> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
-        Self::blueprint_current_target_only(&conn).await
+        Self::blueprint_current_target_only(conn).await
     }
 
     /// Get the current target blueprint, if one exists
@@ -2003,23 +2003,23 @@ mod tests {
         // Trying to read it from the database should fail with the relevant
         // "not found" error.
         let err = datastore
-            .blueprint_read(&opctx, &authz_blueprint)
+            .blueprint_read(opctx, &authz_blueprint)
             .await
             .unwrap_err();
         assert_eq!(err, authz_blueprint.not_found());
 
         // Write it to the database and read it back.
         datastore
-            .blueprint_insert(&opctx, &blueprint1)
+            .blueprint_insert(opctx, &blueprint1)
             .await
             .expect("failed to insert blueprint");
         let blueprint_read = datastore
-            .blueprint_read(&opctx, &authz_blueprint)
+            .blueprint_read(opctx, &authz_blueprint)
             .await
             .expect("failed to read blueprint back");
         assert_eq!(blueprint1, blueprint_read);
         assert_eq!(
-            blueprint_list_all_ids(&opctx, &datastore).await,
+            blueprint_list_all_ids(opctx, datastore).await,
             [blueprint1.id]
         );
 
@@ -2029,7 +2029,7 @@ mod tests {
 
         // Trying to insert the same blueprint again should fail.
         let err =
-            datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap_err();
+            datastore.blueprint_insert(opctx, &blueprint1).await.unwrap_err();
         assert!(err.to_string().contains("duplicate key"));
 
         // We could try to test deleting this blueprint, but deletion checks
@@ -2059,16 +2059,16 @@ mod tests {
 
         // Write it to the database and read it back.
         datastore
-            .blueprint_insert(&opctx, &blueprint1)
+            .blueprint_insert(opctx, &blueprint1)
             .await
             .expect("failed to insert blueprint");
         let blueprint_read = datastore
-            .blueprint_read(&opctx, &authz_blueprint1)
+            .blueprint_read(opctx, &authz_blueprint1)
             .await
             .expect("failed to read collection back");
         assert_eq!(blueprint1, blueprint_read);
         assert_eq!(
-            blueprint_list_all_ids(&opctx, &datastore).await,
+            blueprint_list_all_ids(opctx, datastore).await,
             [blueprint1.id]
         );
 
@@ -2094,15 +2094,15 @@ mod tests {
             time_made_target: now_db_precision(),
         };
         datastore
-            .blueprint_target_set_current(&opctx, bp1_target)
+            .blueprint_target_set_current(opctx, bp1_target)
             .await
             .unwrap();
         assert_eq!(
-            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current_full(opctx).await.unwrap(),
             (bp1_target, blueprint1.clone())
         );
         let err = datastore
-            .blueprint_delete(&opctx, &authz_blueprint1)
+            .blueprint_delete(opctx, &authz_blueprint1)
             .await
             .unwrap_err();
         assert!(
@@ -2293,11 +2293,11 @@ mod tests {
 
         // Check that we can write it to the DB and read it back.
         datastore
-            .blueprint_insert(&opctx, &blueprint2)
+            .blueprint_insert(opctx, &blueprint2)
             .await
             .expect("failed to insert blueprint");
         let blueprint_read = datastore
-            .blueprint_read(&opctx, &authz_blueprint2)
+            .blueprint_read(opctx, &authz_blueprint2)
             .await
             .expect("failed to read collection back");
         let diff = blueprint_read.diff_since_blueprint(&blueprint2);
@@ -2309,7 +2309,7 @@ mod tests {
             let mut expected_ids = [blueprint1.id, blueprint2.id];
             expected_ids.sort();
             assert_eq!(
-                blueprint_list_all_ids(&opctx, &datastore).await,
+                blueprint_list_all_ids(opctx, datastore).await,
                 expected_ids
             );
         }
@@ -2322,15 +2322,15 @@ mod tests {
             time_made_target: now_db_precision(),
         };
         datastore
-            .blueprint_target_set_current(&opctx, bp2_target)
+            .blueprint_target_set_current(opctx, bp2_target)
             .await
             .unwrap();
         assert_eq!(
-            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current_full(opctx).await.unwrap(),
             (bp2_target, blueprint2.clone())
         );
         let err = datastore
-            .blueprint_delete(&opctx, &authz_blueprint2)
+            .blueprint_delete(opctx, &authz_blueprint2)
             .await
             .unwrap_err();
         assert!(
@@ -2343,10 +2343,10 @@ mod tests {
 
         // Now that blueprint2 is the target, we should be able to delete
         // blueprint1.
-        datastore.blueprint_delete(&opctx, &authz_blueprint1).await.unwrap();
-        ensure_blueprint_fully_deleted(&datastore, blueprint1.id).await;
+        datastore.blueprint_delete(opctx, &authz_blueprint1).await.unwrap();
+        ensure_blueprint_fully_deleted(datastore, blueprint1.id).await;
         assert_eq!(
-            blueprint_list_all_ids(&opctx, &datastore).await,
+            blueprint_list_all_ids(opctx, datastore).await,
             [blueprint2.id]
         );
 
@@ -2367,7 +2367,7 @@ mod tests {
         let nonexistent_blueprint_id = BlueprintUuid::new_v4();
         let err = datastore
             .blueprint_target_set_current(
-                &opctx,
+                opctx,
                 BlueprintTarget {
                     target_id: nonexistent_blueprint_id,
                     enabled: true,
@@ -2387,7 +2387,7 @@ mod tests {
         // system, since RSS sets an initial target blueprint, so we should get
         // an error.
         let err = datastore
-            .blueprint_target_get_current_full(&opctx)
+            .blueprint_target_get_current_full(opctx)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("no target blueprint set"));
@@ -2425,9 +2425,9 @@ mod tests {
         assert_eq!(blueprint3.parent_blueprint_id, Some(blueprint1.id));
 
         // Insert all three into the blueprint table.
-        datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap();
-        datastore.blueprint_insert(&opctx, &blueprint2).await.unwrap();
-        datastore.blueprint_insert(&opctx, &blueprint3).await.unwrap();
+        datastore.blueprint_insert(opctx, &blueprint1).await.unwrap();
+        datastore.blueprint_insert(opctx, &blueprint2).await.unwrap();
+        datastore.blueprint_insert(opctx, &blueprint3).await.unwrap();
 
         let bp1_target = BlueprintTarget {
             target_id: blueprint1.id,
@@ -2450,7 +2450,7 @@ mod tests {
         // (i.e., only a blueprint with no parent can be made the current
         // target).
         let err = datastore
-            .blueprint_target_set_current(&opctx, bp2_target)
+            .blueprint_target_set_current(opctx, bp2_target)
             .await
             .unwrap_err();
         assert_eq!(
@@ -2462,7 +2462,7 @@ mod tests {
         // system, since RSS sets an initial target blueprint, so we should get
         // an error.
         let err = datastore
-            .blueprint_target_get_current_full(&opctx)
+            .blueprint_target_get_current_full(opctx)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("no target blueprint set"));
@@ -2470,22 +2470,22 @@ mod tests {
         // We should be able to insert blueprint1, which has no parent (matching
         // the currently-empty `bp_target` table's lack of a target).
         datastore
-            .blueprint_target_set_current(&opctx, bp1_target)
+            .blueprint_target_set_current(opctx, bp1_target)
             .await
             .unwrap();
         assert_eq!(
-            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current_full(opctx).await.unwrap(),
             (bp1_target, blueprint1.clone())
         );
 
         // Now that blueprint1 is the current target, we should be able to
         // insert blueprint2 or blueprint3. WLOG, pick blueprint3.
         datastore
-            .blueprint_target_set_current(&opctx, bp3_target)
+            .blueprint_target_set_current(opctx, bp3_target)
             .await
             .unwrap();
         assert_eq!(
-            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current_full(opctx).await.unwrap(),
             (bp3_target, blueprint3.clone())
         );
 
@@ -2493,7 +2493,7 @@ mod tests {
         // blueprint2 should fail, because neither of their parents (NULL and
         // blueprint1, respectively) match the current target.
         let err = datastore
-            .blueprint_target_set_current(&opctx, bp1_target)
+            .blueprint_target_set_current(opctx, bp1_target)
             .await
             .unwrap_err();
         assert_eq!(
@@ -2501,7 +2501,7 @@ mod tests {
             Error::from(InsertTargetError::ParentNotTarget(blueprint1.id))
         );
         let err = datastore
-            .blueprint_target_set_current(&opctx, bp2_target)
+            .blueprint_target_set_current(opctx, bp2_target)
             .await
             .unwrap_err();
         assert_eq!(
@@ -2521,18 +2521,18 @@ mod tests {
         .expect("failed to create builder")
         .build();
         assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
-        datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();
+        datastore.blueprint_insert(opctx, &blueprint4).await.unwrap();
         let bp4_target = BlueprintTarget {
             target_id: blueprint4.id,
             enabled: false,
             time_made_target: now_db_precision(),
         };
         datastore
-            .blueprint_target_set_current(&opctx, bp4_target)
+            .blueprint_target_set_current(opctx, bp4_target)
             .await
             .unwrap();
         assert_eq!(
-            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current_full(opctx).await.unwrap(),
             (bp4_target, blueprint4)
         );
 
@@ -2569,8 +2569,8 @@ mod tests {
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
 
         // Insert both into the blueprint table.
-        datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap();
-        datastore.blueprint_insert(&opctx, &blueprint2).await.unwrap();
+        datastore.blueprint_insert(opctx, &blueprint1).await.unwrap();
+        datastore.blueprint_insert(opctx, &blueprint2).await.unwrap();
 
         let mut bp1_target = BlueprintTarget {
             target_id: blueprint1.id,
@@ -2585,11 +2585,11 @@ mod tests {
 
         // Set bp1_target as the current target.
         datastore
-            .blueprint_target_set_current(&opctx, bp1_target)
+            .blueprint_target_set_current(opctx, bp1_target)
             .await
             .unwrap();
         assert_eq!(
-            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current(opctx).await.unwrap(),
             bp1_target,
         );
 
@@ -2598,11 +2598,11 @@ mod tests {
         for _ in 0..10 {
             bp1_target.enabled = !bp1_target.enabled;
             datastore
-                .blueprint_target_set_current_enabled(&opctx, bp1_target)
+                .blueprint_target_set_current_enabled(opctx, bp1_target)
                 .await
                 .unwrap();
             assert_eq!(
-                datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+                datastore.blueprint_target_get_current(opctx).await.unwrap(),
                 bp1_target,
             );
         }
@@ -2610,7 +2610,7 @@ mod tests {
         // We cannot use `blueprint_target_set_current_enabled` to make
         // bp2_target the target...
         let err = datastore
-            .blueprint_target_set_current_enabled(&opctx, bp2_target)
+            .blueprint_target_set_current_enabled(opctx, bp2_target)
             .await
             .unwrap_err();
         assert!(
@@ -2619,17 +2619,17 @@ mod tests {
 
         // ...but we can make it the target via `blueprint_target_set_current`.
         datastore
-            .blueprint_target_set_current(&opctx, bp2_target)
+            .blueprint_target_set_current(opctx, bp2_target)
             .await
             .unwrap();
         assert_eq!(
-            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current(opctx).await.unwrap(),
             bp2_target,
         );
 
         // We can no longer toggle the enabled bit of bp1_target.
         let err = datastore
-            .blueprint_target_set_current_enabled(&opctx, bp1_target)
+            .blueprint_target_set_current_enabled(opctx, bp1_target)
             .await
             .unwrap_err();
         assert!(
@@ -2640,11 +2640,11 @@ mod tests {
         for _ in 0..10 {
             bp2_target.enabled = !bp2_target.enabled;
             datastore
-                .blueprint_target_set_current_enabled(&opctx, bp2_target)
+                .blueprint_target_set_current_enabled(opctx, bp2_target)
                 .await
                 .unwrap();
             assert_eq!(
-                datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+                datastore.blueprint_target_get_current(opctx).await.unwrap(),
                 bp2_target,
             );
         }
@@ -2678,11 +2678,11 @@ mod tests {
         ))
         .unwrap();
         let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(&opctx)
+            .ip_pools_service_lookup(opctx)
             .await
             .expect("lookup service ip pool");
         datastore
-            .ip_pool_add_range(&opctx, &service_ip_pool, &ip_range)
+            .ip_pool_add_range(opctx, &service_ip_pool, &ip_range)
             .await
             .expect("add range to service ip pool");
         let zone_id = OmicronZoneUuid::new_v4();
@@ -2740,8 +2740,8 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let blueprint =
-            create_blueprint_with_external_ip(&datastore, &opctx).await;
-        datastore.blueprint_insert(&opctx, &blueprint).await.unwrap();
+            create_blueprint_with_external_ip(datastore, opctx).await;
+        datastore.blueprint_insert(opctx, &blueprint).await.unwrap();
 
         let bp_target = BlueprintTarget {
             target_id: blueprint.id,
@@ -2749,13 +2749,10 @@ mod tests {
             time_made_target: now_db_precision(),
         };
 
-        datastore
-            .blueprint_target_set_current(&opctx, bp_target)
-            .await
-            .unwrap();
+        datastore.blueprint_target_set_current(opctx, bp_target).await.unwrap();
         datastore
             .blueprint_ensure_external_networking_resources_impl(
-                &opctx,
+                opctx,
                 &blueprint,
                 NetworkResourceControlFlow::default(),
             )
@@ -2809,12 +2806,12 @@ mod tests {
             })
             .expect("found external IP");
         let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(&opctx)
+            .ip_pools_service_lookup(opctx)
             .await
             .expect("lookup service ip pool");
         datastore
             .ip_pool_add_range(
-                &opctx,
+                opctx,
                 &service_ip_pool,
                 &IpRange::try_from((nexus_ip, nexus_ip))
                     .expect("valid IP range"),
@@ -2825,9 +2822,9 @@ mod tests {
         // Insert both (plus the original parent of blueprint1, internal to
         // `ExampleSystemBuilder`) into the blueprint table.
         let blueprint0 = example_system.initial_blueprint;
-        datastore.blueprint_insert(&opctx, &blueprint0).await.unwrap();
-        datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap();
-        datastore.blueprint_insert(&opctx, &blueprint2).await.unwrap();
+        datastore.blueprint_insert(opctx, &blueprint0).await.unwrap();
+        datastore.blueprint_insert(opctx, &blueprint1).await.unwrap();
+        datastore.blueprint_insert(opctx, &blueprint2).await.unwrap();
 
         let bp0_target = BlueprintTarget {
             target_id: blueprint0.id,
@@ -2848,11 +2845,11 @@ mod tests {
         // Set bp1_target as the current target (which requires making bp0 the
         // target first).
         datastore
-            .blueprint_target_set_current(&opctx, bp0_target)
+            .blueprint_target_set_current(opctx, bp0_target)
             .await
             .unwrap();
         datastore
-            .blueprint_target_set_current(&opctx, bp1_target)
+            .blueprint_target_set_current(opctx, bp1_target)
             .await
             .unwrap();
 
@@ -2902,12 +2899,12 @@ mod tests {
         // - Update the target
         // - Read the data which "Ensure resources" is attempting to write
         datastore
-            .blueprint_target_set_current(&opctx, bp2_target)
+            .blueprint_target_set_current(opctx, bp2_target)
             .await
             .unwrap();
 
         let conn = datastore
-            .pool_connection_authorized(&opctx)
+            .pool_connection_authorized(opctx)
             .await
             .expect("failed to get connection");
 

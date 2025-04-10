@@ -90,7 +90,7 @@ impl Simulator {
     /// Versioned configurations start with this seed, though they may choose
     /// to change it as they go along.
     pub fn initial_seed(&self) -> &str {
-        &self.root_state.rng().seed()
+        self.root_state.rng().seed()
     }
 
     /// Get the current heads of the store.

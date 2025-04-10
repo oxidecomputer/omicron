@@ -194,8 +194,8 @@ async fn setup_silo_with_quota(
 
     // create default pool and link to this silo. can't use
     // create_default_ip_pool because that links to the default silo
-    create_ip_pool(&client, "default", None).await;
-    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+    create_ip_pool(client, "default", None).await;
+    link_ip_pool(client, "default", &silo.identity.id, true).await;
 
     // Create a silo user
     let user = create_local_user(
@@ -241,10 +241,10 @@ async fn test_quotas(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Simulate space for disks
-    DiskTest::new(&cptestctx).await;
+    DiskTest::new(cptestctx).await;
 
     let system = setup_silo_with_quota(
-        &client,
+        client,
         "quota-test-silo",
         params::SiloQuotasCreate::empty(),
     )
@@ -325,7 +325,7 @@ async fn test_quota_limits(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let system = setup_silo_with_quota(
-        &client,
+        client,
         "quota-test-silo",
         params::SiloQuotasCreate::empty(),
     )

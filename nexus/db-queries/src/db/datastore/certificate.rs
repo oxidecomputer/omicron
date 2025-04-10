@@ -89,7 +89,7 @@ impl DataStore {
         let query;
         match pagparams {
             PaginatedBy::Id(params) => {
-                query = paginated(dsl::certificate, dsl::id, &params)
+                query = paginated(dsl::certificate, dsl::id, params)
                     .filter(dsl::time_deleted.is_null());
             }
             PaginatedBy::Name(params) => {

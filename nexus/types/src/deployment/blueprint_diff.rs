@@ -1089,11 +1089,11 @@ impl BpTableData for BpDiffDatasetsModified {
                         dataset.dataset.disposition.to_string(),
                     ),
                     BpTableColumn::new(
-                        unwrap_or_none(&before_quota),
+                        unwrap_or_none(before_quota),
                         unwrap_or_none(&dataset.dataset.quota),
                     ),
                     BpTableColumn::new(
-                        unwrap_or_none(&before_reservation),
+                        unwrap_or_none(before_reservation),
                         unwrap_or_none(&dataset.dataset.reservation),
                     ),
                     BpTableColumn::new(

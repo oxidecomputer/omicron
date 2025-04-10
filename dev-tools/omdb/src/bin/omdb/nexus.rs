@@ -860,7 +860,7 @@ fn print_task(bgtask: &BackgroundTask) {
     // unstable -- it gets exposed by background tasks as unstructured
     // (schemaless) data.  We make a best effort to interpret it.
     if let LastResult::Completed(completed) = &bgtask.last {
-        print_task_details(&bgtask, &completed.details);
+        print_task_details(bgtask, &completed.details);
     }
 }
 
@@ -887,7 +887,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         serde_json::from_value::<TaskError>(details.clone())
     {
         println!("    last completion reported error: {}", found_error.error);
-        println!("");
+        println!();
         return;
     }
 
@@ -978,7 +978,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
     }
 
-    println!("");
+    println!();
 }
 
 fn print_task_abandoned_vmm_reaper(details: &serde_json::Value) {
@@ -1289,7 +1289,7 @@ fn print_task_dns_propagation(details: &serde_json::Value) {
                 println!("{}", textwrap::indent(&table.to_string(), "      "));
             }
 
-            println!("");
+            println!();
             for (addr, error) in server_results.iter().filter_map(
                 |(addr, result)| match result {
                     Ok(_) => None,
@@ -1387,7 +1387,7 @@ fn print_task_external_endpoints(details: &serde_json::Value) {
                 println!("        warning: {}", w);
             }
 
-            println!("");
+            println!();
             println!("    TLS certificates: {}", tls_cert_rows.len());
             if !tls_cert_rows.is_empty() {
                 let table = tabled::Table::new(tls_cert_rows)
@@ -2443,7 +2443,7 @@ fn push_event_buffer_terminal_info(
 
             builder.push_record([
                 "  reason:".to_string(),
-                reason.message_display(&buffer).to_string(),
+                reason.message_display(buffer).to_string(),
             ]);
             // TODO: show last progress event
         }
@@ -3046,7 +3046,7 @@ async fn cmd_nexus_sled_expunge_with_datastore(
     let opctx = &opctx;
 
     // First, we need to look up the sled so we know its serial number.
-    let (_authz_sled, sled) = LookupPath::new(opctx, &datastore)
+    let (_authz_sled, sled) = LookupPath::new(opctx, datastore)
         .sled_id(args.sled_id.into_untyped_uuid())
         .fetch()
         .await
@@ -3150,7 +3150,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 
     // First, we need to look up the disk so we can lookup identity information.
     let (_authz_physical_disk, physical_disk) =
-        LookupPath::new(opctx, &datastore)
+        LookupPath::new(opctx, datastore)
             .physical_disk(args.physical_disk_id)
             .fetch()
             .await

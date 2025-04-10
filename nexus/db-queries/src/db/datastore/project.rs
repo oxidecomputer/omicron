@@ -102,7 +102,7 @@ impl DataStore {
 
         debug!(opctx.log, "attempting to create built-in projects");
 
-        let (authz_silo,) = db::lookup::LookupPath::new(&opctx, self)
+        let (authz_silo,) = db::lookup::LookupPath::new(opctx, self)
             .silo_id(INTERNAL_SILO_ID)
             .lookup_for(authz::Action::CreateChild)
             .await?;
@@ -314,7 +314,7 @@ impl DataStore {
         use nexus_db_schema::schema::project::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::project, dsl::id, &pagparams)
+                paginated(dsl::project, dsl::id, pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
                 dsl::project,

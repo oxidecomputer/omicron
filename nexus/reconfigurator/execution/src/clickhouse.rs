@@ -175,7 +175,7 @@ where
         futs.push(Either::Right(async move {
             let client = ClickhouseServerClient::new(&admin_url, log.clone());
             if let Err(e) = client
-                .generate_config_and_enable_svc(&config)
+                .generate_config_and_enable_svc(config)
                 .await
                 .map(|_| ())
                 .map_err(|e| {

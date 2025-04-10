@@ -224,7 +224,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     assert_input_and_output(&input, &samples, &oxql_res1);
 
     let start = tokio::time::Instant::now();
-    wait_for_num_points(&log, &client2, samples.len())
+    wait_for_num_points(log, &client2, samples.len())
         .await
         .expect("failed to get samples from client2");
     info!(log, "query samples from client2 time = {:?}", start.elapsed());
@@ -249,7 +249,7 @@ async fn test_cluster() -> anyhow::Result<()> {
 
     // Wait for all the data to be copied to node 3
     let start = tokio::time::Instant::now();
-    wait_for_num_points(&log, &client3, samples.len())
+    wait_for_num_points(log, &client3, samples.len())
         .await
         .expect("failed to get samples from client3");
     info!(log, "query samples from client3 time = {:?}", start.elapsed());
@@ -274,10 +274,10 @@ async fn test_cluster() -> anyhow::Result<()> {
         .expect("failed to insert samples at server3");
 
     // Ensure that both replica 3 and replica 2 have the samples
-    wait_for_num_points(&log, &client3, samples.len() * 2)
+    wait_for_num_points(log, &client3, samples.len() * 2)
         .await
         .expect("failed to get samples from client3");
-    wait_for_num_points(&log, &client2, samples.len() * 2)
+    wait_for_num_points(log, &client2, samples.len() * 2)
         .await
         .expect("failed to get samples from client2");
 
@@ -286,7 +286,7 @@ async fn test_cluster() -> anyhow::Result<()> {
         .start_server(1.into())
         .expect("failed to restart clickhouse server 1");
     wait_for_ping(log, &client1).await.expect("failed to ping server 1");
-    wait_for_num_points(&log, &client1, samples.len() * 2)
+    wait_for_num_points(log, &client1, samples.len() * 2)
         .await
         .expect("failed to get samples from client1");
 
@@ -294,7 +294,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     deployment.remove_keeper(KeeperId(2)).expect("failed to remove keeper 2");
 
     // Querying from any node should still work after a keeper is removed
-    wait_for_num_points(&log, &client1, samples.len() * 2)
+    wait_for_num_points(log, &client1, samples.len() * 2)
         .await
         .expect("failed to get samples from client1");
 
@@ -310,7 +310,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     wait_for_insert(log, &client3, &samples)
         .await
         .expect("failed to insert samples at server3");
-    wait_for_num_points(&log, &client2, samples.len() * 3)
+    wait_for_num_points(log, &client2, samples.len() * 3)
         .await
         .expect("failed to get samples from client2");
 
@@ -318,7 +318,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     deployment.stop_keeper(1.into()).expect("failed to stop keeper 1");
 
     // We should still be able to query
-    wait_for_num_points(&log, &client3, samples.len() * 3)
+    wait_for_num_points(log, &client3, samples.len() * 3)
         .await
         .expect("failed to get samples from client1");
 
@@ -361,7 +361,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     wait_for_insert(log, &client1, &samples)
         .await
         .expect("failed to insert samples at server1");
-    wait_for_num_points(&log, &client2, samples.len() * 4)
+    wait_for_num_points(log, &client2, samples.len() * 4)
         .await
         .expect("failed to get samples from client1");
 
@@ -383,7 +383,7 @@ async fn test_cluster() -> anyhow::Result<()> {
     wait_for_insert(log, &client1, &samples)
         .await
         .expect("failed to insert samples at server1");
-    wait_for_num_points(&log, &client2, samples.len() * 5)
+    wait_for_num_points(log, &client2, samples.len() * 5)
         .await
         .expect("failed to get samples from client1");
 
@@ -416,7 +416,7 @@ fn assert_input_and_output(
     assert_eq!(oxql_res.tables.len(), 1);
     let table = oxql_res.tables.first().unwrap();
     assert_eq!(table.n_timeseries(), input.n_timeseries());
-    assert_eq!(total_points(&oxql_res), samples.len());
+    assert_eq!(total_points(oxql_res), samples.len());
 }
 
 /// Wait for the number of `samples` inserted to equal the number of `points`
@@ -484,7 +484,7 @@ async fn wait_for_insert(
     poll::wait_for_condition(
         || async {
             client
-                .insert_samples(&samples)
+                .insert_samples(samples)
                 .await
                 .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
         },

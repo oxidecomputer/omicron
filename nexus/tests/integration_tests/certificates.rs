@@ -134,21 +134,21 @@ async fn cert_delete_expect_not_found(client: &ClientTestContext) {
 async fn test_not_found_before_creation(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let certs = certs_list(&client).await;
+    let certs = certs_list(client).await;
     assert!(certs.is_empty());
 
     // Make sure we get a 404 if we fetch one.
-    cert_get_expect_not_found(&client).await;
+    cert_get_expect_not_found(client).await;
 
     // We should also get a 404 if we delete one.
-    cert_delete_expect_not_found(&client).await;
+    cert_delete_expect_not_found(client).await;
 }
 
 #[nexus_test]
 async fn test_crud(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let certs = certs_list(&client).await;
+    let certs = certs_list(client).await;
     assert!(certs.is_empty());
 
     let chain = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
@@ -156,33 +156,33 @@ async fn test_crud(cptestctx: &ControlPlaneTestContext) {
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
     // We can create a new certificate
-    create_certificate(&client, CERT_NAME, cert.clone(), key.clone()).await;
+    create_certificate(client, CERT_NAME, cert.clone(), key.clone()).await;
 
     // The certificate can be listed or accessed directly
-    let list = certs_list(&client).await;
+    let list = certs_list(client).await;
     assert_eq!(list.len(), 1, "Expected exactly one certificate");
     assert_eq!(list[0].identity.name, CERT_NAME);
-    let fetched_cert = cert_get(&client, CERT_NAME).await;
+    let fetched_cert = cert_get(client, CERT_NAME).await;
     assert_eq!(fetched_cert.identity.name, CERT_NAME);
 
     // Cannot create a certificate with the same name twice.
     let message =
-        cert_create_expect_error(&client, CERT_NAME, cert.clone(), key.clone())
+        cert_create_expect_error(client, CERT_NAME, cert.clone(), key.clone())
             .await;
     assert_eq!(message, format!("already exists: certificate \"{CERT_NAME}\""));
 
     // However, we can create a certificate with a different name.
-    create_certificate(&client, CERT_NAME2, cert.clone(), key.clone()).await;
-    let list = certs_list(&client).await;
+    create_certificate(client, CERT_NAME2, cert.clone(), key.clone()).await;
+    let list = certs_list(client).await;
     assert_eq!(list.len(), 2, "Expected exactly two certificates");
 
     // We can delete the certificates, and they no longer appear in the API
-    delete_certificate(&client, CERT_NAME2).await;
-    delete_certificate(&client, CERT_NAME).await;
-    let certs = certs_list(&client).await;
+    delete_certificate(client, CERT_NAME2).await;
+    delete_certificate(client, CERT_NAME).await;
+    let certs = certs_list(client).await;
     assert!(certs.is_empty());
-    cert_get_expect_not_found(&client).await;
-    cert_delete_expect_not_found(&client).await;
+    cert_get_expect_not_found(client).await;
+    cert_delete_expect_not_found(client).await;
 }
 
 #[nexus_test]
@@ -198,7 +198,7 @@ async fn test_cannot_create_certificate_with_bad_key(
     let key = String::from_utf8_lossy(&der_key).to_string();
 
     // Cannot create a certificate with a bad key (e.g. not PEM encoded)
-    let error = cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let error = cert_create_expect_error(client, CERT_NAME, cert, key).await;
     let expected = "Failed to parse private key";
     assert!(
         error.contains(expected),
@@ -219,7 +219,7 @@ async fn test_cannot_create_certificate_with_mismatched_key(
     let key2 = chain2.end_cert_private_key_as_pem();
 
     // Cannot create a certificate with a key that doesn't match the cert
-    let error = cert_create_expect_error(&client, CERT_NAME, cert1, key2).await;
+    let error = cert_create_expect_error(client, CERT_NAME, cert1, key2).await;
     let expected = "Certificate and private key do not match";
     assert!(
         error.contains(expected),
@@ -242,7 +242,7 @@ async fn test_cannot_create_certificate_with_bad_cert(
 
     let cert = String::from_utf8(tmp).unwrap();
 
-    let error = cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let error = cert_create_expect_error(client, CERT_NAME, cert, key).await;
 
     // TODO-correctness It's suprising this is the error we get back instead of
     // "Failed to parse certificate". Why?
@@ -267,7 +267,7 @@ async fn test_cannot_create_certificate_with_expired_cert(
     let (cert, key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
-    let error = cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let error = cert_create_expect_error(client, CERT_NAME, cert, key).await;
     let expected = "Certificate exists, but is expired";
     assert!(
         error.contains(expected),
@@ -288,7 +288,7 @@ async fn test_cannot_create_certificate_with_incorrect_subject_alt_name(
     let (cert, key) =
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
-    let error = cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    let error = cert_create_expect_error(client, CERT_NAME, cert, key).await;
     for expected in [
         "Certificate not valid for".to_string(),
         format!("SANs: {bad_subject_alt_name}"),
@@ -678,7 +678,7 @@ impl SiloCert {
     /// client's certificate
     fn reqwest_client(&self) -> reqwest::ClientBuilder {
         let rustls_cert =
-            reqwest::tls::Certificate::from_pem(&self.cert.cert.as_bytes())
+            reqwest::tls::Certificate::from_pem(self.cert.cert.as_bytes())
                 .unwrap();
         reqwest::ClientBuilder::new().add_root_certificate(rustls_cert)
     }

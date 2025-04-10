@@ -399,7 +399,7 @@ where
             let authn = Arc::new(serialized_authn.to_authn());
             let authz = authz::Context::new(
                 Arc::clone(&authn),
-                Arc::clone(&osagactx.authz()),
+                Arc::clone(osagactx.authz()),
                 datastore,
             );
             Ok::<_, std::convert::Infallible>((authn, authz))
@@ -473,7 +473,7 @@ impl SessionStore for ServerContext {
         token: String,
     ) -> Option<Self::SessionModel> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.session_update_last_used(&opctx, &token).await.ok()
+        self.nexus.session_update_last_used(opctx, &token).await.ok()
     }
 
     async fn session_expire(&self, token: String) -> Option<()> {

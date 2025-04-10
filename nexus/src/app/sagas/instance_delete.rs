@@ -117,7 +117,7 @@ async fn sid_delete_nat(
         &params.serialized_authn,
     );
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_instance) = LookupPath::new(&opctx, osagactx.datastore())
         .instance_id(instance_id)
         .lookup_for(authz::Action::Modify)
         .await
@@ -190,9 +190,9 @@ mod test {
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_default_ip_pool(&client).await;
+        create_default_ip_pool(client).await;
         let project = create_project(client, PROJECT_NAME).await;
-        create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+        create_disk(client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id
     }
 
@@ -200,15 +200,14 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         instance_id: Uuid,
     ) -> Params {
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
-        let (.., authz_instance, instance) =
-            LookupPath::new(&opctx, &datastore)
-                .instance_id(instance_id)
-                .fetch()
-                .await
-                .expect("Failed to lookup instance");
+        let (.., authz_instance, instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance_id)
+            .fetch()
+            .await
+            .expect("Failed to lookup instance");
         Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             authz_instance,
@@ -258,14 +257,12 @@ mod test {
         DiskTest::new(cptestctx).await;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        create_org_project_and_disk(&client).await;
+        create_org_project_and_disk(client).await;
 
         // Build the saga DAG with the provided test parameters and run it.
         let params = new_test_params(
-            &cptestctx,
-            create_instance(&cptestctx, new_instance_create_params())
-                .await
-                .id(),
+            cptestctx,
+            create_instance(cptestctx, new_instance_create_params()).await.id(),
         )
         .await;
         nexus
@@ -280,7 +277,7 @@ mod test {
         params: params::InstanceCreate,
     ) -> db::model::Instance {
         let nexus = &cptestctx.server.server_context().nexus;
-        let opctx = test_opctx(&cptestctx);
+        let opctx = test_opctx(cptestctx);
 
         let project_selector = params::ProjectSelector {
             project: PROJECT_NAME.to_string().try_into().unwrap(),
@@ -312,13 +309,13 @@ mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
-        create_org_project_and_disk(&client).await;
+        create_org_project_and_disk(client).await;
 
         // Build the saga DAG with the provided test parameters
         let dag = create_saga_dag::<SagaInstanceDelete>(
             new_test_params(
-                &cptestctx,
-                create_instance(&cptestctx, new_instance_create_params())
+                cptestctx,
+                create_instance(cptestctx, new_instance_create_params())
                     .await
                     .id(),
             )
@@ -331,6 +328,6 @@ mod test {
         )
         .await;
 
-        verify_clean_slate(&cptestctx).await;
+        verify_clean_slate(cptestctx).await;
     }
 }

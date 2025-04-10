@@ -209,7 +209,7 @@ You should only do this if:
                     bail!("dns lookup for {current_sec} found nothing");
                 };
 
-                let Some(addr) = resolver.ipv6_lookup(&target).await? else {
+                let Some(addr) = resolver.ipv6_lookup(target).await? else {
                     let text = format!(
                         "Cannot proceed: no AAAA record for Nexus with id \
                         {current_sec}, so cannot verify that it is not still \

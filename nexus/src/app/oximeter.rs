@@ -36,7 +36,7 @@ impl super::Nexus {
         // Insert the Oximeter instance into the DB. Note that this _updates_ the record,
         // specifically, the time_modified, ip, and port columns, if the instance has already been
         // registered.
-        let db_info = db::model::OximeterInfo::new(&oximeter_info);
+        let db_info = db::model::OximeterInfo::new(oximeter_info);
         self.db_datastore.oximeter_create(opctx, &db_info).await?;
         info!(
             self.log,
@@ -205,8 +205,8 @@ pub(crate) async fn unassign_producer(
             datastore.oximeter_lookup(opctx, &collector_id).await?;
         let address =
             SocketAddr::new(oximeter_info.ip.ip(), *oximeter_info.port);
-        let client = build_oximeter_client(&log, &id, address);
-        if let Err(e) = client.producer_delete(&id).await {
+        let client = build_oximeter_client(log, id, address);
+        if let Err(e) = client.producer_delete(id).await {
             error!(
                 log,
                 "failed to delete producer from collector";

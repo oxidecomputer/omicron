@@ -18,7 +18,7 @@ impl super::Nexus {
     ) -> Result<HttpResponseFound, HttpError> {
         let (.., identity_provider) = self
             .datastore()
-            .identity_provider_lookup(&opctx, silo_name, provider_name)
+            .identity_provider_lookup(opctx, silo_name, provider_name)
             .await?;
 
         match identity_provider {
@@ -53,14 +53,14 @@ impl super::Nexus {
     ) -> Result<(ConsoleSession, String), HttpError> {
         let (authz_silo, db_silo, identity_provider) = self
             .datastore()
-            .identity_provider_lookup(&opctx, silo_name, provider_name)
+            .identity_provider_lookup(opctx, silo_name, provider_name)
             .await?;
         let (authenticated_subject, relay_state_string) =
             match identity_provider {
                 IdentityProviderType::Saml(saml_identity_provider) => {
                     let body_bytes = body_bytes.as_str()?;
                     saml_identity_provider.authenticated_subject(
-                        &body_bytes,
+                        body_bytes,
                         self.samael_max_issue_delay(),
                     )?
                 }
@@ -69,7 +69,7 @@ impl super::Nexus {
             relay_state_string.and_then(|v| RelayState::from_encoded(v).ok());
         let user = self
             .silo_user_from_authenticated_subject(
-                &opctx,
+                opctx,
                 &authz_silo,
                 &db_silo,
                 &authenticated_subject,

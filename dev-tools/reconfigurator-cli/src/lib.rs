@@ -193,7 +193,7 @@ impl CmdReconfiguratorSim {
                     LoopResult::Continue => (),
                     LoopResult::Bail(error) => return Err(error),
                 }
-                println!("");
+                println!();
             }
         } else {
             let mut ed = Reedline::create();
@@ -842,7 +842,7 @@ fn cmd_blueprint_blippy(
     let state = sim.current_state();
     let blueprint = state.system().get_blueprint(args.blueprint_id)?;
     let report =
-        Blippy::new(&blueprint).into_report(BlippyReportSortKey::Severity);
+        Blippy::new(blueprint).into_report(BlippyReportSortKey::Severity);
     Ok(Some(format!("{}", report.display())))
 }
 
@@ -1031,7 +1031,7 @@ fn cmd_blueprint_diff(
     let blueprint1 = state.system().get_blueprint(blueprint1_id)?;
     let blueprint2 = state.system().get_blueprint(blueprint2_id)?;
 
-    let sled_diff = blueprint2.diff_since_blueprint(&blueprint1);
+    let sled_diff = blueprint2.diff_since_blueprint(blueprint1);
     swriteln!(rv, "{}", sled_diff.display());
 
     // Diff'ing DNS is a little trickier.  First, compute what DNS should be for
@@ -1039,12 +1039,12 @@ fn cmd_blueprint_diff(
     // for the executor.
     let sleds_by_id = make_sleds_by_id(state.system().description())?;
     let internal_dns_config1 = blueprint_internal_dns_config(
-        &blueprint1,
+        blueprint1,
         &sleds_by_id,
         &Default::default(),
     )?;
     let internal_dns_config2 = blueprint_internal_dns_config(
-        &blueprint2,
+        blueprint2,
         &sleds_by_id,
         &Default::default(),
     )?;
@@ -1054,12 +1054,12 @@ fn cmd_blueprint_diff(
 
     let external_dns_zone_name = state.config().external_dns_zone_name();
     let external_dns_config1 = blueprint_external_dns_config(
-        &blueprint1,
+        blueprint1,
         state.config().silo_names(),
         external_dns_zone_name.to_owned(),
     );
     let external_dns_config2 = blueprint_external_dns_config(
-        &blueprint2,
+        blueprint2,
         state.config().silo_names(),
         external_dns_zone_name.to_owned(),
     );
@@ -1135,7 +1135,7 @@ fn cmd_blueprint_diff_dns(
     };
 
     let existing_dns_zone = existing_dns_config.sole_zone()?;
-    let dns_diff = DnsDiff::new(&existing_dns_zone, &blueprint_dns_zone)
+    let dns_diff = DnsDiff::new(existing_dns_zone, &blueprint_dns_zone)
         .context("failed to assemble DNS diff")?;
     Ok(Some(dns_diff.to_string()))
 }

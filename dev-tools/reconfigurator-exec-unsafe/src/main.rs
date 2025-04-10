@@ -166,7 +166,7 @@ impl ReconfiguratorExec {
         let rv = realize_blueprint(
             RequiredRealizeArgs {
                 opctx: &opctx,
-                datastore: &datastore,
+                datastore,
                 resolver: &resolver,
                 blueprint: &blueprint,
                 creator: OmicronZoneUuid::from_untyped_uuid(creator),

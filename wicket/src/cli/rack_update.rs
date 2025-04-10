@@ -246,7 +246,7 @@ async fn do_attach_to_updates(
                 for (id, event_report) in &*event_reports {
                     // If display.add_event_report errors out, it's for a report for a
                     // component we weren't interested in. Ignore it.
-                    _ = display.add_event_report(&id, event_report.clone());
+                    _ = display.add_event_report(id, event_report.clone());
                 }
 
                 // Print out status for each component ID at the end -- do it here so
@@ -531,7 +531,7 @@ impl ReplayStrategy {
 
                         // If display.add_event_report errors out, it's for a report for a
                         // component we weren't interested in. Ignore it.
-                        _ = display.add_event_report(&id, report);
+                        _ = display.add_event_report(id, report);
 
                         display.write_events()?;
                     }
@@ -546,7 +546,7 @@ impl ReplayStrategy {
 
                         // If display.add_event_report errors out, it's for a report for a
                         // component we weren't interested in. Ignore it.
-                        _ = display.add_event_report(&id, report);
+                        _ = display.add_event_report(id, report);
 
                         display.write_events()?;
                     }

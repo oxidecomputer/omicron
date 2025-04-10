@@ -246,7 +246,7 @@ fn dns_compute_update(
 ) -> Result<Option<DnsVersionUpdateBuilder>, Error> {
     let mut update = DnsVersionUpdateBuilder::new(dns_group, comment, creator);
 
-    let diff = DnsDiff::new(&current_zone, &new_zone)
+    let diff = DnsDiff::new(current_zone, new_zone)
         .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
     if diff.is_empty() {
         info!(log, "no changes");
@@ -1343,7 +1343,7 @@ mod test {
 
         // Record the zpools so we don't fail to ensure datasets (unrelated to
         // DNS) during blueprint execution.
-        let mut disk_test = DiskTest::new(&cptestctx).await;
+        let mut disk_test = DiskTest::new(cptestctx).await;
         disk_test.add_blueprint_disks(&blueprint).await;
 
         // Now, execute the initial blueprint.
@@ -1433,7 +1433,7 @@ mod test {
         };
         let collection = CollectionBuilder::new("test").build();
         let mut builder = BlueprintBuilder::new_based_on(
-            &log,
+            log,
             &blueprint,
             &planning_input,
             &collection,
@@ -1569,7 +1569,7 @@ mod test {
         // This ensures that the "create Silo" path picks up Nexus instances
         // that exist only in Reconfigurator, not the services table.
         let dns_latest_external = create_silo_and_verify_dns(
-            &cptestctx,
+            cptestctx,
             &opctx,
             datastore,
             resolver,
@@ -1650,12 +1650,12 @@ mod test {
         .await;
 
         let dns_latest_internal = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
+            .dns_config_read(opctx, DnsGroup::Internal)
             .await
             .expect("fetching latest internal DNS");
         assert_eq!(old_internal.generation, dns_latest_internal.generation);
         let dns_latest_external = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
+            .dns_config_read(opctx, DnsGroup::External)
             .await
             .expect("fetching latest external DNS");
         assert_eq!(
@@ -1664,7 +1664,7 @@ mod test {
         );
 
         // Specifically, there should be one new name (for the new Silo).
-        let diff = diff_sole_zones(&old_external, &dns_latest_external);
+        let diff = diff_sole_zones(old_external, &dns_latest_external);
         assert!(diff.names_removed().next().is_none());
         assert!(diff.names_changed().next().is_none());
         let added = diff.names_added().collect::<Vec<_>>();
@@ -1679,15 +1679,15 @@ mod test {
 
         // If we execute the blueprint, DNS should not be changed.
         _ = realize_blueprint_and_expect(
-            &opctx, datastore, resolver, &blueprint, &overrides,
+            opctx, datastore, resolver, blueprint, overrides,
         )
         .await;
         let dns_latest_internal = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
+            .dns_config_read(opctx, DnsGroup::Internal)
             .await
             .expect("fetching latest internal DNS");
         let dns_latest_external = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
+            .dns_config_read(opctx, DnsGroup::External)
             .await
             .expect("fetching latest external DNS");
         assert_eq!(old_internal.generation, dns_latest_internal.generation);
@@ -1706,11 +1706,11 @@ mod test {
         old_external: &DnsConfigParams,
     ) {
         let dns_latest_internal = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
+            .dns_config_read(opctx, DnsGroup::Internal)
             .await
             .expect("fetching latest internal DNS");
         let dns_latest_external = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
+            .dns_config_read(opctx, DnsGroup::External)
             .await
             .expect("fetching latest external DNS");
 

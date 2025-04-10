@@ -578,7 +578,7 @@ impl Client {
     ) -> Result<(), Error> {
         let re = schema_validation_regex();
         for (path, sql) in files.values() {
-            if re.is_match(&sql) {
+            if re.is_match(sql) {
                 return Err(Error::SchemaUpdateModifiesData {
                     path: path.clone(),
                     statement: sql.clone(),
@@ -1811,7 +1811,7 @@ mod tests {
         let logctx = test_setup_log("cannot_ping_nonexistent_server");
         let log = &logctx.log;
         let bad_addr = "[::1]:80".parse().unwrap();
-        let client = Client::new(bad_addr, &log);
+        let client = Client::new(bad_addr, log);
         let e = client
             .ping()
             .await
@@ -3442,7 +3442,7 @@ mod tests {
             {}",
                     maybe_filter
                         .map(|f| format!("WHERE {f}"))
-                        .unwrap_or_else(String::new)
+                        .unwrap_or_default()
                 ),
             )
             .await
@@ -3733,7 +3733,7 @@ mod tests {
 
         // Next, we'll kill the database, and then try to insert the schema.
         // That will fail, since the DB is now inaccessible.
-        wipe_db(&db, &client).await;
+        wipe_db(db, &client).await;
         let res =
             client.save_new_schema_or_remove(&mut handle, new_schema).await;
         assert!(res.is_err(), "Should have failed since the DB is gone");
@@ -3928,7 +3928,7 @@ mod tests {
             "test_apply_one_schema_upgrade_{}",
             if replicated { "replicated" } else { "single_node" }
         );
-        let client = Client::new(address, &log);
+        let client = Client::new(address, log);
 
         // We'll test moving from version 1, which just creates a database and
         // table, to version 2, which adds two columns to that table in
@@ -4066,7 +4066,7 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let client = Client::new(db.native_address().into(), &log);
+        let client = Client::new(db.native_address().into(), log);
         const REPLICATED: bool = false;
         client
             .initialize_db_with_version(
@@ -4108,7 +4108,7 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let client = Client::new(db.native_address().into(), &log);
+        let client = Client::new(db.native_address().into(), log);
         const REPLICATED: bool = false;
         client
             .initialize_db_with_version(
@@ -4149,7 +4149,7 @@ mod tests {
             "test_ensure_schema_walks_through_multiple_steps_{}",
             if replicated { "replicated" } else { "single_node" }
         );
-        let client = Client::new(address, &log);
+        let client = Client::new(address, log);
 
         // We need to actually have the oximeter DB here, and the version table,
         // since `ensure_schema()` writes out versions to the DB as they're
@@ -4364,7 +4364,7 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let client = Client::new(db.native_address().into(), &log);
+        let client = Client::new(db.native_address().into(), log);
         client
             .init_single_node_db()
             .await
@@ -4389,7 +4389,7 @@ mod tests {
         let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let client = Client::new(db.native_address().into(), &log);
+        let client = Client::new(db.native_address().into(), log);
         client
             .initialize_db_with_version(false, OXIMETER_VERSION)
             .await
@@ -4538,7 +4538,7 @@ mod tests {
                 .await
                 .expect("Failed to start ClickHouse")
         };
-        let client = Client::new(db.native_address().into(), &log);
+        let client = Client::new(db.native_address().into(), log);
 
         // Let's start with version 2, which is the first tracked and contains
         // the full SQL files we need to populate the DB.
@@ -4758,7 +4758,7 @@ mod tests {
         address: SocketAddr,
         replicated: bool,
     ) {
-        let client = Client::new(address, &log);
+        let client = Client::new(address, log);
 
         const STARTING_VERSION: u64 = 1;
         const NEXT_VERSION: u64 = 2;

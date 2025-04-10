@@ -297,14 +297,11 @@ impl DnsConfigBuilder {
         // `DnsConfigBuilder`, it's possible that it was added to a different
         // DnsBuilder.
         ensure!(
-            self.zones.contains_key(&zone),
+            self.zones.contains_key(zone),
             "zone {zone} has not been defined",
         );
 
-        let set = self
-            .service_instances_zones
-            .entry(service)
-            .or_insert_with(BTreeMap::new);
+        let set = self.service_instances_zones.entry(service).or_default();
         match set.insert(zone.clone(), port) {
             None => Ok(()),
             Some(existing) => Err(anyhow!(
@@ -335,15 +332,12 @@ impl DnsConfigBuilder {
         // `DnsConfigBuilder`, it's possible that it was added to a different
         // DnsBuilder.
         ensure!(
-            self.sleds.contains_key(&sled),
+            self.sleds.contains_key(sled),
             "sled {} has not been defined",
             sled.0
         );
 
-        let set = self
-            .service_instances_sleds
-            .entry(service)
-            .or_insert_with(BTreeMap::new);
+        let set = self.service_instances_sleds.entry(service).or_default();
         let sled_id = sled.0;
         match set.insert(sled.clone(), port) {
             None => Ok(()),
@@ -539,7 +533,7 @@ impl DnsConfigBuilder {
                 let records = zone2port
                     .iter()
                     .map(|(zone, _port)| {
-                        let zone_ip = self.zones.get(&zone).expect(
+                        let zone_ip = self.zones.get(zone).expect(
                             "service_backend_zone() ensures zones are defined",
                         );
                         DnsRecord::Aaaa(*zone_ip)

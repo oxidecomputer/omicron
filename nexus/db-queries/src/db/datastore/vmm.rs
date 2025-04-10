@@ -461,7 +461,7 @@ mod tests {
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
         let vmm1 = datastore
             .vmm_insert(
-                &opctx,
+                opctx,
                 Vmm {
                     id: Uuid::new_v4(),
                     time_created: Utc::now(),
@@ -482,7 +482,7 @@ mod tests {
 
         let vmm2 = datastore
             .vmm_insert(
-                &opctx,
+                opctx,
                 Vmm {
                     id: Uuid::new_v4(),
                     time_created: Utc::now(),
@@ -503,7 +503,7 @@ mod tests {
 
         let migration1 = datastore
             .migration_insert(
-                &opctx,
+                opctx,
                 Migration::new(Uuid::new_v4(), instance_id, vmm1.id, vmm2.id),
             )
             .await
@@ -525,7 +525,7 @@ mod tests {
         };
         datastore
             .vmm_and_migration_update_runtime(
-                &opctx,
+                opctx,
                 PropolisUuid::from_untyped_uuid(vmm1.id),
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
@@ -547,7 +547,7 @@ mod tests {
         };
         datastore
             .vmm_and_migration_update_runtime(
-                &opctx,
+                opctx,
                 PropolisUuid::from_untyped_uuid(vmm2.id),
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
@@ -564,7 +564,7 @@ mod tests {
 
         let all_migrations = datastore
             .instance_list_migrations(
-                &opctx,
+                opctx,
                 instance_id,
                 &DataPageParams::max_page(),
             )
@@ -592,7 +592,7 @@ mod tests {
         // now, let's simulate a second migration, out of vmm2.
         let vmm3 = datastore
             .vmm_insert(
-                &opctx,
+                opctx,
                 Vmm {
                     id: Uuid::new_v4(),
                     time_created: Utc::now(),
@@ -613,7 +613,7 @@ mod tests {
 
         let migration2 = datastore
             .migration_insert(
-                &opctx,
+                opctx,
                 Migration::new(Uuid::new_v4(), instance_id, vmm2.id, vmm3.id),
             )
             .await
@@ -634,7 +634,7 @@ mod tests {
         };
         datastore
             .vmm_and_migration_update_runtime(
-                &opctx,
+                opctx,
                 PropolisUuid::from_untyped_uuid(vmm2.id),
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
@@ -658,7 +658,7 @@ mod tests {
         };
         datastore
             .vmm_and_migration_update_runtime(
-                &opctx,
+                opctx,
                 PropolisUuid::from_untyped_uuid(vmm3.id),
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
@@ -675,7 +675,7 @@ mod tests {
 
         let all_migrations = datastore
             .instance_list_migrations(
-                &opctx,
+                opctx,
                 instance_id,
                 &DataPageParams::max_page(),
             )

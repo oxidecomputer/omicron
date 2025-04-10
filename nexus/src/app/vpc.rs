@@ -100,7 +100,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::Vpc> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore.vpc_list(&opctx, &authz_project, pagparams).await
+        self.db_datastore.vpc_list(opctx, &authz_project, pagparams).await
     }
 
     pub(crate) async fn project_update_vpc(
@@ -144,13 +144,11 @@ impl super::Nexus {
         self.db_datastore
             .project_delete_vpc(opctx, &db_vpc, &authz_vpc)
             .await?;
-        self.db_datastore.vpc_delete_router(&opctx, &authz_vpc_router).await?;
+        self.db_datastore.vpc_delete_router(opctx, &authz_vpc_router).await?;
 
         // Delete all firewall rules after deleting the VPC, to ensure no
         // firewall rules get added between rules deletion and VPC deletion.
-        self.db_datastore
-            .vpc_delete_all_firewall_rules(&opctx, &authz_vpc)
-            .await
+        self.db_datastore.vpc_delete_all_firewall_rules(opctx, &authz_vpc).await
     }
 
     // Firewall rules

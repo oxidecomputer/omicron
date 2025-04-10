@@ -894,12 +894,12 @@ impl Drop for ClickHouseProcess {
                 .as_ref()
                 .and_then(|child| child.id())
                 .map(|id| format!("(PID {})", id))
-                .unwrap_or_else(String::new);
+                .unwrap_or_default();
             let maybe_dir = self
                 .data_dir
                 .as_ref()
                 .map(|dir| format!(", {}", dir.root_path()))
-                .unwrap_or_else(String::new);
+                .unwrap_or_default();
             eprintln!(
                 "WARN: dropped ClickHouse process without cleaning it up first \
                 (there may still be a child process running {maybe_pid} and a \
@@ -1361,7 +1361,7 @@ mod tests {
             .unwrap();
         writeln!(file, "{}", CLICKHOUSE_READY).unwrap();
         file.flush().unwrap();
-        let ports = wait_for_ports(&file.path()).await.unwrap();
+        let ports = wait_for_ports(file.path()).await.unwrap();
         assert_eq!(ports.http, EXPECTED_HTTP_PORT);
         assert_eq!(ports.native, EXPECTED_TCP_PORT);
     }
@@ -1380,7 +1380,7 @@ mod tests {
         writeln!(file, "Another garbage line").unwrap();
         writeln!(file, "{}", CLICKHOUSE_READY).unwrap();
         file.flush().unwrap();
-        wait_for_ports(&file.path()).await.unwrap();
+        wait_for_ports(file.path()).await.unwrap();
     }
 
     #[tokio::test]

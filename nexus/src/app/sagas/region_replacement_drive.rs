@@ -375,7 +375,7 @@ async fn srrd_drive_region_replacement_check(
             };
 
             let (.., authz_instance) =
-                LookupPath::new(&opctx, &osagactx.datastore())
+                LookupPath::new(&opctx, osagactx.datastore())
                     .instance_id(step_instance_id)
                     .lookup_for(authz::Action::Read)
                     .await
@@ -742,7 +742,7 @@ async fn check_from_previous_pantry_step(
                     // the volume is no longer attached because a Propolis
                     // activation took over from the Pantry.
 
-                    match client.volume_status(&volume_id).await {
+                    match client.volume_status(volume_id).await {
                         Ok(_) => {
                             // The volume is still there as an entry, but the
                             // job isn't? Action is required: this saga should
@@ -874,7 +874,7 @@ async fn srrd_drive_region_replacement_prepare(
             Some(instance_id) => {
                 // The region's volume is attached to an instance
                 let (.., authz_instance) =
-                    LookupPath::new(&opctx, &osagactx.datastore())
+                    LookupPath::new(&opctx, osagactx.datastore())
                         .instance_id(*instance_id)
                         .lookup_for(authz::Action::Read)
                         .await
@@ -1187,7 +1187,7 @@ async fn srrd_drive_region_replacement_execute(
             };
 
             let (.., authz_instance) =
-                LookupPath::new(&opctx, &osagactx.datastore())
+                LookupPath::new(&opctx, osagactx.datastore())
                     .instance_id(instance_id)
                     .lookup_for(authz::Action::Read)
                     .await
@@ -1245,9 +1245,8 @@ async fn srrd_drive_region_replacement_execute(
                 }
             };
 
-            let instance_lookup =
-                LookupPath::new(&opctx, &osagactx.datastore())
-                    .instance_id(instance_id);
+            let instance_lookup = LookupPath::new(&opctx, osagactx.datastore())
+                .instance_id(instance_id);
 
             let (vmm, client) = osagactx
                 .nexus()
@@ -1449,7 +1448,7 @@ async fn execute_pantry_drive_action(
 
     let volume_construction_request:
         crucible_pantry_client::types::VolumeConstructionRequest =
-        serde_json::from_str(&disk_volume.data()).map_err(|e| {
+        serde_json::from_str(disk_volume.data()).map_err(|e| {
             ActionError::action_failed(Error::internal_error(&format!(
                 "failed to deserialize volume {volume_id} data: {e}",
             )))

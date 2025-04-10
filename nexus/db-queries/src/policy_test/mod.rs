@@ -75,7 +75,7 @@ async fn test_iam_roles_behavior() {
     );
     datastore
         .role_assignment_replace_visible(
-            &opctx,
+            opctx,
             &main_silo,
             &[shared::RoleAssignment {
                 identity_type: shared::IdentityType::SiloUser,
@@ -93,7 +93,7 @@ async fn test_iam_roles_behavior() {
     let exemptions = resources::exempted_authz_classes();
     let mut coverage = Coverage::new(&logctx.log, exemptions);
     let builder =
-        ResourceBuilder::new(&opctx, &datastore, &mut coverage, main_silo_id);
+        ResourceBuilder::new(opctx, datastore, &mut coverage, main_silo_id);
     let test_resources = resources::make_resources(builder, main_silo_id).await;
     coverage.verify();
 
@@ -116,7 +116,7 @@ async fn test_iam_roles_behavior() {
                     main_silo_id,
                     SiloAuthnPolicy::default(),
                 ),
-                Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+                Arc::clone(datastore) as Arc<dyn nexus_auth::storage::Storage>,
             );
 
             Arc::new((username.clone(), opctx))
@@ -139,7 +139,7 @@ async fn test_iam_roles_behavior() {
             user_log,
             Arc::clone(&authz),
             authn::Context::internal_unauthenticated(),
-            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+            Arc::clone(datastore) as Arc<dyn nexus_auth::storage::Storage>,
         ),
     )));
 
@@ -168,7 +168,7 @@ async fn test_iam_roles_behavior() {
 
     expectorate::assert_contents(
         "tests/output/authz-roles.out",
-        &std::str::from_utf8(buffer.as_ref()).expect("non-UTF8 output"),
+        std::str::from_utf8(buffer.as_ref()).expect("non-UTF8 output"),
     );
 
     db.terminate().await;
@@ -341,7 +341,7 @@ async fn test_conferred_roles() {
     );
     datastore
         .role_assignment_replace_visible(
-            &opctx,
+            opctx,
             &main_silo,
             &[shared::RoleAssignment {
                 identity_type: shared::IdentityType::SiloUser,
@@ -360,7 +360,7 @@ async fn test_conferred_roles() {
     // behavior on the Fleet itself, as well as some top-level resources that
     // exist outside of a silo.
     let mut builder =
-        ResourceBuilder::new(&opctx, &datastore, &mut coverage, main_silo_id);
+        ResourceBuilder::new(opctx, datastore, &mut coverage, main_silo_id);
     builder.new_resource(authz::FLEET);
     builder.new_resource(authz::IP_POOL_LIST);
     let test_resources = builder.build();
@@ -368,7 +368,7 @@ async fn test_conferred_roles() {
     // We also create a Silo because the ResourceBuilder will create for us
     // users that we can use to test the behavior of each role.
     let mut silo_builder =
-        ResourceBuilder::new(&opctx, &datastore, &mut coverage, main_silo_id);
+        ResourceBuilder::new(opctx, datastore, &mut coverage, main_silo_id);
     silo_builder.new_resource(authz::FLEET);
     silo_builder.new_resource_with_users(main_silo).await;
     let silo_resources = silo_builder.build();
@@ -437,7 +437,7 @@ async fn test_conferred_roles() {
                             main_silo_id,
                             policy.clone(),
                         ),
-                        Arc::clone(&datastore)
+                        Arc::clone(datastore)
                             as Arc<dyn nexus_auth::storage::Storage>,
                     );
                     Arc::new((username.clone(), opctx))
@@ -458,7 +458,7 @@ async fn test_conferred_roles() {
 
     expectorate::assert_contents(
         "tests/output/authz-conferred-roles.out",
-        &std::str::from_utf8(buffer.as_ref()).expect("non-UTF8 output"),
+        std::str::from_utf8(buffer.as_ref()).expect("non-UTF8 output"),
     );
 
     db.terminate().await;
