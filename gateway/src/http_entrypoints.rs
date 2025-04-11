@@ -955,8 +955,7 @@ impl GatewayApi for GatewayImpl {
             let sp_id = path.into_inner().sp.into();
             let sp = apictx.mgmt_switch.sp(sp_id)?;
 
-            let req_restart_id =
-                ereport::RestartId(restart_id.as_untyped_uuid().as_u128());
+            let req_restart_id = restart_id.into_untyped_uuid();
             let start_ena = start_at
                 .map(|ereport_types::Ena(e)| ereport::Ena(e))
                 .unwrap_or(ereport::Ena(0));
@@ -979,7 +978,9 @@ impl GatewayApi for GatewayImpl {
                     err => EreportError::Ereport { sp: sp_id, err },
                 })?;
             let restart_id =
-                ereport_types::EreporterRestartUuid::from_u128(restart_id.0);
+                ereport_types::EreporterRestartUuid::from_untyped_uuid(
+                    restart_id,
+                );
             let ereports = ereports
                 .into_iter()
                 .map(|ereport::Ereport { ena: ereport::Ena(ena), data }| {
