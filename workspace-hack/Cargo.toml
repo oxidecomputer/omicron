@@ -69,7 +69,8 @@ idna = { version = "1.0.3" }
 indexmap = { version = "2.7.1", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
 ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
-itertools = { version = "0.10.5" }
+itertools-594e8ee84c453af0 = { package = "itertools", version = "0.13.0" }
+itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.171", features = ["extra_traits"] }
@@ -191,7 +192,8 @@ idna = { version = "1.0.3" }
 indexmap = { version = "2.7.1", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
 ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
-itertools = { version = "0.10.5" }
+itertools-594e8ee84c453af0 = { package = "itertools", version = "0.13.0" }
+itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.171", features = ["extra_traits"] }
