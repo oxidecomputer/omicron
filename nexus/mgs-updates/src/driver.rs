@@ -520,7 +520,6 @@ struct WaitingAttempt {
     request: PendingMgsUpdate,
 }
 
-// XXX-dap
 #[derive(Clone, Debug)]
 pub enum InternalStatus {
     NotStarted,
@@ -564,8 +563,6 @@ pub struct InProgressUpdateStatus {
 
 /// externally-exposed status for a completed attempt
 // XXX-dap to add: number of previous or total attempts
-// XXX-dap to add: whether we did an update, saw one in progress, aborted one,
-// etc.
 #[derive(Debug)]
 pub struct CompletedAttempt {
     pub time_started: chrono::DateTime<chrono::Utc>,
