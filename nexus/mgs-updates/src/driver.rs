@@ -31,6 +31,8 @@ use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::watch;
+use tokio_util::time::DelayQueue;
+use tokio_util::time::delay_queue;
 use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
@@ -46,6 +48,11 @@ const PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 /// How many recent completions to keep track of (for debugging)
 const N_RECENT_COMPLETIONS: usize = 16;
+
+/// Timeout for repeat attempts
+// XXX-dap this is probably too aggressive but it's good for demo.
+// Maybe this could be a CLI argument for reconfigurator-sp-updater.
+const RETRY_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Drive one or more MGS-managed updates
 ///
@@ -85,6 +92,8 @@ pub struct MgsUpdateDriver {
     mgs_rx: watch::Receiver<AllBackends>,
     status_tx: watch::Sender<DriverStatus>,
     status_rx: watch::Receiver<DriverStatus>,
+    delayq: DelayQueue<Arc<BaseboardId>>,
+    waiting: BTreeMap<Arc<BaseboardId>, WaitingAttempt>,
 }
 
 impl MgsUpdateDriver {
@@ -108,6 +117,8 @@ impl MgsUpdateDriver {
             mgs_rx,
             status_tx,
             status_rx,
+            delayq: DelayQueue::new(),
+            waiting: BTreeMap::new(),
         }
     }
 
@@ -136,6 +147,23 @@ impl MgsUpdateDriver {
                         }
                     };
                 },
+
+                maybe_timer_expired = self.delayq.next(),
+                    if !self.delayq.is_empty() => {
+                    match maybe_timer_expired {
+                        Some(expired) => {
+                            let baseboard_id = expired.into_inner();
+                            self.retry(baseboard_id);
+                        },
+                        None => {
+                            error!(
+                                &self.log,
+                                "DelayQueue unexpectedly ended"
+                            );
+                            break;
+                        }
+                    }
+                }
 
                 maybe_update = self.requests.changed() => {
                     match maybe_update {
@@ -205,52 +233,86 @@ impl MgsUpdateDriver {
             assert!(found.is_some());
         });
 
-        // Re-dispatch this update if either of these is true:
-        //
-        // - the request is unchanged and the attempt was not successful
-        // - the request is changed and not `None`
+        // Regardless of the result, set a timer for retrying.  Our job is to
+        // ensure reality matches our configuration, so even if we succeeded, we
+        // want to check again in a little while to see if anything changed.
+        let delay_key = self.delayq.insert(baseboard_id.clone(), RETRY_TIMEOUT);
+        self.waiting.insert(
+            baseboard_id,
+            WaitingAttempt {
+                delay_key,
+                request: result.requested_update.clone(),
+            },
+        );
+    }
+
+    fn retry(&mut self, baseboard_id: Arc<BaseboardId>) {
+        assert!(self.waiting.remove(&baseboard_id).is_some());
         let requests = self.requests.borrow();
-        let maybe_new_plan = requests.get(&baseboard_id);
-        match (maybe_new_plan, result.result) {
-            (None, _) => {
-                info!(
-                    &in_progress.log,
-                    "no retry needed (update no longer wanted)"
-                );
-            }
-            (Some(new_plan), Ok(ApplyUpdateResult::Completed))
-                if *new_plan == result.requested_update =>
-            {
-                info!(&in_progress.log, "no retry needed (converged)");
-            }
-            (Some(new_plan), _) => {
-                info!(
-                    &in_progress.log,
-                    "retry needed (plan changed or last attempt did not succeed)"
-                );
-                let work = Self::dispatch_update(
-                    self.log.clone(),
-                    self.artifacts.clone(),
-                    self.mgs_rx.clone(),
-                    new_plan,
-                    self.status_tx.clone(),
-                );
-                drop(requests);
-                self.do_dispatch(baseboard_id.clone(), work);
-            }
+        let Some(my_request) = requests.get(&baseboard_id) else {
+            // This case is unlikely.  We get notified when the configuration
+            // changes and we remove entries from the delayq when that happens.
+            // But it's conceivable that we get these events in a different
+            // order than they happened.
+            warn!(
+                &self.log,
+                "attempted retry of baseboard whose update is no longer \
+                 configured";
+                 &*baseboard_id
+            );
+            return;
         };
+
+        info!(
+            &self.log,
+            "dispatching new attempt (retry timer expired)"; &*baseboard_id
+        );
+        let work = Self::dispatch_update(
+            self.log.clone(),
+            self.artifacts.clone(),
+            self.mgs_rx.clone(),
+            my_request,
+            self.status_tx.clone(),
+        );
+        drop(requests);
+        self.do_dispatch(baseboard_id.clone(), work);
     }
 
     fn update_requests(&mut self) {
-        // Kick off updates for any newly-added requests.
-        //
-        // We don't need to do anything with newly-removed requests or changed
-        // requests.  We're not going to cancel them.  Once the current attempt
-        // completes, we'll stop working on them.
+        // Iterate the set of configured updates and figure out what to do.
         let new_requests = self.requests.borrow_and_update();
         let mut work_items = Vec::new();
         for (baseboard_id, request) in &*new_requests {
+            // If this item is waiting for retry...
+            if let Entry::Occupied(occupied) =
+                self.waiting.entry(baseboard_id.clone())
+            {
+                assert!(!self.in_progress.contains_key(baseboard_id));
+                // If the request has not changed, there's nothing to do for
+                // this update.
+                let WaitingAttempt { delay_key, request: old_request } =
+                    occupied.get();
+                if request == old_request {
+                    continue;
+                }
+
+                // The request has changed.  Stop waiting for retry.
+                // We'll fall through and kick off a new update below.
+                info!(&
+                    self.log,
+                    "configuration changed while request was waiting for \
+                     retry";
+                    &*baseboard_id,
+                );
+
+                self.delayq.remove(&delay_key);
+                occupied.remove();
+            }
+
             match self.in_progress.entry(baseboard_id.clone()) {
+                // If we're currently attempting an update for this baseboard,
+                // we don't do anything right now.  When that update finishes,
+                // we'll re-evaluate what to do.
                 Entry::Occupied(_) => {
                     info!(
                         &self.log,
@@ -260,6 +322,8 @@ impl MgsUpdateDriver {
                         "request" => ?request,
                     );
                 }
+                // We're not doing an update nor waiting for a retry.  Kick off
+                // a new attempt.
                 Entry::Vacant(_) => {
                     work_items.push((
                         baseboard_id.clone(),
@@ -274,8 +338,8 @@ impl MgsUpdateDriver {
                 }
             }
         }
-        drop(new_requests);
 
+        drop(new_requests);
         for (baseboard_id, work) in work_items {
             self.do_dispatch(baseboard_id.clone(), work);
         }
@@ -419,6 +483,13 @@ struct InProgressUpdate {
     log: slog::Logger,
     time_started: chrono::DateTime<chrono::Utc>,
     instant_started: Instant,
+}
+
+/// internal bookkeeping for an update that's awaiting retry
+// XXX-dap add to status, include how long we're waiting, etc.
+struct WaitingAttempt {
+    delay_key: delay_queue::Key,
+    request: PendingMgsUpdate,
 }
 
 // XXX-dap

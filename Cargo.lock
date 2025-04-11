@@ -6206,6 +6206,7 @@ dependencies = [
  "sp-sim",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -12663,6 +12664,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "pin-project-lite",
+ "slab",
  "tokio",
 ]
 
