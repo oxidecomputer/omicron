@@ -689,20 +689,9 @@ impl<'a> BlueprintBuilder<'a> {
             }
         });
 
-        let (oximeter_read_mode, oximeter_read_version) = match self
-            .input
-            .oximeter_read_settings()
-        {
-            Ok(p) => (p.mode.clone(), p.version),
-            Err(e) => {
-                // This should never really be reached. The policy will only be
-                // None in the `SystemDescription` testing struct.
-                error!(
-                    self.log,
-                    "oximeter policy error: {e}. Defaulting to reading from single node"
-                );
-                (OximeterReadMode::SingleNode, 0)
-            }
+        let (oximeter_read_mode, oximeter_read_version) = {
+            let policy = self.input.oximeter_read_settings();
+            (policy.mode.clone(), policy.version)
         };
 
         Blueprint {

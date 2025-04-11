@@ -980,17 +980,11 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let nexus = &apictx.nexus;
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
-            match nexus
+            let policy = nexus
                 .datastore()
                 .oximeter_read_policy_get_latest(&opctx)
-                .await?
-            {
-                Some(policy) => Ok(HttpResponseOk(policy)),
-                None => Err(HttpError::for_not_found(
-                    None,
-                    "No oximeter read policy in database".into(),
-                )),
-            }
+                .await?;
+            Ok(HttpResponseOk(policy))
         };
         apictx
             .internal_latencies

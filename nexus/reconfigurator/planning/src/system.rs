@@ -95,7 +95,7 @@ pub struct SystemDescription {
     internal_dns_version: Generation,
     external_dns_version: Generation,
     clickhouse_policy: Option<ClickhousePolicy>,
-    oximeter_read_policy: Option<OximeterReadPolicy>,
+    oximeter_read_policy: OximeterReadPolicy,
 }
 
 impl SystemDescription {
@@ -174,7 +174,9 @@ impl SystemDescription {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
-            oximeter_read_policy: None,
+            // We use the `new()` method, as this is method is only intended
+            // for testing.
+            oximeter_read_policy: OximeterReadPolicy::new(),
         }
     }
 

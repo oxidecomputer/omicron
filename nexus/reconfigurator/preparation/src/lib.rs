@@ -77,7 +77,7 @@ pub struct PlanningInputFromDb<'a> {
     pub external_dns_version: nexus_db_model::Generation,
     pub cockroachdb_settings: &'a CockroachDbSettings,
     pub clickhouse_policy: Option<ClickhousePolicy>,
-    pub oximeter_read_policy: Option<OximeterReadPolicy>,
+    pub oximeter_read_policy: OximeterReadPolicy,
     pub log: &'a Logger,
 }
 

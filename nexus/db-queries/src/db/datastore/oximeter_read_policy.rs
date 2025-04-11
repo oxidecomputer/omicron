@@ -12,7 +12,6 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::ExpressionMethods;
-use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::dsl::sql_query;
 use diesel::expression::SelectableHelper;
@@ -56,7 +55,7 @@ impl DataStore {
     pub async fn oximeter_read_policy_get_latest(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<OximeterReadPolicy>, Error> {
+    ) -> Result<OximeterReadPolicy, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -66,10 +65,9 @@ impl DataStore {
             .order_by(dsl::version.desc())
             .first_async::<DbOximeterReadPolicy>(&*conn)
             .await
-            .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(latest_policy.map(Into::into))
+        Ok(latest_policy.into())
     }
 
     /// Insert the current version of the policy in the database

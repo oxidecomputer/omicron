@@ -14,7 +14,6 @@ use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
-use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use clap::ValueEnum;
@@ -172,33 +171,16 @@ impl PlanningInput {
         clickhouse_policy.mode.single_node_enabled()
     }
 
-    pub fn oximeter_read_settings(
-        &self,
-    ) -> anyhow::Result<&OximeterReadPolicy> {
-        let Some(oximeter_read_policy) = &self.policy.oximeter_read_policy
-        else {
-            return Err(anyhow!(
-                "no oximeter read policy has been implemented yet"
-            ));
-        };
-        Ok(oximeter_read_policy)
+    pub fn oximeter_read_settings(&self) -> &OximeterReadPolicy {
+        &self.policy.oximeter_read_policy
     }
 
     pub fn oximeter_cluster_read_enabled(&self) -> bool {
-        let Some(oximeter_read_policy) = &self.policy.oximeter_read_policy
-        else {
-            return false;
-        };
-        oximeter_read_policy.mode.cluster_enabled()
+        self.policy.oximeter_read_policy.mode.cluster_enabled()
     }
 
     pub fn oximeter_single_node_read_enabled(&self) -> bool {
-        let Some(oximeter_read_policy) = &self.policy.oximeter_read_policy
-        else {
-            // If there is no policy oximeter defaults to reading from single-node clickhouse.
-            return true;
-        };
-        oximeter_read_policy.mode.single_node_enabled()
+        self.policy.oximeter_read_policy.mode.single_node_enabled()
     }
 
     pub fn all_sleds(
@@ -933,10 +915,9 @@ pub struct Policy {
     /// Policy information for defining which ClickHouse setup Oximeter reads
     /// from.
     ///
-    /// If this policy is `None`, then we are reading from a single node
-    /// clickhouse setup. Eventually we will only allow reads from a cluster
-    /// and this will no longer be an option.
-    pub oximeter_read_policy: Option<OximeterReadPolicy>,
+    /// Eventually we will only allow reads from a cluster and this policy will
+    /// no longer exist.
+    pub oximeter_read_policy: OximeterReadPolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -944,6 +925,17 @@ pub struct OximeterReadPolicy {
     pub version: u32,
     pub mode: OximeterReadMode,
     pub time_created: DateTime<Utc>,
+}
+
+impl OximeterReadPolicy {
+    // This function should only be used for testing purposes
+    pub fn new() -> Self {
+        OximeterReadPolicy {
+            version: 0,
+            mode: OximeterReadMode::SingleNode,
+            time_created: Utc::now(),
+        }
+    }
 }
 
 /// Where oximeter should read from
@@ -1093,7 +1085,7 @@ impl PlanningInputBuilder {
                     CockroachDbClusterVersion::POLICY,
                 target_crucible_pantry_zone_count: 0,
                 clickhouse_policy: None,
-                oximeter_read_policy: None,
+                oximeter_read_policy: OximeterReadPolicy::new(),
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

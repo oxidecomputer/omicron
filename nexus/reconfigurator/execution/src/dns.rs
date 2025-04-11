@@ -340,6 +340,7 @@ mod test {
     pub use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     pub use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::OximeterReadMode;
+    use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::params;
@@ -1386,7 +1387,7 @@ mod test {
                     CockroachDbClusterVersion::POLICY,
                 target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
                 clickhouse_policy: None,
-                oximeter_read_policy: None,
+                oximeter_read_policy: OximeterReadPolicy::new(),
                 log,
             }
             .build()

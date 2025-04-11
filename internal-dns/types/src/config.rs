@@ -777,7 +777,10 @@ mod test {
         assert_eq!(ServiceName::InternalDns.dns_name(), "_nameservice._tcp",);
         assert_eq!(ServiceName::Nexus.dns_name(), "_nexus._tcp",);
         assert_eq!(ServiceName::Oximeter.dns_name(), "_oximeter._tcp",);
-        assert_eq!(ServiceName::OximeterReader.dns_name(), "_oximeter-reader._tcp",);
+        assert_eq!(
+            ServiceName::OximeterReader.dns_name(),
+            "_oximeter-reader._tcp",
+        );
         assert_eq!(ServiceName::Dendrite.dns_name(), "_dendrite._tcp",);
         assert_eq!(
             ServiceName::CruciblePantry.dns_name(),
