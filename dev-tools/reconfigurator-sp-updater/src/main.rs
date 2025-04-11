@@ -262,6 +262,7 @@ fn process_cmd(
 ) -> anyhow::Result<Option<String>> {
     let TopLevelArgs { command } = cmd;
     match command {
+        Commands::Config => cmd_config(updater_state),
         Commands::Status => cmd_status(updater_state),
         Commands::Set(args) => cmd_set(updater_state, args),
         Commands::Delete(args) => cmd_delete(updater_state, args),
@@ -279,12 +280,55 @@ struct TopLevelArgs {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Show configured updates
+    Config,
     /// Show status of recent and in-progress updates
     Status,
     /// Configure an update
     Set(SetArgs),
     /// Delete a configured update
     Delete(DeleteArgs),
+}
+
+fn cmd_config(
+    updater_state: &mut UpdaterState,
+) -> anyhow::Result<Option<String>> {
+    let configured = updater_state.requests_tx.borrow();
+
+    let mut s = String::new();
+    writeln!(&mut s, "configured updates ({}):", configured.len())?;
+    for (baseboard_id, update) in &*configured {
+        writeln!(
+            &mut s,
+            "    part {} serial {} (type {:?} slot {}):",
+            baseboard_id.part_number,
+            baseboard_id.serial_number,
+            update.sp_type,
+            update.slot_id,
+        )?;
+        writeln!(&mut s, "        artifact hash: {}", update.artifact_hash_id,)?;
+        writeln!(
+            &mut s,
+            "        user-provided artifact version: {}",
+            update.artifact_version,
+        )?;
+        match &update.details {
+            PendingMgsUpdateDetails::Sp {
+                expected_active_version,
+                expected_inactive_version,
+            } => {
+                writeln!(
+                    &mut s,
+                    "        preconditions: active slot {:?}, inactive slot {:?}",
+                    expected_active_version, expected_inactive_version,
+                )?;
+            }
+        }
+
+        writeln!(&mut s)?;
+    }
+
+    Ok(Some(s))
 }
 
 fn cmd_status(
@@ -321,9 +365,10 @@ fn cmd_status(
         );
         writeln!(
             &mut s,
-            "    {}: serial {} (running {})",
+            "    {}: serial {}: {:?} (running {})",
             status.time_started.to_rfc3339_opts(SecondsFormat::Millis, true),
             baseboard_id.serial_number,
+            status.status,
             humantime::format_duration(elapsed),
         )?;
     }

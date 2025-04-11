@@ -76,9 +76,8 @@ pub struct MgsUpdateDriver {
     log: slog::Logger,
     artifacts: Arc<ArtifactCache>,
     requests: watch::Receiver<PendingMgsUpdates>,
-    // XXX-dap fill in status here
     in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdate>,
-    futures: FuturesUnordered<BoxFuture<'static, UpdateAttemptResult>>,
+    futures: FuturesUnordered<BoxFuture<'static, DriverEvent>>,
     mgs_rx: watch::Receiver<AllBackends>,
     status_tx: watch::Sender<DriverStatus>,
     status_rx: watch::Receiver<DriverStatus>,
@@ -122,7 +121,9 @@ impl MgsUpdateDriver {
                 maybe_work_done = self.futures.next(),
                     if !self.futures.is_empty() => {
                     match maybe_work_done {
-                        Some(result) => self.attempt_done(result),
+                        Some(DriverEvent::UpdateAttemptDone(result)) =>
+                            self.attempt_done(result),
+                        Some(DriverEvent::StatusDone) => (),
                         None => {
                             error!(
                                 &self.log,
@@ -273,24 +274,49 @@ impl MgsUpdateDriver {
     fn do_dispatch(
         &mut self,
         baseboard_id: Arc<BaseboardId>,
-        what: Option<(
-            InProgressUpdate,
-            BoxFuture<'static, UpdateAttemptResult>,
-        )>,
+        what: Option<(InProgressUpdate, BoxFuture<'static, DriverEvent>)>,
     ) {
         if let Some((in_progress, future)) = what {
+            let mut task_status_rx = in_progress.status_rx.clone();
+            let driver_status_tx = self.status_tx.clone();
+
             self.status_tx.send_modify(|driver_status| {
                 driver_status.in_progress.insert(
                     baseboard_id.clone(),
                     InProgressUpdateStatus {
                         time_started: in_progress.time_started,
                         instant_started: in_progress.instant_started,
+                        status: task_status_rx.borrow().clone(),
                     },
                 );
             });
 
-            self.in_progress.insert(baseboard_id, in_progress);
+            self.in_progress.insert(baseboard_id.clone(), in_progress);
             self.futures.push(future);
+            self.futures.push(
+                async move {
+                    while let Ok(_) = task_status_rx.changed().await {
+                        let borrowed = task_status_rx.borrow();
+                        let value = borrowed.clone();
+                        drop(borrowed);
+                        driver_status_tx.send_modify(|driver_status| {
+                            // It's conceivable that we get woken up after the
+                            // task has completed and this in-progress state has
+                            // been cleared out.
+                            let Some(my_status) = driver_status
+                                .in_progress
+                                .get_mut(&baseboard_id)
+                            else {
+                                return;
+                            };
+
+                            my_status.status = value;
+                        });
+                    }
+                    DriverEvent::StatusDone
+                }
+                .boxed(),
+            );
         }
     }
 
@@ -299,8 +325,7 @@ impl MgsUpdateDriver {
         artifacts: Arc<ArtifactCache>,
         mgs_rx: watch::Receiver<AllBackends>,
         update: &PendingMgsUpdate,
-    ) -> Option<(InProgressUpdate, BoxFuture<'static, UpdateAttemptResult>)>
-    {
+    ) -> Option<(InProgressUpdate, BoxFuture<'static, DriverEvent>)> {
         let update_id = Uuid::new_v4();
         let log =
             log.new(o!(update.clone(), "update_id" => update_id.to_string()));
@@ -369,21 +394,23 @@ impl MgsUpdateDriver {
             }
         };
 
-        let (status_tx, status_rx) = watch::channel(());
+        let (status_tx, status_rx) = watch::channel(InternalStatus::NotStarted);
         let in_progress = InProgressUpdate {
             log,
-            update_id,
             time_started: chrono::Utc::now(),
             instant_started: Instant::now(),
-            status_tx,
             status_rx,
         };
         let update = update.clone();
         let future = async move {
-            let result =
-                apply_update(artifacts, &sp_update, &*updater, mgs_rx, &update)
-                    .await;
-            UpdateAttemptResult { requested_update: update, result }
+            let result = apply_update(
+                artifacts, &sp_update, &*updater, mgs_rx, &update, status_tx,
+            )
+            .await;
+            DriverEvent::UpdateAttemptDone(UpdateAttemptResult {
+                requested_update: update,
+                result,
+            })
         }
         .boxed();
 
@@ -391,18 +418,31 @@ impl MgsUpdateDriver {
     }
 }
 
+enum DriverEvent {
+    UpdateAttemptDone(UpdateAttemptResult),
+    StatusDone,
+}
+
 /// internal bookkeeping for each in-progress update
 struct InProgressUpdate {
     log: slog::Logger,
-    update_id: Uuid,
     time_started: chrono::DateTime<chrono::Utc>,
     instant_started: Instant,
-    status_tx: watch::Sender<InternalStatus>,
     status_rx: watch::Receiver<InternalStatus>,
 }
 
 // XXX-dap
-type InternalStatus = ();
+#[derive(Clone, Debug)]
+pub enum InternalStatus {
+    NotStarted,
+    FetchingArtifact,
+    Precheck,
+    Updating,
+    UpdateWaiting,
+    PostUpdate,
+    WaitDone,
+    Done,
+}
 
 /// externally-exposed status for each in-progress update
 // XXX-dap to add: number of previous attempts
@@ -410,6 +450,7 @@ type InternalStatus = ();
 pub struct InProgressUpdateStatus {
     pub time_started: chrono::DateTime<chrono::Utc>,
     pub instant_started: std::time::Instant,
+    pub status: InternalStatus,
 }
 
 /// externally-exposed status for a completed attempt
@@ -629,17 +670,19 @@ impl From<DeliveryWaitError> for ApplyUpdateError {
 /// [`ApplyUpdateError`] is used for failures to even _try_.
 /// XXX-dap we should be able to say that the final state is that no update is
 /// in progress?
-pub async fn apply_update(
+async fn apply_update(
     artifacts: Arc<ArtifactCache>,
     sp_update: &SpComponentUpdate,
     updater: &(dyn ReconfiguratorSpComponentUpdater + Send + Sync),
     mgs_rx: watch::Receiver<AllBackends>,
     update: &PendingMgsUpdate,
+    status_tx: watch::Sender<InternalStatus>,
 ) -> Result<ApplyUpdateResult, ApplyUpdateError> {
     // Set up clients to talk to MGS.
     // XXX-dap rather than this, MgsClients probably ought to have a mode where
     // it accepts a qorb pool and continually try all clients forever on
     // transient issues.
+    let _ = status_tx.send(InternalStatus::FetchingArtifact);
     let log = &sp_update.log;
     let mut mgs_clients = {
         let backends = mgs_rx.borrow();
@@ -679,6 +722,7 @@ pub async fn apply_update(
     // sp_component_caboose_get() + caboose parse (with some logic around other
     // stuff)
     // e.g., for host OS it's: unclear?
+    let _ = status_tx.send(InternalStatus::Precheck);
     match updater.precheck(log, &mut mgs_clients, update).await {
         Ok(PrecheckStatus::ReadyForUpdate) => (),
         Ok(PrecheckStatus::UpdateComplete) => {
@@ -688,9 +732,10 @@ pub async fn apply_update(
             return Ok(ApplyUpdateResult::PreconditionFailed(Arc::new(error)));
         }
     };
-    debug!(log, "ready to start update");
 
     // Start the update.
+    debug!(log, "ready to start update");
+    let _ = status_tx.send(InternalStatus::Updating);
     let sp_type = sp_update.target_sp_type;
     let sp_slot = sp_update.target_sp_slot;
     let component = sp_update.component();
@@ -740,6 +785,7 @@ pub async fn apply_update(
     };
     debug!(log, "started update");
 
+    let _ = status_tx.send(InternalStatus::UpdateWaiting);
     let our_update = match wait_for_delivery(&mut mgs_clients, sp_update)
         .await?
     {
@@ -756,7 +802,6 @@ pub async fn apply_update(
 
         DeliveryWaitStatus::Completed(id) => id == my_update_id,
     };
-    debug!(log, "delivered artifact");
 
     // If we were the one doing the update, then we're responsible for
     // any post-update action (generally, resetting the device).
@@ -791,6 +836,9 @@ pub async fn apply_update(
         }
     };
 
+    debug!(log, "delivered artifact");
+    let _ = status_tx.send(InternalStatus::PostUpdate);
+
     if try_reset {
         // We retry this until we get some error *other* than a communication
         // error.  There is intentionally no timeout here.  If we've staged an
@@ -814,8 +862,15 @@ pub async fn apply_update(
     //
     // There's no point where we'd want to give up here.  We know a reset was
     // sent.
-    match wait_for_update_done(log, updater, &mut mgs_clients, update, None)
-        .await
+    let _ = status_tx.send(InternalStatus::WaitDone);
+    let rv = match wait_for_update_done(
+        log,
+        updater,
+        &mut mgs_clients,
+        update,
+        None,
+    )
+    .await
     {
         // We did not specify a timeout so it should not time out.
         Err(UpdateWaitError::Timeout(_)) => unreachable!(),
@@ -823,7 +878,10 @@ pub async fn apply_update(
         Err(UpdateWaitError::Indeterminate(error)) => {
             Err(ApplyUpdateError::WaitError(error))
         }
-    }
+    };
+
+    let _ = status_tx.send(InternalStatus::Done);
+    rv
 
     // XXX-dap something needs to abort after failure cases
 }
