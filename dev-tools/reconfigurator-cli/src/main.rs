@@ -26,6 +26,7 @@ use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::Simulator;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
+use nexus_types::deployment::BlueprintZoneImageVersion;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -36,7 +37,6 @@ use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
-use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -52,7 +52,9 @@ use std::io::BufRead;
 use std::io::IsTerminal;
 use swrite::{SWrite, swriteln};
 use tabled::Tabled;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::ArtifactVersionError;
 
 mod log_capture;
 
@@ -464,7 +466,11 @@ enum ImageSourceArgs {
     /// the zone image comes from the `install` dataset
     InstallDataset,
     /// the zone image comes from a specific TUF repo artifact
-    Artifact { version: ArtifactVersion, hash: ArtifactHash },
+    Artifact {
+        #[clap(value_parser = parse_blueprint_zone_image_version)]
+        version: BlueprintZoneImageVersion,
+        hash: ArtifactHash,
+    },
 }
 
 impl From<ImageSourceArgs> for BlueprintZoneImageSource {
@@ -478,6 +484,19 @@ impl From<ImageSourceArgs> for BlueprintZoneImageSource {
             }
         }
     }
+}
+
+fn parse_blueprint_zone_image_version(
+    version: &str,
+) -> Result<BlueprintZoneImageVersion, ArtifactVersionError> {
+    // Treat the literal string "unknown" as an unknown version.
+    if version == "unknown" {
+        return Ok(BlueprintZoneImageVersion::Unknown);
+    }
+
+    Ok(BlueprintZoneImageVersion::Available {
+        version: version.parse::<ArtifactVersion>()?,
+    })
 }
 
 #[derive(Debug, Args)]

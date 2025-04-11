@@ -8,7 +8,7 @@
 
 use anyhow::Context;
 use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use std::collections::BTreeMap;
 use std::io;
 use uuid::Uuid;
@@ -74,6 +74,24 @@ pub struct Filter {
 
     /// Show a log file even if is has zero size.
     pub show_empty: bool,
+
+    /// Show a log file if its `mtime` falls within this date range.
+    pub date_range: Option<DateRange>,
+}
+
+/// The range of time a file's `mtime` must be in within to be included.
+#[derive(Copy, Clone, Debug)]
+pub struct DateRange {
+    /// Files with `mtime`s equal to or later than this will be excluded.
+    before: Timestamp,
+    /// Files with `mtime`s equal to or earlier than this will be excluded.
+    after: Timestamp,
+}
+
+impl DateRange {
+    pub fn new(before: Timestamp, after: Timestamp) -> Self {
+        Self { before, after }
+    }
 }
 
 /// Path and metadata about a logfile
@@ -82,7 +100,7 @@ pub struct Filter {
 pub struct LogFile {
     pub path: Utf8PathBuf,
     pub size: Option<u64>,
-    pub modified: Option<DateTime<Utc>>,
+    pub modified: Option<Timestamp>,
 }
 
 impl LogFile {
@@ -90,13 +108,28 @@ impl LogFile {
         if let Ok(metadata) = entry.metadata() {
             self.size = Some(metadata.len());
             if let Ok(modified) = metadata.modified() {
-                self.modified = Some(modified.into());
+                // An mtime that overflows Timestamp is not accurate, ignore.
+                self.modified = modified.try_into().ok();
             }
         }
     }
 
     pub fn file_name_cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.path.file_name().cmp(&other.path.file_name())
+    }
+
+    pub fn in_date_range(&self, date_range: &DateRange) -> bool {
+        let Some(modified) = self.modified else {
+            // We failed to stat the file, it probably doesn't exist anymore.
+            // Exclude from output.
+            return false;
+        };
+
+        if modified < date_range.after || modified > date_range.before {
+            return false;
+        }
+
+        true
     }
 }
 
@@ -287,17 +320,29 @@ impl Zones {
                 paths.primary.clone(),
                 &mut output,
                 filter.show_empty,
+                filter.date_range,
             );
         }
 
         if filter.archived {
             for dir in paths.debug.clone() {
-                load_svc_logs(dir, &mut output, filter.show_empty);
+                load_svc_logs(
+                    dir,
+                    &mut output,
+                    filter.show_empty,
+                    filter.date_range,
+                );
             }
         }
         if filter.extra {
             for (svc_name, dir) in paths.extra.clone() {
-                load_extra_logs(dir, svc_name, &mut output, filter.show_empty);
+                load_extra_logs(
+                    dir,
+                    svc_name,
+                    &mut output,
+                    filter.show_empty,
+                    filter.date_range,
+                );
             }
         }
 
@@ -356,6 +401,7 @@ fn load_svc_logs(
     dir: Utf8PathBuf,
     logs: &mut BTreeMap<ServiceName, SvcLogs>,
     show_empty: bool,
+    date_range: Option<DateRange>,
 ) {
     let Ok(entries) = dir.read_dir_utf8() else {
         return;
@@ -379,10 +425,20 @@ fn load_svc_logs(
                 continue;
             };
 
-            if !show_empty {
+            // Stat the file only if necessary.
+            if !show_empty || date_range.is_some() {
                 logfile.read_metadata(&entry);
+            }
+
+            if !show_empty {
                 if logfile.size == Some(0) {
                     // skip 0 size files
+                    continue;
+                }
+            }
+
+            if let Some(date_range) = date_range {
+                if !logfile.in_date_range(&date_range) {
                     continue;
                 }
             }
@@ -407,6 +463,7 @@ fn load_extra_logs(
     svc_name: &str,
     logs: &mut BTreeMap<ServiceName, SvcLogs>,
     show_empty: bool,
+    date_range: Option<DateRange>,
 ) {
     let Ok(entries) = dir.read_dir_utf8() else {
         return;
@@ -422,10 +479,21 @@ fn load_extra_logs(
         let mut path = dir.clone();
         path.push(filename);
         let mut logfile = LogFile::new(path);
-        if !show_empty {
+
+        // Stat the file only if necessary.
+        if !show_empty || date_range.is_some() {
             logfile.read_metadata(&entry);
+        }
+
+        if !show_empty {
             if logfile.size == Some(0) {
                 // skip 0 size files
+                continue;
+            }
+        }
+
+        if let Some(date_range) = date_range {
+            if !logfile.in_date_range(&date_range) {
                 continue;
             }
         }
@@ -554,5 +622,57 @@ mod tests {
         );
         assert_eq!(svc_logs.extra[0].path, "/foo/blah/sub.default.log1");
         assert_eq!(svc_logs.extra[1].path, "/bar/blah/sub.default.log2");
+    }
+
+    #[test]
+    fn test_daterange_filter() {
+        use super::{DateRange, LogFile};
+        use camino::Utf8PathBuf;
+        use jiff::Timestamp;
+
+        let old_log = LogFile {
+            path: Utf8PathBuf::from("old"),
+            size: None,
+            modified: Some("1950-01-01T00:00:00Z".parse().unwrap()),
+        };
+        let new_log = LogFile {
+            path: Utf8PathBuf::from("new"),
+            size: None,
+            modified: Some("2050-01-01T00:00:00Z".parse().unwrap()),
+        };
+        let matched_log = LogFile {
+            path: Utf8PathBuf::from("just_right"),
+            size: None,
+            modified: Some("2024-01-01T00:00:00Z".parse().unwrap()),
+        };
+
+        let full_date_range = DateRange {
+            before: "2025-01-01T23:59:59Z".parse().unwrap(),
+            after: "1986-01-01T00:00:01Z".parse().unwrap(),
+        };
+
+        assert!(!old_log.in_date_range(&full_date_range));
+        assert!(!new_log.in_date_range(&full_date_range));
+        assert!(matched_log.in_date_range(&full_date_range));
+
+        // Range if '--after` is not set.
+        let min_after_date_range = DateRange {
+            before: "2025-01-01T23:59:59Z".parse().unwrap(),
+            after: Timestamp::MIN,
+        };
+
+        assert!(old_log.in_date_range(&min_after_date_range));
+        assert!(!new_log.in_date_range(&min_after_date_range));
+        assert!(matched_log.in_date_range(&min_after_date_range));
+
+        // Range if '--before` is not set.
+        let max_before_date_range = DateRange {
+            before: Timestamp::MAX,
+            after: "1986-01-01T00:00:01Z".parse().unwrap(),
+        };
+
+        assert!(!old_log.in_date_range(&max_before_date_range));
+        assert!(new_log.in_date_range(&max_before_date_range));
+        assert!(matched_log.in_date_range(&max_before_date_range));
     }
 }

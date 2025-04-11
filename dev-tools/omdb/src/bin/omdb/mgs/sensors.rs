@@ -119,6 +119,13 @@ pub(crate) struct Sensor {
 impl Sensor {
     fn units(&self) -> &str {
         match self.kind {
+            MeasurementKind::CpuTctl => {
+                // Part of me kiiiind of wants to make this "%", as Tctl is
+                // always in the range of 0-100 --- it's essentially a sort of
+                // abstract "thermal shutdown Badness Percentage". But, nobody
+                // else seems to format it as a percentage AFAIK...
+                ""
+            }
             MeasurementKind::Temperature => "°C",
             MeasurementKind::Current | MeasurementKind::InputCurrent => "A",
             MeasurementKind::Voltage | MeasurementKind::InputVoltage => "V",
@@ -149,6 +156,7 @@ impl Sensor {
 
     fn to_kind_string(&self) -> &str {
         match self.kind {
+            MeasurementKind::CpuTctl => "cpu-tctl",
             MeasurementKind::Temperature => "temp",
             MeasurementKind::Power => "power",
             MeasurementKind::Current => "current",
@@ -161,6 +169,7 @@ impl Sensor {
 
     fn from_string(name: &str, kind: &str) -> Option<Self> {
         let k = match kind {
+            "cpu-tctl" => Some(MeasurementKind::CpuTctl),
             "temp" | "temperature" => Some(MeasurementKind::Temperature),
             "power" => Some(MeasurementKind::Power),
             "current" => Some(MeasurementKind::Current),

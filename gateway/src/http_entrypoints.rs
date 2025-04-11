@@ -47,11 +47,11 @@ use gateway_types::update::HostPhase2Progress;
 use gateway_types::update::HostPhase2RecoveryImageId;
 use gateway_types::update::InstallinatorImageId;
 use gateway_types::update::SpUpdateStatus;
-use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::GenericUuid;
 use std::num::NonZeroU8;
 use std::str;
 use std::sync::Arc;
+use tufaceous_artifact::ArtifactHash;
 
 // TODO
 // The gateway service will get asynchronous notifications both from directly

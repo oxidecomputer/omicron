@@ -4,6 +4,7 @@
 
 use super::ByteCount;
 use crate::SqlU16;
+use crate::impl_enum_type;
 use crate::typed_uuid::DbTypedUuid;
 use db_macros::Asset;
 use nexus_db_schema::schema::region;
@@ -14,6 +15,16 @@ use omicron_uuid_kinds::VolumeKind;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+impl_enum_type!(
+    RegionReservationPercentEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    pub enum RegionReservationPercent;
+
+    // Enum values
+    TwentyFive => b"25"
+);
 
 /// Database representation of a Region.
 ///
@@ -55,6 +66,13 @@ pub struct Region {
     // Shared read-only regions require a "deleting" flag to avoid a
     // use-after-free scenario
     deleting: bool,
+
+    // The Agent will reserve space for Downstairs overhead when creating the
+    // corresponding ZFS dataset. Nexus has to account for that: store that
+    // reservation percent here as it may change in the future, and it can be
+    // used during Crucible related accounting. This is stored as an enum to
+    // restrict the values to what the Crucible Agent uses.
+    reservation_percent: RegionReservationPercent,
 }
 
 impl Region {
@@ -77,6 +95,10 @@ impl Region {
             port: Some(port.into()),
             read_only,
             deleting: false,
+            // When the Crucible agent's reservation percentage changes, this
+            // function should accept that as argument. Until then, it can only
+            // ever be 25%.
+            reservation_percent: RegionReservationPercent::TwentyFive,
         }
     }
 
@@ -111,5 +133,25 @@ impl Region {
     }
     pub fn deleting(&self) -> bool {
         self.deleting
+    }
+
+    /// The size of the Region without accounting for any overhead. The
+    /// `allocation_query` function should have validated that this won't
+    /// overflow.
+    pub fn requested_size(&self) -> u64 {
+        self.block_size().to_bytes()
+            * self.blocks_per_extent()
+            * self.extent_count()
+    }
+
+    /// The size the Crucible agent would have reserved during ZFS creation,
+    /// which is some factor higher than the requested region size to account
+    /// for on-disk overhead.
+    pub fn reserved_size(&self) -> u64 {
+        let overhead = match &self.reservation_percent {
+            RegionReservationPercent::TwentyFive => self.requested_size() / 4,
+        };
+
+        self.requested_size() + overhead
     }
 }

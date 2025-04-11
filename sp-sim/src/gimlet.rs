@@ -1621,24 +1621,27 @@ impl SpHandler for Handler {
     }
 
     fn get_task_dump_count(&mut self) -> Result<u32, SpError> {
-        unimplemented!()
+        debug!(&self.log, "received get_task_dump_count");
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn task_dump_read_start(
         &mut self,
-        _index: u32,
+        index: u32,
         _key: [u8; 16],
     ) -> Result<DumpTask, SpError> {
-        unimplemented!()
+        debug!(&self.log, "received task_dump_read_start"; "index" => index);
+        Err(SpError::RequestUnsupportedForSp)
     }
 
     fn task_dump_read_continue(
         &mut self,
         _key: [u8; 16],
-        _seq: u32,
+        seq: u32,
         _buf: &mut [u8],
     ) -> Result<Option<DumpSegment>, SpError> {
-        unimplemented!()
+        debug!(&self.log, "received task_dump_read_continue"; "seq" => seq);
+        Err(SpError::RequestUnsupportedForSp)
     }
 }
 
