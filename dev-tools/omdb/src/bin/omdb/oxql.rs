@@ -47,7 +47,6 @@ impl OxqlArgs {
         omdb: &Omdb,
         log: &Logger,
     ) -> anyhow::Result<()> {
-        // TODO-K: Check every time a query is made about the policy?
         let native_addr = self.resolve_native_addr(omdb, log).await?;
 
         let opts = ShellOptions {
@@ -74,7 +73,6 @@ impl OxqlArgs {
             omdb,
             log,
             self.clickhouse_url.as_deref(),
-            // TODO-K: change this to oximeter reader?
             ServiceName::OximeterReader,
         )
         .await

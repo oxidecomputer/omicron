@@ -321,7 +321,6 @@ impl Nexus {
         let timeseries_client = match &config.pkg.timeseries_db.address {
             None => {
                 let native_resolver =
-                // TODO-K: change this to oximeter reader?
                     qorb_resolver.for_service(ServiceName::OximeterReader);
                 oximeter_db::Client::new_with_resolver(native_resolver, &log)
             }

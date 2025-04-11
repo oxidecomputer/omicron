@@ -22,7 +22,6 @@ use crate::{
 
 use super::{Overridables, Sled, blueprint_nexus_external_ips};
 
-// TODO-K: This is where we set all records - check blueprint here and swap!
 /// Returns the expected contents of internal DNS based on the given blueprint
 pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,

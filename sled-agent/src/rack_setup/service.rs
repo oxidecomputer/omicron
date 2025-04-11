@@ -1553,7 +1553,6 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         // We do not create clickhouse clusters in RSS. We create them via
         // reconfigurator only.
         clickhouse_cluster_config: None,
-        // TODO-K: Reconsider how this works.
         // The oximeter read policy always defaults to single node. The
         // initial generation of this policy in the DB is 0
         oximeter_read_mode: OximeterReadMode::SingleNode,

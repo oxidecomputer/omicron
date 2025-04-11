@@ -432,14 +432,6 @@ impl DnsConfigBuilder {
         );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(http_service, &zone, http_address.port())?;
-
-        // TODO-K: add oximeter reader? maybe not, oximeter reader could point to native instead
-        // maybe we read DB and set oximeter reader?
-
-        // We initially point the oximeter-reader to the single node installation
-        // as that is the default functionality. When the oximeter-read-policy
-        // is set to point to the replicated cluster, the oximeter-reader will
-        // point to it.
         if read_policy_enabled {
             self.service_backend_zone(
                 ServiceName::OximeterReader,
