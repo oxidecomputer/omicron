@@ -1636,11 +1636,21 @@ struct CrucibleDatasetRow {
     no_provision: bool,
 
     // zpool fields
-    control_plane_storage_buffer: i64,
-    pool_total_size: i64,
+    #[tabled(display_with = "option_impl_display")]
+    control_plane_storage_buffer: Option<i64>,
+    #[tabled(display_with = "option_impl_display")]
+    pool_total_size: Option<i64>,
 
     // computed fields
-    size_left: i128,
+    #[tabled(display_with = "option_impl_display")]
+    size_left: Option<i128>,
+}
+
+fn option_impl_display<T: std::fmt::Display>(t: &Option<T>) -> String {
+    match t {
+        Some(v) => format!("{v}"),
+        None => String::from("n/a"),
+    }
 }
 
 async fn get_crucible_dataset_rows(
@@ -1676,16 +1686,14 @@ async fn get_crucible_dataset_rows(
         Vec::with_capacity(crucible_datasets.len());
 
     for d in crucible_datasets {
-        let control_plane_storage_buffer: i64 = zpools
+        let control_plane_storage_buffer: Option<i64> = match zpools
             .get(&d.pool_id)
-            .ok_or_else(|| anyhow::anyhow!("zpool {} not found!", d.pool_id))?
-            .control_plane_storage_buffer()
-            .into();
+        {
+            Some(zpool) => Some(zpool.control_plane_storage_buffer().into()),
+            None => None,
+        };
 
-        let pool_total_size =
-            *zpool_total_size.get(&d.pool_id).ok_or_else(|| {
-                anyhow::anyhow!("zpool {} not part of inventory!", d.pool_id)
-            })?;
+        let pool_total_size = zpool_total_size.get(&d.pool_id);
 
         result.push(CrucibleDatasetRow {
             // dataset fields
@@ -1701,12 +1709,18 @@ async fn get_crucible_dataset_rows(
 
             // zpool fields
             control_plane_storage_buffer,
-            pool_total_size,
+            pool_total_size: pool_total_size.cloned(),
 
             // computed fields
-            size_left: i128::from(pool_total_size)
-                - i128::from(control_plane_storage_buffer)
-                - i128::from(d.size_used),
+            size_left: match (pool_total_size, control_plane_storage_buffer) {
+                (Some(total_size), Some(control_plane_storage_buffer)) => Some(
+                    i128::from(*total_size)
+                        - i128::from(control_plane_storage_buffer)
+                        - i128::from(d.size_used),
+                ),
+
+                _ => None,
+            },
         });
     }
 
@@ -1742,9 +1756,20 @@ async fn cmd_crucible_dataset_show_overprovisioned(
     let rows: Vec<_> = rows
         .into_iter()
         .filter(|row| {
-            (i128::from(row.size_used)
-                + i128::from(row.control_plane_storage_buffer))
-                >= i128::from(row.pool_total_size)
+            match (row.pool_total_size, row.control_plane_storage_buffer) {
+                (Some(pool_total_size), Some(control_plane_storage_buffer)) => {
+                    (i128::from(row.size_used)
+                        + i128::from(control_plane_storage_buffer))
+                        >= i128::from(pool_total_size)
+                }
+
+                _ => {
+                    // Without the total size or control plane storage buffer, we
+                    // can't determine if the dataset is overprovisioned or not.
+                    // Filter it out.
+                    false
+                }
+            }
         })
         .collect();
 
@@ -7858,7 +7883,8 @@ async fn cmd_db_zpool_list(
         time_deleted: String,
         sled_id: Uuid,
         physical_disk_id: Uuid,
-        total_size: i64,
+        #[tabled(display_with = "option_impl_display")]
+        total_size: Option<i64>,
         control_plane_storage_buffer: i64,
     }
 
@@ -7874,13 +7900,7 @@ async fn cmd_db_zpool_list(
                 },
                 sled_id: p.sled_id,
                 physical_disk_id: p.physical_disk_id.into_untyped_uuid(),
-                total_size: *zpool_total_size.get(&zpool_id).ok_or_else(
-                    || {
-                        anyhow::anyhow!(
-                            "zpool {zpool_id} not found in inventory!"
-                        )
-                    },
-                )?,
+                total_size: zpool_total_size.get(&zpool_id).cloned(),
                 control_plane_storage_buffer: p
                     .control_plane_storage_buffer()
                     .into(),
