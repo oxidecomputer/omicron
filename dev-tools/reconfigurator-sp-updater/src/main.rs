@@ -374,6 +374,15 @@ fn cmd_status(
         )?;
     }
 
+    writeln!(&mut s, "\nwaiting for retry:")?;
+    for (baseboard_id, wait_info) in &status.waiting {
+        writeln!(
+            &mut s,
+            "    serial {}: will try again at {}",
+            baseboard_id.serial_number, wait_info.next_attempt_time,
+        )?;
+    }
+
     Ok(Some(s))
 }
 

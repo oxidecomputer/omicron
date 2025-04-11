@@ -106,6 +106,7 @@ impl MgsUpdateDriver {
         let (status_tx, status_rx) = watch::channel(DriverStatus {
             recent: VecDeque::with_capacity(N_RECENT_COMPLETIONS),
             in_progress: BTreeMap::new(),
+            waiting: BTreeMap::new(),
         });
 
         MgsUpdateDriver {
@@ -221,7 +222,20 @@ impl MgsUpdateDriver {
             }
         };
 
+        // Regardless of the result, set a timer for retrying.  Our job is to
+        // ensure reality matches our configuration, so even if we succeeded, we
+        // want to check again in a little while to see if anything changed.
         let baseboard_id = completed.request.baseboard_id.clone();
+        let status_time_next = chrono::Utc::now() + RETRY_TIMEOUT;
+        let delay_key = self.delayq.insert(baseboard_id.clone(), RETRY_TIMEOUT);
+        self.waiting.insert(
+            baseboard_id.clone(),
+            WaitingAttempt {
+                delay_key,
+                request: result.requested_update.clone(),
+            },
+        );
+
         self.status_tx.send_modify(|driver_status| {
             let recent = &mut driver_status.recent;
             if recent.len() == recent.capacity() {
@@ -231,23 +245,20 @@ impl MgsUpdateDriver {
 
             let found = driver_status.in_progress.remove(&baseboard_id);
             assert!(found.is_some());
-        });
 
-        // Regardless of the result, set a timer for retrying.  Our job is to
-        // ensure reality matches our configuration, so even if we succeeded, we
-        // want to check again in a little while to see if anything changed.
-        let delay_key = self.delayq.insert(baseboard_id.clone(), RETRY_TIMEOUT);
-        self.waiting.insert(
-            baseboard_id,
-            WaitingAttempt {
-                delay_key,
-                request: result.requested_update.clone(),
-            },
-        );
+            driver_status.waiting.insert(
+                baseboard_id.clone(),
+                WaitingStatus { next_attempt_time: status_time_next },
+            );
+        });
     }
 
     fn retry(&mut self, baseboard_id: Arc<BaseboardId>) {
         assert!(self.waiting.remove(&baseboard_id).is_some());
+        self.status_tx.send_modify(|driver_status| {
+            driver_status.waiting.remove(&baseboard_id);
+        });
+
         let requests = self.requests.borrow();
         let Some(my_request) = requests.get(&baseboard_id) else {
             // This case is unlikely.  We get notified when the configuration
@@ -307,6 +318,9 @@ impl MgsUpdateDriver {
 
                 self.delayq.remove(&delay_key);
                 occupied.remove();
+                self.status_tx.send_modify(|driver_status| {
+                    driver_status.waiting.remove(baseboard_id);
+                });
             }
 
             match self.in_progress.entry(baseboard_id.clone()) {
@@ -486,7 +500,6 @@ struct InProgressUpdate {
 }
 
 /// internal bookkeeping for an update that's awaiting retry
-// XXX-dap add to status, include how long we're waiting, etc.
 struct WaitingAttempt {
     delay_key: delay_queue::Key,
     request: PendingMgsUpdate,
@@ -547,6 +560,12 @@ pub struct CompletedAttempt {
     pub result: Result<ApplyUpdateResult, String>,
 }
 
+/// externally-exposed status for waiting updates
+#[derive(Debug)]
+pub struct WaitingStatus {
+    pub next_attempt_time: chrono::DateTime<chrono::Utc>,
+}
+
 /// internal result of a completed update attempt
 struct UpdateAttemptResult {
     requested_update: PendingMgsUpdate,
@@ -557,6 +576,7 @@ struct UpdateAttemptResult {
 pub struct DriverStatus {
     pub recent: VecDeque<CompletedAttempt>,
     pub in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdateStatus>,
+    pub waiting: BTreeMap<Arc<BaseboardId>, WaitingStatus>,
 }
 
 /// Parameters describing a request to update one SP-managed component
