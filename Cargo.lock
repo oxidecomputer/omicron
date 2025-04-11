@@ -6100,6 +6100,7 @@ name = "nexus-internal-api"
 version = "0.1.0"
 dependencies = [
  "dropshot 0.16.0",
+ "http",
  "nexus-types",
  "omicron-common",
  "omicron-uuid-kinds",
