@@ -161,6 +161,7 @@ impl ReconfiguratorSpUpdater {
         mgs_resolver.terminate().await;
         repo_depot_resolver.terminate().await;
         info!(&log, "waiting for driver task to stop");
+        drop(updater_state);
         driver_task.await.context("waiting for driver task")?;
 
         Ok(())

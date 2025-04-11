@@ -24,6 +24,7 @@ use qorb::resolver::AllBackends;
 use slog::{debug, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::collections::btree_map::Entry;
 use std::sync::Arc;
 use std::time::Duration;
@@ -39,9 +40,12 @@ const PROGRESS_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// How long to wait between failed attempts to reset the device
 const RESET_DELAY_INTERVAL: Duration = Duration::from_secs(10);
-///
+
 /// How long to wait between poll attempts on update status
 const PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(10);
+
+/// How many recent completions to keep track of (for debugging)
+const N_RECENT_COMPLETIONS: usize = 16;
 
 /// Drive one or more MGS-managed updates
 ///
@@ -91,7 +95,7 @@ impl MgsUpdateDriver {
         mgs_rx: watch::Receiver<AllBackends>,
     ) -> MgsUpdateDriver {
         let (status_tx, status_rx) = watch::channel(DriverStatus {
-            recent: Vec::new(),
+            recent: VecDeque::with_capacity(N_RECENT_COMPLETIONS),
             in_progress: BTreeMap::new(),
         });
 
@@ -140,9 +144,10 @@ impl MgsUpdateDriver {
                             self.update_requests();
                         }
                         Err(error) => {
-                            error!(
+                            info!(
                                 &self.log,
-                                "failed to read from input channel";
+                                "shutting down \
+                                 (failed to read from input channel)";
                                 InlineErrorChain::new(&error)
                             );
                             break;
@@ -191,8 +196,12 @@ impl MgsUpdateDriver {
 
         let baseboard_id = completed.request.baseboard_id.clone();
         self.status_tx.send_modify(|driver_status| {
-            // XXX-dap prune ringbuffer
-            driver_status.recent.push(completed);
+            let recent = &mut driver_status.recent;
+            if recent.len() == recent.capacity() {
+                let _ = recent.pop_front();
+            }
+            recent.push_back(completed);
+
             let found = driver_status.in_progress.remove(&baseboard_id);
             assert!(found.is_some());
         });
@@ -474,7 +483,7 @@ struct UpdateAttemptResult {
 
 #[derive(Debug)]
 pub struct DriverStatus {
-    pub recent: Vec<CompletedAttempt>,
+    pub recent: VecDeque<CompletedAttempt>,
     pub in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdateStatus>,
 }
 
