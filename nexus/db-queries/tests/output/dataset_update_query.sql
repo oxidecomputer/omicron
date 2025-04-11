@@ -17,7 +17,7 @@ WITH
       FROM
         crucible_dataset LEFT JOIN region ON crucible_dataset.id = region.dataset_id
       WHERE
-        crucible_dataset.time_deleted IS NULL AND crucible_dataset.id IN ($1, $2, $3)
+        crucible_dataset.time_deleted IS NULL AND crucible_dataset.id = ANY ($1)
       GROUP BY
         crucible_dataset.id
     )

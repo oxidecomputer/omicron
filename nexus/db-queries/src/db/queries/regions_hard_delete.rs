@@ -36,15 +36,10 @@ pub fn dataset_update_query(
     LEFT JOIN region ON crucible_dataset.id = region.dataset_id
     WHERE
       crucible_dataset.time_deleted IS NULL AND
-      crucible_dataset.id IN (",
+      crucible_dataset.id = ANY (",
     );
 
-    for (idx, dataset_id) in dataset_ids.into_iter().enumerate() {
-        if idx != 0 {
-            builder.sql(",");
-        }
-        builder.param().bind::<sql_types::Uuid, _>(dataset_id);
-    }
+    builder.param().bind::<sql_types::Array<sql_types::Uuid>, _>(dataset_ids);
 
     builder.sql(
         ")
