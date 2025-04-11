@@ -88,7 +88,7 @@ pub struct MgsUpdateDriver {
     artifacts: Arc<ArtifactCache>,
     requests: watch::Receiver<PendingMgsUpdates>,
     in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdate>,
-    futures: FuturesUnordered<BoxFuture<'static, DriverEvent>>,
+    futures: FuturesUnordered<BoxFuture<'static, UpdateAttemptResult>>,
     mgs_rx: watch::Receiver<AllBackends>,
     status_tx: watch::Sender<DriverStatus>,
     status_rx: watch::Receiver<DriverStatus>,
@@ -137,8 +137,7 @@ impl MgsUpdateDriver {
                 maybe_work_done = self.futures.next(),
                     if !self.futures.is_empty() => {
                     match maybe_work_done {
-                        Some(DriverEvent::UpdateAttemptDone(result)) =>
-                            self.attempt_done(result),
+                        Some(result) => self.attempt_done(result),
                         None => {
                             error!(
                                 &self.log,
@@ -189,14 +188,16 @@ impl MgsUpdateDriver {
     fn attempt_done(&mut self, result: UpdateAttemptResult) {
         let in_progress = self
             .in_progress
-            .remove(&result.requested_update.baseboard_id)
+            .remove(&result.baseboard_id)
             .expect("in-progress record for attempt that just completed");
+
+        let request = &in_progress.request;
 
         let completed = CompletedAttempt {
             time_started: in_progress.time_started,
             time_done: chrono::Utc::now(),
             elapsed: in_progress.instant_started.elapsed(),
-            request: result.requested_update.clone(),
+            request: request.clone(),
             result: match &result.result {
                 Ok(success) => Ok(success.clone()),
                 Err(error) => Err(InlineErrorChain::new(error).to_string()),
@@ -230,10 +231,7 @@ impl MgsUpdateDriver {
         let delay_key = self.delayq.insert(baseboard_id.clone(), RETRY_TIMEOUT);
         self.waiting.insert(
             baseboard_id.clone(),
-            WaitingAttempt {
-                delay_key,
-                request: result.requested_update.clone(),
-            },
+            WaitingAttempt { delay_key, request: request.clone() },
         );
 
         self.status_tx.send_modify(|driver_status| {
@@ -353,7 +351,25 @@ impl MgsUpdateDriver {
             }
         }
 
+        // Stop waiting to retry anything that's not in the list of requests.
+        let do_stop: Vec<_> = self
+            .waiting
+            .keys()
+            .filter(|b| !new_requests.contains_key(b))
+            .cloned()
+            .collect();
         drop(new_requests);
+
+        for b in &do_stop {
+            let wait_info = self.waiting.remove(b).unwrap();
+            self.delayq.remove(&wait_info.delay_key);
+        }
+        self.status_tx.send_modify(|driver_status| {
+            for b in do_stop {
+                driver_status.waiting.remove(&b);
+            }
+        });
+
         for (baseboard_id, work) in work_items {
             self.do_dispatch(baseboard_id.clone(), work);
         }
@@ -362,7 +378,10 @@ impl MgsUpdateDriver {
     fn do_dispatch(
         &mut self,
         baseboard_id: Arc<BaseboardId>,
-        what: Option<(InProgressUpdate, BoxFuture<'static, DriverEvent>)>,
+        what: Option<(
+            InProgressUpdate,
+            BoxFuture<'static, UpdateAttemptResult>,
+        )>,
     ) {
         if let Some((in_progress, future)) = what {
             self.status_tx.send_modify(|driver_status| {
@@ -385,20 +404,21 @@ impl MgsUpdateDriver {
         log: slog::Logger,
         artifacts: Arc<ArtifactCache>,
         mgs_rx: watch::Receiver<AllBackends>,
-        update: &PendingMgsUpdate,
+        request: &PendingMgsUpdate,
         status_tx: watch::Sender<DriverStatus>,
-    ) -> Option<(InProgressUpdate, BoxFuture<'static, DriverEvent>)> {
+    ) -> Option<(InProgressUpdate, BoxFuture<'static, UpdateAttemptResult>)>
+    {
         let update_id = Uuid::new_v4();
         let log =
-            log.new(o!(update.clone(), "update_id" => update_id.to_string()));
+            log.new(o!(request.clone(), "update_id" => update_id.to_string()));
         info!(&log, "update requested for baseboard");
 
-        let raw_kind = &update.artifact_hash_id.kind;
+        let raw_kind = &request.artifact_hash_id.kind;
         let Some(known_kind) = raw_kind.to_known() else {
             error!(
                 &log,
                 "ignoring update requested for unknown artifact kind";
-                "kind" => %update.artifact_hash_id.kind,
+                "kind" => %request.artifact_hash_id.kind,
             );
             return None;
         };
@@ -414,8 +434,8 @@ impl MgsUpdateDriver {
                 let sp_update = SpComponentUpdate {
                     log: log.clone(),
                     component: SpComponent::SP_ITSELF,
-                    target_sp_type: update.sp_type,
-                    target_sp_slot: update.slot_id,
+                    target_sp_type: request.sp_type,
+                    target_sp_slot: request.slot_id,
                     // The SP has two firmware slots, but they're aren't
                     // individually labled. We always request an update to slot
                     // 0, which means "the inactive slot".
@@ -456,16 +476,18 @@ impl MgsUpdateDriver {
             }
         };
 
+        let baseboard_id = request.baseboard_id.clone();
         let status_updater = InternalStatusUpdater {
             tx: status_tx,
-            baseboard_id: update.baseboard_id.clone(),
+            baseboard_id: baseboard_id.clone(),
         };
         let in_progress = InProgressUpdate {
             log,
             time_started: chrono::Utc::now(),
             instant_started: Instant::now(),
+            request: request.clone(),
         };
-        let update = update.clone();
+        let update = request.clone();
         let future = async move {
             let result = apply_update(
                 artifacts,
@@ -476,10 +498,7 @@ impl MgsUpdateDriver {
                 status_updater,
             )
             .await;
-            DriverEvent::UpdateAttemptDone(UpdateAttemptResult {
-                requested_update: update,
-                result,
-            })
+            UpdateAttemptResult { baseboard_id, result }
         }
         .boxed();
 
@@ -487,16 +506,12 @@ impl MgsUpdateDriver {
     }
 }
 
-// XXX-dap rip this out
-enum DriverEvent {
-    UpdateAttemptDone(UpdateAttemptResult),
-}
-
 /// internal bookkeeping for each in-progress update
 struct InProgressUpdate {
     log: slog::Logger,
     time_started: chrono::DateTime<chrono::Utc>,
     instant_started: Instant,
+    request: PendingMgsUpdate,
 }
 
 /// internal bookkeeping for an update that's awaiting retry
@@ -514,7 +529,7 @@ pub enum InternalStatus {
     Updating,
     UpdateWaiting,
     PostUpdate,
-    WaitDone,
+    PostUpdateWait,
     Done,
 }
 
@@ -568,7 +583,7 @@ pub struct WaitingStatus {
 
 /// internal result of a completed update attempt
 struct UpdateAttemptResult {
-    requested_update: PendingMgsUpdate,
+    baseboard_id: Arc<BaseboardId>,
     result: Result<ApplyUpdateResult, ApplyUpdateError>,
 }
 
@@ -709,7 +724,7 @@ async fn wait_for_delivery(
 #[derive(Clone, Debug)]
 pub enum ApplyUpdateResult {
     /// the update was completed successfully
-    Completed,
+    Completed(UpdateCompletedHow),
     /// the update could not be completed because it assumed a precondition that
     /// wasn't true (e.g., the device was currently running from a different
     /// slot than expected)
@@ -726,6 +741,14 @@ pub enum ApplyUpdateResult {
     StuckUpdating(Uuid), // XXX-dap more details
     /// the SP unexpectedly behaved as though our update had never started
     Lost,
+}
+
+#[derive(Clone, Debug)]
+pub enum UpdateCompletedHow {
+    FoundNoChangesNeeded,
+    CompletedUpdate,
+    WaitedForConcurrentUpdate,
+    TookOverConcurrentUpdate,
 }
 
 #[derive(Debug, Error)]
@@ -812,22 +835,16 @@ async fn apply_update(
         artifacts.artifact_contents(&update.artifact_hash_id.hash).await?;
     debug!(log, "loaded artifact contents");
 
-    // XXX-dap need some component-specific way to determine:
-    // - this is not yet updated but ready for update
-    // - this is updated
-    // - this is neither
-    // e.g., for RoT, it's: get_component_active_slot() +
-    // sp_component_caboose_get() + parse caboose
-    // e.g., for SP, it's sp_component_caboose_get() + parse caboose
-    // e.g., for RoT bootloader, it's: maybe sp_rot_boot_info() +
-    // sp_component_caboose_get() + caboose parse (with some logic around other
-    // stuff)
-    // e.g., for host OS it's: unclear?
+    // Check the live state first to see if:
+    // - this update has already been completed, or
+    // - if not, then if our required preconditions are met
     status.update(InternalStatus::Precheck);
     match updater.precheck(log, &mut mgs_clients, update).await {
         Ok(PrecheckStatus::ReadyForUpdate) => (),
         Ok(PrecheckStatus::UpdateComplete) => {
-            return Ok(ApplyUpdateResult::Completed);
+            return Ok(ApplyUpdateResult::Completed(
+                UpdateCompletedHow::FoundNoChangesNeeded,
+            ));
         }
         Err(error) => {
             return Ok(ApplyUpdateResult::PreconditionFailed(Arc::new(error)));
@@ -867,24 +884,23 @@ async fn apply_update(
         .await;
 
     match update_start {
-        Ok(()) => (),
-        // XXX-dap need to handle errors here.
-        // - non-transient error that "an update is already ongoing"
-        //  *definitely* needs to be interpreted and allowed to proceed normally
-        // - transient errors should be retried in `try_all_serially()`, I
-        //   think?  Is it safe to bail out if this happens?  I guess it
-        //   probably is if things just get stuck.
-        // - other non-transient errors probably mean bailing out
+        Ok(()) => {
+            debug!(log, "started update");
+        }
         Err(error) => {
-            error!(
-                log,
-                "failed to start update";
-                InlineErrorChain::new(&error)
-            );
-            todo!();
+            // TODO We need a better way to identify this error.
+            let chain = InlineErrorChain::new(&error);
+            let message = chain.to_string();
+            if !message.contains("update still in progress") {
+                error!(log, "failed to start update"; chain);
+                return Err(ApplyUpdateError::MgsCommunication(error));
+            }
+
+            // There's another one ongoing.  That's fine.
+            // We'll handle this below.
+            debug!(log, "watching existing update");
         }
     };
-    debug!(log, "started update");
 
     status.update(InternalStatus::UpdateWaiting);
     let our_update = match wait_for_delivery(&mut mgs_clients, sp_update)
@@ -963,7 +979,7 @@ async fn apply_update(
     //
     // There's no point where we'd want to give up here.  We know a reset was
     // sent.
-    status.update(InternalStatus::WaitDone);
+    status.update(InternalStatus::PostUpdateWait);
     let rv = match wait_for_update_done(
         log,
         updater,
@@ -975,7 +991,14 @@ async fn apply_update(
     {
         // We did not specify a timeout so it should not time out.
         Err(UpdateWaitError::Timeout(_)) => unreachable!(),
-        Ok(()) => Ok(ApplyUpdateResult::Completed),
+        Ok(()) => {
+            let how = match (our_update, try_reset) {
+                (true, _) => UpdateCompletedHow::CompletedUpdate,
+                (false, false) => UpdateCompletedHow::WaitedForConcurrentUpdate,
+                (false, true) => UpdateCompletedHow::TookOverConcurrentUpdate,
+            };
+            Ok(ApplyUpdateResult::Completed(how))
+        }
         Err(UpdateWaitError::Indeterminate(error)) => {
             Err(ApplyUpdateError::WaitError(error))
         }

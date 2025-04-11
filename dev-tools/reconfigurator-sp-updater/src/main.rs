@@ -353,6 +353,7 @@ fn cmd_status(
             humantime::format_duration(elapsed.into()),
             r.request.baseboard_id.serial_number,
         )?;
+        writeln!(&mut s, "        version: {}", r.request.artifact_version)?;
         writeln!(&mut s, "        hash: {}", r.request.artifact_hash_id.hash)?;
         writeln!(&mut s, "        result: {:?}", r.result)?;
     }

@@ -1064,6 +1064,10 @@ impl PendingMgsUpdates {
         self.by_baseboard.is_empty()
     }
 
+    pub fn contains_key(&self, key: &Arc<BaseboardId>) -> bool {
+        self.by_baseboard.contains_key(key)
+    }
+
     pub fn get(&self, baseboard_id: &BaseboardId) -> Option<&PendingMgsUpdate> {
         self.by_baseboard.get(baseboard_id)
     }
