@@ -946,8 +946,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     let mut port_config = PortConfigV2 {
                         addresses: info.addresses.iter().map(|a|
 			    UplinkAddressConfig {
-				    address: a.address.into(),
-				    vlan_id: a.vlan_id.map(|v| v.into())
+				    address: a.address,
+				    vlan_id: a.vlan_id
 			    }).collect(),
                         autoneg: info
                             .links
@@ -1574,8 +1574,8 @@ fn uplinks(
                 .addresses
                 .iter()
                 .map(|a| UplinkAddressConfig {
-                    address: a.address.into(),
-                    vlan_id: a.vlan_id.map(|v| v.into()),
+                    address: a.address,
+                    vlan_id: a.vlan_id,
                 })
                 .collect(),
             lldp,

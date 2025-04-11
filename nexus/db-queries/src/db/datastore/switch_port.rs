@@ -30,15 +30,17 @@ use diesel::{
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    BgpConfig, SqlU8, SqlU16, SqlU32, SwitchPortBgpPeerConfigAllowExport,
-    SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
+    AddressLot, BgpConfig, SqlU8, SqlU16, SqlU32,
+    SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
+    SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::params;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error,
     ImportExportPolicy, ListResultVec, LookupResult, NameOrId, ResourceType,
-    UpdateResult,
+    SwitchPortAddressView, UpdateResult,
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
@@ -106,7 +108,7 @@ pub struct SwitchPortSettingsCombinedResult {
     pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
     pub routes: Vec<SwitchPortRouteConfig>,
     pub bgp_peers: Vec<BgpPeerConfig>,
-    pub addresses: Vec<SwitchPortAddressConfig>,
+    pub addresses: Vec<SwitchPortAddressView>,
 }
 
 impl SwitchPortSettingsCombinedResult {
@@ -150,7 +152,7 @@ impl Into<external::SwitchPortSettingsView>
                 .collect(),
             routes: self.routes.into_iter().map(Into::into).collect(),
             bgp_peers: self.bgp_peers.into_iter().map(Into::into).collect(),
-            addresses: self.addresses.into_iter().map(Into::into).collect(),
+            addresses: self.addresses,
         }
     }
 }
@@ -640,12 +642,13 @@ impl DataStore {
                     self as address_config, dsl as address_config_dsl,
                 };
 
-                result.addresses =
-                    address_config_dsl::switch_port_settings_address_config
+                let addresses = address_config_dsl::switch_port_settings_address_config
                         .filter(address_config::port_settings_id.eq(id))
                         .select(SwitchPortAddressConfig::as_select())
                         .load_async::<SwitchPortAddressConfig>(&conn)
                         .await?;
+
+                result.addresses = switch_port_address_view(&conn, addresses).await?;
 
                 Ok(result)
             }
@@ -1541,13 +1544,49 @@ async fn do_switch_port_settings_create(
             ));
         }
     }
-    result.addresses = diesel::insert_into(
+    let addresses = diesel::insert_into(
         address_config_dsl::switch_port_settings_address_config,
     )
     .values(address_config)
     .returning(SwitchPortAddressConfig::as_returning())
     .get_results_async(conn)
     .await?;
+
+    result.addresses = switch_port_address_view(conn, addresses).await?;
+
+    Ok(result)
+}
+
+async fn switch_port_address_view(
+    conn: &Connection<DTraceConnection<PgConnection>>,
+    addresses: Vec<SwitchPortAddressConfig>,
+) -> Result<Vec<SwitchPortAddressView>, diesel::result::Error> {
+    use nexus_db_schema::schema::{address_lot, address_lot_block};
+
+    let mut result = vec![];
+
+    for address in addresses {
+        let lot = address_lot::table
+            .inner_join(
+                address_lot_block::table
+                    .on(address_lot_block::address_lot_id.eq(address_lot::id)),
+            )
+            .filter(address_lot_block::id.eq(address.address_lot_block_id))
+            .select(AddressLot::as_select())
+            .limit(1)
+            .first_async::<AddressLot>(conn)
+            .await?;
+
+        result.push(SwitchPortAddressView {
+            port_settings_id: address.port_settings_id,
+            address_lot_id: lot.id(),
+            address_lot_name: lot.name().clone(),
+            address_lot_block_id: address.address_lot_block_id,
+            address: address.address.into(),
+            vlan_id: address.vlan_id.map(Into::into),
+            interface_name: address.interface_name,
+        })
+    }
 
     Ok(result)
 }

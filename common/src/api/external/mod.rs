@@ -2504,7 +2504,7 @@ pub struct SwitchPortSettingsView {
     pub bgp_peers: Vec<BgpPeer>,
 
     /// Layer 3 IP address settings.
-    pub addresses: Vec<SwitchPortAddressConfig>,
+    pub addresses: Vec<SwitchPortAddressView>,
 }
 
 /// This structure maps a port settings object to a port settings groups. Port
@@ -2961,6 +2961,33 @@ pub struct BgpAnnouncement {
 pub struct SwitchPortAddressConfig {
     /// The port settings object this address configuration belongs to.
     pub port_settings_id: Uuid,
+
+    /// The id of the address lot block this address is drawn from.
+    pub address_lot_block_id: Uuid,
+
+    /// The IP address and prefix.
+    pub address: oxnet::IpNet,
+
+    /// An optional VLAN ID
+    pub vlan_id: Option<u16>,
+
+    /// The interface name this address belongs to.
+    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
+    // Use `Name` instead of `String` for `interface_name` type
+    pub interface_name: String,
+}
+
+/// An IP address configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortAddressView {
+    /// The port settings object this address configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The id of the address lot this address is drawn from.
+    pub address_lot_id: Uuid,
+
+    /// The name of the address lot this address is drawn from.
+    pub address_lot_name: Name,
 
     /// The id of the address lot block this address is drawn from.
     pub address_lot_block_id: Uuid,

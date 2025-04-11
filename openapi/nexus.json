@@ -22565,7 +22565,7 @@
           "switch_location"
         ]
       },
-      "SwitchPortAddressConfig": {
+      "SwitchPortAddressView": {
         "description": "An IP address configuration for a port settings object.",
         "type": "object",
         "properties": {
@@ -22581,6 +22581,19 @@
             "description": "The id of the address lot block this address is drawn from.",
             "type": "string",
             "format": "uuid"
+          },
+          "address_lot_id": {
+            "description": "The id of the address lot this address is drawn from.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "address_lot_name": {
+            "description": "The name of the address lot this address is drawn from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "interface_name": {
             "description": "The interface name this address belongs to.",
@@ -22602,6 +22615,8 @@
         "required": [
           "address",
           "address_lot_block_id",
+          "address_lot_id",
+          "address_lot_name",
           "interface_name",
           "port_settings_id"
         ]
@@ -23004,7 +23019,7 @@
             "description": "Layer 3 IP address settings.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SwitchPortAddressConfig"
+              "$ref": "#/components/schemas/SwitchPortAddressView"
             }
           },
           "bgp_peers": {
