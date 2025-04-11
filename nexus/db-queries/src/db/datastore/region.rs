@@ -20,11 +20,11 @@ use crate::db::model::SqlU16;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use crate::db::queries::region_allocation::RegionParameters;
+use crate::db::queries::region_allocation;
+use crate::db::queries::regions_hard_delete;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use diesel::dsl::sql_query;
 use diesel::prelude::*;
 use nexus_config::RegionAllocationStrategy;
 use nexus_types::external_api::params;
@@ -258,10 +258,10 @@ impl DataStore {
                 } => (block_size, blocks_per_extent, extent_count),
             };
 
-        let query = crate::db::queries::region_allocation::allocation_query(
+        let query = region_allocation::allocation_query(
             volume_id,
             maybe_snapshot_id,
-            RegionParameters {
+            region_allocation::RegionParameters {
                 block_size,
                 blocks_per_extent,
                 extent_count,
@@ -273,10 +273,10 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(&opctx).await?;
 
-        let dataset_and_regions: Vec<(CrucibleDataset, Region)> =
-            query.get_results_async(&*conn).await.map_err(|e| {
-                crate::db::queries::region_allocation::from_diesel(e)
-            })?;
+        let dataset_and_regions: Vec<(CrucibleDataset, Region)> = query
+            .get_results_async(&*conn)
+            .await
+            .map_err(|e| region_allocation::from_diesel(e))?;
 
         info!(
             self.log,
@@ -302,47 +302,23 @@ impl DataStore {
         }
 
         let conn = self.pool_connection_unauthorized().await?;
+
         self.transaction_retry_wrapper("regions_hard_delete")
             .transaction(&conn, |conn| {
                 let region_ids = region_ids.clone();
+
                 async move {
                     use nexus_db_schema::schema::region::dsl;
 
-                    // Remove the regions
-                    diesel::delete(dsl::region)
+                    let dataset_ids: Vec<Uuid> = diesel::delete(dsl::region)
                         .filter(dsl::id.eq_any(region_ids))
-                        .execute_async(&conn)
+                        .returning(dsl::dataset_id)
+                        .get_results_async(&conn)
                         .await?;
 
-                    // Update datasets to which the regions belonged.
-                    sql_query(
-                        r#"
-WITH size_used_with_reservation AS (
-  SELECT
-    crucible_dataset.id AS crucible_dataset_id,
-    SUM(
-      CASE
-        WHEN block_size IS NULL THEN 0
-        ELSE
-          CASE
-            WHEN reservation_percent = '25' THEN
-              (block_size * blocks_per_extent * extent_count) / 4 +
-              (block_size * blocks_per_extent * extent_count)
-          END
-      END
-    ) AS reserved_size
-  FROM crucible_dataset
-  LEFT JOIN region ON crucible_dataset.id = region.dataset_id
-  WHERE crucible_dataset.time_deleted IS NULL
-  GROUP BY crucible_dataset.id
-)
-UPDATE crucible_dataset
-SET size_used = size_used_with_reservation.reserved_size
-FROM size_used_with_reservation
-WHERE crucible_dataset.id = size_used_with_reservation.crucible_dataset_id"#,
-                    )
-                    .execute_async(&conn)
-                    .await?;
+                    let query =
+                        regions_hard_delete::dataset_update_query(dataset_ids);
+                    query.execute_async(&conn).await?;
 
                     // Whenever a region is hard-deleted, validate invariants
                     // for all volumes
