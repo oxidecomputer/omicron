@@ -12,6 +12,8 @@
 //! actually serialize them to and from SQL take care of the necessary
 //! conversions.
 
+use super::impl_enum_type;
+
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
@@ -21,12 +23,10 @@ use nexus_db_schema::schema::{saga, saga_node_event};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
+use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
-use std::io::Write;
 use std::sync::Arc;
 use uuid::Uuid;
-
-use crate::impl_enum_wrapper;
 
 /// Unique identifier for an SEC (saga execution coordinator) instance
 ///
@@ -148,19 +148,46 @@ where
     }
 }
 
-impl_enum_wrapper!(
-    SagaCachedStateEnum:
+impl_enum_type!(
+    SagaStateEnum:
 
-    #[derive(AsExpression, FromSqlRow, Clone, Copy, Debug, PartialEq)]
-    pub struct SagaCachedState(pub steno::SagaCachedState);
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+    )]
+    pub enum SagaState;
 
-    // Enum values
     Running => b"running"
     Unwinding => b"unwinding"
     Done => b"done"
+    Abandoned => b"abandoned"
 );
 
-NewtypeFrom! { () pub struct SagaCachedState(steno::SagaCachedState); }
+impl SagaState {
+    /// A saga must be in this set of states to be a candidate for saga
+    /// recovery.
+    ///
+    /// Sagas that are Done don't need to be run anymore. Sagas that are
+    /// Abandoned have been explicitly opted out of being recovered.
+    pub const RECOVERY_CANDIDATE_STATES: &'static [Self] =
+        &[Self::Running, Self::Unwinding];
+}
+
+impl From<steno::SagaCachedState> for SagaState {
+    fn from(value: steno::SagaCachedState) -> Self {
+        match value {
+            steno::SagaCachedState::Running => Self::Running,
+            steno::SagaCachedState::Unwinding => Self::Unwinding,
+            steno::SagaCachedState::Done => Self::Done,
+        }
+    }
+}
 
 /// Represents a row in the "Saga" table
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, PartialEq)]
@@ -171,7 +198,7 @@ pub struct Saga {
     pub time_created: chrono::DateTime<chrono::Utc>,
     pub name: String,
     pub saga_dag: serde_json::Value,
-    pub saga_state: SagaCachedState,
+    pub saga_state: SagaState,
     pub current_sec: Option<SecId>,
     pub adopt_generation: super::Generation,
     pub adopt_time: chrono::DateTime<chrono::Utc>,
