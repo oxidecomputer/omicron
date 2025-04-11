@@ -26,7 +26,7 @@ futures.workspace = true
 hex.workspace = true
 http.workspace = true
 ipnetwork.workspace = true
-lldp = { git = "https://github.com/oxidecomputer/lldp", package = "protocol" }
+lldp_protocol.workspace = true
 macaddr.workspace = true
 mg-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
