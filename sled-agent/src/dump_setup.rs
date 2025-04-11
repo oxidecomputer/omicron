@@ -83,6 +83,7 @@
 //! number is incremented by 1 until no conflict remains.
 
 use async_trait::async_trait;
+use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use derive_more::{AsRef, From};
 use illumos_utils::ExecutionError;
@@ -496,6 +497,31 @@ impl ZoneInvoker for RealZone {
             .filter(|z| z.global() || z.name().starts_with(ZONE_PREFIX))
             .collect::<Vec<_>>())
     }
+}
+
+fn safe_to_delete(path: &Utf8Path, meta: &std::fs::Metadata) -> bool {
+    if !meta.is_file() {
+        // Ignore non-files (e.g. directories, symlinks)
+        return false;
+    }
+
+    // Confirm that the file name is "safe to delete".
+    //
+    // This list may expand as we continue using the Debug dataset.
+    let Some(file_name) = path.file_name() else {
+        return false;
+    };
+    // Ignore support bundles
+    if file_name == crate::support_bundle::storage::BUNDLE_FILE_NAME {
+        return false;
+    }
+    // Ignore support bundle "temp files" as they're being created.
+    if file_name
+        .ends_with(crate::support_bundle::storage::BUNDLE_TMP_FILE_NAME_SUFFIX)
+    {
+        return false;
+    }
+    return true;
 }
 
 impl DumpSetupWorker {
@@ -1092,7 +1118,7 @@ impl DumpSetupWorker {
                 info!(
                     self.log,
                     "Removing file on debug dataset to make space";
-                    "path" => path.to_string_lossy().to_string()
+                    "path" => %path
                 );
                 // if we are unable to remove a file, we cannot guarantee
                 // that we will reach our target size threshold, and suspect
@@ -1102,7 +1128,7 @@ impl DumpSetupWorker {
                 if let Err(err) = tokio::fs::remove_file(&path).await {
                     error!(
                         self.log,
-                        "Couldn't delete {path:?} from debug dataset, skipping {dir:?}. {err:?}"
+                        "Couldn't delete {path} from debug dataset, skipping {dir:?}. {err:?}"
                     );
                     continue 'next_debug_dir;
                 }
@@ -1134,6 +1160,7 @@ impl DumpSetupWorker {
         for path in
             glob::glob(debug_dir.as_ref().join("**/*").as_str())?.flatten()
         {
+            let path = Utf8PathBuf::try_from(path)?;
             let meta = match tokio::fs::metadata(&path).await {
                 Ok(meta) => meta,
                 // "Not found" errors could be caused by TOCTTOU -- observing a
@@ -1142,32 +1169,27 @@ impl DumpSetupWorker {
                 Err(err)
                     if matches!(err.kind(), std::io::ErrorKind::NotFound) =>
                 {
+                    info!(
+                        self.log,
+                        "File was removed before metadata could be read - ignoring";
+                        "path" => %path
+                    );
                     continue;
                 }
                 // Other errors get propagated.
-                Err(err) => return Err(err.into()),
+                Err(err) => {
+                    warn!(
+                        self.log,
+                        "Debug auto-cleaner could not read metadata from path";
+                        "err" => %err,
+                        "path" => %path
+                    );
+                    return Err(err.into());
+                }
             };
 
-            if !meta.is_file() {
-                // Ignore non-files (e.g. directories, symlinks)
-                continue;
-            }
-
-            // Confirm that the file name is "safe to delete".
-            //
-            // This list may expand as we continue using the Debug dataset.
-            let Some(file_name) = path.file_name().and_then(|n| n.to_str())
-            else {
-                continue;
-            };
-            // Ignore support bundles
-            if file_name == crate::support_bundle::storage::BUNDLE_FILE_NAME {
-                continue;
-            }
-            // Ignore support bundle "temp files" as they're being created.
-            if file_name.ends_with(
-                crate::support_bundle::storage::BUNDLE_TMP_FILE_NAME_SUFFIX,
-            ) {
+            if !safe_to_delete(&path, &meta) {
+                trace!(self.log, "Debug auto-cleaner ignoring file: {path}");
                 continue;
             }
 
@@ -1221,13 +1243,15 @@ pub enum ArchiveLogsError {
 enum CleanupError {
     #[error("No debug datasets were successfully evaluated for cleanup")]
     NoDatasetsToClean,
-    #[error("Failed to query ZFS properties: {0}")]
+    #[error("Failed to parse path as UTF-8")]
+    ParsePath(#[from] camino::FromPathBufError),
+    #[error("Failed to query ZFS properties")]
     ZfsError(#[from] ZfsGetError),
-    #[error("I/O error: {0}")]
+    #[error("I/O error during cleanup")]
     IoError(#[from] tokio::io::Error),
-    #[error("Glob pattern invalid: {0}")]
+    #[error("Glob pattern invalid")]
     Glob(#[from] glob::PatternError),
-    #[error("A file's observed modified time was before the Unix epoch: {0}")]
+    #[error("A file's observed modified time was before the Unix epoch")]
     TimelineWentSideways(#[from] SystemTimeError),
 }
 
@@ -1235,7 +1259,7 @@ enum CleanupError {
 struct CleanupDirInfo {
     average_time: Duration,
     num_to_delete: u32,
-    file_list: Vec<(Duration, u64, PathBuf)>,
+    file_list: Vec<(Duration, u64, Utf8PathBuf)>,
 }
 
 #[cfg(test)]
