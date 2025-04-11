@@ -270,6 +270,7 @@ pub trait ReconfiguratorSpComponentUpdater {
 }
 
 /// Describes the live state of the component before the update begins
+#[derive(Debug)]
 pub enum PrecheckStatus {
     UpdateComplete,
     ReadyForUpdate,

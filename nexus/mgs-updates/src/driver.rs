@@ -116,7 +116,9 @@ impl MgsUpdateDriver {
         info!(&self.log, "starting MgsUpdateDriver");
         loop {
             tokio::select! {
-                // XXX-dap copy comment from steno sec.rs L831 or so
+                // Avoid waiting on an empty FuturesUnordered.  Doing so would
+                // cause it to immediately return None, terminating the Stream
+                // altogether.
                 maybe_work_done = self.futures.next(),
                     if !self.futures.is_empty() => {
                     match maybe_work_done {
@@ -857,6 +859,8 @@ async fn wait_for_update_done(
     // error or the caller wants to give up due to a timeout.
 
     loop {
+        let precheck = updater.precheck(log, mgs_clients, update).await;
+        debug!(log, "precheck result"; "precheck" => ?precheck);
         match updater.precheck(log, mgs_clients, update).await {
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
