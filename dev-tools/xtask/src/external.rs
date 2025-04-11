@@ -10,8 +10,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-
-use crate::common::cargo_command;
+use dev_tools_common::{CargoLocation, cargo_command};
 
 /// Argument parser for external xtasks.
 ///
@@ -74,7 +73,7 @@ impl External {
 }
 
 fn new_command() -> Command {
-    let mut command = cargo_command();
+    let mut command = cargo_command(CargoLocation::FromEnv);
     command.arg("run");
     command
 }

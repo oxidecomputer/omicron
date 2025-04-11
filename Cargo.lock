@@ -1890,9 +1890,9 @@ checksum = "f64009896348fc5af4222e9cf7d7d82a95a256c634ebcf61c53e4ea461422242"
 
 [[package]]
 name = "crossbeam-channel"
-version = "0.5.13"
+version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33480d6946193aa8033910124896ca395333cae7e2d1113d1fef6c3272217df2"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -2402,6 +2402,10 @@ checksum = "ffdd80ce8ce993de27e9f063a444a4d53ce8e8db4c1f00cc03af5ad5a9867a1e"
 dependencies = [
  "cipher",
 ]
+
+[[package]]
+name = "dev-tools-common"
+version = "0.1.0"
 
 [[package]]
 name = "dhcproto"
@@ -7418,6 +7422,7 @@ dependencies = [
  "camino",
  "cargo_metadata 0.19.2",
  "clap",
+ "dev-tools-common",
  "expectorate",
  "futures",
  "hex",
@@ -7801,7 +7806,6 @@ dependencies = [
  "getrandom 0.3.1",
  "group",
  "hashbrown 0.15.1",
- "heck 0.4.1",
  "hickory-proto",
  "hmac",
  "hyper",
@@ -7813,7 +7817,6 @@ dependencies = [
  "inout",
  "ipnetwork",
  "itertools 0.10.5",
- "itertools 0.12.1",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -14374,6 +14377,7 @@ dependencies = [
  "cargo_metadata 0.19.2",
  "cargo_toml",
  "clap",
+ "dev-tools-common",
  "fs-err",
  "macaddr",
  "serde",
