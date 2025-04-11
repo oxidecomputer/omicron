@@ -216,7 +216,7 @@ task_gen = 13
 uptime = 1237
 class = "gov.nasa.apollo.fault"
 message = "houston, we have a problem"
-crew = ["Lovell", "Swigert", "Hayes"]
+crew = ["Lovell", "Swigert", "Haise"]
 
 [[simulated_sps.gimlet.ereport_config.ereports]]
 task_name = "drv_thingy_server"
