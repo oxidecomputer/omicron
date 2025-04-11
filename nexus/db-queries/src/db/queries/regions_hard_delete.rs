@@ -58,3 +58,49 @@ pub fn dataset_update_query(
 
     builder.query::<()>()
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::db::explain::ExplainableAsync;
+    use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::raw_query_builder::expectorate_query_contents;
+    use omicron_test_utils::dev;
+    use uuid::Uuid;
+
+    // This test is a bit of a "change detector", but it's here to help with
+    // debugging too. If you change this query, it can be useful to see exactly
+    // how the output SQL has been altered.
+    #[tokio::test]
+    async fn expectorate_query() {
+        let query =
+            dataset_update_query(vec![Uuid::nil(), Uuid::nil(), Uuid::nil()]);
+
+        expectorate_query_contents(
+            &query,
+            "tests/output/dataset_update_query.sql",
+        )
+        .await;
+    }
+
+    // Explain the possible forms of the SQL query to ensure that it
+    // creates a valid SQL string.
+    #[tokio::test]
+    async fn explainable() {
+        let logctx = dev::test_setup_log("explainable");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query =
+            dataset_update_query(vec![Uuid::nil(), Uuid::nil(), Uuid::nil()]);
+
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+}
