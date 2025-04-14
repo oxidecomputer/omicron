@@ -99,7 +99,6 @@ async fn wait_for_delivery(
     let component = update.component();
 
     loop {
-        // XXX-dap don't want to bail out if all MgsClients fail?
         let status = mgs_clients
             .try_all_serially(log, |client| async move {
                 let update_status = client
@@ -247,10 +246,12 @@ pub(crate) async fn apply_update(
     update: &PendingMgsUpdate,
     status: UpdateAttemptStatusUpdater,
 ) -> Result<ApplyUpdateResult, ApplyUpdateError> {
-    // Set up clients to talk to MGS.
-    // XXX-dap rather than this, MgsClients probably ought to have a mode where
-    // it accepts a qorb pool and continually try all clients forever on
-    // transient issues.
+    // Set up an instance of `MgsClients` to talk to MGS for the duration of
+    // this attempt.  For each call to `try_serially()`, `MgsClients` will try
+    // the request against each MGS client that it has.  That makes it possible
+    // to survive transient failure of MGS as long as one is working.  If all
+    // are offline, these operations will fail.  We rely on the higher-level
+    // operation retry to deal with that.
     status.update(UpdateAttemptStatus::FetchingArtifact);
     let log = &sp_update.log;
     let mut mgs_clients = {
