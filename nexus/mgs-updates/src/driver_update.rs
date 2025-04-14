@@ -61,7 +61,7 @@ impl SpComponentUpdate {
 }
 
 #[derive(Clone, Debug)]
-pub enum ApplyUpdateResult {
+pub enum ApplyUpdateStatus {
     /// the update was completed successfully
     Completed(UpdateCompletedHow),
     /// the update could not be completed because it assumed a precondition that
@@ -133,7 +133,7 @@ pub(crate) async fn apply_update(
     mgs_rx: watch::Receiver<AllBackends>,
     update: &PendingMgsUpdate,
     status: UpdateAttemptStatusUpdater,
-) -> Result<ApplyUpdateResult, ApplyUpdateError> {
+) -> Result<ApplyUpdateStatus, ApplyUpdateError> {
     // Set up an instance of `MgsClients` to talk to MGS for the duration of
     // this attempt.  For each call to `try_serially()`, `MgsClients` will try
     // the request against each MGS client that it has.  That makes it possible
@@ -176,12 +176,12 @@ pub(crate) async fn apply_update(
     match update_helper.precheck(log, &mut mgs_clients, update).await {
         Ok(PrecheckStatus::ReadyForUpdate) => (),
         Ok(PrecheckStatus::UpdateComplete) => {
-            return Ok(ApplyUpdateResult::Completed(
+            return Ok(ApplyUpdateStatus::Completed(
                 UpdateCompletedHow::FoundNoChangesNeeded,
             ));
         }
         Err(error) => {
-            return Ok(ApplyUpdateResult::PreconditionFailed(Arc::new(error)));
+            return Ok(ApplyUpdateStatus::PreconditionFailed(Arc::new(error)));
         }
     };
 
@@ -240,15 +240,15 @@ pub(crate) async fn apply_update(
     let our_update = match wait_for_delivery(&mut mgs_clients, sp_update)
         .await?
     {
-        DeliveryWaitStatus::NotRunning => return Ok(ApplyUpdateResult::Lost),
+        DeliveryWaitStatus::NotRunning => return Ok(ApplyUpdateStatus::Lost),
         DeliveryWaitStatus::Aborted(id) => {
-            return Ok(ApplyUpdateResult::Aborted(id));
+            return Ok(ApplyUpdateStatus::Aborted(id));
         }
         DeliveryWaitStatus::StuckUpdating(id, timeout) => {
-            return Ok(ApplyUpdateResult::StuckUpdating(id, timeout));
+            return Ok(ApplyUpdateStatus::StuckUpdating(id, timeout));
         }
         DeliveryWaitStatus::Failed(id, message) => {
-            return Ok(ApplyUpdateResult::Failed(id, message));
+            return Ok(ApplyUpdateStatus::Failed(id, message));
         }
 
         DeliveryWaitStatus::Completed(id) => id == my_update_id,
@@ -301,7 +301,7 @@ pub(crate) async fn apply_update(
             if !matches!(error, gateway_client::Error::CommunicationError(_)) {
                 let error = InlineErrorChain::new(&error);
                 error!(log, "post_update failed"; &error);
-                return Ok(ApplyUpdateResult::ResetFailed(error.to_string()));
+                return Ok(ApplyUpdateStatus::ResetFailed(error.to_string()));
             }
 
             tokio::time::sleep(RESET_DELAY_INTERVAL).await;
@@ -326,7 +326,7 @@ pub(crate) async fn apply_update(
                 (false, false) => UpdateCompletedHow::WaitedForConcurrentUpdate,
                 (false, true) => UpdateCompletedHow::TookOverConcurrentUpdate,
             };
-            Ok(ApplyUpdateResult::Completed(how))
+            Ok(ApplyUpdateStatus::Completed(how))
         }
         Err(UpdateWaitError::Timeout(error)) => {
             Err(ApplyUpdateError::ResetTimeoutError(error))

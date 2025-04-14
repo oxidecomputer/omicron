@@ -6,7 +6,7 @@
 
 use crate::ArtifactCache;
 use crate::driver_update::ApplyUpdateError;
-use crate::driver_update::ApplyUpdateResult;
+use crate::driver_update::ApplyUpdateStatus;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
 use crate::sp_updater::ReconfiguratorSpUpdater;
@@ -504,7 +504,7 @@ struct InProgressUpdate {
 /// internal result of a completed update attempt
 struct UpdateAttemptResult {
     baseboard_id: Arc<BaseboardId>,
-    result: Result<ApplyUpdateResult, ApplyUpdateError>,
+    result: Result<ApplyUpdateStatus, ApplyUpdateError>,
 }
 
 /// internal bookkeeping for an update that's awaiting retry
@@ -552,7 +552,7 @@ pub struct CompletedAttempt {
     pub time_done: chrono::DateTime<chrono::Utc>,
     pub elapsed: Duration,
     pub request: PendingMgsUpdate,
-    pub result: Result<ApplyUpdateResult, String>,
+    pub result: Result<ApplyUpdateStatus, String>,
     pub nattempts_done: u32,
 }
 
