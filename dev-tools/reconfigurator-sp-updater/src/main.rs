@@ -354,9 +354,14 @@ fn cmd_status(
             humantime::format_duration(elapsed.into()),
             r.request.baseboard_id.serial_number,
         )?;
-        writeln!(&mut s, "        version: {}", r.request.artifact_version)?;
-        writeln!(&mut s, "        hash: {}", r.request.artifact_hash_id.hash)?;
-        writeln!(&mut s, "        result: {:?}", r.result)?;
+        writeln!(&mut s, "        attempt#: {}", r.nattempts_done)?;
+        writeln!(&mut s, "        version:  {}", r.request.artifact_version)?;
+        writeln!(
+            &mut s,
+            "        hash:     {}",
+            r.request.artifact_hash_id.hash
+        )?;
+        writeln!(&mut s, "        result:   {:?}", r.result)?;
     }
 
     writeln!(&mut s, "\ncurrently in progress:")?;
@@ -368,10 +373,11 @@ fn cmd_status(
         );
         writeln!(
             &mut s,
-            "    {}: serial {}: {:?} (running {})",
+            "    {}: serial {}: {:?} (attempt {}, running {})",
             status.time_started.to_rfc3339_opts(SecondsFormat::Millis, true),
             baseboard_id.serial_number,
             status.status,
+            status.nattempts_done + 1,
             humantime::format_duration(elapsed),
         )?;
     }
@@ -380,8 +386,10 @@ fn cmd_status(
     for (baseboard_id, wait_info) in &status.waiting {
         writeln!(
             &mut s,
-            "    serial {}: will try again at {}",
-            baseboard_id.serial_number, wait_info.next_attempt_time,
+            "    serial {}: will try again at {} (attempt {})",
+            baseboard_id.serial_number,
+            wait_info.next_attempt_time,
+            wait_info.nattempts_done + 1,
         )?;
     }
 

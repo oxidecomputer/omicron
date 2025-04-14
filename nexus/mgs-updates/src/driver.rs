@@ -218,7 +218,9 @@ impl MgsUpdateDriver {
                 .filter_map(|(baseboard_id, waiting)| {
                     match new_config.get(baseboard_id) {
                         None => true,
-                        Some(new_request) => *new_request != waiting.request,
+                        Some(new_request) => {
+                            *new_request != waiting.internal_request.request
+                        }
                     }
                     .then(|| baseboard_id.clone())
                 })
@@ -231,14 +233,18 @@ impl MgsUpdateDriver {
             // - we're not waiting to retry and not already running an attempt
             let to_dispatch: Vec<_> = new_config
                 .iter()
-                .filter(|(baseboard_id, new_request)| {
-                    if let Some(waiting) = self.waiting.get(*baseboard_id) {
-                        **new_request != waiting.request
-                    } else {
-                        !self.in_progress.contains_key(*baseboard_id)
-                    }
+                .filter_map(|(baseboard_id, new_request)| {
+                    let do_dispatch =
+                        if let Some(waiting) = self.waiting.get(baseboard_id) {
+                            *new_request != waiting.internal_request.request
+                        } else {
+                            !self.in_progress.contains_key(baseboard_id)
+                        };
+                    do_dispatch.then(|| InternalRequest {
+                        request: (*new_request).clone(),
+                        nattempts_done: 0,
+                    })
                 })
-                .map(|(a, b)| (a.clone(), b.clone()))
                 .collect();
 
             (to_stop_waiting, to_dispatch)
@@ -261,26 +267,22 @@ impl MgsUpdateDriver {
         });
 
         // Now dispatch new update attempts.
-        for (baseboard_id, request) in to_dispatch {
-            self.start_attempt(request);
+        for internal_request in to_dispatch {
+            self.start_attempt(internal_request);
         }
     }
 
-    fn start_attempt(&mut self, request: PendingMgsUpdate) {
-        assert!(!self.in_progress.contains_key(&baseboard_id));
+    fn start_attempt(&mut self, internal_request: InternalRequest) {
+        let request = &internal_request.request;
+        let baseboard_id = &request.baseboard_id;
+        assert!(!self.in_progress.contains_key(baseboard_id));
 
         let update_id = Uuid::new_v4();
-        let log = self
-            .log
-            .new(o!(request.clone(), "update_id" => update_id.to_string()));
+        let log = self.log.new(o!(
+            request.clone(),
+            "update_id" => update_id.to_string()
+        ));
         info!(&log, "begin update attempt for baseboard");
-
-        let in_progress = InProgressUpdate {
-            log: log.clone(),
-            time_started: chrono::Utc::now(),
-            instant_started: Instant::now(),
-            request: request.clone(),
-        };
 
         let (sp_update, updater) = match &request.details {
             nexus_types::deployment::PendingMgsUpdateDetails::Sp { .. } => {
@@ -301,13 +303,14 @@ impl MgsUpdateDriver {
             }
         };
 
-        let baseboard_id = request.baseboard_id.clone();
+        let baseboard_id = baseboard_id.clone();
         let status_updater = UpdateAttemptStatusUpdater {
             tx: self.status_tx.clone(),
             baseboard_id: baseboard_id.clone(),
         };
         let artifacts = self.artifacts.clone();
         let mgs_rx = self.mgs_rx.clone();
+        let request = internal_request.request.clone();
         let future = async move {
             let result = apply_update(
                 artifacts,
@@ -322,6 +325,14 @@ impl MgsUpdateDriver {
         }
         .boxed();
 
+        let nattempts_done = internal_request.nattempts_done;
+        let in_progress = InProgressUpdate {
+            log: log.clone(),
+            time_started: chrono::Utc::now(),
+            instant_started: Instant::now(),
+            internal_request,
+        };
+
         // Keep track of the work.
         self.futures.push(future);
 
@@ -333,6 +344,7 @@ impl MgsUpdateDriver {
                     time_started: in_progress.time_started,
                     instant_started: in_progress.instant_started,
                     status: UpdateAttemptStatus::NotStarted,
+                    nattempts_done,
                 },
             );
         });
@@ -353,16 +365,21 @@ impl MgsUpdateDriver {
             .in_progress
             .remove(&result.baseboard_id)
             .expect("in-progress record for attempt that just completed");
-        let request = &in_progress.request;
+        let nattempts_done = in_progress.internal_request.nattempts_done + 1;
         let completed = CompletedAttempt {
             time_started: in_progress.time_started,
             time_done: chrono::Utc::now(),
             elapsed: in_progress.instant_started.elapsed(),
-            request: request.clone(),
+            request: in_progress.internal_request.request.clone(),
             result: match &result.result {
                 Ok(success) => Ok(success.clone()),
                 Err(error) => Err(InlineErrorChain::new(error).to_string()),
             },
+            nattempts_done,
+        };
+        let internal_request = InternalRequest {
+            request: in_progress.internal_request.request,
+            nattempts_done,
         };
 
         // Log the result.
@@ -394,7 +411,7 @@ impl MgsUpdateDriver {
         let delay_key = self.delayq.insert(baseboard_id.clone(), retry_timeout);
         self.waiting.insert(
             baseboard_id.clone(),
-            WaitingAttempt { delay_key, request: request.clone() },
+            WaitingAttempt { delay_key, internal_request },
         );
 
         // Update the overall status to reflect all these changes.
@@ -406,7 +423,10 @@ impl MgsUpdateDriver {
             // Add this item to the list of requests waiting to be retried.
             driver_status.waiting.insert(
                 baseboard_id.clone(),
-                WaitingStatus { next_attempt_time: status_time_next },
+                WaitingStatus {
+                    next_attempt_time: status_time_next,
+                    nattempts_done,
+                },
             );
 
             // Report this recently-completed attempt.
@@ -423,7 +443,10 @@ impl MgsUpdateDriver {
     /// Invoked when the timer fires to retry a particular request.
     fn on_retry_timer_expired(&mut self, baseboard_id: Arc<BaseboardId>) {
         // Remove this request from the set of requests waiting to be retried.
-        assert!(self.waiting.remove(&baseboard_id).is_some());
+        let waiting = self
+            .waiting
+            .remove(&baseboard_id)
+            .expect("waiting request for expired retry timer");
         // Update the external status to reflect that.
         self.status_tx.send_modify(|driver_status| {
             driver_status.waiting.remove(&baseboard_id);
@@ -457,8 +480,17 @@ impl MgsUpdateDriver {
             &self.log,
             "dispatching new attempt (retry timer expired)"; &*baseboard_id
         );
-        self.start_attempt(my_request);
+        self.start_attempt(InternalRequest {
+            request: my_request,
+            nattempts_done: waiting.internal_request.nattempts_done,
+        });
     }
+}
+
+/// information tracked for each request
+struct InternalRequest {
+    request: PendingMgsUpdate,
+    nattempts_done: u32,
 }
 
 /// internal bookkeeping for each in-progress update
@@ -466,7 +498,7 @@ struct InProgressUpdate {
     log: slog::Logger,
     time_started: chrono::DateTime<chrono::Utc>,
     instant_started: Instant,
-    request: PendingMgsUpdate,
+    internal_request: InternalRequest,
 }
 
 /// internal result of a completed update attempt
@@ -478,7 +510,7 @@ struct UpdateAttemptResult {
 /// internal bookkeeping for an update that's awaiting retry
 struct WaitingAttempt {
     delay_key: delay_queue::Key,
-    request: PendingMgsUpdate,
+    internal_request: InternalRequest,
 }
 
 /// Interface used by update attempts to update just their part of the overall
@@ -514,7 +546,6 @@ pub struct DriverStatus {
 }
 
 /// externally-exposed status for a completed attempt
-// XXX-dap to add: number of previous or total attempts
 #[derive(Debug)]
 pub struct CompletedAttempt {
     pub time_started: chrono::DateTime<chrono::Utc>,
@@ -522,15 +553,16 @@ pub struct CompletedAttempt {
     pub elapsed: Duration,
     pub request: PendingMgsUpdate,
     pub result: Result<ApplyUpdateResult, String>,
+    pub nattempts_done: u32,
 }
 
 /// externally-exposed status for each in-progress update
-// XXX-dap to add: number of previous attempts
 #[derive(Debug)]
 pub struct InProgressUpdateStatus {
     pub time_started: chrono::DateTime<chrono::Utc>,
     pub instant_started: std::time::Instant,
     pub status: UpdateAttemptStatus,
+    pub nattempts_done: u32,
 }
 
 /// status of a single update attempt
@@ -550,4 +582,5 @@ pub enum UpdateAttemptStatus {
 #[derive(Debug)]
 pub struct WaitingStatus {
     pub next_attempt_time: chrono::DateTime<chrono::Utc>,
+    pub nattempts_done: u32,
 }
