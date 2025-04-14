@@ -6,8 +6,8 @@
 
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
-use crate::common_sp_update::ReconfiguratorSpComponentUpdater;
 use crate::common_sp_update::STATUS_POLL_INTERVAL;
+use crate::common_sp_update::SpComponentUpdateHelper;
 use crate::driver::UpdateAttemptStatus;
 use crate::driver::UpdateAttemptStatusUpdater;
 use crate::mgs_clients::GatewayClientError;
@@ -239,7 +239,7 @@ pub enum ApplyUpdateError {
 pub(crate) async fn apply_update(
     artifacts: Arc<ArtifactCache>,
     sp_update: &SpComponentUpdate,
-    updater: &(dyn ReconfiguratorSpComponentUpdater + Send + Sync),
+    update_helper: &(dyn SpComponentUpdateHelper + Send + Sync),
     mgs_rx: watch::Receiver<AllBackends>,
     update: &PendingMgsUpdate,
     status: UpdateAttemptStatusUpdater,
@@ -283,7 +283,7 @@ pub(crate) async fn apply_update(
     // - this update has already been completed, or
     // - if not, then if our required preconditions are met
     status.update(UpdateAttemptStatus::Precheck);
-    match updater.precheck(log, &mut mgs_clients, update).await {
+    match update_helper.precheck(log, &mut mgs_clients, update).await {
         Ok(PrecheckStatus::ReadyForUpdate) => (),
         Ok(PrecheckStatus::UpdateComplete) => {
             return Ok(ApplyUpdateResult::Completed(
@@ -379,7 +379,7 @@ pub(crate) async fn apply_update(
     } else {
         match wait_for_update_done(
             log,
-            updater,
+            update_helper,
             &mut mgs_clients,
             update,
             PROGRESS_TIMEOUT,
@@ -406,7 +406,7 @@ pub(crate) async fn apply_update(
         // update but not managed to reset the device, there's no point where
         // we'd want to stop trying to do so.
         while let Err(error) =
-            updater.post_update(log, &mut mgs_clients, update).await
+            update_helper.post_update(log, &mut mgs_clients, update).await
         {
             if !matches!(error, gateway_client::Error::CommunicationError(_)) {
                 let error = InlineErrorChain::new(&error);
@@ -423,7 +423,7 @@ pub(crate) async fn apply_update(
     status.update(UpdateAttemptStatus::PostUpdateWait);
     let rv = match wait_for_update_done(
         log,
-        updater,
+        update_helper,
         &mut mgs_clients,
         update,
         RESET_TIMEOUT,
@@ -472,7 +472,7 @@ enum UpdateWaitError {
 /// (after the update).
 async fn wait_for_update_done(
     log: &slog::Logger,
-    updater: &(dyn ReconfiguratorSpComponentUpdater + Send + Sync),
+    updater: &(dyn SpComponentUpdateHelper + Send + Sync),
     mgs_clients: &mut MgsClients,
     update: &PendingMgsUpdate,
     timeout: Duration,

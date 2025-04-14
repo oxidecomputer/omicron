@@ -22,8 +22,8 @@ mod sp_updater;
 
 pub use artifacts::ArtifactCache;
 pub use artifacts::ArtifactCacheError;
-pub use common_sp_update::ReconfiguratorSpComponentUpdater;
 pub use common_sp_update::SpComponentUpdateError;
+pub use common_sp_update::SpComponentUpdateHelper;
 pub use common_sp_update::SpComponentUpdater;
 pub use driver::DriverStatus;
 pub use driver::MgsUpdateDriver;

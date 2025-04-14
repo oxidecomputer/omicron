@@ -5,8 +5,8 @@
 //! Module containing types for updating SPs via MGS.
 
 use crate::MgsClients;
-use crate::ReconfiguratorSpComponentUpdater;
 use crate::SpComponentUpdateError;
+use crate::SpComponentUpdateHelper;
 use crate::UpdateProgress;
 use crate::common_sp_update::FoundVersion;
 use crate::common_sp_update::PrecheckError;
@@ -151,7 +151,7 @@ impl SpComponentUpdater for SpUpdater {
 }
 
 pub struct ReconfiguratorSpUpdater;
-impl ReconfiguratorSpComponentUpdater for ReconfiguratorSpUpdater {
+impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
         &'a self,

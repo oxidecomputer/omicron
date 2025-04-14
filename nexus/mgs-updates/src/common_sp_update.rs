@@ -249,8 +249,8 @@ fn status_is_complete(
     }
 }
 
-/// Describes a Reconfigurator-based update for an SP-updated component
-pub trait ReconfiguratorSpComponentUpdater {
+/// Provides helper functions used while updating a particular SP component
+pub trait SpComponentUpdateHelper {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
         &'a self,
