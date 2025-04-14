@@ -146,6 +146,7 @@ impl ReconfiguratorSpUpdater {
             artifact_cache,
             requests_rx,
             mgs_rx,
+            Duration::from_secs(20),
         );
         let status_rx = driver.status_rx();
         let driver_task = tokio::spawn(async move { driver.run().await });

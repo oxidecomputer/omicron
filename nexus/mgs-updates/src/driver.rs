@@ -50,9 +50,7 @@ const PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 const N_RECENT_COMPLETIONS: usize = 16;
 
 /// Timeout for repeat attempts
-// XXX-dap this is probably too aggressive but it's good for demo.
-// Maybe this could be a CLI argument for reconfigurator-sp-updater.
-const RETRY_TIMEOUT: Duration = Duration::from_secs(20);
+pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Drive one or more MGS-managed updates
 ///
@@ -94,6 +92,8 @@ pub struct MgsUpdateDriver {
     status_rx: watch::Receiver<DriverStatus>,
     delayq: DelayQueue<Arc<BaseboardId>>,
     waiting: BTreeMap<Arc<BaseboardId>, WaitingAttempt>,
+    /// how long to wait between attempts (successful or otherwise)
+    retry_timeout: Duration,
 }
 
 impl MgsUpdateDriver {
@@ -102,6 +102,7 @@ impl MgsUpdateDriver {
         artifacts: Arc<ArtifactCache>,
         rx: watch::Receiver<PendingMgsUpdates>,
         mgs_rx: watch::Receiver<AllBackends>,
+        retry_timeout: Duration,
     ) -> MgsUpdateDriver {
         let (status_tx, status_rx) = watch::channel(DriverStatus {
             recent: VecDeque::with_capacity(N_RECENT_COMPLETIONS),
@@ -120,6 +121,7 @@ impl MgsUpdateDriver {
             status_rx,
             delayq: DelayQueue::new(),
             waiting: BTreeMap::new(),
+            retry_timeout,
         }
     }
 
@@ -227,8 +229,9 @@ impl MgsUpdateDriver {
         // ensure reality matches our configuration, so even if we succeeded, we
         // want to check again in a little while to see if anything changed.
         let baseboard_id = completed.request.baseboard_id.clone();
-        let status_time_next = chrono::Utc::now() + RETRY_TIMEOUT;
-        let delay_key = self.delayq.insert(baseboard_id.clone(), RETRY_TIMEOUT);
+        let retry_timeout = self.retry_timeout;
+        let status_time_next = chrono::Utc::now() + retry_timeout;
+        let delay_key = self.delayq.insert(baseboard_id.clone(), retry_timeout);
         self.waiting.insert(
             baseboard_id.clone(),
             WaitingAttempt { delay_key, request: request.clone() },

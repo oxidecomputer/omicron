@@ -108,6 +108,7 @@ pub(crate) mod sagas;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use sagas::demo::CompletingDemoSagas;
+use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).
@@ -393,6 +394,7 @@ impl Nexus {
             artifact_cache,
             mgs_updates_rx,
             mgs_resolver.monitor(),
+            DEFAULT_RETRY_TIMEOUT,
         );
         let mgs_update_status_rx = mgs_update_driver.status_rx();
         let _mgs_driver_task =

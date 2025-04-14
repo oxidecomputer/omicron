@@ -31,6 +31,7 @@ use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::watch;
 use update_engine::EventBuffer;
 use update_engine::NestedError;
@@ -217,6 +218,7 @@ impl ReconfiguratorExec {
                 artifact_cache,
                 requests_rx,
                 mgs_rx,
+                Duration::from_secs(20),
             );
             let status_rx = driver.status_rx();
             let driver_task = tokio::spawn(async move {
