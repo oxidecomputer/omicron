@@ -61,28 +61,6 @@ impl SpComponentUpdate {
 }
 
 #[derive(Clone, Debug)]
-pub enum ApplyUpdateStatus {
-    /// the update was completed successfully
-    Completed(UpdateCompletedHow),
-    /// the update could not be completed because it assumed a precondition that
-    /// wasn't true (e.g., the device was currently running from a different
-    /// slot than expected)
-    PreconditionFailed(Arc<PrecheckError>),
-    /// the update we tried to complete was aborted (possibly by a different
-    /// Nexus instance)
-    Aborted(Uuid),
-    /// the SP reports that our update failed
-    Failed(Uuid, String),
-    /// the SP reports that our attempt to reset the component failed
-    ResetFailed(String),
-    /// we gave up during the "updating" phase because it stopped making
-    /// progress
-    StuckUpdating(Uuid, Duration),
-    /// the SP unexpectedly behaved as though our update had never started
-    Lost,
-}
-
-#[derive(Clone, Debug)]
 pub enum UpdateCompletedHow {
     FoundNoChangesNeeded,
     CompletedUpdate,
@@ -96,11 +74,30 @@ pub enum ApplyUpdateError {
     NoMgsBackends,
     #[error("failed to fetch artifact")]
     FetchArtifact(#[from] ArtifactCacheError),
+    #[error("preconditions were not met")]
+    PreconditionFailed(#[source] PrecheckError),
+    #[error("SP reports update {0} was aborted")]
+    SpUpdateAborted(Uuid),
+    #[error("SP reports update {0} failed: {1:?}")]
+    SpUpdateFailed(Uuid, String),
+    #[error("SP not knowing about our update attempt")]
+    SpUpdateLost,
+    #[error(
+        "gave up after {}ms waiting for update {0} to finish",
+        .1.as_millis())
+    ]
+    StuckUpdating(Uuid, Duration),
+    #[error("SP reports that reset failed: {0:?}")]
+    SpResetFailed(String),
+
     #[error("failed waiting for artifact delivery")]
     DeliveryWaitError(#[from] DeliveryWaitError),
     #[error("error communicating with MGS")]
     UpdateStartError(GatewayClientError),
-    #[error("timed out after {}ms waiting for update to finish", .0.as_millis())]
+    #[error(
+        "timed out after {}ms waiting for update to finish",
+        .0.as_millis()
+    )]
     ResetTimeoutError(Duration),
     #[error("waiting for update to finish")]
     WaitError(PrecheckError),
@@ -121,11 +118,8 @@ pub enum ApplyUpdateError {
 /// return early if not (e.g., if we find that somebody else has aborted our
 /// update or if there's been no progress for too long).
 ///
-/// // XXX-dap should these various failures be part of the Error enum instead?
-/// The final result, when known, is reported as an [`ApplyUpdateResult`].
-/// [`ApplyUpdateError`] is used for failures to even _try_.
-/// XXX-dap we should be able to say that the final state is that no update is
-/// in progress?
+/// On success, `UpdateCompletedHow` describes what was needed to complete the
+/// update.
 pub(crate) async fn apply_update(
     artifacts: Arc<ArtifactCache>,
     sp_update: &SpComponentUpdate,
@@ -133,7 +127,7 @@ pub(crate) async fn apply_update(
     mgs_rx: watch::Receiver<AllBackends>,
     update: &PendingMgsUpdate,
     status: UpdateAttemptStatusUpdater,
-) -> Result<ApplyUpdateStatus, ApplyUpdateError> {
+) -> Result<UpdateCompletedHow, ApplyUpdateError> {
     // Set up an instance of `MgsClients` to talk to MGS for the duration of
     // this attempt.  For each call to `try_serially()`, `MgsClients` will try
     // the request against each MGS client that it has.  That makes it possible
@@ -176,12 +170,10 @@ pub(crate) async fn apply_update(
     match update_helper.precheck(log, &mut mgs_clients, update).await {
         Ok(PrecheckStatus::ReadyForUpdate) => (),
         Ok(PrecheckStatus::UpdateComplete) => {
-            return Ok(ApplyUpdateStatus::Completed(
-                UpdateCompletedHow::FoundNoChangesNeeded,
-            ));
+            return Ok(UpdateCompletedHow::FoundNoChangesNeeded);
         }
         Err(error) => {
-            return Ok(ApplyUpdateStatus::PreconditionFailed(Arc::new(error)));
+            return Err(ApplyUpdateError::PreconditionFailed(error));
         }
     };
 
@@ -237,22 +229,23 @@ pub(crate) async fn apply_update(
     };
 
     status.update(UpdateAttemptStatus::UpdateWaiting);
-    let our_update = match wait_for_delivery(&mut mgs_clients, sp_update)
-        .await?
-    {
-        DeliveryWaitStatus::NotRunning => return Ok(ApplyUpdateStatus::Lost),
-        DeliveryWaitStatus::Aborted(id) => {
-            return Ok(ApplyUpdateStatus::Aborted(id));
-        }
-        DeliveryWaitStatus::StuckUpdating(id, timeout) => {
-            return Ok(ApplyUpdateStatus::StuckUpdating(id, timeout));
-        }
-        DeliveryWaitStatus::Failed(id, message) => {
-            return Ok(ApplyUpdateStatus::Failed(id, message));
-        }
+    let our_update =
+        match wait_for_delivery(&mut mgs_clients, sp_update).await? {
+            DeliveryWaitStatus::NotRunning => {
+                return Err(ApplyUpdateError::SpUpdateLost);
+            }
+            DeliveryWaitStatus::Aborted(id) => {
+                return Err(ApplyUpdateError::SpUpdateAborted(id));
+            }
+            DeliveryWaitStatus::StuckUpdating(id, timeout) => {
+                return Err(ApplyUpdateError::StuckUpdating(id, timeout));
+            }
+            DeliveryWaitStatus::Failed(id, message) => {
+                return Err(ApplyUpdateError::SpUpdateFailed(id, message));
+            }
 
-        DeliveryWaitStatus::Completed(id) => id == my_update_id,
-    };
+            DeliveryWaitStatus::Completed(id) => id == my_update_id,
+        };
 
     // If we were the one doing the update, then we're responsible for
     // any post-update action (generally, resetting the device).
@@ -301,7 +294,7 @@ pub(crate) async fn apply_update(
             if !matches!(error, gateway_client::Error::CommunicationError(_)) {
                 let error = InlineErrorChain::new(&error);
                 error!(log, "post_update failed"; &error);
-                return Ok(ApplyUpdateStatus::ResetFailed(error.to_string()));
+                return Err(ApplyUpdateError::SpResetFailed(error.to_string()));
             }
 
             tokio::time::sleep(RESET_DELAY_INTERVAL).await;
@@ -326,7 +319,7 @@ pub(crate) async fn apply_update(
                 (false, false) => UpdateCompletedHow::WaitedForConcurrentUpdate,
                 (false, true) => UpdateCompletedHow::TookOverConcurrentUpdate,
             };
-            Ok(ApplyUpdateStatus::Completed(how))
+            Ok(how)
         }
         Err(UpdateWaitError::Timeout(error)) => {
             Err(ApplyUpdateError::ResetTimeoutError(error))
