@@ -9,8 +9,8 @@ use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
-    ArtifactHash, ByteCount, DbOximeterReadMode, Generation, MacAddr, Name, SledState, SqlU8,
-    SqlU16, SqlU32, TufArtifact, impl_enum_type, ipv6,
+    ArtifactHash, ByteCount, DbOximeterReadMode, Generation, MacAddr, Name,
+    SledState, SqlU8, SqlU16, SqlU32, TufArtifact, impl_enum_type, ipv6,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
