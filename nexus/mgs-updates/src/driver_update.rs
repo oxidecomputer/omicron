@@ -38,6 +38,9 @@ const PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 /// Timeout for repeat attempts
 pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long to wait after resetting the device before expecting it to come up
+const RESET_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Parameters describing a request to update one SP-managed component
 ///
 /// This is similar in spirit to the `SpComponentUpdater` trait but uses a
@@ -207,6 +210,8 @@ pub enum ApplyUpdateError {
     DeliveryWaitError(#[from] DeliveryWaitError),
     #[error("error communicating with MGS")]
     UpdateStartError(GatewayClientError),
+    #[error("timed out after {}ms waiting for update to finish", .0.as_millis())]
+    ResetTimeoutError(Duration),
     #[error("waiting for update to finish")]
     WaitError(PrecheckError),
 }
@@ -377,7 +382,7 @@ pub(crate) async fn apply_update(
             updater,
             &mut mgs_clients,
             update,
-            Some(PROGRESS_TIMEOUT),
+            PROGRESS_TIMEOUT,
         )
         .await
         {
@@ -415,21 +420,16 @@ pub(crate) async fn apply_update(
 
     // Regardless of whether it was our job to reset the device, wait for it to
     // come back on the new version.
-    //
-    // There's no point where we'd want to give up here.  We know a reset was
-    // sent.
     status.update(UpdateAttemptStatus::PostUpdateWait);
     let rv = match wait_for_update_done(
         log,
         updater,
         &mut mgs_clients,
         update,
-        None,
+        RESET_TIMEOUT,
     )
     .await
     {
-        // We did not specify a timeout so it should not time out.
-        Err(UpdateWaitError::Timeout(_)) => unreachable!(),
         Ok(()) => {
             let how = match (our_update, try_reset) {
                 (true, _) => UpdateCompletedHow::CompletedUpdate,
@@ -437,6 +437,9 @@ pub(crate) async fn apply_update(
                 (false, true) => UpdateCompletedHow::TookOverConcurrentUpdate,
             };
             Ok(ApplyUpdateResult::Completed(how))
+        }
+        Err(UpdateWaitError::Timeout(error)) => {
+            Err(ApplyUpdateError::ResetTimeoutError(error))
         }
         Err(UpdateWaitError::Indeterminate(error)) => {
             Err(ApplyUpdateError::WaitError(error))
@@ -472,7 +475,7 @@ async fn wait_for_update_done(
     updater: &(dyn ReconfiguratorSpComponentUpdater + Send + Sync),
     mgs_clients: &mut MgsClients,
     update: &PendingMgsUpdate,
-    timeout: Option<Duration>,
+    timeout: Duration,
 ) -> Result<(), UpdateWaitError> {
     let before = Instant::now();
 
@@ -492,15 +495,12 @@ async fn wait_for_update_done(
             Err(PrecheckError::GatewayClientError(_))
             | Err(PrecheckError::WrongInactiveVersion { .. })
             | Ok(PrecheckStatus::ReadyForUpdate) => {
-                match timeout {
-                    Some(timeout) if before.elapsed() >= timeout => {
-                        return Err(UpdateWaitError::Timeout(timeout));
-                    }
-                    _ => {
-                        tokio::time::sleep(PROGRESS_POLL_INTERVAL).await;
-                        continue;
-                    }
-                };
+                if before.elapsed() >= timeout {
+                    return Err(UpdateWaitError::Timeout(timeout));
+                }
+
+                tokio::time::sleep(PROGRESS_POLL_INTERVAL).await;
+                continue;
             }
 
             Err(error @ PrecheckError::WrongDevice { .. })
