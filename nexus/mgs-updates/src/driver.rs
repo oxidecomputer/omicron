@@ -5,7 +5,6 @@
 //! Drive one or more in-progress MGS-managed updates
 
 use crate::ArtifactCache;
-use crate::common_sp_update::ReconfiguratorSpComponentUpdater;
 use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::ApplyUpdateResult;
 use crate::driver_update::SpComponentUpdate;
@@ -31,7 +30,6 @@ use std::time::Instant;
 use tokio::sync::watch;
 use tokio_util::time::DelayQueue;
 use tokio_util::time::delay_queue;
-use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
 /// How many recent completions to keep track of (for debugging)
@@ -255,7 +253,7 @@ impl MgsUpdateDriver {
                             self.log.clone(),
                             self.artifacts.clone(),
                             self.mgs_rx.clone(),
-                            request,
+                            request.clone(),
                             self.status_tx.clone(),
                         ),
                     ));
@@ -297,23 +295,22 @@ impl MgsUpdateDriver {
     fn record_attempt_started(
         &mut self,
         baseboard_id: Arc<BaseboardId>,
-        what: Option<UpdateAttempt>,
+        what: UpdateAttempt,
     ) {
-        if let Some(UpdateAttempt { in_progress, future }) = what {
-            self.status_tx.send_modify(|driver_status| {
-                driver_status.in_progress.insert(
-                    baseboard_id.clone(),
-                    InProgressUpdateStatus {
-                        time_started: in_progress.time_started,
-                        instant_started: in_progress.instant_started,
-                        status: UpdateAttemptStatus::NotStarted,
-                    },
-                );
-            });
+        let UpdateAttempt { in_progress, future } = what;
+        self.status_tx.send_modify(|driver_status| {
+            driver_status.in_progress.insert(
+                baseboard_id.clone(),
+                InProgressUpdateStatus {
+                    time_started: in_progress.time_started,
+                    instant_started: in_progress.instant_started,
+                    status: UpdateAttemptStatus::NotStarted,
+                },
+            );
+        });
 
-            self.in_progress.insert(baseboard_id.clone(), in_progress);
-            self.futures.push(future);
-        }
+        self.in_progress.insert(baseboard_id.clone(), in_progress);
+        self.futures.push(future);
     }
 
     /// Invoked when an in-progress update attempt has completed.
@@ -407,15 +404,20 @@ impl MgsUpdateDriver {
         // conceivable that the retry timer fired, then it was removed from the
         // configuration (concurrently), and we just noticed that before having
         // processed the change notification.
-        let requests = self.requests_rx.borrow();
-        let Some(my_request) = requests.get(&baseboard_id) else {
-            warn!(
-                &self.log,
-                "attempted retry of baseboard whose update is no longer \
-                 configured";
-                 &*baseboard_id
-            );
-            return;
+        let my_request = {
+            let current_config = self.requests_rx.borrow();
+            let Some(my_request) = current_config.get(&baseboard_id).cloned()
+            else {
+                warn!(
+                    &self.log,
+                    "attempted retry of baseboard whose update is no longer \
+                     configured";
+                     &*baseboard_id
+                );
+                return;
+            };
+
+            my_request
         };
 
         // Dispatch another attempt.
@@ -430,7 +432,6 @@ impl MgsUpdateDriver {
             my_request,
             self.status_tx.clone(),
         );
-        drop(requests);
         self.record_attempt_started(baseboard_id.clone(), work);
     }
 }
@@ -445,74 +446,37 @@ impl UpdateAttempt {
         log: slog::Logger,
         artifacts: Arc<ArtifactCache>,
         mgs_rx: watch::Receiver<AllBackends>,
-        request: &PendingMgsUpdate,
+        request: PendingMgsUpdate,
         status_tx: watch::Sender<DriverStatus>,
-    ) -> Option<UpdateAttempt> {
+    ) -> UpdateAttempt {
         let update_id = Uuid::new_v4();
         let log =
             log.new(o!(request.clone(), "update_id" => update_id.to_string()));
         info!(&log, "update requested for baseboard");
 
-        let raw_kind = &request.artifact_hash_id.kind;
-        let Some(known_kind) = raw_kind.to_known() else {
-            error!(
-                &log,
-                "ignoring update requested for unknown artifact kind";
-                "kind" => %request.artifact_hash_id.kind,
-            );
-            return None;
+        let in_progress = InProgressUpdate {
+            log: log.clone(),
+            time_started: chrono::Utc::now(),
+            instant_started: Instant::now(),
+            request: request.clone(),
         };
 
-        // XXX-dap check sp_type against artifact kind
-        let (sp_update, updater): (
-            SpComponentUpdate,
-            Box<dyn ReconfiguratorSpComponentUpdater + Send + Sync>,
-        ) = match known_kind {
-            KnownArtifactKind::GimletSp
-            | KnownArtifactKind::PscSp
-            | KnownArtifactKind::SwitchSp => {
+        let (sp_update, updater) = match &request.details {
+            nexus_types::deployment::PendingMgsUpdateDetails::Sp { .. } => {
                 let sp_update = SpComponentUpdate {
                     log: log.clone(),
                     component: SpComponent::SP_ITSELF,
                     target_sp_type: request.sp_type,
                     target_sp_slot: request.slot_id,
                     // The SP has two firmware slots, but they're aren't
-                    // individually labled. We always request an update to slot
-                    // 0, which means "the inactive slot".
+                    // individually labeled. We always request an update to slot
+                    // 0, which (confusingly in this context) means "the
+                    // inactive slot".
                     firmware_slot: 0,
                     update_id,
                 };
 
                 (sp_update, Box::new(ReconfiguratorSpUpdater {}))
-            }
-
-            KnownArtifactKind::GimletRot
-            | KnownArtifactKind::PscRot
-            | KnownArtifactKind::SwitchRot => {
-                error!(
-                    &log,
-                    "ignoring update requested for unsupported artifact \
-                     kind: {:?}",
-                    known_kind,
-                );
-                return None;
-            }
-
-            // XXX-dap should we have checked this earlier?
-            KnownArtifactKind::GimletRotBootloader
-            | KnownArtifactKind::Host
-            | KnownArtifactKind::Trampoline
-            | KnownArtifactKind::ControlPlane
-            | KnownArtifactKind::Zone
-            | KnownArtifactKind::PscRotBootloader
-            | KnownArtifactKind::SwitchRotBootloader => {
-                error!(
-                    &log,
-                    "ignoring update requested for unsupported artifact \
-                     kind: {:?}",
-                    known_kind,
-                );
-                return None;
             }
         };
 
@@ -520,12 +484,6 @@ impl UpdateAttempt {
         let status_updater = UpdateAttemptStatusUpdater {
             tx: status_tx,
             baseboard_id: baseboard_id.clone(),
-        };
-        let in_progress = InProgressUpdate {
-            log,
-            time_started: chrono::Utc::now(),
-            instant_started: Instant::now(),
-            request: request.clone(),
         };
         let update = request.clone();
         let future = async move {
@@ -542,7 +500,7 @@ impl UpdateAttempt {
         }
         .boxed();
 
-        Some((in_progress, future))
+        UpdateAttempt { in_progress, future }
     }
 }
 
