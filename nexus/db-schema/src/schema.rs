@@ -1079,6 +1079,8 @@ table! {
 
         sled_id -> Uuid,
         physical_disk_id -> Uuid,
+
+        control_plane_storage_buffer -> Int8,
     }
 }
 
@@ -1101,6 +1103,8 @@ table! {
         port -> Int4,
 
         size_used -> Int8,
+
+        no_provision -> Bool,
     }
 }
 
@@ -1135,6 +1139,8 @@ table! {
         read_only -> Bool,
 
         deleting -> Bool,
+
+        reservation_percent -> crate::enums::RegionReservationPercentEnum,
     }
 }
 
@@ -1802,8 +1808,12 @@ table! {
         disposition_expunged_ready_for_cleanup -> Bool,
         external_ip_id -> Nullable<Uuid>,
         filesystem_pool -> Uuid,
+        image_source -> crate::enums::BpZoneImageSourceEnum,
+        image_artifact_sha256 -> Nullable<Text>,
     }
 }
+
+allow_tables_to_appear_in_same_query!(bp_omicron_zone, tuf_artifact);
 
 table! {
     bp_omicron_zone_nic (blueprint_id, id) {

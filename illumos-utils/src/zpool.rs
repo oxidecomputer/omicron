@@ -178,9 +178,6 @@ impl FromStr for ZpoolInfo {
     }
 }
 
-/// Wraps commands for interacting with ZFS pools.
-pub struct Zpool {}
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ZpoolOrRamdisk {
     Zpool(ZpoolName),
@@ -200,9 +197,15 @@ pub struct PathInPool {
     pub path: Utf8PathBuf,
 }
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
-impl Zpool {
-    pub fn create(
+/// Wraps commands for interacting with ZFS pools.
+pub struct Zpool(());
+
+/// Describes the API for interfacing with zpools
+///
+/// This is a trait so that it can be faked out for tests.
+pub trait Api: Send + Sync {
+    fn create(
+        &self,
         name: &ZpoolName,
         vdev: &Utf8Path,
     ) -> Result<(), CreateError> {
@@ -225,6 +228,14 @@ impl Zpool {
         execute(&mut cmd).map_err(Error::from)?;
 
         Ok(())
+    }
+}
+
+impl Api for Zpool {}
+
+impl Zpool {
+    pub fn real_api() -> Self {
+        Self(())
     }
 
     pub fn destroy(name: &ZpoolName) -> Result<(), DestroyError> {

@@ -146,8 +146,7 @@ pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
 /// This value is chosen to be small enough to avoid any queries being too
 /// expensive.
 // unsafe: `new_unchecked` is only unsound if the argument is 0.
-pub const SQL_BATCH_SIZE: NonZeroU32 =
-    unsafe { NonZeroU32::new_unchecked(1000) };
+pub const SQL_BATCH_SIZE: NonZeroU32 = NonZeroU32::new(1000).unwrap();
 
 // Represents a query that is ready to be executed.
 //
@@ -765,8 +764,12 @@ mod test {
         physical_disk_id: PhysicalDiskUuid,
     ) -> Uuid {
         let zpool_id = Uuid::new_v4();
-        let zpool =
-            Zpool::new(zpool_id, sled_id.into_untyped_uuid(), physical_disk_id);
+        let zpool = Zpool::new(
+            zpool_id,
+            sled_id.into_untyped_uuid(),
+            physical_disk_id,
+            ByteCount::from(0).into(),
+        );
         datastore.zpool_insert(opctx, zpool).await.unwrap();
         zpool_id
     }

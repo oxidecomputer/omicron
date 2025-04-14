@@ -18,11 +18,11 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use installinator_client::{ClientError, ResponseValue};
 use installinator_common::EventReport;
-use omicron_common::update::ArtifactHashId;
 use proptest::prelude::*;
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
 use tokio::sync::mpsc;
+use tufaceous_artifact::ArtifactHashId;
 use uuid::Uuid;
 
 use crate::{

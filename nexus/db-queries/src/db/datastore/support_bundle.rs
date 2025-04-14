@@ -478,6 +478,7 @@ mod test {
     use nexus_reconfigurator_planning::example::SimRngState;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintZoneType;
+    use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
     use omicron_test_utils::dev;
@@ -584,6 +585,7 @@ mod test {
                     *pool.pool.as_untyped_uuid(),
                     *self.sled.as_untyped_uuid(),
                     PhysicalDiskUuid::new_v4(),
+                    ByteCount::from(0).into(),
                 );
                 datastore
                     .zpool_insert(opctx, zpool)

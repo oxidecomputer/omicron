@@ -99,7 +99,7 @@ impl BackgroundTask for InstanceReincarnation {
                 ));
             }
 
-            if !status.total_errors() > 0 {
+            if status.total_errors() > 0 {
                 warn!(
                     &opctx.log,
                     "instance reincarnation completed with errors";

@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{CrucibleDataset, Generation};
+use crate::ByteCount;
 use crate::collection::DatastoreCollectionConfig;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
@@ -29,6 +30,20 @@ pub struct Zpool {
 
     // The physical disk to which this Zpool is attached.
     pub physical_disk_id: DbTypedUuid<PhysicalDiskKind>,
+
+    /// Currently, a single dataset is created per pool, and this dataset (and
+    /// children of it) is used for all persistent data, both customer data (in
+    /// the form of Crucible regions) and non-customer data (zone root datasets,
+    /// delegated zone datasets, debug logs, core files, and more). To prevent
+    /// Crucible regions from taking all the dataset space, reserve space that
+    /// region allocation is not allowed to use.
+    ///
+    /// This value is consulted by the region allocation query, and can change
+    /// at runtime. A pool could become "overprovisioned" if this value
+    /// increases over the total storage minus how much storage Crucible regions
+    /// currently occupy, though this won't immediately cause any problems and
+    /// can be identified and fixed via omdb commands.
+    control_plane_storage_buffer: ByteCount,
 }
 
 impl Zpool {
@@ -36,6 +51,7 @@ impl Zpool {
         id: Uuid,
         sled_id: Uuid,
         physical_disk_id: PhysicalDiskUuid,
+        control_plane_storage_buffer: ByteCount,
     ) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),
@@ -43,7 +59,16 @@ impl Zpool {
             rcgen: Generation::new(),
             sled_id,
             physical_disk_id: physical_disk_id.into(),
+            control_plane_storage_buffer,
         }
+    }
+
+    pub fn time_deleted(&self) -> Option<DateTime<Utc>> {
+        self.time_deleted
+    }
+
+    pub fn control_plane_storage_buffer(&self) -> ByteCount {
+        self.control_plane_storage_buffer
     }
 }
 

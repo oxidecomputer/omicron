@@ -44,13 +44,13 @@ ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
 
 
 /*
- * The deployment strategy for clickhouse 
+ * The deployment strategy for clickhouse
  */
 CREATE TYPE IF NOT EXISTS omicron.public.clickhouse_mode AS ENUM (
-   -- Only deploy a single node clickhouse 
+   -- Only deploy a single node clickhouse
    'single_node_only',
 
-   -- Only deploy a clickhouse cluster without any single node deployments 
+   -- Only deploy a clickhouse cluster without any single node deployments
    'cluster_only',
 
    -- Deploy both a single node and cluster deployment.
@@ -578,7 +578,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.zpool (
     sled_id UUID NOT NULL,
 
     /* FK into the Physical Disk table */
-    physical_disk_id UUID NOT NULL
+    physical_disk_id UUID NOT NULL,
+
+    /*
+     * How many bytes to reserve for non-Crucible control plane storage
+     */
+    control_plane_storage_buffer INT NOT NULL
 );
 
 /* Create an index on the physical disk id */
@@ -635,8 +640,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.crucible_dataset (
      * Reconfigurator rendezvous process, this field is set to 0. Reconfigurator
      * otherwise ignores this field. It's updated by Nexus as region allocations
      * and deletions are performed using this dataset.
+     *
+     * Note that the value in this column is _not_ the sum of requested region
+     * sizes, but sum of the size *reserved* by the Crucible agent for the
+     * dataset that contains the regions (which is larger than the the actual
+     * region size).
      */
-    size_used INT NOT NULL
+    size_used INT NOT NULL,
+
+    /* Do not consider this dataset during region allocation */
+    no_provision BOOL NOT NULL
 );
 
 /* Create an index on the size usage for any Crucible dataset */
@@ -651,6 +664,10 @@ CREATE INDEX IF NOT EXISTS lookup_crucible_dataset_by_zpool ON
 
 CREATE INDEX IF NOT EXISTS lookup_crucible_dataset_by_ip ON
   omicron.public.crucible_dataset (ip);
+
+CREATE TYPE IF NOT EXISTS omicron.public.region_reservation_percent AS ENUM (
+  '25'
+);
 
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
@@ -676,7 +693,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
 
     read_only BOOL NOT NULL,
 
-    deleting BOOL NOT NULL
+    deleting BOOL NOT NULL,
+
+    /*
+     * The Crucible Agent will reserve space for a region with overhead for
+     * on-disk metadata that the downstairs needs to store. Record here the
+     * overhead associated with a specific region as this may change or be
+     * configurable in the future.
+     */
+    reservation_percent omicron.public.region_reservation_percent NOT NULL
 );
 
 /*
@@ -2418,7 +2443,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
-    version STRING(63) NOT NULL,
+    version STRING(64) NOT NULL,
     -- This used to be an enum but is now a string, because it can represent
     -- artifact kinds currently unknown to a particular version of Nexus as
     -- well.
@@ -2442,6 +2467,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
 CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_added
     ON omicron.public.tuf_artifact (generation_added, id)
     STORING (name, version, kind, time_created, sha256, artifact_size);
+
+-- RFD 554: (kind, hash) is unique for artifacts. This index is used while
+-- looking up artifacts.
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_kind_sha256
+    ON omicron.public.tuf_artifact (kind, sha256);
 
 -- Reflects that a particular artifact was provided by a particular TUF repo.
 -- This is a many-many mapping.
@@ -3579,7 +3609,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
     -- the firmware version string for each NVMe slot (0 indexed), a NULL means the
     -- slot exists but is empty
     slot_firmware_versions STRING(8)[] CHECK (array_length(slot_firmware_versions, 1) BETWEEN 1 AND 7),
-    
+
     -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
@@ -3954,6 +3984,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
     PRIMARY KEY (blueprint_id, id)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_image_source AS ENUM (
+    'install_dataset',
+    'artifact'
+);
+
 -- description of omicron zones specified in a blueprint
 --
 -- This is currently identical to `inv_omicron_zone`, except that the foreign
@@ -4042,6 +4077,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     disposition_expunged_as_of_generation INT,
     disposition_expunged_ready_for_cleanup BOOL NOT NULL,
 
+    -- Blueprint zone image source
+    image_source omicron.public.bp_zone_image_source NOT NULL,
+    image_artifact_sha256 STRING(64),
+
     PRIMARY KEY (blueprint_id, id),
 
     CONSTRAINT expunged_disposition_properties CHECK (
@@ -4051,6 +4090,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
         OR
         (disposition = 'expunged'
             AND disposition_expunged_as_of_generation IS NOT NULL)
+    ),
+
+    CONSTRAINT zone_image_source_artifact_hash_present CHECK (
+        (image_source = 'artifact'
+            AND image_artifact_sha256 IS NOT NULL)
+        OR
+        (image_source != 'artifact'
+            AND image_artifact_sha256 IS NULL)
     )
 );
 
@@ -5050,7 +5097,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '134.0.0', NULL)
+    (TRUE, NOW(), NOW(), '137.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

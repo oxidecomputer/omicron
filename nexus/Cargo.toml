@@ -50,7 +50,7 @@ internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
-lldpd-client.workspace = true
+lldpd_client.workspace = true
 macaddr.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
@@ -100,6 +100,7 @@ tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util = { workspace = true, features = ["codec"] }
 tough.workspace = true
+tufaceous-artifact.workspace = true
 uuid.workspace = true
 
 nexus-auth.workspace = true

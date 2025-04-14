@@ -23,6 +23,7 @@ use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
 use anyhow::Context;
+use anyhow::anyhow;
 use anyhow::bail;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -140,10 +141,12 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VolumeUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_client::VolumeConstructionRequest;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -154,6 +157,7 @@ use std::collections::HashSet;
 use std::fmt::Display;
 use std::future::Future;
 use std::num::NonZeroU32;
+use std::str::FromStr;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
@@ -325,6 +329,8 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
+    /// Commands relevant to Crucible datasets
+    CrucibleDataset(CrucibleDatasetArgs),
     /// Print any Crucible resources that are located on expunged physical disks
     ReplacementsToDo,
     /// Print information about the rack
@@ -371,6 +377,37 @@ enum DbCommands {
     Vmms(VmmListArgs),
     /// Print information about the oximeter collector.
     Oximeter(OximeterArgs),
+    /// Commands for querying and interacting with pools
+    Zpool(ZpoolArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct CrucibleDatasetArgs {
+    #[command(subcommand)]
+    command: CrucibleDatasetCommands,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum CrucibleDatasetCommands {
+    List,
+
+    ShowOverprovisioned,
+
+    MarkNonProvisionable(MarkNonProvisionableArgs),
+
+    MarkProvisionable(MarkProvisionableArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct MarkNonProvisionableArgs {
+    /// The UUID of the Crucible dataset
+    dataset_id: DatasetUuid,
+}
+
+#[derive(Debug, Args, Clone)]
+struct MarkProvisionableArgs {
+    /// The UUID of the Crucible dataset
+    dataset_id: DatasetUuid,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -555,11 +592,104 @@ enum CollectionsCommands {
 
 #[derive(Debug, Args, Clone)]
 struct CollectionsShowArgs {
-    /// id of the collection
-    id: CollectionUuid,
+    /// id of the collection (or `latest`)
+    id_or_latest: CollectionIdOrLatest,
     /// show long strings in their entirety
     #[clap(long)]
     show_long_strings: bool,
+
+    #[clap(subcommand)]
+    filter: Option<CollectionsShowFilter>,
+}
+
+#[derive(Debug, Clone, Copy, Args)]
+struct CollectionIdArgs {
+    /// id of collection (or `latest` for the latest one)
+    collection_id: CollectionIdOrLatest,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CollectionIdOrLatest {
+    Latest,
+    CollectionId(CollectionUuid),
+}
+
+impl FromStr for CollectionIdOrLatest {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "latest" {
+            Ok(Self::Latest)
+        } else {
+            let id = s.parse()?;
+            Ok(Self::CollectionId(id))
+        }
+    }
+}
+
+impl CollectionIdOrLatest {
+    async fn to_collection(
+        &self,
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> anyhow::Result<Collection> {
+        match self {
+            CollectionIdOrLatest::Latest => datastore
+                .inventory_get_latest_collection(opctx)
+                .await
+                .context("fetching latest collection")?
+                .ok_or_else(|| anyhow!("no inventory collections found")),
+            CollectionIdOrLatest::CollectionId(id) => datastore
+                .inventory_collection_read(opctx, *id)
+                .await
+                .with_context(|| format!("fetching collection {id}")),
+        }
+    }
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum CollectionsShowFilter {
+    /// show all information from the collection
+    All,
+    /// show information about service processors (baseboard)
+    Sp {
+        /// show only information about one SP
+        serial: Option<String>,
+    },
+}
+
+impl CollectionsShowFilter {
+    fn include_sp_unknown_serial(&self) -> bool {
+        match self {
+            CollectionsShowFilter::All => true,
+            CollectionsShowFilter::Sp { serial: None } => true,
+            CollectionsShowFilter::Sp { serial: Some(_) } => false,
+        }
+    }
+
+    fn include_sp(&self, this_serial: &str) -> bool {
+        match self {
+            CollectionsShowFilter::All => true,
+            CollectionsShowFilter::Sp { serial: None } => true,
+            CollectionsShowFilter::Sp { serial: Some(serial) } => {
+                this_serial == serial
+            }
+        }
+    }
+
+    fn include_sleds(&self) -> bool {
+        match self {
+            CollectionsShowFilter::All => true,
+            CollectionsShowFilter::Sp { .. } => false,
+        }
+    }
+
+    fn include_keeper_membership(&self) -> bool {
+        match self {
+            CollectionsShowFilter::All => true,
+            CollectionsShowFilter::Sp { .. } => false,
+        }
+    }
 }
 
 #[derive(Debug, Args, Clone, Copy)]
@@ -609,8 +739,12 @@ enum RegionCommands {
 #[derive(Debug, Args, Clone)]
 struct RegionListArgs {
     /// Print region IDs only
-    #[arg(short)]
+    #[arg(long, short)]
     id_only: bool,
+
+    /// List regions only in a certain dataset
+    #[arg(long, short)]
+    dataset_id: Option<DatasetUuid>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -947,6 +1081,37 @@ struct VmmListArgs {
     states: Vec<db::model::VmmState>,
 }
 
+#[derive(Debug, Args, Clone)]
+struct ZpoolArgs {
+    #[command(subcommand)]
+    command: ZpoolCommands,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum ZpoolCommands {
+    /// List pools
+    List(ZpoolListArgs),
+
+    /// Set the control plane storage buffer for a pool
+    SetStorageBuffer(SetStorageBufferArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct ZpoolListArgs {
+    /// Only output zpool ids
+    #[clap(short, long)]
+    id_only: bool,
+}
+
+#[derive(Debug, Args, Clone)]
+struct SetStorageBufferArgs {
+    /// The UUID of Pool
+    id: Uuid,
+
+    /// How many bytes to set the buffer to
+    storage_buffer: i64,
+}
+
 impl DbArgs {
     /// Run a `omdb db` subcommand.
     ///
@@ -961,6 +1126,34 @@ impl DbArgs {
         self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
                 match &self.command {
+                    DbCommands::CrucibleDataset(CrucibleDatasetArgs {
+                        command: CrucibleDatasetCommands::List,
+                    }) => {
+                        cmd_crucible_dataset_list(&opctx, &datastore).await
+                    }
+                    DbCommands::CrucibleDataset(CrucibleDatasetArgs {
+                        command: CrucibleDatasetCommands::ShowOverprovisioned,
+                    }) => {
+                        cmd_crucible_dataset_show_overprovisioned(
+                            &opctx, &datastore,
+                        ).await
+                    }
+                    DbCommands::CrucibleDataset(CrucibleDatasetArgs {
+                        command: CrucibleDatasetCommands::MarkNonProvisionable(args),
+                    }) => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_crucible_dataset_mark_non_provisionable(
+                            &opctx, &datastore, args, token,
+                        ).await
+                    }
+                    DbCommands::CrucibleDataset(CrucibleDatasetArgs {
+                        command: CrucibleDatasetCommands::MarkProvisionable(args),
+                    }) => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_crucible_dataset_mark_provisionable(
+                            &opctx, &datastore, args, token,
+                        ).await
+                    }
                     DbCommands::ReplacementsToDo => {
                         replacements_to_do(&opctx, &datastore).await
                     }
@@ -1226,6 +1419,20 @@ impl DbArgs {
                     DbCommands::Oximeter(OximeterArgs {
                         command: OximeterCommands::ListProducers
                     }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
+                    DbCommands::Zpool(ZpoolArgs {
+                        command: ZpoolCommands::List(args)
+                    }) => cmd_db_zpool_list(&opctx, &datastore, &args).await,
+                    DbCommands::Zpool(ZpoolArgs {
+                        command: ZpoolCommands::SetStorageBuffer(args)
+                    }) => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_db_zpool_set_storage_buffer(
+                            &opctx,
+                            &datastore,
+                            &args,
+                            token,
+                        ).await
+                    }
                 }
             }
         }).await
@@ -1413,6 +1620,197 @@ async fn lookup_project(
         .await
         .optional()
         .with_context(|| format!("loading project {project_id}"))
+}
+
+// Crucible datasets
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct CrucibleDatasetRow {
+    // dataset fields
+    id: Uuid,
+    time_deleted: String,
+    pool_id: Uuid,
+    address: String,
+    size_used: i64,
+    no_provision: bool,
+
+    // zpool fields
+    #[tabled(display_with = "option_impl_display")]
+    control_plane_storage_buffer: Option<i64>,
+    #[tabled(display_with = "option_impl_display")]
+    pool_total_size: Option<i64>,
+
+    // computed fields
+    #[tabled(display_with = "option_impl_display")]
+    size_left: Option<i128>,
+}
+
+fn option_impl_display<T: std::fmt::Display>(t: &Option<T>) -> String {
+    match t {
+        Some(v) => format!("{v}"),
+        None => String::from("n/a"),
+    }
+}
+
+async fn get_crucible_dataset_rows(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<Vec<CrucibleDatasetRow>, anyhow::Error> {
+    let crucible_datasets =
+        datastore.crucible_dataset_list_all_batched(opctx).await?;
+
+    let Some(latest_collection) =
+        datastore.inventory_get_latest_collection(opctx).await?
+    else {
+        bail!("no latest inventory found!");
+    };
+
+    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+
+    for (_, sled_agent) in latest_collection.sled_agents {
+        for zpool in sled_agent.zpools {
+            zpool_total_size
+                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+        }
+    }
+
+    let zpools: HashMap<Uuid, Zpool> = datastore
+        .zpool_list_all_external_batched(opctx)
+        .await?
+        .into_iter()
+        .map(|(zpool, _)| (zpool.id().into_untyped_uuid(), zpool))
+        .collect();
+
+    let mut result: Vec<CrucibleDatasetRow> =
+        Vec::with_capacity(crucible_datasets.len());
+
+    for d in crucible_datasets {
+        let control_plane_storage_buffer: Option<i64> = match zpools
+            .get(&d.pool_id)
+        {
+            Some(zpool) => Some(zpool.control_plane_storage_buffer().into()),
+            None => None,
+        };
+
+        let pool_total_size = zpool_total_size.get(&d.pool_id);
+
+        result.push(CrucibleDatasetRow {
+            // dataset fields
+            id: d.id().into_untyped_uuid(),
+            time_deleted: match d.time_deleted() {
+                Some(t) => t.to_string(),
+                None => String::from(""),
+            },
+            pool_id: d.pool_id,
+            address: d.address().to_string(),
+            size_used: d.size_used,
+            no_provision: d.no_provision(),
+
+            // zpool fields
+            control_plane_storage_buffer,
+            pool_total_size: pool_total_size.cloned(),
+
+            // computed fields
+            size_left: match (pool_total_size, control_plane_storage_buffer) {
+                (Some(total_size), Some(control_plane_storage_buffer)) => Some(
+                    i128::from(*total_size)
+                        - i128::from(control_plane_storage_buffer)
+                        - i128::from(d.size_used),
+                ),
+
+                _ => None,
+            },
+        });
+    }
+
+    Ok(result)
+}
+
+async fn cmd_crucible_dataset_list(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    let rows: Vec<_> = get_crucible_dataset_rows(opctx, datastore).await?;
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::psql())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_crucible_dataset_show_overprovisioned(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    // A Crucible dataset is overprovisioned if size_used (amount taken up by
+    // Crucible region reservations) plus the control plane storage buffer
+    // (note this is _not_ a ZFS reservation! it's currently just a per-pool
+    // value in the database) is larger than the backing pool's total size.
+
+    let rows: Vec<_> = get_crucible_dataset_rows(opctx, datastore).await?;
+    let rows: Vec<_> = rows
+        .into_iter()
+        .filter(|row| {
+            match (row.pool_total_size, row.control_plane_storage_buffer) {
+                (Some(pool_total_size), Some(control_plane_storage_buffer)) => {
+                    (i128::from(row.size_used)
+                        + i128::from(control_plane_storage_buffer))
+                        >= i128::from(pool_total_size)
+                }
+
+                _ => {
+                    // Without the total size or control plane storage buffer, we
+                    // can't determine if the dataset is overprovisioned or not.
+                    // Filter it out.
+                    false
+                }
+            }
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::psql())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_crucible_dataset_mark_non_provisionable(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &MarkNonProvisionableArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    datastore
+        .mark_crucible_dataset_not_provisionable(opctx, args.dataset_id)
+        .await?;
+
+    println!("marked {:?} as non-provisionable", args.dataset_id);
+
+    Ok(())
+}
+
+async fn cmd_crucible_dataset_mark_provisionable(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &MarkProvisionableArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    datastore
+        .mark_crucible_dataset_provisionable(opctx, args.dataset_id)
+        .await?;
+
+    println!("marked {:?} as provisionable", args.dataset_id);
+
+    Ok(())
 }
 
 // Disks
@@ -2943,14 +3341,20 @@ async fn cmd_db_region_list(
 ) -> Result<(), anyhow::Error> {
     use nexus_db_schema::schema::region::dsl;
 
-    let regions: Vec<Region> = paginated(
+    let mut query = paginated(
         dsl::region,
         dsl::id,
         &first_page::<dsl::id>(fetch_opts.fetch_limit),
-    )
-    .select(Region::as_select())
-    .load_async(&*datastore.pool_connection_for_tests().await?)
-    .await?;
+    );
+
+    if let Some(dataset_id) = args.dataset_id {
+        query = query.filter(dsl::dataset_id.eq(to_db_typed_uuid(dataset_id)));
+    }
+
+    let regions: Vec<Region> = query
+        .select(Region::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await?;
 
     check_limit(&regions, fetch_opts.fetch_limit, || {
         String::from("listing regions")
@@ -6078,17 +6482,20 @@ async fn cmd_db_inventory(
         InventoryCommands::Collections(CollectionsArgs {
             command:
                 CollectionsCommands::Show(CollectionsShowArgs {
-                    id,
+                    id_or_latest,
                     show_long_strings,
+                    ref filter,
                 }),
         }) => {
             let long_string_formatter =
                 LongStringFormatter { show_long_strings };
+            let filter = filter.as_ref().unwrap_or(&CollectionsShowFilter::All);
             cmd_db_inventory_collections_show(
                 opctx,
                 datastore,
-                id,
+                id_or_latest,
                 long_string_formatter,
+                filter,
             )
             .await
         }
@@ -6377,19 +6784,22 @@ async fn cmd_db_inventory_collections_list(
 async fn cmd_db_inventory_collections_show(
     opctx: &OpContext,
     datastore: &DataStore,
-    id: CollectionUuid,
+    id_or_latest: CollectionIdOrLatest,
     long_string_formatter: LongStringFormatter,
+    filter: &CollectionsShowFilter,
 ) -> Result<(), anyhow::Error> {
-    let collection = datastore
-        .inventory_collection_read(opctx, id)
-        .await
-        .context("reading collection")?;
+    let collection = id_or_latest.to_collection(opctx, datastore).await?;
 
     inv_collection_print(&collection).await?;
     let nerrors = inv_collection_print_errors(&collection).await?;
-    inv_collection_print_devices(&collection, &long_string_formatter).await?;
-    inv_collection_print_sleds(&collection);
-    inv_collection_print_keeper_membership(&collection);
+    inv_collection_print_devices(&collection, filter, &long_string_formatter)
+        .await?;
+    if filter.include_sleds() {
+        inv_collection_print_sleds(&collection);
+    }
+    if filter.include_keeper_membership() {
+        inv_collection_print_keeper_membership(&collection);
+    }
 
     if nerrors > 0 {
         eprintln!(
@@ -6445,6 +6855,7 @@ async fn inv_collection_print_errors(
 
 async fn inv_collection_print_devices(
     collection: &Collection,
+    filter: &CollectionsShowFilter,
     long_string_formatter: &LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
     // Assemble a list of baseboard ids, sorted first by device type (sled,
@@ -6466,7 +6877,6 @@ async fn inv_collection_print_devices(
         let baseboard = collection.baseboards.get(baseboard_id);
         let rot = collection.rots.get(baseboard_id);
 
-        println!("");
         match baseboard {
             None => {
                 // It should be impossible to find an SP whose baseboard
@@ -6474,6 +6884,11 @@ async fn inv_collection_print_devices(
                 // in this tool (for failing to fetch or find the right
                 // baseboard information) or the inventory system (for failing
                 // to insert a record into the hw_baseboard_id table).
+                if !filter.include_sp_unknown_serial() {
+                    continue;
+                }
+
+                println!("");
                 println!(
                     "{:?} (serial number unknown -- this is a bug)",
                     sp.sp_type
@@ -6481,6 +6896,11 @@ async fn inv_collection_print_devices(
                 println!("    part number: unknown");
             }
             Some(baseboard) => {
+                if !filter.include_sp(&baseboard.serial_number) {
+                    continue;
+                }
+
+                println!("");
                 println!("{:?} {}", sp.sp_type, baseboard.serial_number);
                 println!("    part number: {}", baseboard.part_number);
             }
@@ -7432,4 +7852,96 @@ fn option_datetime_rfc3339_concise(t: &Option<DateTime<Utc>>) -> String {
 fn datetime_opt_rfc3339_concise(t: &Option<DateTime<Utc>>) -> String {
     t.map(|t| t.to_rfc3339_opts(chrono::format::SecondsFormat::Millis, true))
         .unwrap_or_else(|| "-".to_string())
+}
+
+async fn cmd_db_zpool_list(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &ZpoolListArgs,
+) -> Result<(), anyhow::Error> {
+    let zpools = datastore.zpool_list_all_external_batched(opctx).await?;
+
+    let Some(latest_collection) =
+        datastore.inventory_get_latest_collection(opctx).await?
+    else {
+        bail!("no latest inventory found!");
+    };
+
+    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+
+    for (_, sled_agent) in latest_collection.sled_agents {
+        for zpool in sled_agent.zpools {
+            zpool_total_size
+                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+        }
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct ZpoolRow {
+        id: Uuid,
+        time_deleted: String,
+        sled_id: Uuid,
+        physical_disk_id: Uuid,
+        #[tabled(display_with = "option_impl_display")]
+        total_size: Option<i64>,
+        control_plane_storage_buffer: i64,
+    }
+
+    let rows: Vec<ZpoolRow> = zpools
+        .into_iter()
+        .map(|(p, _)| {
+            let zpool_id = p.id().into_untyped_uuid();
+            Ok(ZpoolRow {
+                id: zpool_id,
+                time_deleted: match p.time_deleted() {
+                    Some(t) => t.to_string(),
+                    None => String::from(""),
+                },
+                sled_id: p.sled_id,
+                physical_disk_id: p.physical_disk_id.into_untyped_uuid(),
+                total_size: zpool_total_size.get(&zpool_id).cloned(),
+                control_plane_storage_buffer: p
+                    .control_plane_storage_buffer()
+                    .into(),
+            })
+        })
+        .collect::<Result<Vec<_>, anyhow::Error>>()?;
+
+    if args.id_only {
+        for row in rows {
+            println!("{}", row.id);
+        }
+    } else {
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::psql())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+
+        println!("{}", table);
+    }
+
+    Ok(())
+}
+
+async fn cmd_db_zpool_set_storage_buffer(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &SetStorageBufferArgs,
+    _token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    datastore
+        .zpool_set_control_plane_storage_buffer(
+            opctx,
+            ZpoolUuid::from_untyped_uuid(args.id),
+            args.storage_buffer,
+        )
+        .await?;
+
+    println!(
+        "set pool {} control plane storage buffer bytes to {}",
+        args.id, args.storage_buffer,
+    );
+
+    Ok(())
 }
