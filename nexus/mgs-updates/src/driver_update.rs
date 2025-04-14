@@ -13,6 +13,7 @@ use crate::driver::UpdateAttemptStatusUpdater;
 use crate::mgs_clients::GatewayClientError;
 use crate::{ArtifactCache, ArtifactCacheError, MgsClients};
 use gateway_client::SpComponent;
+use gateway_client::types::UpdateAbortBody;
 use gateway_client::types::{SpType, SpUpdateStatus};
 use nexus_types::deployment::PendingMgsUpdate;
 use qorb::resolver::AllBackends;
@@ -87,6 +88,8 @@ pub enum ApplyUpdateError {
         .1.as_millis())
     ]
     StuckUpdating(Uuid, Duration),
+    #[error("failed to abort in-progress SP update")]
+    SpUpdateAbortFailed(#[from] AbortError),
     #[error("SP reports that reset failed: {0:?}")]
     SpResetFailed(String),
 
@@ -231,20 +234,34 @@ pub(crate) async fn apply_update(
     status.update(UpdateAttemptStatus::UpdateWaiting);
     let our_update =
         match wait_for_delivery(&mut mgs_clients, sp_update).await? {
-            DeliveryWaitStatus::NotRunning => {
-                return Err(ApplyUpdateError::SpUpdateLost);
-            }
+            DeliveryWaitStatus::Completed(id) => id == my_update_id,
             DeliveryWaitStatus::Aborted(id) => {
+                warn!(
+                    log,
+                    "SP reports update was aborted";
+                    "aborted_update_id" => id.to_string()
+                );
                 return Err(ApplyUpdateError::SpUpdateAborted(id));
             }
-            DeliveryWaitStatus::StuckUpdating(id, timeout) => {
-                return Err(ApplyUpdateError::StuckUpdating(id, timeout));
-            }
-            DeliveryWaitStatus::Failed(id, message) => {
-                return Err(ApplyUpdateError::SpUpdateFailed(id, message));
+            DeliveryWaitStatus::NotRunning => {
+                // This is a little weird.  The SP has likely been reset.
+                warn!(log, "SP unexpectedly reports no update in progress");
+                return Err(ApplyUpdateError::SpUpdateLost);
             }
 
-            DeliveryWaitStatus::Completed(id) => id == my_update_id,
+            // For any of the following cases: something went wrong with the
+            // update.  It needs to be explicitly aborted before anybody can try
+            // again.  We'll attempt the abort and then report the specific
+            // error.  The caller will have to do the retry if they want it.
+            DeliveryWaitStatus::StuckUpdating(id, timeout) => {
+                abort_update(&mut mgs_clients, sp_update, id, "stuck").await?;
+                return Err(ApplyUpdateError::StuckUpdating(id, timeout));
+            }
+
+            DeliveryWaitStatus::Failed(id, message) => {
+                abort_update(&mut mgs_clients, sp_update, id, "failed").await?;
+                return Err(ApplyUpdateError::SpUpdateFailed(id, message));
+            }
         };
 
     // If we were the one doing the update, then we're responsible for
@@ -331,8 +348,6 @@ pub(crate) async fn apply_update(
 
     status.update(UpdateAttemptStatus::Done);
     rv
-
-    // XXX-dap something needs to abort after failure cases
 }
 
 enum DeliveryWaitStatus {
@@ -446,6 +461,52 @@ async fn wait_for_delivery(
 
         tokio::time::sleep(STATUS_POLL_INTERVAL).await;
     }
+}
+
+#[derive(Debug, Error)]
+#[error(
+    "error aborting update {update_id} (reason: {reason}): error \
+     communicating with MGS"
+)]
+pub struct AbortError {
+    update_id: Uuid,
+    reason: String,
+    #[source]
+    error: GatewayClientError,
+}
+
+async fn abort_update(
+    mgs_clients: &mut MgsClients,
+    sp_update: &SpComponentUpdate,
+    update_id: Uuid,
+    reason: &str,
+) -> Result<(), AbortError> {
+    let log = &sp_update.log;
+    let sp_type = sp_update.target_sp_type;
+    let sp_slot = sp_update.target_sp_slot;
+    let component = sp_update.component();
+
+    warn!(
+        log,
+        "aborting in-progress SP component update";
+        "update_id" => update_id.to_string(),
+        "reason" => reason,
+    );
+
+    mgs_clients
+        .try_all_serially(log, |mgs_client| async move {
+            let arg = UpdateAbortBody { id: update_id };
+            mgs_client
+                .sp_component_update_abort(sp_type, sp_slot, component, &arg)
+                .await
+        })
+        .await
+        .map_err(|error| AbortError {
+            update_id,
+            reason: reason.to_string(),
+            error,
+        })?;
+    Ok(())
 }
 
 /// Errors returned from `wait_for_update_done()`.
