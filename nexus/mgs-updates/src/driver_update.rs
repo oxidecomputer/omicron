@@ -60,116 +60,6 @@ impl SpComponentUpdate {
     }
 }
 
-enum DeliveryWaitStatus {
-    /// the SP does not know about the update we're waiting for
-    ///
-    /// This can happen if the SP was reset, possibly because the update
-    /// completed successfully.
-    NotRunning,
-    /// the SP reports that this update was aborted
-    Aborted(Uuid),
-    /// the SP reports that this update was completed
-    Completed(Uuid),
-    /// the SP reports that this update failed
-    Failed(Uuid, String),
-    /// we gave up because the update stopped making forward progress for too
-    /// long
-    StuckUpdating(Uuid, Duration),
-}
-
-#[derive(Debug, Error)]
-pub enum DeliveryWaitError {
-    #[error("error communicating with MGS")]
-    MgsCommunication(#[from] GatewayClientError),
-}
-
-/// Waits for the delivery (upload) phase of the specified update to complete
-///
-/// This is used both when we're the one doing the update and when some other
-/// component is doing it.
-///
-/// This returns early if the update stops for any reason or stops making
-/// forward progress for too long.
-async fn wait_for_delivery(
-    mgs_clients: &mut MgsClients,
-    update: &SpComponentUpdate,
-) -> Result<DeliveryWaitStatus, DeliveryWaitError> {
-    let mut last_status = None;
-    let mut last_progress = Instant::now();
-    let log = &update.log;
-    let sp_type = update.target_sp_type;
-    let sp_slot = update.target_sp_slot;
-    let component = update.component();
-
-    loop {
-        let status = mgs_clients
-            .try_all_serially(log, |client| async move {
-                let update_status = client
-                    .sp_component_update_status(sp_type, sp_slot, component)
-                    .await?;
-
-                debug!(
-                    log,
-                    "got update status";
-                    "mgs_addr" => client.baseurl(),
-                    "status" => ?update_status,
-                );
-
-                Ok(update_status)
-            })
-            .await?
-            .into_inner();
-
-        match status {
-            SpUpdateStatus::None => {
-                return Ok(DeliveryWaitStatus::NotRunning);
-            }
-            SpUpdateStatus::Preparing { id, .. }
-            | SpUpdateStatus::InProgress { id, .. } => {
-                if let Some(last) = last_status.replace(status.clone()) {
-                    if last == status {
-                        if last_progress.elapsed() > PROGRESS_TIMEOUT {
-                            error!(
-                                log,
-                                "progress timeout";
-                                "status" => ?status,
-                                "timeout_ms" => PROGRESS_TIMEOUT.as_millis(),
-                            );
-
-                            return Ok(DeliveryWaitStatus::StuckUpdating(
-                                id,
-                                PROGRESS_TIMEOUT,
-                            ));
-                        }
-                    } else {
-                        last_progress = Instant::now();
-                    }
-                }
-            }
-            SpUpdateStatus::Complete { id } => {
-                return Ok(DeliveryWaitStatus::Completed(id));
-            }
-            SpUpdateStatus::Aborted { id } => {
-                return Ok(DeliveryWaitStatus::Aborted(id));
-            }
-            SpUpdateStatus::Failed { code, id } => {
-                return Ok(DeliveryWaitStatus::Failed(
-                    id,
-                    format!("code {code}"),
-                ));
-            }
-            SpUpdateStatus::RotError { id, message } => {
-                return Ok(DeliveryWaitStatus::Failed(
-                    id,
-                    format!("RoT error: {message}"),
-                ));
-            }
-        }
-
-        tokio::time::sleep(STATUS_POLL_INTERVAL).await;
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum ApplyUpdateResult {
     /// the update was completed successfully
@@ -452,6 +342,119 @@ pub(crate) async fn apply_update(
     // XXX-dap something needs to abort after failure cases
 }
 
+enum DeliveryWaitStatus {
+    /// the SP does not know about the update we're waiting for
+    ///
+    /// This can happen if the SP was reset, possibly because the update
+    /// completed successfully.
+    NotRunning,
+    /// the SP reports that this update was aborted
+    Aborted(Uuid),
+    /// the SP reports that this update was completed
+    Completed(Uuid),
+    /// the SP reports that this update failed
+    Failed(Uuid, String),
+    /// we gave up because the update stopped making forward progress for too
+    /// long
+    StuckUpdating(Uuid, Duration),
+}
+
+#[derive(Debug, Error)]
+pub enum DeliveryWaitError {
+    #[error("error communicating with MGS")]
+    MgsCommunication(#[from] GatewayClientError),
+}
+
+/// Waits for the delivery (upload) phase of the specified update to complete
+///
+/// This is used both when we're the one doing the update and when some other
+/// component is doing it.
+///
+/// This returns early if the update stops for any reason or stops making
+/// forward progress for too long.
+///
+/// This returns an error only when the state is indeterminate.  Otherwise, it
+/// returns a description of the resting state.
+async fn wait_for_delivery(
+    mgs_clients: &mut MgsClients,
+    update: &SpComponentUpdate,
+) -> Result<DeliveryWaitStatus, DeliveryWaitError> {
+    let mut last_status = None;
+    let mut last_progress = Instant::now();
+    let log = &update.log;
+    let sp_type = update.target_sp_type;
+    let sp_slot = update.target_sp_slot;
+    let component = update.component();
+
+    loop {
+        let status = mgs_clients
+            .try_all_serially(log, |client| async move {
+                let update_status = client
+                    .sp_component_update_status(sp_type, sp_slot, component)
+                    .await?;
+
+                debug!(
+                    log,
+                    "got update status";
+                    "mgs_addr" => client.baseurl(),
+                    "status" => ?update_status,
+                );
+
+                Ok(update_status)
+            })
+            .await?
+            .into_inner();
+
+        match status {
+            SpUpdateStatus::None => {
+                return Ok(DeliveryWaitStatus::NotRunning);
+            }
+            SpUpdateStatus::Preparing { id, .. }
+            | SpUpdateStatus::InProgress { id, .. } => {
+                if let Some(last) = last_status.replace(status.clone()) {
+                    if last == status {
+                        if last_progress.elapsed() > PROGRESS_TIMEOUT {
+                            error!(
+                                log,
+                                "progress timeout";
+                                "status" => ?status,
+                                "timeout_ms" => PROGRESS_TIMEOUT.as_millis(),
+                            );
+
+                            return Ok(DeliveryWaitStatus::StuckUpdating(
+                                id,
+                                PROGRESS_TIMEOUT,
+                            ));
+                        }
+                    } else {
+                        last_progress = Instant::now();
+                    }
+                }
+            }
+            SpUpdateStatus::Complete { id } => {
+                return Ok(DeliveryWaitStatus::Completed(id));
+            }
+            SpUpdateStatus::Aborted { id } => {
+                return Ok(DeliveryWaitStatus::Aborted(id));
+            }
+            SpUpdateStatus::Failed { code, id } => {
+                return Ok(DeliveryWaitStatus::Failed(
+                    id,
+                    format!("code {code}"),
+                ));
+            }
+            SpUpdateStatus::RotError { id, message } => {
+                return Ok(DeliveryWaitStatus::Failed(
+                    id,
+                    format!("RoT error: {message}"),
+                ));
+            }
+        }
+
+        tokio::time::sleep(STATUS_POLL_INTERVAL).await;
+    }
+}
+
 /// Errors returned from `wait_for_update_done()`.
 #[derive(Debug, Error)]
 enum UpdateWaitError {
@@ -461,7 +464,12 @@ enum UpdateWaitError {
     Indeterminate(PrecheckError),
 }
 
-/// Waits for the specified update to finish (by polling)
+/// Waits for the specified update to completely finish (by polling)
+///
+/// "Finish" here means that the component is online in the final state
+/// reflected by the update (e.g., with the expected software in the active
+/// slot).  If a reset was required as part of the update, then the component
+/// will have come back online on the new software.
 ///
 /// This is called after the caller has determined than a particular update
 /// (from one specific version to another) is ongoing, potentially driven by a

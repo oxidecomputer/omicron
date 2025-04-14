@@ -107,8 +107,8 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
-use sagas::demo::CompletingDemoSagas;
 use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
+use sagas::demo::CompletingDemoSagas;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).
@@ -238,7 +238,9 @@ pub struct Nexus {
     tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
 
     /// reports status of pending MGS-managed updates
-    mgs_update_status_rx: watch::Receiver<nexus_mgs_updates::DriverStatus>,
+    // This will be used in the future to expose driver state via the internal
+    // API.
+    _mgs_update_status_rx: watch::Receiver<nexus_mgs_updates::DriverStatus>,
 }
 
 impl Nexus {
@@ -396,9 +398,8 @@ impl Nexus {
             mgs_resolver.monitor(),
             DEFAULT_RETRY_TIMEOUT,
         );
-        let mgs_update_status_rx = mgs_update_driver.status_rx();
-        let _mgs_driver_task =
-            tokio::spawn(async move { mgs_update_driver.run().await });
+        let _mgs_update_status_rx = mgs_update_driver.status_rx();
+        let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
         let nexus = Nexus {
             id: config.deployment.id,
@@ -448,7 +449,7 @@ impl Nexus {
                 CompletingDemoSagas::new(),
             )),
             tuf_artifact_replication_tx,
-            mgs_update_status_rx,
+            _mgs_update_status_rx,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
