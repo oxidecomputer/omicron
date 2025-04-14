@@ -71,11 +71,11 @@ enum DeliveryWaitStatus {
     Failed(Uuid, String),
     /// we gave up because the update stopped making forward progress for too
     /// long
-    StuckUpdating(Uuid), // XXX-dap more details
+    StuckUpdating(Uuid, Duration),
 }
 
 #[derive(Debug, Error)]
-enum DeliveryWaitError {
+pub enum DeliveryWaitError {
     #[error("error communicating with MGS")]
     MgsCommunication(#[from] GatewayClientError),
 }
@@ -130,11 +130,13 @@ async fn wait_for_delivery(
                                 log,
                                 "progress timeout";
                                 "status" => ?status,
-                                // XXX-dap formatting
-                                "timeout" => ?PROGRESS_TIMEOUT,
+                                "timeout_ms" => PROGRESS_TIMEOUT.as_millis(),
                             );
 
-                            return Ok(DeliveryWaitStatus::StuckUpdating(id));
+                            return Ok(DeliveryWaitStatus::StuckUpdating(
+                                id,
+                                PROGRESS_TIMEOUT,
+                            ));
                         }
                     } else {
                         last_progress = Instant::now();
@@ -182,7 +184,7 @@ pub enum ApplyUpdateResult {
     ResetFailed(String),
     /// we gave up during the "updating" phase because it stopped making
     /// progress
-    StuckUpdating(Uuid), // XXX-dap more details
+    StuckUpdating(Uuid, Duration),
     /// the SP unexpectedly behaved as though our update had never started
     Lost,
 }
@@ -201,21 +203,12 @@ pub enum ApplyUpdateError {
     NoMgsBackends,
     #[error("failed to fetch artifact")]
     FetchArtifact(#[from] ArtifactCacheError),
+    #[error("failed waiting for artifact delivery")]
+    DeliveryWaitError(#[from] DeliveryWaitError),
     #[error("error communicating with MGS")]
-    MgsCommunication(#[from] GatewayClientError),
+    UpdateStartError(GatewayClientError),
     #[error("waiting for update to finish")]
     WaitError(PrecheckError),
-}
-
-impl From<DeliveryWaitError> for ApplyUpdateError {
-    fn from(value: DeliveryWaitError) -> Self {
-        match value {
-            DeliveryWaitError::MgsCommunication(error) => {
-                // XXX-dap add more context?
-                ApplyUpdateError::MgsCommunication(error)
-            }
-        }
-    }
 }
 
 /// Makes one complete attempt to apply the specified software update to an SP
@@ -339,7 +332,7 @@ pub(crate) async fn apply_update(
             let message = chain.to_string();
             if !message.contains("update still in progress") {
                 error!(log, "failed to start update"; chain);
-                return Err(ApplyUpdateError::MgsCommunication(error));
+                return Err(ApplyUpdateError::UpdateStartError(error));
             }
 
             // There's another one ongoing.  That's fine.
@@ -356,8 +349,8 @@ pub(crate) async fn apply_update(
         DeliveryWaitStatus::Aborted(id) => {
             return Ok(ApplyUpdateResult::Aborted(id));
         }
-        DeliveryWaitStatus::StuckUpdating(id) => {
-            return Ok(ApplyUpdateResult::StuckUpdating(id));
+        DeliveryWaitStatus::StuckUpdating(id, timeout) => {
+            return Ok(ApplyUpdateResult::StuckUpdating(id, timeout));
         }
         DeliveryWaitStatus::Failed(id, message) => {
             return Ok(ApplyUpdateResult::Failed(id, message));
