@@ -145,7 +145,7 @@ impl MgsUpdateDriver {
                 maybe_update = self.requests_rx.changed() => {
                     match maybe_update {
                         Ok(()) => {
-                            self.evaluate_config();
+                            self.on_config_changed();
                         }
                         Err(error) => {
                             info!(
@@ -167,7 +167,7 @@ impl MgsUpdateDriver {
                 maybe_work_done = self.futures.next(),
                     if !self.futures.is_empty() => {
                     match maybe_work_done {
-                        Some(result) => self.attempt_done(result),
+                        Some(result) => self.on_attempt_done(result),
                         None => {
                             error!(
                                 &self.log,
@@ -184,7 +184,7 @@ impl MgsUpdateDriver {
                     match maybe_timer_expired {
                         Some(expired) => {
                             let baseboard_id = expired.into_inner();
-                            self.retry(baseboard_id);
+                            self.on_retry_timer_expired(baseboard_id);
                         },
                         None => {
                             error!(
@@ -200,7 +200,7 @@ impl MgsUpdateDriver {
     }
 
     /// Examines the configuration and decides what work needs to be kicked off.
-    fn evaluate_config(&mut self) {
+    fn on_config_changed(&mut self) {
         let new_config = self.requests_rx.borrow_and_update();
         let mut work_items = Vec::new();
         for (baseboard_id, request) in &*new_config {
@@ -251,7 +251,7 @@ impl MgsUpdateDriver {
                 Entry::Vacant(_) => {
                     work_items.push((
                         baseboard_id.clone(),
-                        Self::dispatch_update(
+                        UpdateAttempt::start(
                             self.log.clone(),
                             self.artifacts.clone(),
                             self.mgs_rx.clone(),
@@ -287,21 +287,19 @@ impl MgsUpdateDriver {
             }
         });
 
-        // Actually kick off the attempts we collected above.
+        // Record that we've kicked off the attempts started above.
         for (baseboard_id, work) in work_items {
-            self.do_dispatch(baseboard_id.clone(), work);
+            self.record_attempt_started(baseboard_id.clone(), work);
         }
     }
 
-    fn do_dispatch(
+    /// Invoked when an update attempt may have been started
+    fn record_attempt_started(
         &mut self,
         baseboard_id: Arc<BaseboardId>,
-        what: Option<(
-            InProgressUpdate,
-            BoxFuture<'static, UpdateAttemptResult>,
-        )>,
+        what: Option<UpdateAttempt>,
     ) {
-        if let Some((in_progress, future)) = what {
+        if let Some(UpdateAttempt { in_progress, future }) = what {
             self.status_tx.send_modify(|driver_status| {
                 driver_status.in_progress.insert(
                     baseboard_id.clone(),
@@ -318,14 +316,138 @@ impl MgsUpdateDriver {
         }
     }
 
-    fn dispatch_update(
+    /// Invoked when an in-progress update attempt has completed.
+    fn on_attempt_done(&mut self, result: UpdateAttemptResult) {
+        // Load the in-progress state and generate a CompletedAttempt status for
+        // this attempt.
+        let in_progress = self
+            .in_progress
+            .remove(&result.baseboard_id)
+            .expect("in-progress record for attempt that just completed");
+        let request = &in_progress.request;
+        let completed = CompletedAttempt {
+            time_started: in_progress.time_started,
+            time_done: chrono::Utc::now(),
+            elapsed: in_progress.instant_started.elapsed(),
+            request: request.clone(),
+            result: match &result.result {
+                Ok(success) => Ok(success.clone()),
+                Err(error) => Err(InlineErrorChain::new(error).to_string()),
+            },
+        };
+
+        // Log the result.
+        match &completed.result {
+            Ok(success) => {
+                info!(
+                    &in_progress.log,
+                    "update attempt done";
+                    "elapsed_millis" => completed.elapsed.as_millis(),
+                    "result" => ?success,
+                );
+            }
+            Err(error) => {
+                info!(
+                    &in_progress.log,
+                    "update attempt done";
+                    "elapsed_millis" => completed.elapsed.as_millis(),
+                    "error" => error,
+                )
+            }
+        };
+
+        // Regardless of the result, set a timer for retrying.  Our job is to
+        // ensure reality matches our configuration, so even if we succeeded, we
+        // want to check again in a little while to see if anything has changed.
+        let baseboard_id = completed.request.baseboard_id.clone();
+        let retry_timeout = self.retry_timeout;
+        let status_time_next = chrono::Utc::now() + retry_timeout;
+        let delay_key = self.delayq.insert(baseboard_id.clone(), retry_timeout);
+        self.waiting.insert(
+            baseboard_id.clone(),
+            WaitingAttempt { delay_key, request: request.clone() },
+        );
+
+        // Update the overall status to reflect all these changes.
+        self.status_tx.send_modify(|driver_status| {
+            // Remove this item from the list of in-progress attempts.
+            let found = driver_status.in_progress.remove(&baseboard_id);
+            assert!(found.is_some());
+
+            // Add this item to the list of requests waiting to be retried.
+            driver_status.waiting.insert(
+                baseboard_id.clone(),
+                WaitingStatus { next_attempt_time: status_time_next },
+            );
+
+            // Report this recently-completed attempt.
+            // This is a ringbuffer of recent attempts.  Make space if we're
+            // already at the capacity.
+            let recent = &mut driver_status.recent;
+            if recent.len() == recent.capacity() {
+                let _ = recent.pop_front();
+            }
+            recent.push_back(completed);
+        });
+    }
+
+    /// Invoked when the timer fires to retry a particular request.
+    fn on_retry_timer_expired(&mut self, baseboard_id: Arc<BaseboardId>) {
+        // Remove this request from the set of requests waiting to be retried.
+        assert!(self.waiting.remove(&baseboard_id).is_some());
+        // Update the external status to reflect that.
+        self.status_tx.send_modify(|driver_status| {
+            driver_status.waiting.remove(&baseboard_id);
+        });
+
+        // Find the current configuration for this request.
+        //
+        // It generally ought to be here because if it got removed, we'd have
+        // gotten a notification and cancelled the retry timer.  But it's
+        // conceivable that the retry timer fired, then it was removed from the
+        // configuration (concurrently), and we just noticed that before having
+        // processed the change notification.
+        let requests = self.requests_rx.borrow();
+        let Some(my_request) = requests.get(&baseboard_id) else {
+            warn!(
+                &self.log,
+                "attempted retry of baseboard whose update is no longer \
+                 configured";
+                 &*baseboard_id
+            );
+            return;
+        };
+
+        // Dispatch another attempt.
+        info!(
+            &self.log,
+            "dispatching new attempt (retry timer expired)"; &*baseboard_id
+        );
+        let work = UpdateAttempt::start(
+            self.log.clone(),
+            self.artifacts.clone(),
+            self.mgs_rx.clone(),
+            my_request,
+            self.status_tx.clone(),
+        );
+        drop(requests);
+        self.record_attempt_started(baseboard_id.clone(), work);
+    }
+}
+
+struct UpdateAttempt {
+    in_progress: InProgressUpdate,
+    future: BoxFuture<'static, UpdateAttemptResult>,
+}
+
+impl UpdateAttempt {
+    pub fn start(
         log: slog::Logger,
         artifacts: Arc<ArtifactCache>,
         mgs_rx: watch::Receiver<AllBackends>,
         request: &PendingMgsUpdate,
         status_tx: watch::Sender<DriverStatus>,
-    ) -> Option<(InProgressUpdate, BoxFuture<'static, UpdateAttemptResult>)>
-    {
+    ) -> Option<UpdateAttempt> {
         let update_id = Uuid::new_v4();
         let log =
             log.new(o!(request.clone(), "update_id" => update_id.to_string()));
@@ -421,109 +543,6 @@ impl MgsUpdateDriver {
         .boxed();
 
         Some((in_progress, future))
-    }
-
-    fn attempt_done(&mut self, result: UpdateAttemptResult) {
-        let in_progress = self
-            .in_progress
-            .remove(&result.baseboard_id)
-            .expect("in-progress record for attempt that just completed");
-
-        let request = &in_progress.request;
-
-        let completed = CompletedAttempt {
-            time_started: in_progress.time_started,
-            time_done: chrono::Utc::now(),
-            elapsed: in_progress.instant_started.elapsed(),
-            request: request.clone(),
-            result: match &result.result {
-                Ok(success) => Ok(success.clone()),
-                Err(error) => Err(InlineErrorChain::new(error).to_string()),
-            },
-        };
-
-        match &completed.result {
-            Ok(success) => {
-                info!(
-                    &in_progress.log,
-                    "update attempt done";
-                    "elapsed_millis" => completed.elapsed.as_millis(),
-                    "result" => ?success,
-                );
-            }
-            Err(error) => {
-                info!(
-                    &in_progress.log,
-                    "update attempt done";
-                    "elapsed_millis" => completed.elapsed.as_millis(),
-                    "error" => error,
-                )
-            }
-        };
-
-        // Regardless of the result, set a timer for retrying.  Our job is to
-        // ensure reality matches our configuration, so even if we succeeded, we
-        // want to check again in a little while to see if anything changed.
-        let baseboard_id = completed.request.baseboard_id.clone();
-        let retry_timeout = self.retry_timeout;
-        let status_time_next = chrono::Utc::now() + retry_timeout;
-        let delay_key = self.delayq.insert(baseboard_id.clone(), retry_timeout);
-        self.waiting.insert(
-            baseboard_id.clone(),
-            WaitingAttempt { delay_key, request: request.clone() },
-        );
-
-        self.status_tx.send_modify(|driver_status| {
-            let recent = &mut driver_status.recent;
-            if recent.len() == recent.capacity() {
-                let _ = recent.pop_front();
-            }
-            recent.push_back(completed);
-
-            let found = driver_status.in_progress.remove(&baseboard_id);
-            assert!(found.is_some());
-
-            driver_status.waiting.insert(
-                baseboard_id.clone(),
-                WaitingStatus { next_attempt_time: status_time_next },
-            );
-        });
-    }
-
-    fn retry(&mut self, baseboard_id: Arc<BaseboardId>) {
-        assert!(self.waiting.remove(&baseboard_id).is_some());
-        self.status_tx.send_modify(|driver_status| {
-            driver_status.waiting.remove(&baseboard_id);
-        });
-
-        let requests = self.requests_rx.borrow();
-        let Some(my_request) = requests.get(&baseboard_id) else {
-            // This case is unlikely.  We get notified when the configuration
-            // changes and we remove entries from the delayq when that happens.
-            // But it's conceivable that we get these events in a different
-            // order than they happened.
-            warn!(
-                &self.log,
-                "attempted retry of baseboard whose update is no longer \
-                 configured";
-                 &*baseboard_id
-            );
-            return;
-        };
-
-        info!(
-            &self.log,
-            "dispatching new attempt (retry timer expired)"; &*baseboard_id
-        );
-        let work = Self::dispatch_update(
-            self.log.clone(),
-            self.artifacts.clone(),
-            self.mgs_rx.clone(),
-            my_request,
-            self.status_tx.clone(),
-        );
-        drop(requests);
-        self.do_dispatch(baseboard_id.clone(), work);
     }
 }
 
