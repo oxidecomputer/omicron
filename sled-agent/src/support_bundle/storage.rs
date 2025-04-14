@@ -51,7 +51,12 @@ use zip::result::ZipError;
 // /pool/ext/$(POOL_UUID)/crypt/$(DATASET_TYPE)/$(BUNDLE_UUID)/bundle.zip
 //                              |               | This is a per-bundle nested dataset
 //                              | This is a Debug dataset
-const BUNDLE_FILE_NAME: &str = "bundle.zip";
+//
+// NOTE: The "DumpSetupWorker" has been explicitly configured to ignore these files, so they are
+// not removed. If the files used here change in the future, DumpSetupWorker should also be
+// updated.
+pub const BUNDLE_FILE_NAME: &str = "bundle.zip";
+pub const BUNDLE_TMP_FILE_NAME_SUFFIX: &str = "bundle.zip.tmp";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -641,7 +646,7 @@ impl<'a> SupportBundleManager<'a> {
             .await?;
         let support_bundle_path = support_bundle_dir.join(BUNDLE_FILE_NAME);
         let support_bundle_path_tmp = support_bundle_dir.join(format!(
-            "bundle-{}.tmp",
+            "{}-{BUNDLE_TMP_FILE_NAME_SUFFIX}",
             thread_rng()
                 .sample_iter(Alphanumeric)
                 .take(6)

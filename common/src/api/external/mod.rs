@@ -2717,7 +2717,7 @@ pub struct LldpNeighbor {
     pub system_description: Option<String>,
 
     /// The LLDP management IP(s) advertised by the neighbor
-    pub management_ip: Vec<oxnet::IpNet>,
+    pub management_ip: Vec<lldp_protocol::types::ManagementAddress>,
 }
 
 impl SimpleIdentity for LldpNeighbor {
