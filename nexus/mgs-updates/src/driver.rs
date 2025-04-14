@@ -23,7 +23,6 @@ use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
-use std::collections::btree_map::Entry;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -199,105 +198,134 @@ impl MgsUpdateDriver {
 
     /// Examines the configuration and decides what work needs to be kicked off.
     fn on_config_changed(&mut self) {
-        let new_config = self.requests_rx.borrow_and_update();
-        let mut work_items = Vec::new();
-        for (baseboard_id, request) in &*new_config {
-            // If this item is waiting for retry...
-            if let Entry::Occupied(occupied) =
-                self.waiting.entry(baseboard_id.clone())
-            {
-                assert!(!self.in_progress.contains_key(baseboard_id));
-                // If the request has not changed, there's nothing to do for
-                // this request.
-                let WaitingAttempt { delay_key, request: old_request } =
-                    occupied.get();
-                if request == old_request {
-                    continue;
-                }
+        // We'll take two passes:
+        //
+        // 1. Look at each request in the configuration and decide what to do
+        //    with each one.
+        // 2. Take the appropriate action for each one.
+        //
+        // Importantly, we can drop the config (unblocking the "watch" channel
+        // and also dropping a shared reference on `self`) after pass 1.
 
-                // The request has changed.  Stop waiting for retry.
-                // We'll fall through and kick off a new update attempt below.
-                info!(&
-                    self.log,
-                    "configuration changed while request was waiting for \
-                     retry";
-                    &*baseboard_id,
-                );
+        let (to_stop_waiting, to_dispatch) = {
+            let new_config = self.requests_rx.borrow_and_update();
 
-                self.delayq.remove(&delay_key);
-                occupied.remove();
-                self.status_tx.send_modify(|driver_status| {
-                    driver_status.waiting.remove(baseboard_id);
-                });
-            }
+            // Stop waiting to retry any requests whose config has changed or
+            // been removed,
+            let to_stop_waiting: Vec<_> = self
+                .waiting
+                .iter()
+                .filter_map(|(baseboard_id, waiting)| {
+                    match new_config.get(baseboard_id) {
+                        None => true,
+                        Some(new_request) => *new_request != waiting.request,
+                    }
+                    .then(|| baseboard_id.clone())
+                })
+                .collect();
 
-            match self.in_progress.entry(baseboard_id.clone()) {
-                // If we're currently attempting an update for this baseboard,
-                // we don't do anything right now.  When that attempt finishes,
-                // we'll re-evaluate what to do.
-                Entry::Occupied(_) => {
-                    info!(
-                        &self.log,
-                        "update requested for baseboard with update already \
-                         in progress";
-                        &baseboard_id,
-                        "request" => ?request,
-                    );
-                }
-                // We're not doing an update nor waiting for a retry.  Kick off
-                // a new attempt.
-                Entry::Vacant(_) => {
-                    work_items.push((
-                        baseboard_id.clone(),
-                        UpdateAttempt::start(
-                            self.log.clone(),
-                            self.artifacts.clone(),
-                            self.mgs_rx.clone(),
-                            request.clone(),
-                            self.status_tx.clone(),
-                        ),
-                    ));
-                }
-            }
+            // Dispatch new requests if either:
+            //
+            // - we're waiting to retry and the config has changed
+            //   (overlaps with the case above)
+            // - we're not waiting to retry and not already running an attempt
+            let to_dispatch: Vec<_> = new_config
+                .iter()
+                .filter(|(baseboard_id, new_request)| {
+                    if let Some(waiting) = self.waiting.get(*baseboard_id) {
+                        **new_request != waiting.request
+                    } else {
+                        !self.in_progress.contains_key(*baseboard_id)
+                    }
+                })
+                .map(|(a, b)| (a.clone(), b.clone()))
+                .collect();
+
+            (to_stop_waiting, to_dispatch)
+        };
+
+        // Process the requests for which we've decided to stop waiting.
+        for baseboard_id in &to_stop_waiting {
+            // Update our bookkeeping.
+            // unwrap(): we filtered on this condition above.
+            let waiting = self.waiting.remove(baseboard_id).unwrap();
+
+            // Stop tracking this timeout.
+            self.delayq.remove(&waiting.delay_key);
         }
-
-        // Collect the set of waiting attempts that are no longer part of the
-        // configuration.  We will stop waiting on these.
-        let do_stop: Vec<_> = self
-            .waiting
-            .keys()
-            .filter(|b| !new_config.contains_key(b))
-            .cloned()
-            .collect();
-
-        // Drop the new configuration because we can't have it borrowed while we
-        // invoke the functions below.
-        drop(new_config);
-
-        // Actually stop waiting to retry the attempts we collected above.
-        for b in &do_stop {
-            let wait_info = self.waiting.remove(b).unwrap();
-            self.delayq.remove(&wait_info.delay_key);
-        }
+        // Update the status to reflect that.
         self.status_tx.send_modify(|driver_status| {
-            for b in do_stop {
-                driver_status.waiting.remove(&b);
+            for baseboard_id in &to_stop_waiting {
+                driver_status.waiting.remove(baseboard_id);
             }
         });
 
-        // Record that we've kicked off the attempts started above.
-        for (baseboard_id, work) in work_items {
-            self.record_attempt_started(baseboard_id.clone(), work);
+        // Now dispatch new update attempts.
+        for (baseboard_id, request) in to_dispatch {
+            self.start_attempt(request);
         }
     }
 
-    /// Invoked when an update attempt may have been started
-    fn record_attempt_started(
-        &mut self,
-        baseboard_id: Arc<BaseboardId>,
-        what: UpdateAttempt,
-    ) {
-        let UpdateAttempt { in_progress, future } = what;
+    fn start_attempt(&mut self, request: PendingMgsUpdate) {
+        assert!(!self.in_progress.contains_key(&baseboard_id));
+
+        let update_id = Uuid::new_v4();
+        let log = self
+            .log
+            .new(o!(request.clone(), "update_id" => update_id.to_string()));
+        info!(&log, "begin update attempt for baseboard");
+
+        let in_progress = InProgressUpdate {
+            log: log.clone(),
+            time_started: chrono::Utc::now(),
+            instant_started: Instant::now(),
+            request: request.clone(),
+        };
+
+        let (sp_update, updater) = match &request.details {
+            nexus_types::deployment::PendingMgsUpdateDetails::Sp { .. } => {
+                let sp_update = SpComponentUpdate {
+                    log: log.clone(),
+                    component: SpComponent::SP_ITSELF,
+                    target_sp_type: request.sp_type,
+                    target_sp_slot: request.slot_id,
+                    // The SP has two firmware slots, but they're aren't
+                    // individually labeled. We always request an update to slot
+                    // 0, which (confusingly in this context) means "the
+                    // inactive slot".
+                    firmware_slot: 0,
+                    update_id,
+                };
+
+                (sp_update, Box::new(ReconfiguratorSpUpdater {}))
+            }
+        };
+
+        let baseboard_id = request.baseboard_id.clone();
+        let status_updater = UpdateAttemptStatusUpdater {
+            tx: self.status_tx.clone(),
+            baseboard_id: baseboard_id.clone(),
+        };
+        let artifacts = self.artifacts.clone();
+        let mgs_rx = self.mgs_rx.clone();
+        let future = async move {
+            let result = apply_update(
+                artifacts,
+                &sp_update,
+                &*updater,
+                mgs_rx,
+                &request,
+                status_updater,
+            )
+            .await;
+            UpdateAttemptResult { baseboard_id: request.baseboard_id, result }
+        }
+        .boxed();
+
+        // Keep track of the work.
+        self.futures.push(future);
+
+        // Update status.
         self.status_tx.send_modify(|driver_status| {
             driver_status.in_progress.insert(
                 baseboard_id.clone(),
@@ -309,8 +337,12 @@ impl MgsUpdateDriver {
             );
         });
 
-        self.in_progress.insert(baseboard_id.clone(), in_progress);
-        self.futures.push(future);
+        // Update our bookkeeping.
+        assert!(
+            self.in_progress
+                .insert(baseboard_id.clone(), in_progress)
+                .is_none()
+        );
     }
 
     /// Invoked when an in-progress update attempt has completed.
@@ -425,82 +457,7 @@ impl MgsUpdateDriver {
             &self.log,
             "dispatching new attempt (retry timer expired)"; &*baseboard_id
         );
-        let work = UpdateAttempt::start(
-            self.log.clone(),
-            self.artifacts.clone(),
-            self.mgs_rx.clone(),
-            my_request,
-            self.status_tx.clone(),
-        );
-        self.record_attempt_started(baseboard_id.clone(), work);
-    }
-}
-
-struct UpdateAttempt {
-    in_progress: InProgressUpdate,
-    future: BoxFuture<'static, UpdateAttemptResult>,
-}
-
-impl UpdateAttempt {
-    pub fn start(
-        log: slog::Logger,
-        artifacts: Arc<ArtifactCache>,
-        mgs_rx: watch::Receiver<AllBackends>,
-        request: PendingMgsUpdate,
-        status_tx: watch::Sender<DriverStatus>,
-    ) -> UpdateAttempt {
-        let update_id = Uuid::new_v4();
-        let log =
-            log.new(o!(request.clone(), "update_id" => update_id.to_string()));
-        info!(&log, "update requested for baseboard");
-
-        let in_progress = InProgressUpdate {
-            log: log.clone(),
-            time_started: chrono::Utc::now(),
-            instant_started: Instant::now(),
-            request: request.clone(),
-        };
-
-        let (sp_update, updater) = match &request.details {
-            nexus_types::deployment::PendingMgsUpdateDetails::Sp { .. } => {
-                let sp_update = SpComponentUpdate {
-                    log: log.clone(),
-                    component: SpComponent::SP_ITSELF,
-                    target_sp_type: request.sp_type,
-                    target_sp_slot: request.slot_id,
-                    // The SP has two firmware slots, but they're aren't
-                    // individually labeled. We always request an update to slot
-                    // 0, which (confusingly in this context) means "the
-                    // inactive slot".
-                    firmware_slot: 0,
-                    update_id,
-                };
-
-                (sp_update, Box::new(ReconfiguratorSpUpdater {}))
-            }
-        };
-
-        let baseboard_id = request.baseboard_id.clone();
-        let status_updater = UpdateAttemptStatusUpdater {
-            tx: status_tx,
-            baseboard_id: baseboard_id.clone(),
-        };
-        let update = request.clone();
-        let future = async move {
-            let result = apply_update(
-                artifacts,
-                &sp_update,
-                &*updater,
-                mgs_rx,
-                &update,
-                status_updater,
-            )
-            .await;
-            UpdateAttemptResult { baseboard_id, result }
-        }
-        .boxed();
-
-        UpdateAttempt { in_progress, future }
+        self.start_attempt(my_request);
     }
 }
 

@@ -1056,6 +1056,12 @@ impl PendingMgsUpdates {
         PendingMgsUpdates { by_baseboard: BTreeMap::new() }
     }
 
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (&Arc<BaseboardId>, &PendingMgsUpdate)> {
+        self.into_iter()
+    }
+
     pub fn len(&self) -> usize {
         self.by_baseboard.len()
     }
