@@ -15,6 +15,8 @@ use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use gateway_client::SpComponent;
+use id_map::IdMap;
+use id_map::IdMappable;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::inventory::BaseboardId;
@@ -54,7 +56,8 @@ const N_RECENT_COMPLETIONS: usize = 16;
 ///     we'll wait for that one to complete.
 ///   - If the process appears to be stuck (whether this driver is running it or
 ///     a different one is), it will be aborted.  This is really only intended
-///     to catch pathological cases like a partitioned Nexus.
+///     to catch pathological cases like a partitioned Nexus or a failure of the
+///     MGS through which we're sending the update image.
 ///   - Once the update attempt completes, regardless of the outcome, it will be
 ///     tried again later.
 /// - If an update is ongoing when it gets removed from the channel, it is *not*
@@ -90,10 +93,10 @@ pub struct MgsUpdateDriver {
     delayq: DelayQueue<Arc<BaseboardId>>,
 
     /// tracks update attempts that are in-progress right now
-    in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdate>,
+    in_progress: IdMap<InProgressUpdate>,
     /// tracks update attempts that are not running right now
     /// (but waiting for a retry)
-    waiting: BTreeMap<Arc<BaseboardId>, WaitingAttempt>,
+    waiting: IdMap<WaitingAttempt>,
 }
 
 impl MgsUpdateDriver {
@@ -119,8 +122,8 @@ impl MgsUpdateDriver {
             status_tx,
             futures: FuturesUnordered::new(),
             delayq: DelayQueue::new(),
-            in_progress: BTreeMap::new(),
-            waiting: BTreeMap::new(),
+            in_progress: IdMap::new(),
+            waiting: IdMap::new(),
         }
     }
 
@@ -215,7 +218,9 @@ impl MgsUpdateDriver {
             let to_stop_waiting: Vec<_> = self
                 .waiting
                 .iter()
-                .filter_map(|(baseboard_id, waiting)| {
+                .filter_map(|waiting| {
+                    let baseboard_id =
+                        &waiting.internal_request.request.baseboard_id;
                     match new_config.get(baseboard_id) {
                         None => true,
                         Some(new_request) => {
@@ -351,11 +356,7 @@ impl MgsUpdateDriver {
         });
 
         // Update our bookkeeping.
-        assert!(
-            self.in_progress
-                .insert(baseboard_id.clone(), in_progress)
-                .is_none()
-        );
+        assert!(self.in_progress.insert(in_progress).is_none());
     }
 
     /// Invoked when an in-progress update attempt has completed.
@@ -410,10 +411,7 @@ impl MgsUpdateDriver {
         let retry_timeout = self.retry_timeout;
         let status_time_next = chrono::Utc::now() + retry_timeout;
         let delay_key = self.delayq.insert(baseboard_id.clone(), retry_timeout);
-        self.waiting.insert(
-            baseboard_id.clone(),
-            WaitingAttempt { delay_key, internal_request },
-        );
+        self.waiting.insert(WaitingAttempt { delay_key, internal_request });
 
         // Update the overall status to reflect all these changes.
         self.status_tx.send_modify(|driver_status| {
@@ -502,6 +500,13 @@ struct InProgressUpdate {
     internal_request: InternalRequest,
 }
 
+impl IdMappable for InProgressUpdate {
+    type Id = Arc<BaseboardId>;
+    fn id(&self) -> Self::Id {
+        self.internal_request.request.baseboard_id.clone()
+    }
+}
+
 /// internal result of a completed update attempt
 struct UpdateAttemptResult {
     baseboard_id: Arc<BaseboardId>,
@@ -512,6 +517,19 @@ struct UpdateAttemptResult {
 struct WaitingAttempt {
     delay_key: delay_queue::Key,
     internal_request: InternalRequest,
+}
+
+impl WaitingAttempt {
+    fn baseboard_id(&self) -> &Arc<BaseboardId> {
+        &self.internal_request.request.baseboard_id
+    }
+}
+
+impl IdMappable for WaitingAttempt {
+    type Id = Arc<BaseboardId>;
+    fn id(&self) -> Self::Id {
+        self.baseboard_id().clone()
+    }
 }
 
 /// Interface used by update attempts to update just their part of the overall
