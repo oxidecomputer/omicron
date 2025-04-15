@@ -3899,6 +3899,12 @@
           "$ref": "#/components/schemas/BlueprintZoneConfig"
         }
       },
+      "IdMapPendingMgsUpdate": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/PendingMgsUpdate"
+        }
+      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -4845,10 +4851,7 @@
         "type": "object",
         "properties": {
           "by_baseboard": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/PendingMgsUpdate"
-            }
+            "$ref": "#/components/schemas/IdMapPendingMgsUpdate"
           }
         },
         "required": [
