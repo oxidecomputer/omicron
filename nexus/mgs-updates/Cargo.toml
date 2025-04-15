@@ -7,12 +7,23 @@ edition = "2021"
 workspace = true
 
 [dependencies]
+chrono.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
+internal-dns-resolver.workspace = true
+internal-dns-types.workspace = true
+omicron-common.workspace = true
+nexus-types.workspace = true
+qorb.workspace = true
+repo-depot-client.workspace = true
 reqwest.workspace = true
+sha2.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
+tufaceous-artifact.workspace = true
 uuid.workspace = true
 
 omicron-workspace-hack.workspace = true
