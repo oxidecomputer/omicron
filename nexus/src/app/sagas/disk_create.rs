@@ -16,7 +16,6 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
-use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::VolumeUuid;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
@@ -837,6 +836,7 @@ pub(crate) mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
+    use omicron_common::disk::DatasetKind;
     use omicron_sled_agent::sim::SledAgent;
     use uuid::Uuid;
 
