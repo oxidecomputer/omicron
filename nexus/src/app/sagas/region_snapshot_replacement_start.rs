@@ -1258,8 +1258,8 @@ pub(crate) mod test {
 
         assert_eq!(region_allocations(&datastore).await, 0);
 
-        let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+        let disk_test =
+            DiskTestBuilder::new(cptestctx).with_zpool_count(4).build().await;
 
         assert_eq!(region_allocations(&datastore).await, 0);
 
