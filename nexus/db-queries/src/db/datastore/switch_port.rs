@@ -1214,7 +1214,7 @@ async fn do_switch_port_settings_create(
     let mut link_config = Vec::with_capacity(params.links.len());
     let mut tx_eq_config = Vec::with_capacity(params.links.len());
 
-    for (link_name, c) in &params.links {
+    for c in &params.links {
         let lldp_link_config = LldpLinkConfig::new(
             c.lldp.enabled,
             c.lldp.link_name.clone(),
@@ -1244,7 +1244,7 @@ async fn do_switch_port_settings_create(
         link_config.push(SwitchPortLinkConfig::new(
             psid,
             lldp_config_id,
-            link_name.clone(),
+            c.link_name.to_string(),
             c.mtu,
             c.fec.map(|fec| fec.into()),
             c.speed.into(),
@@ -1278,10 +1278,10 @@ async fn do_switch_port_settings_create(
 
     let mut interface_config = Vec::with_capacity(params.interfaces.len());
     let mut vlan_interface_config = Vec::new();
-    for (interface_name, i) in &params.interfaces {
+    for i in &params.interfaces {
         let ifx_config = SwitchInterfaceConfig::new(
             psid,
-            interface_name.clone(),
+            i.link_name.to_string(),
             i.v6_enabled,
             i.kind.into(),
         );
@@ -1309,11 +1309,11 @@ async fn do_switch_port_settings_create(
 
     let mut route_config = Vec::with_capacity(params.routes.len());
 
-    for (interface_name, r) in &params.routes {
+    for r in &params.routes {
         for route in &r.routes {
             route_config.push(SwitchPortRouteConfig::new(
                 psid,
-                interface_name.clone(),
+                r.link_name.to_string(),
                 route.dst.into(),
                 route.gw.into(),
                 route.vid.map(Into::into),
@@ -1333,7 +1333,7 @@ async fn do_switch_port_settings_create(
         BTreeMap::new();
 
     let mut bgp_peer_config = Vec::new();
-    for (interface_name, peer_config) in &params.bgp_peers {
+    for peer_config in &params.bgp_peers {
         for p in &peer_config.peers {
             peer_by_addr.insert(p.addr, &p);
             use nexus_db_schema::schema::bgp_config;
@@ -1376,7 +1376,7 @@ async fn do_switch_port_settings_create(
                     .into_iter()
                     .map(|x| SwitchPortBgpPeerConfigAllowImport {
                         port_settings_id: id,
-                        interface_name: interface_name.clone(),
+                        interface_name: peer_config.link_name.to_string(),
                         addr: p.addr.into(),
                         prefix: x.into(),
                     })
@@ -1395,7 +1395,7 @@ async fn do_switch_port_settings_create(
                     .into_iter()
                     .map(|x| SwitchPortBgpPeerConfigAllowExport {
                         port_settings_id: id,
-                        interface_name: interface_name.clone(),
+                        interface_name: peer_config.link_name.to_string(),
                         addr: p.addr.into(),
                         prefix: x.into(),
                     })
@@ -1415,7 +1415,7 @@ async fn do_switch_port_settings_create(
                     .into_iter()
                     .map(|x| SwitchPortBgpPeerConfigCommunity {
                         port_settings_id: id,
-                        interface_name: interface_name.clone(),
+                        interface_name: peer_config.link_name.to_string(),
                         addr: p.addr.into(),
                         community: x.into(),
                     })
@@ -1430,7 +1430,7 @@ async fn do_switch_port_settings_create(
             bgp_peer_config.push(SwitchPortBgpPeerConfig::new(
                 psid,
                 bgp_config_id,
-                interface_name.clone(),
+                peer_config.link_name.to_string(),
                 p,
             ));
         }
@@ -1482,7 +1482,7 @@ async fn do_switch_port_settings_create(
 
     let mut address_config = Vec::new();
     use nexus_db_schema::schema::address_lot;
-    for (interface_name, a) in &params.addresses {
+    for a in &params.addresses {
         for address in &a.addresses {
             let address_lot_id = match &address.address_lot {
                 NameOrId::Id(id) => address_lot::table
@@ -1539,7 +1539,7 @@ async fn do_switch_port_settings_create(
                 block.id,
                 rsvd_block.id,
                 address.address.into(),
-                interface_name.clone(),
+                a.link_name.to_string(),
                 address.vlan_id,
             ));
         }
@@ -1791,7 +1791,7 @@ mod test {
         NameOrId,
     };
     use omicron_test_utils::dev;
-    use std::collections::HashMap;
+    use std::str::FromStr;
     use uuid::Uuid;
 
     #[tokio::test]
@@ -1845,37 +1845,36 @@ mod test {
                 geometry: SwitchPortGeometry::Qsfp28x1,
             },
             groups: Vec::new(),
-            links: HashMap::new(),
-            interfaces: HashMap::new(),
-            routes: HashMap::new(),
-            bgp_peers: HashMap::from([(
-                "phy0".into(),
-                BgpPeerConfig {
-                    peers: vec![BgpPeer {
-                        bgp_config: NameOrId::Name(
-                            "test-bgp-config".parse().unwrap(),
-                        ),
-                        interface_name: "qsfp0".into(),
-                        addr: "192.168.1.1".parse().unwrap(),
-                        hold_time: 0,
-                        idle_hold_time: 0,
-                        delay_open: 0,
-                        connect_retry: 0,
-                        keepalive: 0,
-                        remote_asn: None,
-                        min_ttl: None,
-                        md5_auth_key: None,
-                        multi_exit_discriminator: None,
-                        communities: Vec::new(),
-                        local_pref: None,
-                        enforce_first_as: false,
-                        allowed_export: ImportExportPolicy::NoFiltering,
-                        allowed_import: ImportExportPolicy::NoFiltering,
-                        vlan_id: None,
-                    }],
-                },
-            )]),
-            addresses: HashMap::new(),
+            links: vec![],
+            interfaces: vec![],
+            routes: vec![],
+            bgp_peers: vec![BgpPeerConfig {
+                link_name: Name::from_str("phy0")
+                    .expect("phy0 should be a valid link name"),
+                peers: vec![BgpPeer {
+                    bgp_config: NameOrId::Name(
+                        "test-bgp-config".parse().unwrap(),
+                    ),
+                    interface_name: "qsfp0".into(),
+                    addr: "192.168.1.1".parse().unwrap(),
+                    hold_time: 0,
+                    idle_hold_time: 0,
+                    delay_open: 0,
+                    connect_retry: 0,
+                    keepalive: 0,
+                    remote_asn: None,
+                    min_ttl: None,
+                    md5_auth_key: None,
+                    multi_exit_discriminator: None,
+                    communities: Vec::new(),
+                    local_pref: None,
+                    enforce_first_as: false,
+                    allowed_export: ImportExportPolicy::NoFiltering,
+                    allowed_import: ImportExportPolicy::NoFiltering,
+                    vlan_id: None,
+                }],
+            }],
+            addresses: vec![],
         };
 
         let settings_result = datastore

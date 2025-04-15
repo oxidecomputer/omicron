@@ -4,6 +4,8 @@
 
 //! Integration tests for operating on Ports
 
+use std::str::FromStr;
+
 use http::StatusCode;
 use http::method::Method;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -16,11 +18,11 @@ use nexus_types::external_api::params::{
     SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::views::Rack;
-use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::{
     self, AddressLotKind, BgpPeer, IdentityMetadataCreateParams, LinkFec,
     LinkSpeed, NameOrId, SwitchPort, SwitchPortSettingsView,
 };
+use omicron_common::api::external::{ImportExportPolicy, Name};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -113,57 +115,53 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             name: "portofino".parse().unwrap(),
             description: "just a port".into(),
         });
+
+    let link_name =
+        Name::from_str("phy0").expect("phy0 should be a valid name");
+
     // links
-    settings.links.insert(
-        "phy0".into(),
-        LinkConfigCreate {
-            mtu: 4700,
-            lldp: LldpLinkConfigCreate {
-                enabled: true,
-                link_name: Some("Link Name".into()),
-                link_description: Some("link_ Dscription".into()),
-                chassis_id: Some("Chassis ID".into()),
-                system_name: Some("System Name".into()),
-                system_description: Some("System description".into()),
-                management_ip: None,
-            },
-            fec: Some(LinkFec::None),
-            speed: LinkSpeed::Speed100G,
-            autoneg: false,
-            tx_eq: None,
+    settings.links.push(LinkConfigCreate {
+        link_name: link_name.clone(),
+        mtu: 4700,
+        lldp: LldpLinkConfigCreate {
+            enabled: true,
+            link_name: Some("Link Name".into()),
+            link_description: Some("link_ Dscription".into()),
+            chassis_id: Some("Chassis ID".into()),
+            system_name: Some("System Name".into()),
+            system_description: Some("System description".into()),
+            management_ip: None,
         },
-    );
+        fec: Some(LinkFec::None),
+        speed: LinkSpeed::Speed100G,
+        autoneg: false,
+        tx_eq: None,
+    });
     // interfaces
-    settings.interfaces.insert(
-        "phy0".into(),
-        SwitchInterfaceConfigCreate {
-            v6_enabled: true,
-            kind: SwitchInterfaceKind::Primary,
-        },
-    );
+    settings.interfaces.push(SwitchInterfaceConfigCreate {
+        link_name: link_name.clone(),
+        v6_enabled: true,
+        kind: SwitchInterfaceKind::Primary,
+    });
     // routes
-    settings.routes.insert(
-        "phy0".into(),
-        RouteConfig {
-            routes: vec![Route {
-                dst: "1.2.3.0/24".parse().unwrap(),
-                gw: "1.2.3.4".parse().unwrap(),
-                vid: None,
-                rib_priority: None,
-            }],
-        },
-    );
+    settings.routes.push(RouteConfig {
+        link_name: link_name.clone(),
+        routes: vec![Route {
+            dst: "1.2.3.0/24".parse().unwrap(),
+            gw: "1.2.3.4".parse().unwrap(),
+            vid: None,
+            rib_priority: None,
+        }],
+    });
     // addresses
-    settings.addresses.insert(
-        "phy0".into(),
-        AddressConfig {
-            addresses: vec![Address {
-                address: "203.0.113.10/24".parse().unwrap(),
-                vlan_id: None,
-                address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
-            }],
-        },
-    );
+    settings.addresses.push(AddressConfig {
+        link_name: link_name.clone(),
+        addresses: vec![Address {
+            address: "203.0.113.10/24".parse().unwrap(),
+            vlan_id: None,
+            address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
+        }],
+    });
 
     let created: SwitchPortSettingsView = NexusRequest::objects_post(
         client,
@@ -280,31 +278,29 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Update port settings. Should not see conflict.
-    settings.bgp_peers.insert(
-        "phy0".into(),
-        BgpPeerConfig {
-            peers: vec![BgpPeer {
-                bgp_config: NameOrId::Name("as47".parse().unwrap()),
-                interface_name: "phy0".to_string(),
-                addr: "1.2.3.4".parse().unwrap(),
-                hold_time: 6,
-                idle_hold_time: 6,
-                delay_open: 0,
-                connect_retry: 3,
-                keepalive: 2,
-                remote_asn: None,
-                min_ttl: None,
-                md5_auth_key: None,
-                multi_exit_discriminator: None,
-                communities: Vec::new(),
-                local_pref: None,
-                enforce_first_as: false,
-                allowed_export: ImportExportPolicy::NoFiltering,
-                allowed_import: ImportExportPolicy::NoFiltering,
-                vlan_id: None,
-            }],
-        },
-    );
+    settings.bgp_peers.push(BgpPeerConfig {
+        link_name: link_name.clone(),
+        peers: vec![BgpPeer {
+            bgp_config: NameOrId::Name("as47".parse().unwrap()),
+            interface_name: "phy0".to_string(),
+            addr: "1.2.3.4".parse().unwrap(),
+            hold_time: 6,
+            idle_hold_time: 6,
+            delay_open: 0,
+            connect_retry: 3,
+            keepalive: 2,
+            remote_asn: None,
+            min_ttl: None,
+            md5_auth_key: None,
+            multi_exit_discriminator: None,
+            communities: Vec::new(),
+            local_pref: None,
+            enforce_first_as: false,
+            allowed_export: ImportExportPolicy::NoFiltering,
+            allowed_import: ImportExportPolicy::NoFiltering,
+            vlan_id: None,
+        }],
+    });
     let _created: SwitchPortSettingsView = NexusRequest::objects_post(
         client,
         "/v1/system/networking/switch-port-settings",
