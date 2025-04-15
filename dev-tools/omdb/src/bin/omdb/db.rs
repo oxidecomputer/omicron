@@ -762,20 +762,30 @@ struct RegionUsedByArgs {
 
 #[derive(Debug, Args, Clone)]
 struct DryRunRegionAllocationArgs {
+    /// Specify to consider associated region snapshots as existing region
+    /// allocations (i.e. do not allocate a new read-only region on the same
+    /// sled as a related region snapshot)
     #[arg(long)]
     snapshot_id: Option<Uuid>,
 
     #[arg(long)]
     block_size: u32,
 
+    /// The size of the virtual disk
     #[arg(long)]
     size: i64,
 
+    /// Should the allocated regions be restricted to distinct sleds?
     #[arg(long)]
     distinct_sleds: bool,
 
-    #[arg(long, short)]
+    /// How many regions are required?
+    #[arg(long, short, default_value_t = 3)]
     num_regions_required: usize,
+
+    /// the Volume to associate the new regions with
+    #[arg(long, short, default_value_t = VolumeUuid::new_v4())]
+    volume_id: VolumeUuid,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -3713,8 +3723,6 @@ async fn cmd_db_dry_run_region_allocation(
     datastore: &DataStore,
     args: &DryRunRegionAllocationArgs,
 ) -> Result<(), anyhow::Error> {
-    let volume_id = VolumeUuid::new_v4();
-
     let size: external::ByteCount = args.size.try_into()?;
     let block_size: params::BlockSize = args.block_size.try_into()?;
 
@@ -3741,7 +3749,7 @@ async fn cmd_db_dry_run_region_allocation(
 
                 async move {
                     let query = region_allocation::allocation_query(
-                        volume_id,
+                        args.volume_id,
                         args.snapshot_id,
                         region_allocation::RegionParameters {
                             block_size: args.block_size.into(),
