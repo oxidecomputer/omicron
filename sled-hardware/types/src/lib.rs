@@ -95,3 +95,10 @@ impl std::fmt::Display for Baseboard {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+pub enum CpuFamily {
+    Unknown,
+    AmdMilan,
+    AmdTurin,
+}

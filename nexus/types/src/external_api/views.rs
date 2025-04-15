@@ -596,6 +596,8 @@ pub struct Sled {
     pub usable_hardware_threads: u32,
     /// Amount of RAM which may be used by the Sled's OS
     pub usable_physical_ram: ByteCount,
+    /// The family of the sled's CPU(s).
+    pub cpu_family: SledCpuFamily,
 }
 
 /// The operator-defined provision policy of a sled.
@@ -763,6 +765,26 @@ impl fmt::Display for SledState {
             SledState::Decommissioned => write!(f, "decommissioned"),
         }
     }
+}
+
+/// Identifies the kind of CPU present on a sled, determined by reading CPUID.
+/// This is the CPU family used in deciding if this sled can support an instance
+/// with a particular required CPU platform.
+// In lab and development environments in particular, the family reported here
+// may differ from the real processor family. `sled-hardware::detect_cpu_family`
+// tries to map various CPUs that we would not ship in a rack to their
+// greatest-common-denominator family names here.
+#[derive(Clone, Serialize, Deserialize, Debug, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SledCpuFamily {
+    /// The CPU vendor or its model/family numbers were not recognized.
+    Unknown,
+
+    /// The sled has an AMD Milan (Zen 3) processor.
+    AmdMilan,
+
+    /// The sled has an AMD Turin (Zen 5) processor.
+    AmdTurin,
 }
 
 /// An operator's view of an instance running on a given sled

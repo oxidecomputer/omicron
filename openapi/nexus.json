@@ -23719,6 +23719,14 @@
           "baseboard": {
             "$ref": "#/components/schemas/Baseboard"
           },
+          "cpu_family": {
+            "description": "The family of the sled's CPU(s).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledCpuFamily"
+              }
+            ]
+          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -23772,6 +23780,7 @@
         },
         "required": [
           "baseboard",
+          "cpu_family",
           "id",
           "policy",
           "rack_id",
@@ -23780,6 +23789,32 @@
           "time_modified",
           "usable_hardware_threads",
           "usable_physical_ram"
+        ]
+      },
+      "SledCpuFamily": {
+        "description": "Identifies the kind of CPU present on a sled, determined by reading CPUID. This is the CPU family used in deciding if this sled can support an instance with a particular required CPU platform.",
+        "oneOf": [
+          {
+            "description": "The CPU vendor or its model/family numbers were not recognized.",
+            "type": "string",
+            "enum": [
+              "unknown"
+            ]
+          },
+          {
+            "description": "The sled has an AMD Milan (Zen 3) processor.",
+            "type": "string",
+            "enum": [
+              "amd_milan"
+            ]
+          },
+          {
+            "description": "The sled has an AMD Turin (Zen 5) processor.",
+            "type": "string",
+            "enum": [
+              "amd_turin"
+            ]
+          }
         ]
       },
       "SledId": {

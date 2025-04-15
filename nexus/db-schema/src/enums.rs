@@ -72,6 +72,7 @@ define_enums! {
     RouterRouteKindEnum => "router_route_kind",
     SagaStateEnum => "saga_state",
     ServiceKindEnum => "service_kind",
+    SledCpuFamilyEnum => "sled_cpu_family",
     SledPolicyEnum => "sled_policy",
     SledRoleEnum => "sled_role",
     SledStateEnum => "sled_state",

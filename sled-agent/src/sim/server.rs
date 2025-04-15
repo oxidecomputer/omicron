@@ -166,6 +166,7 @@ impl Server {
                                 config.hardware.reservoir_ram,
                             )
                             .unwrap(),
+                            cpu_family: config.hardware.cpu_family,
                             generation: Generation::new(),
                             decommissioned: false,
                         },

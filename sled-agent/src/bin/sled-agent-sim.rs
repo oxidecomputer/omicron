@@ -12,6 +12,7 @@ use clap::Parser;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+use nexus_client::types::SledCpuFamily;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
@@ -110,6 +111,7 @@ async fn do_run() -> Result<(), CmdError> {
             hardware_threads: 32,
             physical_ram: 64 * (1 << 30),
             reservoir_ram: 32 * (1 << 30),
+            cpu_family: SledCpuFamily::AmdMilan,
             baseboard: Baseboard::Gimlet {
                 identifier: format!("sim-{}", args.uuid),
                 model: String::from("sim-gimlet"),
@@ -122,6 +124,7 @@ async fn do_run() -> Result<(), CmdError> {
             Some(args.nexus_addr),
             Some(tmp.path()),
             ZpoolConfig::TenVirtualU2s,
+            SledCpuFamily::AmdMilan,
         )
     };
 

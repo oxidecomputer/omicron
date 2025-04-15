@@ -6,6 +6,7 @@ use super::{ByteCount, Generation, SledState, SqlU16, SqlU32};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::sled::shared::Baseboard;
+use crate::sled_cpu_family::SledCpuFamily;
 use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
@@ -40,6 +41,8 @@ pub struct SledSystemHardware {
 
     // current VMM reservoir size
     pub reservoir_size: ByteCount,
+
+    pub cpu_family: SledCpuFamily,
 }
 
 /// Database representation of a Sled.
@@ -84,6 +87,9 @@ pub struct Sled {
 
     // ServiceAddress (Repo Depot API). Uses `ip`.
     pub repo_depot_port: SqlU16,
+
+    /// The family of this sled's CPU.
+    pub cpu_family: SledCpuFamily,
 }
 
 impl Sled {
@@ -141,6 +147,7 @@ impl From<Sled> for views::Sled {
             state: sled.state.into(),
             usable_hardware_threads: sled.usable_hardware_threads.0,
             usable_physical_ram: *sled.usable_physical_ram,
+            cpu_family: sled.cpu_family.into(),
         }
     }
 }
@@ -185,6 +192,7 @@ impl From<Sled> for params::SledAgentInfo {
             usable_physical_ram: sled.usable_physical_ram.into(),
             reservoir_size: sled.reservoir_size.into(),
             generation: sled.sled_agent_gen.into(),
+            cpu_family: sled.cpu_family.into(),
             decommissioned,
         }
     }
@@ -229,6 +237,8 @@ pub struct SledUpdate {
     // ServiceAddress (Repo Depot API). Uses `ip`.
     pub repo_depot_port: SqlU16,
 
+    pub cpu_family: SledCpuFamily,
+
     // Generation number - owned and incremented by sled-agent.
     pub sled_agent_gen: Generation,
 }
@@ -258,6 +268,7 @@ impl SledUpdate {
             ip: addr.ip().into(),
             port: addr.port().into(),
             repo_depot_port: repo_depot_port.into(),
+            cpu_family: hardware.cpu_family,
             sled_agent_gen,
         }
     }
@@ -296,6 +307,7 @@ impl SledUpdate {
             repo_depot_port: self.repo_depot_port,
             last_used_address,
             sled_agent_gen: self.sled_agent_gen,
+            cpu_family: self.cpu_family,
         }
     }
 

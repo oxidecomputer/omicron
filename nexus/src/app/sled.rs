@@ -77,6 +77,7 @@ impl super::Nexus {
                 usable_hardware_threads: info.usable_hardware_threads,
                 usable_physical_ram: info.usable_physical_ram.into(),
                 reservoir_size: info.reservoir_size.into(),
+                cpu_family: info.cpu_family.into(),
             },
             self.rack_id,
             info.generation.into(),

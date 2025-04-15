@@ -27,6 +27,7 @@ use id_map::IdMap;
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use internal_dns_types::names::ServiceName;
+use nexus_client::types::SledCpuFamily;
 use nexus_config::Database;
 use nexus_config::DpdConfig;
 use nexus_config::InternalDns;
@@ -1902,7 +1903,18 @@ pub async fn start_sled_agent(
         Some(nexus_address),
         Some(update_directory),
         sim::ZpoolConfig::None,
+        SledCpuFamily::AmdMilan,
     );
+    start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
+        .await
+}
+
+pub async fn start_sled_agent_with_config(
+    log: Logger,
+    config: &sim::Config,
+    sled_index: u16,
+    simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
+) -> Result<sim::Server, String> {
     let server =
         sim::Server::start(&config, &log, true, simulated_upstairs, sled_index)
             .await
