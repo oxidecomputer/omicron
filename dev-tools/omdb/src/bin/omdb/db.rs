@@ -783,9 +783,10 @@ struct DryRunRegionAllocationArgs {
     #[arg(long, short, default_value_t = 3)]
     num_regions_required: usize,
 
-    /// the Volume to associate the new regions with
-    #[arg(long, short, default_value_t = VolumeUuid::new_v4())]
-    volume_id: VolumeUuid,
+    /// the (optional) Volume to associate the new regions with (defaults to a
+    /// random ID)
+    #[arg(long, short)]
+    volume_id: Option<VolumeUuid>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -3723,6 +3724,11 @@ async fn cmd_db_dry_run_region_allocation(
     datastore: &DataStore,
     args: &DryRunRegionAllocationArgs,
 ) -> Result<(), anyhow::Error> {
+    let volume_id = match args.volume_id {
+        Some(v) => v,
+        None => VolumeUuid::new_v4(),
+    };
+
     let size: external::ByteCount = args.size.try_into()?;
     let block_size: params::BlockSize = args.block_size.try_into()?;
 
@@ -3749,7 +3755,7 @@ async fn cmd_db_dry_run_region_allocation(
 
                 async move {
                     let query = region_allocation::allocation_query(
-                        args.volume_id,
+                        volume_id,
                         args.snapshot_id,
                         region_allocation::RegionParameters {
                             block_size: args.block_size.into(),
