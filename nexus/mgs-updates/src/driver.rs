@@ -381,10 +381,9 @@ impl MgsUpdateDriver {
             time_done: chrono::Utc::now(),
             elapsed: in_progress.instant_started.elapsed(),
             request: in_progress.internal_request.request.clone(),
-            result: match &result.result {
-                Ok(success) => Ok(success.clone()),
-                Err(error) => Err(InlineErrorChain::new(error).to_string()),
-            },
+            result: result
+                .result
+                .map_err(|error| InlineErrorChain::new(&error).to_string()),
             nattempts_done,
         };
         let internal_request = InternalRequest {

@@ -96,14 +96,14 @@ pub enum ApplyUpdateError {
     #[error("failed waiting for artifact delivery")]
     DeliveryWaitError(#[from] DeliveryWaitError),
     #[error("error communicating with MGS")]
-    UpdateStartError(GatewayClientError),
+    UpdateStartError(#[source] GatewayClientError),
     #[error(
         "timed out after {}ms waiting for update to finish",
         .0.as_millis()
     )]
     ResetTimeoutError(Duration),
     #[error("waiting for update to finish")]
-    WaitError(PrecheckError),
+    WaitError(#[source] PrecheckError),
 }
 
 /// Makes one complete attempt to apply the specified software update to an SP
@@ -515,7 +515,7 @@ enum UpdateWaitError {
     #[error("timed out after {0:?}")]
     Timeout(Duration),
     #[error("found unexpected state while waiting for update")]
-    Indeterminate(PrecheckError),
+    Indeterminate(#[source] PrecheckError),
 }
 
 /// Waits for the specified update to completely finish (by polling)
