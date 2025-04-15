@@ -59,6 +59,7 @@ use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::PendingMgsUpdates;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -892,6 +893,8 @@ impl DataStore {
 
         Ok(Blueprint {
             id: blueprint_id,
+            // TODO these need to be serialized to the database.
+            pending_mgs_updates: PendingMgsUpdates::new(),
             sleds: sled_configs,
             parent_blueprint_id,
             internal_dns_version,

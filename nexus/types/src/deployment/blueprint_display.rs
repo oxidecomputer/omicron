@@ -100,23 +100,23 @@ impl fmt::Display for BpGeneration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             BpGeneration::Value(generation) => {
-                write!(f, "at generation {generation}")
+                write!(f, " at generation {generation}")
             }
             BpGeneration::Diff { before: None, after: Some(after) } => {
-                write!(f, "at generation {after}")
+                write!(f, " at generation {after}")
             }
             BpGeneration::Diff { before: Some(before), after: None } => {
-                write!(f, "from generation {before}")
+                write!(f, " from generation {before}")
             }
             BpGeneration::Diff { before: Some(before), after: Some(after) } => {
                 if before == after {
-                    write!(f, "at generation {after}")
+                    write!(f, " at generation {after}")
                 } else {
-                    write!(f, "generation {before} -> {after}")
+                    write!(f, " generation {before} -> {after}")
                 }
             }
             BpGeneration::Diff { before: None, after: None } => {
-                write!(f, "unknown generation")
+                write!(f, " unknown generation")
             }
         }
     }
@@ -397,6 +397,25 @@ impl BpTableSchema for BpClickhouseServersTableSchema {
 
     fn column_names(&self) -> &'static [&'static str] {
         &["zone id", "server id"]
+    }
+}
+
+/// The [`BpTable`] schema for pending MGS updates
+pub struct BpPendingMgsUpdates {}
+impl BpTableSchema for BpPendingMgsUpdates {
+    fn table_name(&self) -> &'static str {
+        "Pending MGS-managed updates"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &[
+            "sp_type",
+            "slot",
+            "part_number",
+            "serial_number",
+            "artifact_kind",
+            "artifact_hash",
+        ]
     }
 }
 
