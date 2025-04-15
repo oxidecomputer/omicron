@@ -920,7 +920,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let pagparams = data_page_params_for(&rqctx, &query)?;
 
             let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+                crate::context::op_context_for_internal_api(&rqctx).await;
 
             let bundles = nexus
                 .support_bundle_list(&opctx, &pagparams)
@@ -954,7 +954,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let path = path_params.into_inner();
 
             let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+                crate::context::op_context_for_internal_api(&rqctx).await;
 
             let bundle = nexus
                 .support_bundle_view(
@@ -981,7 +981,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+                crate::context::op_context_for_internal_api(&rqctx).await;
 
             let head = false;
             let range = rqctx.range();
@@ -1013,7 +1013,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+                crate::context::op_context_for_internal_api(&rqctx).await;
 
             let head = false;
             let range = rqctx.range();
@@ -1045,7 +1045,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             let head = false;
             let range = rqctx.range();
 
@@ -1078,7 +1078,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             let head = true;
             let range = rqctx.range();
 
@@ -1109,7 +1109,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+                crate::context::op_context_for_internal_api(&rqctx).await;
             let head = true;
             let range = rqctx.range();
 
@@ -1141,7 +1141,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let nexus = &apictx.context.nexus;
 
             let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+                crate::context::op_context_for_internal_api(&rqctx).await;
 
             let bundle = nexus
                 .support_bundle_create(&opctx, "Created by external API")
@@ -1165,7 +1165,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let path = path_params.into_inner();
 
             let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
+                crate::context::op_context_for_internal_api(&rqctx).await;
 
             nexus
                 .support_bundle_delete(
