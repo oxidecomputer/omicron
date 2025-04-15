@@ -16,6 +16,7 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
+use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::VolumeUuid;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
@@ -1013,6 +1014,9 @@ pub(crate) mod test {
     ) -> bool {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
+                if !matches!(dataset.kind, DatasetKind::Crucible) {
+                    continue;
+                }
                 if datastore
                     .regions_total_reserved_size(dataset.id)
                     .await
@@ -1029,6 +1033,9 @@ pub(crate) mod test {
     fn no_regions_ensured(sled_agent: &SledAgent, test: &DiskTest<'_>) -> bool {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
+                if !matches!(dataset.kind, DatasetKind::Crucible) {
+                    continue;
+                }
                 let crucible_dataset =
                     sled_agent.get_crucible_dataset(zpool.id, dataset.id);
                 if !crucible_dataset.is_empty() {
