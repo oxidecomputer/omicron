@@ -7586,6 +7586,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "async-trait",
+ "atomicwrites",
  "base64 0.22.1",
  "bootstore",
  "bootstrap-agent-api",

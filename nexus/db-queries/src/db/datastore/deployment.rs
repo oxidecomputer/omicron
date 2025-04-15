@@ -894,6 +894,7 @@ impl DataStore {
         Ok(Blueprint {
             id: blueprint_id,
             // TODO these need to be serialized to the database.
+            // See oxidecomputer/omicron#7981.
             pending_mgs_updates: PendingMgsUpdates::new(),
             sleds: sled_configs,
             parent_blueprint_id,
