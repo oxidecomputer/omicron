@@ -593,7 +593,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
                     BpPendingMgsUpdates {},
                     None,
                     pending_mgs_updates
-                        .values()
+                        .iter()
                         .map(|pu| {
                             BpTableRow::from_strings(
                                 BpDiffState::Unchanged,
@@ -1047,18 +1047,17 @@ impl fmt::Display for BlueprintZoneImageVersion {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 pub struct PendingMgsUpdates {
-    // Only one outstanding MGS-managed update is allowed for a given baseboard.
-    by_baseboard: BTreeMap<Arc<BaseboardId>, PendingMgsUpdate>,
+    // The IdMap key is the baseboard_id.  Only one outstanding MGS-managed
+    // update is allowed for a given baseboard.
+    by_baseboard: IdMap<PendingMgsUpdate>,
 }
 
 impl PendingMgsUpdates {
     pub fn new() -> PendingMgsUpdates {
-        PendingMgsUpdates { by_baseboard: BTreeMap::new() }
+        PendingMgsUpdates { by_baseboard: IdMap::new() }
     }
 
-    pub fn iter(
-        &self,
-    ) -> impl Iterator<Item = (&Arc<BaseboardId>, &PendingMgsUpdate)> {
+    pub fn iter(&self) -> impl Iterator<Item = &PendingMgsUpdate> {
         self.into_iter()
     }
 
@@ -1074,32 +1073,31 @@ impl PendingMgsUpdates {
         self.by_baseboard.contains_key(key)
     }
 
-    pub fn get(&self, baseboard_id: &BaseboardId) -> Option<&PendingMgsUpdate> {
+    pub fn get(
+        &self,
+        baseboard_id: &Arc<BaseboardId>,
+    ) -> Option<&PendingMgsUpdate> {
         self.by_baseboard.get(baseboard_id)
-    }
-
-    pub fn values(&self) -> impl Iterator<Item = &PendingMgsUpdate> {
-        self.by_baseboard.values()
     }
 
     pub fn remove(
         &mut self,
-        baseboard_id: &BaseboardId,
+        baseboard_id: &Arc<BaseboardId>,
     ) -> Option<PendingMgsUpdate> {
         self.by_baseboard.remove(baseboard_id)
     }
 
-    pub fn add_or_replace(
+    pub fn insert(
         &mut self,
         update: PendingMgsUpdate,
     ) -> Option<PendingMgsUpdate> {
-        self.by_baseboard.insert(update.baseboard_id.clone(), update)
+        self.by_baseboard.insert(update)
     }
 }
 
 impl<'a> IntoIterator for &'a PendingMgsUpdates {
-    type Item = (&'a Arc<BaseboardId>, &'a PendingMgsUpdate);
-    type IntoIter = std::collections::btree_map::Iter<
+    type Item = &'a PendingMgsUpdate;
+    type IntoIter = std::collections::btree_map::Values<
         'a,
         Arc<BaseboardId>,
         PendingMgsUpdate,
@@ -1151,6 +1149,13 @@ impl slog::KV for PendingMgsUpdate {
             Key::from("artifact_hash"),
             &self.artifact_hash_id.hash.to_string(),
         )
+    }
+}
+
+impl IdMappable for PendingMgsUpdate {
+    type Id = Arc<BaseboardId>;
+    fn id(&self) -> Self::Id {
+        self.baseboard_id.clone()
     }
 }
 
