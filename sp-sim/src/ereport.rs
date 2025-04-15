@@ -15,7 +15,7 @@ use std::io::Cursor;
 use tokio::sync::oneshot;
 
 pub(crate) struct EreportState {
-    ereports: VecDeque<(Ena, EreportList)>,
+    ereports: VecDeque<EreportListEntry>,
     meta: toml::map::Map<String, toml::Value>,
     /// Next ENA, used for appending new ENAs at runtime.
     next_ena: Ena,
@@ -27,6 +27,12 @@ pub(crate) struct EreportState {
 pub(crate) enum Command {
     Restart(EreportRestart, oneshot::Sender<()>),
     Append(Ereport, oneshot::Sender<Ena>),
+}
+
+struct EreportListEntry {
+    ena: Ena,
+    ereport: Ereport,
+    bytes: Vec<u8>,
 }
 
 impl EreportState {
@@ -42,10 +48,10 @@ impl EreportState {
             "n_ereports" => ereports.len(),
             "metadata" => ?metadata,
         );
-        let ereports: VecDeque<(Ena, EreportList)> = ereports
+        let ereports: VecDeque<_> = ereports
             .into_iter()
             .enumerate()
-            .map(|(i, ereport)| (Ena(i as u64), ereport.to_list()))
+            .map(|(i, ereport)| ereport.to_entry(Ena(i as u64)))
             .collect();
         let restart_id = RestartId(restart_id.as_u128());
         let next_ena = Ena(ereports.len() as u64);
@@ -90,7 +96,7 @@ impl EreportState {
             "ena" => ?ena,
             "ereport" => ?ereport,
         );
-        self.ereports.push_back((ena, ereport.to_list()));
+        self.ereports.push_back(ereport.to_entry(ena));
         self.next_ena.0 += 1;
         ena
     }
@@ -137,7 +143,7 @@ impl EreportState {
                 while self
                     .ereports
                     .front()
-                    .map(|(ena, _)| ena <= &committed_ena)
+                    .map(|ereport| ereport.ena <= committed_ena)
                     .unwrap_or(false)
                 {
                     self.ereports.pop_front();
@@ -183,23 +189,16 @@ impl EreportState {
         let mut respondant_ereports = self
             .ereports
             .iter()
-            .filter(|(ena, _)| ena.0 >= start_ena.0)
+            .filter(|ereport| ereport.ena >= start_ena)
             .take(req.limit as usize);
-        if let Some((ena, ereport)) = respondant_ereports.next() {
+        if let Some(EreportListEntry { ena, ereport, bytes }) =
+            respondant_ereports.next()
+        {
             pos += gateway_messages::serialize(&mut buf[pos..], ena)
                 .expect("serialing ena shouldn't fail");
             buf[pos] = 0x9f; // start list
             pos += 1;
 
-            // Okay, this is a little bit goofy: we're going to encode each
-            // message to a separate Vec before writing it to the packet buffer.
-            // This is because we need to know if the *whole* ereport fits in
-            // the packet before deciding whether or not to include it.
-            //
-            // We could certainly be a bit more efficient here by reusing a
-            // dedicated encoding buffer for this, but honestly? This is the SP
-            // simulator, so I don't care enough.
-            let bytes = serde_cbor::to_vec(ereport).unwrap();
             buf[pos..pos + bytes.len()].copy_from_slice(&bytes[..]);
             pos += bytes.len();
             slog::debug!(
@@ -211,8 +210,8 @@ impl EreportState {
             );
 
             // try to fill the rest of the packet
-            for (_, ereport) in respondant_ereports {
-                let bytes = serde_cbor::to_vec(ereport).unwrap();
+            for EreportListEntry { ena, ereport, bytes } in respondant_ereports
+            {
                 // packet full!
                 if buf[pos..].len() < (bytes.len() + 1) {
                     break;
@@ -223,6 +222,7 @@ impl EreportState {
                 slog::debug!(
                     self.log,
                     "wrote subsequent ereport: {ereport:#?}";
+                    "ena" => ?ena,
                     "packet_bytes" => pos,
                     "ereport_bytes" => bytes.len(),
                 );
@@ -236,36 +236,29 @@ impl EreportState {
     }
 }
 
-type EreportList = Vec<toml::Value>;
-
 impl Ereport {
-    fn to_list(self) -> EreportList {
-        let Ereport { task_name, task_gen, uptime, data } = self;
-        vec![
-            task_name.into(),
-            task_gen.into(),
-            (uptime as i64).into(),
-            data.into(),
-        ]
+    fn to_entry(self, ena: Ena) -> EreportListEntry {
+        let &Ereport { uptime, task_gen, ref task_name, ref data } = &self;
+        let body_bytes = match serde_cbor::to_vec(data) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                panic!("Failed to serialize ereport body: {e}\ndata: {data:#?}",)
+            }
+        };
+        let bytes = match serde_cbor::to_vec(&(
+            task_name,
+            task_gen,
+            uptime,
+            // force byte array serialization --- serde will by default turn a
+            // `Vec<u8>` into a sequence of integers, which is ghastly (and not
+            // what MGS expects...)
+            serde_cbor::Value::Bytes(body_bytes),
+        )) {
+            Ok(bytes) => bytes,
+            Err(e) => panic!(
+                "Failed to serialize ereport tuple: {e}\nereport: {self:#?}",
+            ),
+        };
+        EreportListEntry { ena, ereport: self, bytes }
     }
 }
-
-// fn toml2cbor(toml: &toml::Value) -> serde_cbor::Value {
-//     match *toml {
-//         toml::Value::String(ref s) => serde_cbor::Value::Text(s.clone()),
-//         toml::Value::Integer(i) => serde_cbor::Value::Integer(i as i128),
-//         toml::Value::Float(f) => serde_cbor::Value::Float(f),
-//         toml::Value::Boolean(b) => serde_cbor::Value::Bool(b),
-//         toml::Value::Datetime(d) => unimplemented!("don't use toml datetimes"),
-//         toml::Value::Array(ref a) => {
-//             serde_cbor::Value::Array(a.iter().map(toml2cbor).collect())
-//         }
-//         toml::Value::Table(ref t) => serde_cbor::Value::Map(toml2cbor_table::<serde_cbor::Value>(toml))
-//     }
-// }
-
-// fn toml2cbor_table<K: From<String>>(toml: &toml::Table) -> BTreeMap<K, serde_cbor::Value> {
-//     toml.iter().map(|(k, v) {
-//         (k.clone().into(), toml2cbor(v))
-//     }).collect()
-// }

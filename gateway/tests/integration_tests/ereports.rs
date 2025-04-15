@@ -80,6 +80,7 @@ mod sled0 {
             "hubris_task_name": "task_apollo_server",
             "hubris_task_gen": 13,
             "hubris_uptime_ms": 1233,
+            "ereport_message_version": 0,
             "class": "gov.nasa.apollo.o2_tanks.stir.begin",
             "message": "stirring the tanks",
         }
@@ -92,6 +93,7 @@ mod sled0 {
             "hubris_task_name": "drv_ae35_server",
             "hubris_task_gen": 1,
             "hubris_uptime_ms": 1234,
+            "ereport_message_version": 0,
             "class": "io.discovery.ae35.fault",
             "message": "i've just picked up a fault in the AE-35 unit",
             "de": {
@@ -113,6 +115,7 @@ mod sled0 {
             "hubris_task_name": "task_apollo_server",
             "hubris_task_gen": 13,
             "hubris_uptime_ms": 1237,
+            "ereport_message_version": 0,
             "class": "gov.nasa.apollo.fault",
             "message": "houston, we have a problem",
             "crew": [
@@ -131,6 +134,7 @@ mod sled0 {
             "hubris_task_name": "drv_thingy_server",
             "hubris_task_gen": 2,
             "hubris_uptime_ms": 1240,
+            "ereport_message_version": 0,
             "class": "flagrant_error",
             "computer": false,
         }
@@ -144,6 +148,7 @@ mod sled0 {
             "hubris_task_name": "task_latex_server",
             "hubris_task_gen": 1,
             "hubris_uptime_ms": 1245,
+            "ereport_message_version": 0,
             "class": "overfull_hbox",
             "badness": 10000,
         }
@@ -164,6 +169,7 @@ mod sled1 {
             "hubris_task_name": "task_thermal_server",
             "hubris_task_gen": 1,
             "hubris_uptime_ms": 1233,
+            "ereport_message_version": 0,
             "class": "computer.oxide.gimlet.chassis_integrity.fault",
             "nosub_class": "chassis_integrity.cat_hair_detected",
             "message": "cat hair detected inside gimlet",
