@@ -1225,9 +1225,10 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             disk_test.sleds.keys().cloned().collect::<Vec<SledUuid>>()
         {
             for _ in 0..zpool_count {
-                disk_test.add_zpool_with_dataset(sled_id).await;
+                disk_test.add_zpool_with_datasets(sled_id).await;
             }
         }
+        disk_test.propagate_datasets_to_sleds().await;
 
         disk_test
     }
@@ -1235,7 +1236,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     pub async fn add_blueprint_disks(&mut self, blueprint: &Blueprint) {
         for (sled_id, sled_config) in blueprint.sleds.iter() {
             for disk in &sled_config.disks {
-                self.add_zpool_with_dataset_ext(
+                self.add_zpool_with_datasets_ext(
                     *sled_id,
                     disk.id,
                     disk.pool_id,
@@ -1250,15 +1251,21 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         }
     }
 
-    pub async fn add_zpool_with_dataset(&mut self, sled_id: SledUuid) {
-        self.add_zpool_with_dataset_ext(
+    pub async fn add_zpool_with_datasets(&mut self, sled_id: SledUuid) {
+        self.add_zpool_with_datasets_ext(
             sled_id,
             PhysicalDiskUuid::new_v4(),
             ZpoolUuid::new_v4(),
-            vec![TestDataset {
-                id: DatasetUuid::new_v4(),
-                kind: DatasetKind::Crucible,
-            }],
+            vec![
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::Crucible,
+                },
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::Debug,
+                },
+            ],
             Self::DEFAULT_ZPOOL_SIZE_GIB,
         )
         .await
@@ -1279,7 +1286,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     // 2. Re-work the DiskTestBuilder API to automatically deploy the "disks + datasets" config
     //    to sled agents exactly once. Adding new zpools / datasets after the DiskTest has been
     //    started will need to also make a decision about re-deploying this configuration.
-    pub async fn propagate_datasets_to_sleds(&mut self) {
+    async fn propagate_datasets_to_sleds(&mut self) {
         let cptestctx = self.cptestctx;
 
         for (sled_id, PerSledDiskState { zpools }) in &self.sleds {
@@ -1347,7 +1354,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         }
     }
 
-    pub async fn add_zpool_with_dataset_ext(
+    pub async fn add_zpool_with_datasets_ext(
         &mut self,
         sled_id: SledUuid,
         physical_disk_id: PhysicalDiskUuid,
@@ -1508,10 +1515,15 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         zpools.push(zpool);
     }
 
+    /// Configures all region requests within Crucible datasets to return
+    /// "Requested", then "Created".
     pub async fn set_requested_then_created_callback(&self) {
         for (sled_id, state) in &self.sleds {
             for zpool in &state.zpools {
                 for dataset in &zpool.datasets {
+                    if !matches!(dataset.kind, DatasetKind::Crucible) {
+                        continue;
+                    }
                     let crucible = self
                         .get_sled(*sled_id)
                         .get_crucible_dataset(zpool.id, dataset.id);
@@ -1532,10 +1544,14 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         }
     }
 
+    /// Configures all region requests within Crucible datasets to fail
     pub async fn set_always_fail_callback(&self) {
         for (sled_id, state) in &self.sleds {
             for zpool in &state.zpools {
                 for dataset in &zpool.datasets {
+                    if !matches!(dataset.kind, DatasetKind::Crucible) {
+                        continue;
+                    }
                     let crucible = self
                         .get_sled(*sled_id)
                         .get_crucible_dataset(zpool.id, dataset.id);
@@ -1555,6 +1571,9 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         for (sled_id, state) in &self.sleds {
             for zpool in &state.zpools {
                 for dataset in &zpool.datasets {
+                    if !matches!(dataset.kind, DatasetKind::Crucible) {
+                        continue;
+                    }
                     let crucible = self
                         .get_sled(*sled_id)
                         .get_crucible_dataset(zpool.id, dataset.id);

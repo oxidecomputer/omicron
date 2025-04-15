@@ -45,6 +45,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{ByteCount, SimpleIdentityOrName as _};
+use omicron_common::disk::DatasetKind;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::app::{MAX_DISK_SIZE_BYTES, MIN_DISK_SIZE_BYTES};
@@ -999,16 +1000,12 @@ async fn test_disk_backed_by_multiple_region_sets(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create three zpools, each with one dataset
-    let mut test = DiskTest::new(&cptestctx).await;
+    // Create six zpools, each with one crucible dataset
+    let _test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(6).build().await;
 
     // Assert default is still 16 GiB
     assert_eq!(16, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
-
-    // Create another three zpools, each with one dataset
-    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
-    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
-    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
 
     create_project_and_pool(client).await;
 
@@ -1558,6 +1555,10 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     // Total occupied size should start at 0
     for zpool in test.zpools() {
         for dataset in &zpool.datasets {
+            if !matches!(dataset.kind, DatasetKind::Crucible) {
+                continue;
+            }
+
             assert_eq!(
                 datastore
                     .regions_total_reserved_size(dataset.id)
@@ -1607,6 +1608,9 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     // plus reservation overhead
     for zpool in test.zpools() {
         for dataset in &zpool.datasets {
+            if !matches!(dataset.kind, DatasetKind::Crucible) {
+                continue;
+            }
             assert_eq!(
                 datastore
                     .regions_total_reserved_size(dataset.id)
@@ -1644,6 +1648,9 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     // Total occupied size is still 7 GiB * 3 (plus overhead)
     for zpool in test.zpools() {
         for dataset in &zpool.datasets {
+            if !matches!(dataset.kind, DatasetKind::Crucible) {
+                continue;
+            }
             assert_eq!(
                 datastore
                     .regions_total_reserved_size(dataset.id)
@@ -1668,6 +1675,9 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     // Total occupied size should be 0
     for zpool in test.zpools() {
         for dataset in &zpool.datasets {
+            if !matches!(dataset.kind, DatasetKind::Crucible) {
+                continue;
+            }
             assert_eq!(
                 datastore
                     .regions_total_reserved_size(dataset.id)
@@ -1704,6 +1714,9 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     // Total occupied size should be 10 GiB * 3 plus overhead
     for zpool in test.zpools() {
         for dataset in &zpool.datasets {
+            if !matches!(dataset.kind, DatasetKind::Crucible) {
+                continue;
+            }
             assert_eq!(
                 datastore
                     .regions_total_reserved_size(dataset.id)
