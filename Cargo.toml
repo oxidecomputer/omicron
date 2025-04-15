@@ -938,7 +938,7 @@ path = "workspace-hack"
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
 
-# Waiting for https://github.com/seanmonstar/reqwest/pull/2623 to be merged...
+# Waiting for https://github.com/seanmonstar/reqwest/pull/2623 to be released...
 [patch.crates-io.reqwest]
-git = 'https://github.com/hawkw/reqwest'
-branch = 'eliza/ip-bound-if'
+git = 'https://github.com/seanmonstar/reqwest'
+rev = '114d97c1a862567b465cb57f14d584626e1cf30c'
