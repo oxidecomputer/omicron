@@ -351,7 +351,7 @@ fn cmd_status(
             "    {} to {} (took {}): serial {}",
             r.time_started.to_rfc3339_opts(SecondsFormat::Millis, true),
             r.time_done.to_rfc3339_opts(SecondsFormat::Millis, true),
-            humantime::format_duration(elapsed.into()),
+            humantime::format_duration(elapsed),
             r.request.baseboard_id.serial_number,
         )?;
         writeln!(&mut s, "        attempt#: {}", r.nattempts_done)?;
