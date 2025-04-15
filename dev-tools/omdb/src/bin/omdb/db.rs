@@ -118,6 +118,7 @@ use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+use nexus_db_queries::db::queries::region_allocation;
 use nexus_db_queries::transaction_retry::OptionalError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -3700,6 +3701,13 @@ async fn cmd_db_region_find_deleted(
     Ok(())
 }
 
+#[derive(Debug)]
+enum DryRunRegionAllocationResult {
+    QueryError { e: region_allocation::AllocationQueryError },
+
+    Success { datasets_and_regions: Vec<(CrucibleDataset, Region)> },
+}
+
 async fn cmd_db_dry_run_region_allocation(
     opctx: &OpContext,
     datastore: &DataStore,
@@ -3721,40 +3729,42 @@ async fn cmd_db_dry_run_region_allocation(
         RegionAllocationStrategy::Random { seed: None }
     };
 
-    let query = match nexus_db_queries::db::queries::region_allocation::allocation_query(
-        volume_id,
-        args.snapshot_id,
-        nexus_db_queries::db::queries::region_allocation::RegionParameters {
-            block_size: args.block_size.into(),
-            blocks_per_extent,
-            extent_count,
-            read_only: args.snapshot_id.is_some(),
-        },
-        &allocation_strategy,
-        args.num_regions_required,
-    ) {
-        Ok(q) => q,
-        Err(e) => {
-            eprintln!("error from allocation_query: {e:?}");
-            bail!("error from allocation_query");
-        }
-    };
+    let err = OptionalError::<DryRunRegionAllocationResult>::new();
+    let conn = datastore.pool_connection_for_tests().await?;
 
-    let err = OptionalError::new();
+    let result: Result<std::convert::Infallible, diesel::result::Error> =
+        datastore
+            .transaction_retry_wrapper("dry_run_region_allocation")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let allocation_strategy = allocation_strategy.clone();
 
-    let result: Result<(), diesel::result::Error> = datastore
-        .pool_connection_for_tests()
-        .await?
-        .transaction_async({
-            let err = err.clone();
-            async move |conn| {
-                let datasets_and_regions: Vec<(CrucibleDataset, Region)> =
-                    query.get_results_async(&conn).await?;
+                async move {
+                    let query = region_allocation::allocation_query(
+                        volume_id,
+                        args.snapshot_id,
+                        region_allocation::RegionParameters {
+                            block_size: args.block_size.into(),
+                            blocks_per_extent,
+                            extent_count,
+                            read_only: args.snapshot_id.is_some(),
+                        },
+                        &allocation_strategy,
+                        args.num_regions_required,
+                    )
+                    .map_err(|e| {
+                        err.bail(DryRunRegionAllocationResult::QueryError { e })
+                    })?;
 
-                Err(err.bail(datasets_and_regions))
-            }
-        })
-        .await;
+                    let datasets_and_regions: Vec<(CrucibleDataset, Region)> =
+                        query.get_results_async(&conn).await?;
+
+                    Err(err.bail(DryRunRegionAllocationResult::Success {
+                        datasets_and_regions,
+                    }))
+                }
+            })
+            .await;
 
     let datasets_and_regions = match result {
         Ok(_) => {
@@ -3762,13 +3772,22 @@ async fn cmd_db_dry_run_region_allocation(
         }
 
         Err(e) => {
-            if let Some(datasets_and_regions) = err.take() {
-                Ok(datasets_and_regions)
+            if let Some(result) = err.take() {
+                match result {
+                    DryRunRegionAllocationResult::QueryError { e } => {
+                        let err: external::Error = e.into();
+                        Err(err)?
+                    }
+
+                    DryRunRegionAllocationResult::Success {
+                        datasets_and_regions,
+                    } => datasets_and_regions,
+                }
             } else {
-                Err(e)
+                Err(e)?
             }
         }
-    }?;
+    };
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -3792,7 +3811,10 @@ async fn cmd_db_dry_run_region_allocation(
     let Some(latest_collection) =
         datastore.inventory_get_latest_collection(opctx).await?
     else {
-        bail!("no latest inventory!");
+        bail!(
+            "failing due to missing inventory - we rely on inventory to \
+            calculate zpool sizing info"
+        );
     };
 
     let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
