@@ -23,6 +23,7 @@ slog.workspace = true
 slog-error-chain.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 tokio-util.workspace = true
 tufaceous-artifact.workspace = true
 uuid.workspace = true

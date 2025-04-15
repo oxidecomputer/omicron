@@ -11,7 +11,6 @@ use crate::driver_update::UpdateCompletedHow;
 use crate::driver_update::apply_update;
 use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::FutureExt;
-use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use gateway_client::SpComponent;
@@ -29,6 +28,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
+use tokio_stream::StreamExt;
 use tokio_util::time::DelayQueue;
 use tokio_util::time::delay_queue;
 use uuid::Uuid;
@@ -142,6 +142,8 @@ impl MgsUpdateDriver {
         loop {
             tokio::select! {
                 // See if we've received an updated configuration.
+                // Per the docs on [`tokio::select!],
+                // `watch::Receiver::changed()` is cancel-safe.
                 maybe_update = self.requests_rx.changed() => {
                     match maybe_update {
                         Ok(()) => {
@@ -164,6 +166,9 @@ impl MgsUpdateDriver {
                 // Avoid waiting on an empty FuturesUnordered.  Doing so would
                 // cause it to immediately return None, terminating the Stream
                 // altogether.
+                //
+                // tokio_stream::StreamExt::next() is documented to be
+                // cancel-safe.
                 maybe_work_done = self.futures.next(),
                     if !self.futures.is_empty() => {
                     match maybe_work_done {
@@ -179,6 +184,8 @@ impl MgsUpdateDriver {
                 },
 
                 // See if the timer has fired for any update awaiting retry.
+                // tokio_stream::StreamExt::next() is documented to be
+                // cancel-safe.
                 maybe_timer_expired = self.delayq.next(),
                     if !self.delayq.is_empty() => {
                     match maybe_timer_expired {
@@ -310,13 +317,35 @@ impl MgsUpdateDriver {
         };
 
         let baseboard_id = baseboard_id.clone();
+        let nattempts_done = internal_request.nattempts_done;
+        let request = internal_request.request.clone();
+        let in_progress = InProgressUpdate {
+            log: log.clone(),
+            time_started: chrono::Utc::now(),
+            instant_started: Instant::now(),
+            internal_request,
+        };
+
+        // Update status.  We do this before starting the future because it will
+        // update this status and expects to find it.
+        self.status_tx.send_modify(|driver_status| {
+            driver_status.in_progress.insert(
+                baseboard_id.clone(),
+                InProgressUpdateStatus {
+                    time_started: in_progress.time_started,
+                    instant_started: in_progress.instant_started,
+                    status: UpdateAttemptStatus::NotStarted,
+                    nattempts_done,
+                },
+            );
+        });
+
         let status_updater = UpdateAttemptStatusUpdater {
             tx: self.status_tx.clone(),
             baseboard_id: baseboard_id.clone(),
         };
         let artifacts = self.artifacts.clone();
         let mgs_rx = self.mgs_rx.clone();
-        let request = internal_request.request.clone();
         let future = async move {
             let result = apply_update(
                 artifacts,
@@ -331,29 +360,8 @@ impl MgsUpdateDriver {
         }
         .boxed();
 
-        let nattempts_done = internal_request.nattempts_done;
-        let in_progress = InProgressUpdate {
-            log: log.clone(),
-            time_started: chrono::Utc::now(),
-            instant_started: Instant::now(),
-            internal_request,
-        };
-
         // Keep track of the work.
         self.futures.push(future);
-
-        // Update status.
-        self.status_tx.send_modify(|driver_status| {
-            driver_status.in_progress.insert(
-                baseboard_id.clone(),
-                InProgressUpdateStatus {
-                    time_started: in_progress.time_started,
-                    instant_started: in_progress.instant_started,
-                    status: UpdateAttemptStatus::NotStarted,
-                    nattempts_done,
-                },
-            );
-        });
 
         // Update our bookkeeping.
         assert!(self.in_progress.insert(in_progress).is_none());
