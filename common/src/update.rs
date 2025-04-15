@@ -4,6 +4,7 @@
 
 use std::fmt;
 
+use daft::Diffable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tufaceous_artifact::{Artifact, ArtifactKind, ArtifactVersion};
@@ -15,6 +16,7 @@ use tufaceous_artifact::{Artifact, ArtifactKind, ArtifactVersion};
 // TODO: move this to tufaceous-artifact in the future
 #[derive(
     Debug,
+    Diffable,
     Clone,
     PartialEq,
     Eq,
