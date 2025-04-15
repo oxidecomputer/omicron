@@ -245,8 +245,10 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                     FoundVersion::Version(version.into_inner().version)
                 }
                 Err(error) => {
-                    if format!("{error:?}")
-                        .contains("the image caboose does not contain")
+                    let message = format!("{error:?}");
+                    if message.contains("the image caboose does not contain")
+                        || message
+                            .contains("the image does not include a caboose")
                     {
                         FoundVersion::MissingVersion
                     } else {
