@@ -217,15 +217,15 @@ impl Permits {
 #[derive(PartialEq, Debug, Clone)]
 enum LogType {
     /// Logs that are within the a zone's dataset.
-    /// e.g.  /pool/ext/<UUID>/crypt/zone/<ZONE_NAME>/root/var/log/svc/<LOGFILE>
+    /// e.g.  `/pool/ext/<UUID>/crypt/zone/<ZONE_NAME>/root/var/log/svc/<LOGFILE>`
     Current,
     /// Logs that have been archived by sled-agent into a debug dataset.
-    /// e.g.  /pool/ext/<UUID>/crypt/debug/<ZONE_NAME/<LOGFILE>
+    /// e.g.  `/pool/ext/<UUID>/crypt/debug/<ZONE_NAME/<LOGFILE>`
     Archive,
     /// Logs that are within a delegated dataset.
     /// e.g.
-    ///     dataset: oxp_<UUID>/crypt/cockroachdb
-    ///     path: /pool/ext/<UUID>/crypt/zone/<ZONE_NAME>/root/data/
+    ///     dataset: `oxp_<UUID>/crypt/cockroachdb`
+    ///     path: `/pool/ext/<UUID>/crypt/zone/<ZONE_NAME>/root/data/`
     Extra,
 }
 
