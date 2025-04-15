@@ -1315,7 +1315,13 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Return the full path to the snapshot directory within the filesystem.
+    /// Note that if this is called on the root dataset such as
+    /// `rpool/ROOT/<BE>` it will return "legacy/.zfs/snapshot/<SNAP_NAME>".
     pub fn full_path(&self) -> Result<Utf8PathBuf, GetValueError> {
+        // TODO:
+        // When a mountpoint is returned as "legacy" we could go fish around in
+        // "/etc/mnttab". That would probably mean making this function return a
+        // result of an option.
         let mountpoint = Zfs::get_value(&self.filesystem, "mountpoint")?;
         Ok(Utf8PathBuf::from(mountpoint)
             .join(format!(".zfs/snapshot/{}", self.snap_name)))
