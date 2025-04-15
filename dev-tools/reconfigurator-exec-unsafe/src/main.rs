@@ -5,20 +5,34 @@
 //! Execute blueprints from the command line
 
 use anyhow::Context;
+use anyhow::anyhow;
 use anyhow::bail;
 use camino::Utf8PathBuf;
 use clap::ColorChoice;
 use clap::Parser;
+use dropshot::PaginationOrder;
+use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_mgs_updates::ArtifactCache;
+use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_reconfigurator_execution::{RequiredRealizeArgs, realize_blueprint};
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::SledFilter;
+use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use slog::info;
+use qorb::resolver::Resolver;
+use qorb::resolvers::fixed::FixedResolver;
+use slog::{debug, info};
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
+use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::watch;
 use update_engine::EventBuffer;
 use update_engine::NestedError;
 use update_engine::display::LineDisplay;
@@ -62,6 +76,11 @@ struct ReconfiguratorExec {
     #[arg(long, default_value = "[fd00:1122:3344:3::1]:53")]
     dns_server: SocketAddr,
 
+    /// enable MGS-managed updates (will keep the process running after
+    /// blueprint execution completes)
+    #[arg(long, default_value_t = false)]
+    mgs_updates: bool,
+
     /// Color output
     #[arg(long, value_enum, default_value_t)]
     color: ColorChoice,
@@ -96,7 +115,7 @@ impl ReconfiguratorExec {
                 .context("creating datastore")?,
         );
 
-        let result = self.do_exec(log, &datastore).await;
+        let result = self.do_exec(log, &datastore, &qorb_resolver).await;
         datastore.terminate().await;
         result
     }
@@ -105,6 +124,7 @@ impl ReconfiguratorExec {
         &self,
         log: slog::Logger,
         datastore: &Arc<DataStore>,
+        qorb_resolver: &internal_dns_resolver::QorbResolver,
     ) -> Result<(), anyhow::Error> {
         info!(&log, "setting up arguments for execution");
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
@@ -156,6 +176,60 @@ impl ReconfiguratorExec {
             event_buffer
         });
 
+        // If requested, set up a driver for MGS-managed updates.
+        let (mgs_updates, mgs) = if self.mgs_updates {
+            info!(&log, "setting up MGS update driver");
+            let mut mgs_resolver = qorb_resolver
+                .for_service(ServiceName::ManagementGatewayService);
+            let mgs_rx = mgs_resolver.monitor();
+            // Pick an arbitrary in-service sled to act as our repo depot
+            // server.
+            let repo_depot_sled = datastore
+                .sled_list(
+                    &opctx,
+                    &DataPageParams {
+                        marker: None,
+                        direction: PaginationOrder::Ascending,
+                        limit: NonZeroU32::new(1).expect("1 is not 0"),
+                    },
+                    SledFilter::TufArtifactReplication,
+                )
+                .await
+                .context("listing sleds")?
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow!("found no sleds with TUF artifacts"))?;
+            let repo_depot_addr = SocketAddrV6::new(
+                *repo_depot_sled.ip,
+                *repo_depot_sled.repo_depot_port,
+                0,
+                0,
+            );
+            let mut repo_depot_resolver =
+                FixedResolver::new([SocketAddr::from(repo_depot_addr)]);
+            let artifact_cache = Arc::new(ArtifactCache::new(
+                log.clone(),
+                repo_depot_resolver.monitor(),
+            ));
+            let (requests_tx, requests_rx) =
+                watch::channel(PendingMgsUpdates::new());
+            let driver = MgsUpdateDriver::new(
+                log.clone(),
+                artifact_cache,
+                requests_rx,
+                mgs_rx,
+                Duration::from_secs(20),
+            );
+            let status_rx = driver.status_rx();
+            let driver_task = tokio::spawn(async move {
+                driver.run().await;
+            });
+            (requests_tx, Some((driver_task, status_rx, repo_depot_resolver)))
+        } else {
+            let (mgs_updates, _rx) = watch::channel(PendingMgsUpdates::new());
+            (mgs_updates, None)
+        };
+
         // This uuid uses similar conventions as the DB fixed data.  It's
         // intended to be recognizable by a human (maybe just as "a little
         // strange looking") and ideally evoke this tool.
@@ -171,6 +245,7 @@ impl ReconfiguratorExec {
                 blueprint: &blueprint,
                 creator: OmicronZoneUuid::from_untyped_uuid(creator),
                 sender,
+                mgs_updates,
             }
             .into(),
         )
@@ -192,6 +267,37 @@ impl ReconfiguratorExec {
             line_display.set_styles(LineDisplayStyles::colorized());
         }
         line_display.write_event_buffer(&event_buffer)?;
+
+        if let Some((driver_task, status_rx, mut repo_depot_resolver)) = mgs {
+            let nupdates = blueprint.pending_mgs_updates.len();
+            info!(
+                &log,
+                "waiting for requested SP updates to complete";
+                "nupdates" => nupdates
+            );
+
+            loop {
+                let status = status_rx.borrow();
+                debug!(&log, "MGS update status"; "status" => ?status);
+                if !status.recent.is_empty() && status.in_progress.is_empty() {
+                    break;
+                }
+                debug!(
+                    &log,
+                    "waiting for more updates";
+                    "nwaiting" => nupdates,
+                    "nrecent" => status.recent.len(),
+                    "nin_progress" => status.in_progress.len(),
+                );
+                drop(status);
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            }
+
+            info!(&log, "waiting for repo depot resolver to stop");
+            repo_depot_resolver.terminate().await;
+            info!(&log, "waiting for driver to stop");
+            driver_task.await.context("waiting for driver to stop")?;
+        }
 
         rv.map(|_| ())
     }
