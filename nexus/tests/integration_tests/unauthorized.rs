@@ -18,7 +18,11 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
+use nexus_test_utils::resource_helpers::TestDataset;
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::disk::DatasetKind;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use std::sync::LazyLock;
 
 type ControlPlaneTestContext =
@@ -55,7 +59,27 @@ type DiskTest<'a> =
 //   403).
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
-    let _disk_test = DiskTest::new(cptestctx).await;
+    let mut disk_test = DiskTest::new(cptestctx).await;
+    let sled_id = cptestctx.first_sled_id();
+    disk_test
+        .add_zpool_with_datasets_ext(
+            sled_id,
+            nexus_test_utils::PHYSICAL_DISK_UUID.parse().unwrap(),
+            ZpoolUuid::new_v4(),
+            vec![
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::Crucible,
+                },
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::Debug,
+                },
+            ],
+            DiskTest::DEFAULT_ZPOOL_SIZE_GIB,
+        )
+        .await;
+    disk_test.propagate_datasets_to_sleds().await;
 
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;

@@ -1182,6 +1182,7 @@ impl<'a> Iterator for ZpoolIterator<'a> {
 pub struct DiskTest<'a, N: NexusServer> {
     cptestctx: &'a ControlPlaneTestContext<N>,
     sleds: BTreeMap<SledUuid, PerSledDiskState>,
+    generation: Generation,
 }
 
 impl<'a, N: NexusServer> DiskTest<'a, N> {
@@ -1219,7 +1220,8 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             sleds.insert(sled_id, PerSledDiskState { zpools: vec![] });
         }
 
-        let mut disk_test = Self { cptestctx, sleds };
+        let mut disk_test =
+            Self { cptestctx, sleds, generation: Generation::new() };
 
         for sled_id in
             disk_test.sleds.keys().cloned().collect::<Vec<SledUuid>>()
@@ -1251,6 +1253,12 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         }
     }
 
+    /// Adds the zpool and datasets into the database.
+    ///
+    /// Does not inform sled agents to use these pools.
+    ///
+    /// See: [Self::propagate_datasets_to_sleds] if you want to send
+    /// this configuration to a simulated sled agent.
     pub async fn add_zpool_with_datasets(&mut self, sled_id: SledUuid) {
         self.add_zpool_with_datasets_ext(
             sled_id,
@@ -1271,22 +1279,13 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         .await
     }
 
-    // Propagate the dataset configuration to all Sled Agents.
-    //
-    // # Panics
-    //
-    // This function will panic if any of the Sled Agents have already
-    // applied dataset configuration.
-    //
+    /// Propagate the dataset configuration to all Sled Agents.
     // TODO: Ideally, we should do the following:
-    // 1. Also call a similar method to invoke the "omicron_physical_disks_ensure" API. Right now,
-    //    we aren't calling this at all for the simulated sled agent, which only works because
-    //    the simulated sled agent simply treats this as a stored config, rather than processing it
-    //    to actually provide a different view of storage.
-    // 2. Re-work the DiskTestBuilder API to automatically deploy the "disks + datasets" config
-    //    to sled agents exactly once. Adding new zpools / datasets after the DiskTest has been
-    //    started will need to also make a decision about re-deploying this configuration.
-    async fn propagate_datasets_to_sleds(&mut self) {
+    // Also call a similar method to invoke the "omicron_physical_disks_ensure" API. Right now,
+    // we aren't calling this at all for the simulated sled agent, which only works because
+    // the simulated sled agent simply treats this as a stored config, rather than processing it
+    // to actually provide a different view of storage.
+    pub async fn propagate_datasets_to_sleds(&mut self) {
         let cptestctx = self.cptestctx;
 
         for (sled_id, PerSledDiskState { zpools }) in &self.sleds {
@@ -1322,7 +1321,8 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 })
                 .collect();
 
-            let generation = Generation::new().next();
+            self.generation = self.generation.next();
+            let generation = self.generation;
             let dataset_config = DatasetsConfig { generation, datasets };
             let res = sled_agent.datasets_ensure(dataset_config).expect(
                 "Should have been able to ensure datasets, but could not.
@@ -1354,6 +1354,13 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         }
     }
 
+    /// Adds the zpool and datasets into the database, with additional
+    /// configuration.
+    ///
+    /// Does not inform sled agents to use these pools.
+    ///
+    /// See: [Self::propagate_datasets_to_sleds] if you want to send
+    /// this configuration to a simulated sled agent.
     pub async fn add_zpool_with_datasets_ext(
         &mut self,
         sled_id: SledUuid,
