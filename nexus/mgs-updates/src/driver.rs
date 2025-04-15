@@ -233,7 +233,8 @@ impl MgsUpdateDriver {
             // - we're not waiting to retry and not already running an attempt
             let to_dispatch: Vec<_> = new_config
                 .iter()
-                .filter_map(|(baseboard_id, new_request)| {
+                .filter_map(|new_request| {
+                    let baseboard_id = &new_request.baseboard_id;
                     let do_dispatch =
                         if let Some(waiting) = self.waiting.get(baseboard_id) {
                             *new_request != waiting.internal_request.request

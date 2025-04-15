@@ -299,7 +299,8 @@ fn cmd_config(
 
     let mut s = String::new();
     writeln!(&mut s, "configured updates ({}):", configured.len())?;
-    for (baseboard_id, update) in &*configured {
+    for update in &*configured {
+        let baseboard_id = &update.baseboard_id;
         writeln!(
             &mut s,
             "    part {} serial {} (type {:?} slot {}):",
@@ -450,7 +451,7 @@ fn cmd_set(
     };
 
     updater_state.requests_tx.send_modify(|requests| {
-        requests.add_or_replace(request);
+        requests.insert(request);
     });
 
     Ok(Some(format!("updated configuration for {serial}")))
