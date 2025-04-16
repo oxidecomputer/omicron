@@ -91,6 +91,7 @@ impl super::Nexus {
             InstanceUuid::from_untyped_uuid(authz_instance.id()),
             db_subnet,
             params.identity.clone(),
+            params.transit_ips.clone(),
             params.ip,
         )?;
         self.db_datastore
