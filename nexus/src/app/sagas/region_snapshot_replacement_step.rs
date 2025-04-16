@@ -52,9 +52,9 @@ use crate::app::db::datastore::ReplacementTarget;
 use crate::app::db::datastore::VolumeReplaceResult;
 use crate::app::db::datastore::VolumeToDelete;
 use crate::app::db::datastore::VolumeWithTarget;
-use crate::app::db::lookup::LookupPath;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::VmmState;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
@@ -443,7 +443,7 @@ async fn rsrss_notify_upstairs(
         &params.serialized_authn,
     );
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_instance) = LookupPath::new(&opctx, osagactx.datastore())
         .instance_id(instance_id)
         .lookup_for(authz::Action::Read)
         .await
@@ -510,7 +510,7 @@ async fn rsrss_notify_upstairs(
     };
 
     let instance_lookup =
-        LookupPath::new(&opctx, &osagactx.datastore()).instance_id(instance_id);
+        LookupPath::new(&opctx, osagactx.datastore()).instance_id(instance_id);
 
     let (vmm, client) = osagactx
         .nexus()

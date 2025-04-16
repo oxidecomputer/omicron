@@ -76,7 +76,9 @@ members = [
     "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
+    "nexus/db-errors",
     "nexus/db-fixed-data",
+    "nexus/db-lookup",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -221,7 +223,9 @@ default-members = [
     "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
+    "nexus/db-errors",
     "nexus/db-fixed-data",
+    "nexus/db-lookup",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -490,7 +494,9 @@ multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
+nexus-db-errors = { path = "nexus/db-errors" }
 nexus-db-fixed-data = { path = "nexus/db-fixed-data" }
+nexus-db-lookup = { path = "nexus/db-lookup" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-db-schema = { path = "nexus/db-schema" }

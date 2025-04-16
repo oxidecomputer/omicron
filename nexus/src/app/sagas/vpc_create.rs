@@ -656,11 +656,11 @@ pub(crate) mod test {
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_queries::db::fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
     use nexus_db_queries::{
         authn::saga::Serialized, authz, context::OpContext,
         db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
-        db::lookup::LookupPath,
     };
     use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
@@ -735,7 +735,7 @@ pub(crate) mod test {
         let system_name = Name::try_from("system".to_string()).unwrap();
 
         // Default Subnet
-        let (.., authz_subnet, subnet) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_subnet, subnet) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .vpc_name(&default_name.clone().into())
             .vpc_subnet_name(&default_name.clone().into())
@@ -748,7 +748,7 @@ pub(crate) mod test {
             .expect("Failed to delete default Subnet");
 
         // Default gateway routes
-        let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_route, _route) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .vpc_name(&default_name.clone().into())
             .vpc_router_name(&system_name.clone().into())
@@ -761,7 +761,7 @@ pub(crate) mod test {
             .await
             .expect("Failed to delete default route");
 
-        let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_route, _route) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .vpc_name(&default_name.clone().into())
             .vpc_router_name(&system_name.clone().into())
@@ -775,7 +775,7 @@ pub(crate) mod test {
             .expect("Failed to delete default route");
 
         // System router
-        let (.., authz_router, _router) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_router, _router) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .vpc_name(&default_name.clone().into())
             .vpc_router_name(&system_name.into())
@@ -789,7 +789,7 @@ pub(crate) mod test {
 
         // Default gateway
         let (.., authz_vpc, authz_igw, _igw) =
-            LookupPath::new(&opctx, &datastore)
+            LookupPath::new(&opctx, datastore)
                 .project_id(project_id)
                 .vpc_name(&default_name.clone().into())
                 .internet_gateway_name(&default_name.clone().into())
@@ -807,7 +807,7 @@ pub(crate) mod test {
             .expect("Failed to delete default gateway");
 
         // Default VPC & Firewall Rules
-        let (.., authz_vpc, vpc) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_vpc, vpc) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .vpc_name(&default_name.into())
             .fetch()

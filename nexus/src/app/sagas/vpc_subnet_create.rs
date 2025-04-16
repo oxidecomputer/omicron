@@ -8,7 +8,7 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use crate::external_api::params;
-use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external;
@@ -350,12 +350,12 @@ pub(crate) mod test {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::RouterRouteKind;
     use nexus_db_queries::db;
     use nexus_db_queries::{
         authn::saga::Serialized, authz, context::OpContext,
         db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
-        db::lookup::LookupPath,
     };
     use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;

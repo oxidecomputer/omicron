@@ -787,9 +787,9 @@ impl Nexus {
     /// underneath Organizations:
     ///
     /// ```
+    /// use nexus_db_lookup::LookupPath;
     /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
-    /// use nexus_db_queries::db::lookup::LookupPath;
     /// use nexus_db_queries::db::model::Name;
     /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
@@ -817,9 +817,9 @@ impl Nexus {
     /// example stub for the "get" endpoint for that same resource:
     ///
     /// ```
+    /// use nexus_db_lookup::LookupPath;
     /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
-    /// use nexus_db_queries::db::lookup::LookupPath;
     /// use nexus_db_queries::db::model::Name;
     /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
