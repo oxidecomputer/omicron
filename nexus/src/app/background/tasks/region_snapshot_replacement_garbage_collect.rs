@@ -145,7 +145,6 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::VolumeUuid;
-    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -193,19 +192,6 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(
-                volume_id,
-                VolumeConstructionRequest::Volume {
-                    id: Uuid::new_v4(), // not required to match!
-                    block_size: 512,
-                    sub_volumes: vec![], // nothing needed here
-                    read_only_parent: None,
-                },
-            )
-            .await
-            .unwrap();
-
-        datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
                 &opctx, request, volume_id,
             )
@@ -224,19 +210,6 @@ mod test {
         let request_2_id = request.id;
 
         let volume_id = VolumeUuid::new_v4();
-
-        datastore
-            .volume_create(
-                volume_id,
-                VolumeConstructionRequest::Volume {
-                    id: Uuid::new_v4(), // not required to match!
-                    block_size: 512,
-                    sub_volumes: vec![], // nothing needed here
-                    read_only_parent: None,
-                },
-            )
-            .await
-            .unwrap();
 
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(

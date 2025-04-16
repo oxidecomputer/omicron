@@ -6457,3 +6457,65 @@ async fn test_proper_region_sled_redundancy(
         }
     }
 }
+
+/// Ensure that volume create won't create a volume with deleted resources
+#[nexus_test(extra_sled_agents = 2)]
+async fn test_volume_create_wont_use_deleted_region_snapshots(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create one zpool on each of the 3 sleds
+    let _disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(1)
+        .build()
+        .await;
+
+    create_project_and_pool(client).await;
+
+    let _disk = create_disk(&client, PROJECT_NAME, "disk").await;
+
+    let snapshot =
+        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+
+    // Manually create the following race:
+    //
+    // 1) creating a disk from a snapshot performs a checkout (with a checkout
+    //    reason = read-only copy) of the snapshot volume to use as a read-only
+    //    parent.
+    //
+    // 2) the snapshot is deleted, which decreases the ref counts of the region
+    //    snapshots, which in this case marks them for deletion
+    //
+    // 3) pass the disk volume to volume_create
+
+    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!("snapshot {:?} should exist", snapshot.identity.id)
+        });
+
+    let volume_copy = datastore
+        .volume_checkout(
+            db_snapshot.volume_id(),
+            db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
+        )
+        .await
+        .unwrap();
+
+    let _cr =
+        datastore.soft_delete_volume(db_snapshot.volume_id()).await.unwrap();
+
+    let vcr: VolumeConstructionRequest =
+        serde_json::from_str(volume_copy.data()).unwrap();
+
+    assert!(datastore.volume_create(VolumeUuid::new_v4(), vcr).await.is_err());
+}
