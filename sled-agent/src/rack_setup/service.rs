@@ -96,7 +96,7 @@ use nexus_types::deployment::{
     BlueprintZoneType, CockroachDbPreserveDowngrade, blueprint_zone_type,
 };
 use nexus_types::deployment::{
-    BlueprintSledConfig, OximeterReadMode, PendingMgsUpdates
+    BlueprintSledConfig, OximeterReadMode, PendingMgsUpdates,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
