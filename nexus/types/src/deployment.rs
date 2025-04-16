@@ -45,6 +45,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::ser::SerializeSeq;
 use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -108,6 +109,8 @@ use blueprint_display::{
     BpTable, BpTableData, BpTableRow, KvListWithHeading, constants::*,
 };
 use id_map::{IdMap, IdMappable};
+use serde::de::SeqAccess;
+use serde::de::Visitor;
 use std::str::FromStr;
 
 /// Describes a complete set of software and configuration for the system
@@ -1043,9 +1046,7 @@ impl fmt::Display for BlueprintZoneImageVersion {
     }
 }
 
-#[derive(
-    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
-)]
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Diffable)]
 pub struct PendingMgsUpdates {
     // The IdMap key is the baseboard_id.  Only one outstanding MGS-managed
     // update is allowed for a given baseboard.
@@ -1104,6 +1105,54 @@ impl<'a> IntoIterator for &'a PendingMgsUpdates {
     >;
     fn into_iter(self) -> Self::IntoIter {
         self.by_baseboard.iter()
+    }
+}
+
+// `PendingMgsUpdates` is serialized as a sequence of `PendingMgsUpdate` objects
+// rather than a map.  (A map would not directly work because the keys here are
+// themselves objects, but JSON requires that they be strings.)
+impl Serialize for PendingMgsUpdates {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.len()))?;
+        for item in self {
+            seq.serialize_element(item)?;
+        }
+        seq.end()
+    }
+}
+
+// See the note on the `Serialize` impl above.
+impl<'de> Deserialize<'de> for PendingMgsUpdates {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct MyVisitor;
+
+        impl<'de> Visitor<'de> for MyVisitor {
+            type Value = PendingMgsUpdates;
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a sequence of objects")
+            }
+            fn visit_seq<A>(
+                self,
+                mut seq: A,
+            ) -> Result<PendingMgsUpdates, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut map = PendingMgsUpdates::new();
+                while let Some(u) = seq.next_element()? {
+                    map.insert(u);
+                }
+                Ok(map)
+            }
+        }
+
+        deserializer.deserialize_seq(MyVisitor)
     }
 }
 
