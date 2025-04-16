@@ -3394,7 +3394,7 @@ async fn print_utf8_stream_to_stdout(
                 };
 
                 match std::str::from_utf8(&combined) {
-                    Ok(data) => println!("{data}"),
+                    Ok(data) => print!("{data}"),
                     Err(_) => leftover = Some(combined.into()),
                 }
             }
