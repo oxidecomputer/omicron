@@ -1007,7 +1007,7 @@ async fn test_floating_ip_attach_fail_between_projects(
             boot_disk: None,
             start: true,
             auto_restart_policy: Default::default(),
-            anti_affinity_groups: None,
+            anti_affinity_groups: Vec::new(),
         },
         StatusCode::BAD_REQUEST,
     )
