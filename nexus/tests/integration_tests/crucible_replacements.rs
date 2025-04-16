@@ -2674,7 +2674,7 @@ async fn test_replacement_sanity_twice_after_snapshot_delete(
     // Manually create region snapshot replacement requests for each region
     // snapshot.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await

@@ -6495,7 +6495,7 @@ async fn test_volume_create_wont_use_deleted_region_snapshots(
     //
     // 3) pass the disk volume to volume_create
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
