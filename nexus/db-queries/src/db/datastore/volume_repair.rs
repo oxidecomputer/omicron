@@ -29,9 +29,22 @@ impl DataStore {
     /// If there exists a record that has a matching volume id and repair id,
     /// return Ok(()).
     ///
-    /// If there is no volume that matches the given volume id, return an error:
-    /// it should not be possible to lock a volume that does not exist! Note
-    /// that it is possible to lock a soft-deleted volume.
+    /// Note that it is possible to create one of these records for a
+    /// soft-deleted volume, and for a volume that doesn't exist yet. Volume
+    /// repair records have to be taken to prevent some cases of concurrent
+    /// calls of region allocation for the same volume id.
+    ///
+    /// If these repair records can be created for records that don't exist yet,
+    /// this also means that repair records can be created for hard-deleted
+    /// volumes as well, which sounds like utter nonsense but occurs when:
+    ///
+    /// - a snapshot volume is hard deleted
+    /// - region snapshot replacement runs and allocates a replacement for one
+    ///   of the targets of that snapshot volume's region set
+    ///
+    /// The snapshot volume record is no longer required to exist for the
+    /// replacement machinery to work, but we still need to prevent concurrent
+    /// calls of region allocation for the same volume id.
     ///
     /// If there is already an existing record that has a matching volume id but
     /// a different repair id, then this function returns an Error::conflict.
@@ -58,19 +71,6 @@ impl DataStore {
         if maybe_lock.is_some() {
             return Ok(());
         }
-
-        // Do not allow a volume repair record to be created if the volume does
-        // not exist, or was hard-deleted!
-        let maybe_volume = Self::volume_get_impl(conn, volume_id).await?;
-
-        if maybe_volume.is_none() {
-            return Err(err.bail(Error::invalid_request(format!(
-                "cannot create record: volume {volume_id} does not exist"
-            ))));
-        }
-
-        // Do not check for soft-deletion here: We may want to request locks for
-        // soft-deleted volumes.
 
         match diesel::insert_into(dsl::volume_repair)
             .values(VolumeRepair { volume_id: volume_id.into(), repair_id })
@@ -171,7 +171,6 @@ mod test {
 
     use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::VolumeConstructionRequest;
 
     #[tokio::test]
@@ -210,22 +209,19 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    /// Assert that you can't take a volume repair lock if the volume does not
-    /// exist yet!
+    /// Assert that you can take a volume repair lock if the volume does not
+    /// exist yet
     #[tokio::test]
-    async fn volume_lock_should_fail_without_volume() {
+    async fn volume_lock_should_pass_without_volume() {
         let logctx =
-            dev::test_setup_log("volume_lock_should_fail_without_volume");
+            dev::test_setup_log("volume_lock_should_pass_without_volume");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let lock_1 = Uuid::new_v4();
         let volume_id = VolumeUuid::new_v4();
 
-        datastore
-            .volume_repair_lock(&opctx, volume_id, lock_1)
-            .await
-            .unwrap_err();
+        datastore.volume_repair_lock(&opctx, volume_id, lock_1).await.unwrap();
 
         db.terminate().await;
         logctx.cleanup_successful();

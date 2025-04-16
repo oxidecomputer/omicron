@@ -466,7 +466,9 @@ impl DataStore {
         &self,
         region_id: Uuid,
     ) -> LookupResult<Option<SocketAddrV6>> {
-        let region = self.get_region(region_id).await?;
+        let Some(region) = self.get_region_optional(region_id).await? else {
+            return Ok(None);
+        };
 
         let Some(port) = region.port() else {
             return Ok(None);

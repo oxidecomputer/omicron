@@ -187,9 +187,12 @@ impl NexusSaga for SagaInstanceCreate {
             Ok(())
         }
 
-        for (i, group) in
-            params.create_params.anti_affinity_groups.iter().enumerate()
+        let aa_groups = match params.create_params.anti_affinity_groups.as_ref()
         {
+            Some(groups) => groups,
+            None => &Vec::new(),
+        };
+        for (i, group) in aa_groups.iter().enumerate() {
             let group = match group {
                 NameOrId::Id(id) => {
                     AntiAffinityGroupUuid::from_untyped_uuid(*id)
@@ -1297,7 +1300,7 @@ pub mod test {
                 disks: Vec::new(),
                 start: false,
                 auto_restart_policy: Default::default(),
-                anti_affinity_groups: Vec::new(),
+                anti_affinity_groups: None,
             },
             boundary_switches: HashSet::from([SwitchLocation::Switch0]),
         }

@@ -58,6 +58,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         let BlueprintDiff {
             // Fields in which changes are meaningful.
             sleds,
+            pending_mgs_updates,
             clickhouse_cluster_config,
             // Metadata fields for which changes don't reflect semantic
             // changes from one blueprint to the next.
@@ -75,6 +76,14 @@ impl<'a> BlueprintDiffSummary<'a> {
         if sleds.modified().next().is_some()
             || !sleds.added.is_empty()
             || !sleds.removed.is_empty()
+        {
+            return true;
+        }
+
+        // Did we modify, add, or remove any pending MGS updates?
+        if pending_mgs_updates.by_baseboard.modified().next().is_some()
+            || !pending_mgs_updates.by_baseboard.added.is_empty()
+            || !pending_mgs_updates.by_baseboard.removed.is_empty()
         {
             return true;
         }

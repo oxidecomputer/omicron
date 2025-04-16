@@ -91,11 +91,11 @@ use nexus_client::{
 use nexus_sled_agent_shared::inventory::{
     OmicronSledConfig, OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
-use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintZoneType, CockroachDbPreserveDowngrade, blueprint_zone_type,
 };
+use nexus_types::deployment::{BlueprintSledConfig, PendingMgsUpdates};
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::Generation;
@@ -1540,6 +1540,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     Ok(Blueprint {
         id: BlueprintUuid::new_v4(),
         sleds: blueprint_sleds,
+        pending_mgs_updates: PendingMgsUpdates::new(),
         parent_blueprint_id: None,
         internal_dns_version,
         // We don't configure external DNS during RSS, so set it to an initial
