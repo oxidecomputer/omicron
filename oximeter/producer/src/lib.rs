@@ -314,8 +314,7 @@ async fn registration_task(
     loop {
         debug!(
             log,
-            "{} oximeter producer lease with Nexus",
-            if count == 0 { "registering" } else { "renewing" };
+            "registering as oximeter producer with Nexus";
             "registration_count" => %count,
         );
         count += 1;
@@ -355,6 +354,7 @@ async fn resolve_nexus_and_register(
                 .map_err(|e| BackoffError::transient(e.to_string()))
                 .map(Into::into)?,
         };
+        debug!(log, "successfully resolved Nexus"; "address" => %address);
 
         // Register as a metric producer.
         let client = nexus_client::Client::new(
