@@ -370,7 +370,7 @@ async fn resolve_nexus_and_register(
     let log_failure = |error, count, delay| {
         warn!(
             log,
-            "failed to lookup Nexus IP, will retry";
+            "failed to register with Nexus, will retry";
             "count" => %count,
             "delay" => ?delay,
             "error" => ?error,
