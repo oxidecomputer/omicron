@@ -55,6 +55,7 @@ use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use itertools::Itertools;
 use nexus_config::PostgresConfigWithUrl;
+use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::CrucibleDataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -117,11 +118,14 @@ use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+use nexus_db_queries::db::queries::region_allocation;
+use nexus_db_queries::transaction_retry::OptionalError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::params;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledPolicy;
@@ -132,6 +136,7 @@ use nexus_types::internal_api::params::Srv;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPageWhich;
+use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
@@ -734,6 +739,9 @@ enum RegionCommands {
 
     /// Find deleted volume regions
     FindDeletedVolumeRegions,
+
+    /// Perform an dry-run allocation and return what was selected
+    DryRunRegionAllocation(DryRunRegionAllocationArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -750,6 +758,35 @@ struct RegionListArgs {
 #[derive(Debug, Args, Clone)]
 struct RegionUsedByArgs {
     region_id: Vec<Uuid>,
+}
+
+#[derive(Debug, Args, Clone)]
+struct DryRunRegionAllocationArgs {
+    /// Specify to consider associated region snapshots as existing region
+    /// allocations (i.e. do not allocate a new read-only region on the same
+    /// sled as a related region snapshot)
+    #[arg(long)]
+    snapshot_id: Option<Uuid>,
+
+    #[arg(long)]
+    block_size: u32,
+
+    /// The size of the virtual disk
+    #[arg(long)]
+    size: i64,
+
+    /// Should the allocated regions be restricted to distinct sleds?
+    #[arg(long)]
+    distinct_sleds: bool,
+
+    /// How many regions are required?
+    #[arg(long, short, default_value_t = 3)]
+    num_regions_required: usize,
+
+    /// the (optional) Volume to associate the new regions with (defaults to a
+    /// random ID)
+    #[arg(long, short)]
+    volume_id: Option<VolumeUuid>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1227,6 +1264,9 @@ impl DbArgs {
                     DbCommands::Region(RegionArgs {
                         command: RegionCommands::FindDeletedVolumeRegions,
                     }) => cmd_db_region_find_deleted(&datastore).await,
+                    DbCommands::Region(RegionArgs {
+                        command: RegionCommands::DryRunRegionAllocation(args),
+                    }) => cmd_db_dry_run_region_allocation(&opctx, &datastore, args).await,
                     DbCommands::RegionReplacement(RegionReplacementArgs {
                         command: RegionReplacementCommands::List(args),
                     }) => {
@@ -3668,6 +3708,164 @@ async fn cmd_db_region_find_deleted(
         .to_string();
 
     println!("{}", volume_table);
+
+    Ok(())
+}
+
+#[derive(Debug)]
+enum DryRunRegionAllocationResult {
+    QueryError { e: region_allocation::AllocationQueryError },
+
+    Success { datasets_and_regions: Vec<(CrucibleDataset, Region)> },
+}
+
+async fn cmd_db_dry_run_region_allocation(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &DryRunRegionAllocationArgs,
+) -> Result<(), anyhow::Error> {
+    let volume_id = match args.volume_id {
+        Some(v) => v,
+        None => VolumeUuid::new_v4(),
+    };
+
+    let size: external::ByteCount = args.size.try_into()?;
+    let block_size: params::BlockSize = args.block_size.try_into()?;
+
+    let (blocks_per_extent, extent_count) = DataStore::get_crucible_allocation(
+        &block_size.try_into().unwrap(),
+        size,
+    );
+
+    let allocation_strategy = if args.distinct_sleds {
+        RegionAllocationStrategy::RandomWithDistinctSleds { seed: None }
+    } else {
+        RegionAllocationStrategy::Random { seed: None }
+    };
+
+    let err = OptionalError::<DryRunRegionAllocationResult>::new();
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    let result: Result<std::convert::Infallible, diesel::result::Error> =
+        datastore
+            .transaction_retry_wrapper("dry_run_region_allocation")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let allocation_strategy = allocation_strategy.clone();
+
+                async move {
+                    let query = region_allocation::allocation_query(
+                        volume_id,
+                        args.snapshot_id,
+                        region_allocation::RegionParameters {
+                            block_size: args.block_size.into(),
+                            blocks_per_extent,
+                            extent_count,
+                            read_only: args.snapshot_id.is_some(),
+                        },
+                        &allocation_strategy,
+                        args.num_regions_required,
+                    )
+                    .map_err(|e| {
+                        err.bail(DryRunRegionAllocationResult::QueryError { e })
+                    })?;
+
+                    let datasets_and_regions: Vec<(CrucibleDataset, Region)> =
+                        query.get_results_async(&conn).await?;
+
+                    Err(err.bail(DryRunRegionAllocationResult::Success {
+                        datasets_and_regions,
+                    }))
+                }
+            })
+            .await;
+
+    let datasets_and_regions = match result {
+        Ok(_) => {
+            panic!("should not have succeeded!");
+        }
+
+        Err(e) => {
+            if let Some(result) = err.take() {
+                match result {
+                    DryRunRegionAllocationResult::QueryError { e } => {
+                        let err: external::Error = e.into();
+                        Err(err)?
+                    }
+
+                    DryRunRegionAllocationResult::Success {
+                        datasets_and_regions,
+                    } => datasets_and_regions,
+                }
+            } else {
+                Err(e)?
+            }
+        }
+    };
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct Row {
+        pub region_id: Uuid,
+
+        pub dataset_id: Uuid,
+        pub size_used: i64,
+
+        pub pool_id: Uuid,
+
+        #[tabled(display_with = "option_impl_display")]
+        pub total_size: Option<i64>,
+
+        #[tabled(display_with = "option_impl_display")]
+        pub size_left: Option<i64>,
+    }
+
+    let mut rows = Vec::with_capacity(datasets_and_regions.len());
+
+    let Some(latest_collection) =
+        datastore.inventory_get_latest_collection(opctx).await?
+    else {
+        bail!(
+            "failing due to missing inventory - we rely on inventory to \
+            calculate zpool sizing info"
+        );
+    };
+
+    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+
+    for (_, sled_agent) in latest_collection.sled_agents {
+        for zpool in sled_agent.zpools {
+            zpool_total_size
+                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+        }
+    }
+
+    for (dataset, region) in datasets_and_regions {
+        let pool_id = dataset.pool_id.into_untyped_uuid();
+        let total_size = zpool_total_size.get(&pool_id);
+        rows.push(Row {
+            region_id: region.id(),
+
+            dataset_id: dataset.id().into_untyped_uuid(),
+            size_used: dataset.size_used,
+
+            pool_id,
+            total_size: total_size.copied(),
+
+            size_left: match total_size {
+                Some(total_size) => Some(total_size - dataset.size_used),
+                None => None,
+            },
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::psql())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .with(tabled::settings::Panel::header("Allocation results"))
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }
