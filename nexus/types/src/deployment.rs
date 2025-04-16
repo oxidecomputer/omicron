@@ -1645,3 +1645,57 @@ pub struct UnstableReconfiguratorState {
     pub silo_names: Vec<omicron_common::api::external::Name>,
     pub external_dns_zone_names: Vec<String>,
 }
+
+#[cfg(test)]
+mod test {
+    use super::ExpectedVersion;
+    use super::PendingMgsUpdate;
+    use super::PendingMgsUpdateDetails;
+    use super::PendingMgsUpdates;
+    use crate::inventory::BaseboardId;
+    use gateway_client::types::SpType;
+    use std::sync::Arc;
+    use tufaceous_artifact::ArtifactHashId;
+    use tufaceous_artifact::ArtifactKind;
+    use tufaceous_artifact::KnownArtifactKind;
+
+    #[test]
+    fn test_serialize_pending_mgs_updates() {
+        // Trivial case: empty map
+        let empty = PendingMgsUpdates::new();
+        let empty_serialized = serde_json::to_string(&empty).unwrap();
+        assert_eq!(empty_serialized, "[]");
+        let empty_deserialized: PendingMgsUpdates =
+            serde_json::from_str(&empty_serialized).unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(empty, empty_deserialized);
+
+        // Non-trivial case: contains an element.
+        let mut pending_mgs_updates = PendingMgsUpdates::new();
+        let update = PendingMgsUpdate {
+            baseboard_id: Arc::new(BaseboardId {
+                part_number: String::from("913-0000019"),
+                serial_number: String::from("BRM27230037"),
+            }),
+            sp_type: SpType::Sled,
+            slot_id: 15,
+            details: PendingMgsUpdateDetails::Sp {
+                expected_active_version: "1.0.36".parse().unwrap(),
+                expected_inactive_version: ExpectedVersion::Version(
+                    "1.0.36".parse().unwrap(),
+                ),
+            },
+            artifact_hash_id: ArtifactHashId {
+            kind: ArtifactKind::from_known(KnownArtifactKind::GimletSp),
+            hash: "47266ede81e13f5f1e36623ea8dd963842606b783397e4809a9a5f0bda0f8170".parse().unwrap(),
+            },
+            artifact_version: "1.0.34".parse().unwrap(),
+        };
+        pending_mgs_updates.insert(update);
+        let serialized = serde_json::to_string(&pending_mgs_updates).unwrap();
+        let deserialized: PendingMgsUpdates =
+            serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, pending_mgs_updates);
+        assert!(!deserialized.is_empty());
+    }
+}
