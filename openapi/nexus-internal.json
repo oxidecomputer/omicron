@@ -1620,6 +1620,25 @@
           }
         ]
       },
+      "ArtifactHashId": {
+        "description": "A hash-based identifier for an artifact or deployment unit: the kind and hash.",
+        "type": "object",
+        "properties": {
+          "hash": {
+            "description": "The hash of the artifact.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "kind": {
+            "description": "The kind of artifact this is.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "kind"
+        ]
+      },
       "ArtifactVersion": {
         "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
         "type": "string",
@@ -1706,6 +1725,24 @@
           "part",
           "revision",
           "serial"
+        ]
+      },
+      "BaseboardId": {
+        "description": "A unique baseboard id found during a collection\n\nBaseboard ids are the keys used to link up information from disparate sources (like a service processor and a sled agent).\n\nThese are normalized in the database.  Each distinct baseboard id is assigned a uuid and shared across the many possible collections that reference it.\n\nUsually, the part number and serial number are combined with a revision number.  We do not include that here.  If we ever did find a baseboard with the same part number and serial number but a new revision number, we'd want to treat that as the same baseboard as one with a different revision number.",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
         ]
       },
       "BfdMode": {
@@ -2012,6 +2049,14 @@
               }
             ]
           },
+          "pending_mgs_updates": {
+            "description": "List of pending MGS-mediated updates",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingMgsUpdates"
+              }
+            ]
+          },
           "sleds": {
             "description": "A map of sled id -> desired configuration of the sled.",
             "type": "object",
@@ -2035,6 +2080,7 @@
           "internal_dns_version",
           "oximeter_read_mode",
           "oximeter_read_version",
+          "pending_mgs_updates",
           "sleds",
           "time_created"
         ]
@@ -3814,6 +3860,45 @@
           "request_id"
         ]
       },
+      "ExpectedVersion": {
+        "description": "Describes the version that we expect to find in some firmware slot",
+        "oneOf": [
+          {
+            "description": "We expect to find _no_ valid caboose in this slot",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "no_valid_version"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "We expect to find the specified version in this slot",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "version"
+                ]
+              },
+              "version": {
+                "$ref": "#/components/schemas/ArtifactVersion"
+              }
+            },
+            "required": [
+              "kind",
+              "version"
+            ]
+          }
+        ]
+      },
       "ExternalPortDiscovery": {
         "oneOf": [
           {
@@ -3879,6 +3964,12 @@
         "type": "object",
         "additionalProperties": {
           "$ref": "#/components/schemas/BlueprintZoneConfig"
+        }
+      },
+      "IdMapPendingMgsUpdate": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/PendingMgsUpdate"
         }
       },
       "ImportExportPolicy": {
@@ -4784,6 +4875,109 @@
           "mode",
           "time_created",
           "version"
+        ]
+      },
+      "PendingMgsUpdate": {
+        "type": "object",
+        "properties": {
+          "artifact_hash_id": {
+            "description": "which artifact to apply to this device (implies which component is being updated)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactHashId"
+              }
+            ]
+          },
+          "artifact_version": {
+            "$ref": "#/components/schemas/ArtifactVersion"
+          },
+          "baseboard_id": {
+            "description": "id of the baseboard that we're going to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "details": {
+            "description": "component-specific details of the pending update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingMgsUpdateDetails"
+              }
+            ]
+          },
+          "slot_id": {
+            "description": "last known MGS slot (cubby number) of the baseboard",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "sp_type": {
+            "description": "what type of baseboard this is",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpType"
+              }
+            ]
+          }
+        },
+        "required": [
+          "artifact_hash_id",
+          "artifact_version",
+          "baseboard_id",
+          "details",
+          "slot_id",
+          "sp_type"
+        ]
+      },
+      "PendingMgsUpdateDetails": {
+        "description": "Describes the component-specific details of a PendingMgsUpdate",
+        "oneOf": [
+          {
+            "description": "the SP itself is being updated",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "sp"
+                ]
+              },
+              "expected_active_version": {
+                "description": "expected contents of the active slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ArtifactVersion"
+                  }
+                ]
+              },
+              "expected_inactive_version": {
+                "description": "expected contents of the inactive slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExpectedVersion"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "expected_active_version",
+              "expected_inactive_version"
+            ]
+          }
+        ]
+      },
+      "PendingMgsUpdates": {
+        "type": "object",
+        "properties": {
+          "by_baseboard": {
+            "$ref": "#/components/schemas/IdMapPendingMgsUpdate"
+          }
+        },
+        "required": [
+          "by_baseboard"
         ]
       },
       "PhysicalDiskKind": {
@@ -5927,6 +6121,15 @@
           "first_port",
           "ip",
           "last_port"
+        ]
+      },
+      "SpType": {
+        "description": "SpType\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
+        "type": "string",
+        "enum": [
+          "sled",
+          "power",
+          "switch"
         ]
       },
       "Srv": {

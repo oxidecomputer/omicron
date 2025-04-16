@@ -341,6 +341,7 @@ mod test {
     pub use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::OximeterReadPolicy;
+    use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::params;
@@ -690,6 +691,7 @@ mod test {
         let mut blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: blueprint_sleds,
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,

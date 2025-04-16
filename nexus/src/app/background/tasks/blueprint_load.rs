@@ -195,7 +195,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         Blueprint, BlueprintTarget, CockroachDbPreserveDowngrade,
-        OximeterReadMode,
+        OximeterReadMode, PendingMgsUpdates,
     };
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -218,6 +218,7 @@ mod test {
             Blueprint {
                 id,
                 sleds: BTreeMap::new(),
+                pending_mgs_updates: PendingMgsUpdates::new(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: Some(parent_blueprint_id),

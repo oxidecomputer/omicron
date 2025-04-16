@@ -18052,8 +18052,9 @@
         "type": "object",
         "properties": {
           "anti_affinity_groups": {
-            "description": "Anti-Affinity groups which this instance should be added.",
-            "default": [],
+            "nullable": true,
+            "description": "Anti-Affinity groups which this instance should be added.\n\nA \"null\" set of groups is equivalent to an empty set of groups.",
+            "default": null,
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NameOrId"

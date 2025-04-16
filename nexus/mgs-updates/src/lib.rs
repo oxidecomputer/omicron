@@ -11,13 +11,23 @@
 //! - root of trust bootloader (bootleby)
 //! - host phase 1 image (Helios phase 1)
 
+mod artifacts;
 mod common_sp_update;
+mod driver;
+mod driver_update;
 mod host_phase1_updater;
 mod mgs_clients;
 mod rot_updater;
 mod sp_updater;
 
+pub use artifacts::ArtifactCache;
+pub use artifacts::ArtifactCacheError;
 pub use common_sp_update::SpComponentUpdateError;
+pub use common_sp_update::SpComponentUpdateHelper;
+pub use common_sp_update::SpComponentUpdater;
+pub use driver::DriverStatus;
+pub use driver::MgsUpdateDriver;
+pub use driver_update::DEFAULT_RETRY_TIMEOUT;
 pub use host_phase1_updater::HostPhase1Updater;
 pub use mgs_clients::MgsClients;
 pub use rot_updater::RotUpdater;

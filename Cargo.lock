@@ -3540,6 +3540,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "daft",
  "gateway-messages",
  "omicron-workspace-hack",
  "progenitor 0.9.1",
@@ -4366,9 +4367,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df2dcfbe0677734ab2f3ffa7fa7bfd4706bfdc1ef393f2ee30184aed67e631b4"
+checksum = "497bbc33a26fdd4af9ed9c70d63f61cf56a938375fbb32df34db9b1cd6d643f2"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -4376,6 +4377,7 @@ dependencies = [
  "http",
  "http-body",
  "hyper",
+ "libc",
  "pin-project-lite",
  "socket2",
  "tokio",
@@ -5302,7 +5304,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6185,18 +6187,31 @@ dependencies = [
 name = "nexus-mgs-updates"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "futures",
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
  "hubtools",
+ "id-map",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "nexus-types",
+ "omicron-common",
  "omicron-workspace-hack",
+ "qorb",
  "rand 0.8.5",
+ "repo-depot-client",
  "reqwest",
+ "sha2",
  "slog",
+ "slog-error-chain",
  "sp-sim",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -6285,6 +6300,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-db-schema",
  "nexus-inventory",
+ "nexus-mgs-updates",
  "nexus-networking",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
@@ -7246,6 +7262,7 @@ dependencies = [
  "nexus-internal-api",
  "nexus-inventory",
  "nexus-metrics-producer-gc",
+ "nexus-mgs-updates",
  "nexus-networking",
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
@@ -7480,14 +7497,19 @@ dependencies = [
  "clap",
  "dropshot 0.16.0",
  "internal-dns-resolver",
+ "internal-dns-types",
  "nexus-db-model",
  "nexus-db-queries",
+ "nexus-mgs-updates",
  "nexus-reconfigurator-execution",
  "nexus-types",
+ "omicron-common",
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pq-sys",
+ "qorb",
+ "repo-depot-client",
  "serde_json",
  "slog",
  "supports-color",
@@ -7574,6 +7596,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "async-trait",
+ "atomicwrites",
  "base64 0.22.1",
  "bootstore",
  "bootstrap-agent-api",
@@ -10045,6 +10068,30 @@ dependencies = [
  "tokio",
  "tufaceous-artifact",
  "uuid",
+]
+
+[[package]]
+name = "reconfigurator-sp-updater"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "dropshot 0.16.0",
+ "futures",
+ "gateway-client",
+ "humantime",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "nexus-mgs-updates",
+ "nexus-types",
+ "omicron-repl-utils",
+ "omicron-workspace-hack",
+ "qorb",
+ "serde_json",
+ "slog",
+ "tokio",
+ "tufaceous-artifact",
 ]
 
 [[package]]
@@ -12635,6 +12682,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "pin-project-lite",
+ "slab",
  "tokio",
 ]
 

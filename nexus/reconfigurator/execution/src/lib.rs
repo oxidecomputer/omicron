@@ -11,8 +11,15 @@ use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::execution::*;
+use nexus_types::deployment::execution::StepSkipped;
+use nexus_types::deployment::execution::overridables;
+use nexus_types::deployment::execution::{
+    ComponentRegistrar, Event, ExecutionComponent, ExecutionStepId,
+    Overridables, ReconfiguratorExecutionSpec, SharedStepHandle, Sled,
+    StepHandle, StepResult, UpdateEngine,
+};
 use nexus_types::identity::Asset;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -22,6 +29,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use update_engine::StepSuccess;
 use update_engine::StepWarning;
 use update_engine::merge_anyhow_list;
@@ -49,6 +57,7 @@ pub struct RealizeArgs<'a> {
     pub creator: OmicronZoneUuid,
     pub sender: mpsc::Sender<Event>,
     pub overrides: Option<&'a Overridables>,
+    pub mgs_updates: watch::Sender<PendingMgsUpdates>,
 }
 
 impl<'a> RealizeArgs<'a> {
@@ -95,6 +104,7 @@ pub struct RequiredRealizeArgs<'a> {
     pub creator: OmicronZoneUuid,
     pub blueprint: &'a Blueprint,
     pub sender: mpsc::Sender<Event>,
+    pub mgs_updates: watch::Sender<PendingMgsUpdates>,
 }
 
 impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
@@ -108,6 +118,7 @@ impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
             nexus_id: None,
             sender: value.sender,
             overrides: None,
+            mgs_updates: value.mgs_updates,
         }
     }
 }
@@ -152,6 +163,7 @@ pub async fn realize_blueprint(
         creator,
         sender,
         overrides,
+        mgs_updates,
     } = exec_ctx;
 
     let opctx = opctx.child(BTreeMap::from([(
@@ -259,6 +271,12 @@ pub async fn realize_blueprint(
         &opctx,
         datastore,
         blueprint,
+    );
+
+    register_mgs_update_step(
+        &engine.for_component(ExecutionComponent::MgsUpdates),
+        blueprint,
+        mgs_updates,
     );
 
     // All steps are registered, so execute the engine.
@@ -627,6 +645,26 @@ fn register_cockroachdb_settings_step<'a>(
                     cockroachdb::ensure_settings(opctx, datastore, blueprint)
                         .await;
                 Ok(map_err_to_step_warning(res))
+            },
+        )
+        .register();
+}
+
+fn register_mgs_update_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    blueprint: &'a Blueprint,
+    sender: watch::Sender<PendingMgsUpdates>,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Kick off MGS-managed updates",
+            move |_cx| async move {
+                let result =
+                    sender.send(blueprint.pending_mgs_updates.clone()).context(
+                        "failed to send to MgsUpdateDriver on watch channel",
+                    );
+                Ok(map_err_to_step_warning(result))
             },
         )
         .register();
