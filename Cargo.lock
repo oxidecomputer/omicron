@@ -6186,18 +6186,31 @@ dependencies = [
 name = "nexus-mgs-updates"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "futures",
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
  "hubtools",
+ "id-map",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "nexus-types",
+ "omicron-common",
  "omicron-workspace-hack",
+ "qorb",
  "rand 0.8.5",
+ "repo-depot-client",
  "reqwest",
+ "sha2",
  "slog",
+ "slog-error-chain",
  "sp-sim",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -10050,6 +10063,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "reconfigurator-sp-updater"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "dropshot 0.16.0",
+ "futures",
+ "gateway-client",
+ "humantime",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "nexus-mgs-updates",
+ "nexus-types",
+ "omicron-repl-utils",
+ "omicron-workspace-hack",
+ "qorb",
+ "serde_json",
+ "slog",
+ "tokio",
+ "tufaceous-artifact",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12637,6 +12674,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "pin-project-lite",
+ "slab",
  "tokio",
 ]
 
