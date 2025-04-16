@@ -1230,8 +1230,10 @@ pub struct InstanceCreate {
     pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 
     /// Anti-Affinity groups which this instance should be added.
+    ///
+    /// A "null" set of groups is equivalent to an empty set of groups.
     #[serde(default)]
-    pub anti_affinity_groups: Vec<NameOrId>,
+    pub anti_affinity_groups: Option<Vec<NameOrId>>,
 }
 
 /// Parameters of an `Instance` that can be reconfigured after creation.

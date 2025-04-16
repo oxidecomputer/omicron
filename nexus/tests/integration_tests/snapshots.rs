@@ -149,7 +149,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             external_ips: vec![],
             start: true,
             auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
+            anti_affinity_groups: None,
         },
     )
     .await;
@@ -355,7 +355,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
             external_ips: vec![],
             start: false,
             auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
+            anti_affinity_groups: None,
         },
     )
     .await;

@@ -1380,7 +1380,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         disks: Vec::new(),
                         start: false,
                         auto_restart_policy: Default::default(),
-                        anti_affinity_groups: Vec::new(),
+                        anti_affinity_groups: None,
                     },
                 ))
                 .execute_async(&*pool_and_conn.conn)

@@ -1888,7 +1888,7 @@ mod tests {
             boot_disk: None,
             start: true,
             auto_restart_policy: Default::default(),
-            anti_affinity_groups: Vec::new(),
+            anti_affinity_groups: None,
         };
 
         let instance = Instance::new(instance_id, project_id, &params);
