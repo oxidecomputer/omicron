@@ -82,8 +82,8 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Did we modify, add, or remove any pending MGS updates?
         if pending_mgs_updates.by_baseboard.modified().next().is_some()
-            || pending_mgs_updates.by_baseboard.added.is_empty()
-            || pending_mgs_updates.by_baseboard.removed.is_empty()
+            || !pending_mgs_updates.by_baseboard.added.is_empty()
+            || !pending_mgs_updates.by_baseboard.removed.is_empty()
         {
             return true;
         }
