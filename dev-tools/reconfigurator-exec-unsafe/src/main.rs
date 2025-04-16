@@ -245,6 +245,9 @@ impl ReconfiguratorExec {
                 blueprint: &blueprint,
                 creator: OmicronZoneUuid::from_untyped_uuid(creator),
                 sender,
+                // The driver shuts down when the tx side of this channel gets
+                // closed.  Clone this sender so that it doesn't get shut down
+                // right away.
                 mgs_updates: mgs_updates.clone(),
             }
             .into(),
@@ -296,6 +299,7 @@ impl ReconfiguratorExec {
             info!(&log, "waiting for repo depot resolver to stop");
             repo_depot_resolver.terminate().await;
             info!(&log, "waiting for driver to stop");
+            // We're ready to drop this sender so that the driver shuts down.
             drop(mgs_updates);
             driver_task.await.context("waiting for driver to stop")?;
         }
