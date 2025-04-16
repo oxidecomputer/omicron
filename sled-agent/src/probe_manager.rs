@@ -357,13 +357,19 @@ impl ProbeManagerInner {
 
         // Notify the sled-agent's metrics task to start tracking the VNIC and
         // any OPTE ports in the zone.
-        if !self.metrics_queue.track_zone_links(&rz).await {
-            error!(
+        match self.metrics_queue.track_zone_links(&rz) {
+            Ok(_) => debug!(
+                self.log,
+                "started tracking zone datalinks";
+                "zone_name" => rz.name(),
+            ),
+            Err(errors) => error!(
                 self.log,
                 "Failed to track one or more datalinks in the zone, \
                 some metrics will not be produced";
                 "zone_name" => rz.name(),
-            );
+                "errors" => ?errors,
+            ),
         }
 
         self.running_probes.lock().await.zones.insert(probe.id, rz);
@@ -406,7 +412,20 @@ impl ProbeManagerInner {
 
                 // Ask the sled-agent to stop tracking our datalinks, and then
                 // delete the OPTE ports.
-                self.metrics_queue.untrack_zone_links(&running_zone).await;
+                match self.metrics_queue.untrack_zone_links(&running_zone) {
+                    Ok(_) => debug!(
+                        self.log,
+                        "stopped tracking zone datalinks";
+                        "zone_name" => running_zone.name(),
+                    ),
+                    Err(errors) => error!(
+                        self.log,
+                        "Failed to stop tracking one or more datalinks in the \
+                        zone, some metrics will not be produced";
+                        "zone_name" => running_zone.name(),
+                        "errors" => ?errors,
+                    ),
+                }
                 running_zone.release_opte_ports();
 
                 if let Err(e) = running_zone.stop().await {
