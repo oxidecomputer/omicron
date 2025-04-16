@@ -1423,6 +1423,7 @@ parent:    <none>
     internal DNS version:   1
     external DNS version:   2
 
+ PENDING MGS-MANAGED UPDATES: 0
 
 ---------------------------------------------
 stderr:
@@ -1519,6 +1520,7 @@ parent:    <none>
     internal DNS version:   1
     external DNS version:   2
 
+ PENDING MGS-MANAGED UPDATES: 0
 
 ---------------------------------------------
 stderr:

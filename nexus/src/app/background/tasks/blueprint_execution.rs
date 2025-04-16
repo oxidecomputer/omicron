@@ -190,7 +190,7 @@ mod test {
     use nexus_types::deployment::{
         Blueprint, BlueprintSledConfig, BlueprintTarget, BlueprintZoneConfig,
         BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
-        CockroachDbPreserveDowngrade, blueprint_zone_type,
+        CockroachDbPreserveDowngrade, PendingMgsUpdates, blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external;
@@ -253,6 +253,7 @@ mod test {
         let blueprint = Blueprint {
             id,
             sleds: blueprint_sleds,
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: Some(current_target.target_id),

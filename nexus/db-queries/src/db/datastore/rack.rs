@@ -1012,6 +1012,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
+    use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::{
         BlueprintZoneConfig, OmicronZoneExternalFloatingAddr,
         OmicronZoneExternalFloatingIp,
@@ -1054,6 +1055,7 @@ mod test {
                 blueprint: Blueprint {
                     id: BlueprintUuid::new_v4(),
                     sleds: BTreeMap::new(),
+                    pending_mgs_updates: PendingMgsUpdates::new(),
                     cockroachdb_setting_preserve_downgrade:
                         CockroachDbPreserveDowngrade::DoNotModify,
                     parent_blueprint_id: None,
@@ -1539,6 +1541,7 @@ mod test {
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -1796,6 +1799,7 @@ mod test {
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -2002,6 +2006,7 @@ mod test {
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -2138,6 +2143,7 @@ mod test {
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,

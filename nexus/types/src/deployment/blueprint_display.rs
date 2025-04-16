@@ -400,6 +400,25 @@ impl BpTableSchema for BpClickhouseServersTableSchema {
     }
 }
 
+/// The [`BpTable`] schema for pending MGS updates
+pub struct BpPendingMgsUpdates {}
+impl BpTableSchema for BpPendingMgsUpdates {
+    fn table_name(&self) -> &'static str {
+        "Pending MGS-managed updates"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &[
+            "sp_type",
+            "slot",
+            "part_number",
+            "serial_number",
+            "artifact_kind",
+            "artifact_hash",
+        ]
+    }
+}
+
 // An entry in a [`KvListWithHeading`]
 #[derive(Debug)]
 pub struct KvPair {
