@@ -811,17 +811,6 @@ mod illumos_tests {
         }
     }
 
-    // TODO MTZ: tests we want
-    //
-    // - Snapshot creation
-    // - Snapshot deletion on drop
-    // - Snapshot creation; mem::forget; LogHandle::cleanup
-    //
-    // - Manual process_logs
-    // - Current logs
-    // - Archived logs
-    // - Extra
-
     // A custom zfs snapshot list that only shows us our view of the world for
     // a particular filesystem to prevent races from other concurrent tests.
     fn list_snapshots(filesystem: &str) -> Vec<Snapshot> {
