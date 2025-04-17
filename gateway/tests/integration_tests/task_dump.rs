@@ -12,6 +12,8 @@ use gateway_test_utils::setup;
 use gateway_types::component::SpType;
 use gateway_types::task_dump::TaskDump;
 use sp_sim::SIM_GIMLET_BOARD;
+use std::io::Cursor;
+use std::io::Read;
 
 #[tokio::test]
 async fn task_dump() {
@@ -39,7 +41,7 @@ async fn task_dump() {
         bord,
         gitc,
         vers,
-        base64_memory,
+        base64_zip,
     } = test_util::object_get(client, &url).await;
 
     assert_eq!(0, task_index);
@@ -49,11 +51,15 @@ async fn task_dump() {
     assert_eq!(gitc, "ffffffff".to_string());
     assert_eq!(vers, Some("0.0.2".to_string()));
 
-    let encoded_mem = &base64_memory[&1];
-    assert_eq!(
-        "my cool SP dump".repeat(3).as_bytes(),
-        BASE64_STANDARD.decode(encoded_mem).unwrap()
-    );
+    let zip_bytes = BASE64_STANDARD.decode(base64_zip).unwrap();
+    let cursor = Cursor::new(zip_bytes);
+    let mut zip = zip::ZipArchive::new(cursor).unwrap();
+
+    let mut file = zip.by_name("0x000001.bin").unwrap();
+    let mut data = Vec::new();
+    file.read_to_end(&mut data).unwrap();
+
+    assert_eq!("my cool SP dump".repeat(3).as_bytes(), data);
 
     testctx.teardown().await;
 }

@@ -48,6 +48,7 @@ use gateway_types::update::HostPhase2Progress;
 use gateway_types::update::HostPhase2RecoveryImageId;
 use gateway_types::update::InstallinatorImageId;
 use gateway_types::update::SpUpdateStatus;
+use std::io::Cursor;
 use std::str;
 use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
@@ -690,28 +691,23 @@ impl GatewayApi for GatewayImpl {
                     SpCommsError::SpCommunicationFailed { sp: sp_id, err }
                 })?;
 
-            let archive_id = hex::encode(raw_dump.archive_id);
-            let base64_memory = raw_dump
-                .memory
-                .into_iter()
-                .map(|(key, mem)| {
-                    let base64_mem =
-                        base64::engine::general_purpose::STANDARD.encode(mem);
-                    (key, base64_mem)
-                })
-                .collect();
+            let mut cursor = Cursor::new(Vec::new());
+            raw_dump.write_zip(&mut cursor).map_err(|err| {
+                HttpError::for_internal_error(err.to_string())
+            })?;
 
-            let dump = TaskDump {
+            let base64_zip = base64::engine::general_purpose::STANDARD
+                .encode(cursor.into_inner());
+
+            Ok(HttpResponseOk(TaskDump {
                 task_index: raw_dump.task_index,
                 timestamp: raw_dump.timestamp,
-                archive_id,
+                archive_id: hex::encode(raw_dump.archive_id),
                 bord: raw_dump.bord,
                 gitc: raw_dump.gitc,
                 vers: raw_dump.vers,
-                base64_memory,
-            };
-
-            Ok(HttpResponseOk(dump))
+                base64_zip,
+            }))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }

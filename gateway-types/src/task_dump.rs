@@ -4,7 +4,6 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 #[derive(
     Debug,
@@ -20,7 +19,7 @@ use std::collections::BTreeMap;
 pub struct TaskDump {
     /// Index of the crashed task.
     pub task_index: u16,
-    /// Timestamp at which the task crash occurred.
+    /// Hubris timestamp at which the task crash occurred.
     pub timestamp: u64,
     /// Hex-encoded Hubris archive ID.
     pub archive_id: String,
@@ -30,6 +29,6 @@ pub struct TaskDump {
     pub gitc: String,
     /// `VERS` field from the caboose, if present.
     pub vers: Option<String>,
-    /// Base64-encoded raw memory read from the SP.
-    pub base64_memory: BTreeMap<u32, String>,
+    /// Base64-encoded zip file containing dehydrated task dump.
+    pub base64_zip: String,
 }
