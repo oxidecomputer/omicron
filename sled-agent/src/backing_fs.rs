@@ -134,7 +134,7 @@ pub(crate) fn ensure_backing_fs(
             sled_storage::dataset::M2_BACKING_DATASET,
             bfs.name
         );
-        let mountpoint = Mountpoint::Path(Utf8PathBuf::from(bfs.mountpoint));
+        let mountpoint = Mountpoint(Utf8PathBuf::from(bfs.mountpoint));
 
         info!(log, "Ensuring dataset {}", dataset);
 

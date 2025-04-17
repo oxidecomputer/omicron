@@ -27,6 +27,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use nexus_db_model::PhysicalDiskKind;
+use nexus_db_model::to_db_typed_uuid;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -309,5 +310,34 @@ impl DataStore {
             })?;
 
         Ok(SledUuid::from_untyped_uuid(id))
+    }
+
+    pub async fn zpool_set_control_plane_storage_buffer(
+        &self,
+        opctx: &OpContext,
+        id: ZpoolUuid,
+        control_plane_storage_buffer: i64,
+    ) -> Result<(), Error> {
+        use nexus_db_schema::schema::zpool::dsl;
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        info!(
+            opctx.log,
+            "changing {id} control plane storage buffer to \
+            {control_plane_storage_buffer}",
+        );
+
+        diesel::update(dsl::zpool)
+            .filter(dsl::id.eq(to_db_typed_uuid(id)))
+            .set(
+                dsl::control_plane_storage_buffer
+                    .eq(control_plane_storage_buffer),
+            )
+            .execute_async(&*conn)
+            .await
+            .map(|_| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

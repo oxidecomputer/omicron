@@ -46,7 +46,7 @@ use oximeter::types::Sample;
 use qorb::policy::Policy;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
-use qorb::resolvers::single_host::SingleHostResolver;
+use qorb::resolvers::fixed::FixedResolver;
 use regex::Regex;
 use regex::RegexBuilder;
 use slog::Logger;
@@ -164,7 +164,7 @@ impl Client {
         ));
         let schema = Mutex::new(BTreeMap::new());
         let native_pool = match Pool::new(
-            Box::new(SingleHostResolver::new(address)),
+            Box::new(FixedResolver::new([address])),
             Arc::new(native::connection::Connector),
             Default::default(),
         ) {
@@ -5077,7 +5077,7 @@ mod tests {
             0,
             0,
         ));
-        let resolver = Box::new(SingleHostResolver::new(BOGUS_ADDR));
+        let resolver = Box::new(FixedResolver::new([BOGUS_ADDR]));
         let policy = Policy {
             claim_timeout: Duration::from_secs(1),
             ..Default::default()

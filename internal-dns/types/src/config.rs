@@ -423,6 +423,7 @@ impl DnsConfigBuilder {
         zone_id: OmicronZoneUuid,
         http_service: ServiceName,
         http_address: SocketAddrV6,
+        read_policy_enabled: bool,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             http_service == ServiceName::Clickhouse,
@@ -431,7 +432,13 @@ impl DnsConfigBuilder {
         );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(http_service, &zone, http_address.port())?;
-
+        if read_policy_enabled {
+            self.service_backend_zone(
+                ServiceName::OximeterReader,
+                &zone,
+                CLICKHOUSE_TCP_PORT,
+            )?;
+        };
         self.service_backend_zone(
             ServiceName::ClickhouseNative,
             &zone,
@@ -470,6 +477,7 @@ impl DnsConfigBuilder {
         zone_id: OmicronZoneUuid,
         http_service: ServiceName,
         http_address: SocketAddrV6,
+        read_policy_enabled: bool,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             http_service == ServiceName::ClickhouseServer,
@@ -478,6 +486,13 @@ impl DnsConfigBuilder {
         );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(http_service, &zone, http_address.port())?;
+        if read_policy_enabled {
+            self.service_backend_zone(
+                ServiceName::OximeterReader,
+                &zone,
+                CLICKHOUSE_TCP_PORT,
+            )?;
+        };
         self.service_backend_zone(
             ServiceName::ClickhouseClusterNative,
             &zone,
@@ -762,6 +777,10 @@ mod test {
         assert_eq!(ServiceName::InternalDns.dns_name(), "_nameservice._tcp",);
         assert_eq!(ServiceName::Nexus.dns_name(), "_nexus._tcp",);
         assert_eq!(ServiceName::Oximeter.dns_name(), "_oximeter._tcp",);
+        assert_eq!(
+            ServiceName::OximeterReader.dns_name(),
+            "_oximeter-reader._tcp",
+        );
         assert_eq!(ServiceName::Dendrite.dns_name(), "_dendrite._tcp",);
         assert_eq!(
             ServiceName::CruciblePantry.dns_name(),
@@ -884,12 +903,14 @@ mod test {
                 zone_clickhouse_uuid,
                 ServiceName::Clickhouse,
                 SocketAddrV6::new(ZONE_CLICKHOUSE_IP, 0, 0, 0),
+                true,
             )
             .unwrap();
             b.host_zone_clickhouse_cluster(
                 zone_clickhouse_server_uuid,
                 ServiceName::ClickhouseServer,
                 SocketAddrV6::new(ZONE_CLICKHOUSE_SERVER_IP, 0, 0, 0),
+                false,
             )
             .unwrap();
 

@@ -4,9 +4,10 @@
 
 //! Subcommand: cargo xtask clippy
 
-use crate::common::{cargo_command, run_subcmd};
+use crate::common::run_subcmd;
 use anyhow::Result;
 use clap::Parser;
+use dev_tools_common::{CargoLocation, cargo_command};
 
 #[derive(Parser)]
 pub struct ClippyArgs {
@@ -19,7 +20,7 @@ pub struct ClippyArgs {
 }
 
 pub fn run_cmd(args: ClippyArgs) -> Result<()> {
-    let mut command = cargo_command();
+    let mut command = cargo_command(CargoLocation::FromEnv);
     command.arg("clippy");
 
     if args.fix {

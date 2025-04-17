@@ -879,7 +879,7 @@ table! {
         time_created -> Timestamptz,
         name -> Text,
         saga_dag -> Jsonb,
-        saga_state -> crate::enums::SagaCachedStateEnum,
+        saga_state -> crate::enums::SagaStateEnum,
         current_sec -> Nullable<Uuid>,
         adopt_generation -> Int8,
         adopt_time -> Timestamptz,
@@ -903,6 +903,14 @@ table! {
         clickhouse_mode -> crate::enums::ClickhouseModeEnum,
         clickhouse_cluster_target_servers -> Int2,
         clickhouse_cluster_target_keepers -> Int2,
+        time_created -> Timestamptz,
+    }
+}
+
+table! {
+    oximeter_read_policy (version) {
+        version -> Int8,
+        oximeter_read_mode -> crate::enums::OximeterReadModeEnum,
         time_created -> Timestamptz,
     }
 }
@@ -1071,6 +1079,8 @@ table! {
 
         sled_id -> Uuid,
         physical_disk_id -> Uuid,
+
+        control_plane_storage_buffer -> Int8,
     }
 }
 
@@ -1093,6 +1103,8 @@ table! {
         port -> Int4,
 
         size_used -> Int8,
+
+        no_provision -> Bool,
     }
 }
 
@@ -1849,6 +1861,14 @@ table! {
     cockroachdb_zone_id_to_node_id (omicron_zone_id, crdb_node_id) {
         omicron_zone_id -> Uuid,
         crdb_node_id -> Text,
+    }
+}
+
+table! {
+    bp_oximeter_read_policy (blueprint_id) {
+        blueprint_id -> Uuid,
+        version -> Int8,
+        oximeter_read_mode -> crate::enums::OximeterReadModeEnum,
     }
 }
 

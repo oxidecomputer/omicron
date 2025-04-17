@@ -1012,13 +1012,14 @@ mod test {
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
+    use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::{
         BlueprintZoneConfig, OmicronZoneExternalFloatingAddr,
         OmicronZoneExternalFloatingIp,
     };
     use nexus_types::deployment::{
         BlueprintZoneDisposition, BlueprintZoneImageSource,
-        OmicronZoneExternalSnatIp,
+        OmicronZoneExternalSnatIp, OximeterReadMode,
     };
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::external_api::views::SledState;
@@ -1054,6 +1055,7 @@ mod test {
                 blueprint: Blueprint {
                     id: BlueprintUuid::new_v4(),
                     sleds: BTreeMap::new(),
+                    pending_mgs_updates: PendingMgsUpdates::new(),
                     cockroachdb_setting_preserve_downgrade:
                         CockroachDbPreserveDowngrade::DoNotModify,
                     parent_blueprint_id: None,
@@ -1061,6 +1063,8 @@ mod test {
                     external_dns_version: *Generation::new(),
                     cockroachdb_fingerprint: String::new(),
                     clickhouse_cluster_config: None,
+                    oximeter_read_version: *Generation::new(),
+                    oximeter_read_mode: OximeterReadMode::SingleNode,
                     time_created: Utc::now(),
                     creator: "test suite".to_string(),
                     comment: "test suite".to_string(),
@@ -1101,10 +1105,10 @@ mod test {
                     DNS_ZONE
                 ),
                 recovery_user_id: "test-user".parse().unwrap(),
-                // empty string password
-                recovery_user_password_hash: "$argon2id$v=19$m=98304,t=13,\
-                p=1$d2t2UHhOdWt3NkYyY1l3cA$pIvmXrcTk/\
-                nsUzWvBQIeuMJk96ijye/oIXHCj15xg+M"
+                // Generated via `cargo run --example argon2 -- --input ""`.
+                recovery_user_password_hash: "$argon2id$v=19$m=98304,t=23,\
+                    p=1$E4DE+f6Yduuy0nSubo5qtg$57JDYGov3SZoEZnLyZZBHOACH95s\
+                    8aOpG22zBoWZ2S4"
                     .parse()
                     .unwrap(),
                 dns_update: DnsVersionUpdateBuilder::new(
@@ -1539,6 +1543,7 @@ mod test {
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -1546,6 +1551,8 @@ mod test {
             external_dns_version: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: *Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -1796,6 +1803,7 @@ mod test {
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -1803,6 +1811,8 @@ mod test {
             external_dns_version: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: *Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -2002,6 +2012,7 @@ mod test {
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -2009,6 +2020,8 @@ mod test {
             external_dns_version: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: *Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -2138,6 +2151,7 @@ mod test {
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -2145,6 +2159,8 @@ mod test {
             external_dns_version: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: *Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
