@@ -79,9 +79,11 @@ impl DataStore {
         opctx: &OpContext,
         policy: &OximeterReadPolicy,
     ) -> Result<(), Error> {
-        if policy.version < 1 {
+        // We pre-populate the database with version 1, so any new
+        // version must be greater 
+        if policy.version < 2 {
             return Err(Error::invalid_request(
-                "policy version must be greater than 0",
+                "policy version must be greater than 1",
             ));
         }
         opctx
@@ -108,13 +110,13 @@ impl DataStore {
     /// Only succeeds if the prior version is the latest version currently
     /// in the `oximeter_read_policy` table.
     ///
-    /// Panics if `policy.version <= 0`;
+    /// Panics if `policy.version <= 1`;
     async fn oximeter_read_policy_insert_next_policy(
         &self,
         opctx: &OpContext,
         policy: &OximeterReadPolicy,
     ) -> Result<usize, Error> {
-        assert!(policy.version > 0);
+        assert!(policy.version > 1);
         let prev_version = policy.version - 1;
 
         sql_query(
@@ -162,7 +164,7 @@ mod tests {
 
         // Fail to insert a policy with version 0
         let mut policy = OximeterReadPolicy {
-            version: 0,
+            version: 1,
             mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
         };
@@ -173,27 +175,18 @@ mod tests {
                 .await
                 .unwrap_err()
                 .to_string()
-                .contains("policy version must be greater than 0")
+                .contains("policy version must be greater than 1")
         );
 
-        // Inserting version 2 before version 1 should not work
-        policy.version = 2;
+        // Inserting version 3 before version 2 should not work
+        policy.version = 3;
         assert!(
             datastore
                 .oximeter_read_policy_insert_latest_version(opctx, &policy)
                 .await
                 .unwrap_err()
                 .to_string()
-                .contains("policy version 2 is not the most recent")
-        );
-
-        // Inserting version 1 should work
-        policy.version = 1;
-        assert!(
-            datastore
-                .oximeter_read_policy_insert_latest_version(opctx, &policy)
-                .await
-                .is_ok()
+                .contains("policy version 3 is not the most recent")
         );
 
         // Inserting version 2 should work
@@ -205,17 +198,6 @@ mod tests {
                 .is_ok()
         );
 
-        // Inserting version 4 should not work, since the prior version is 2
-        policy.version = 4;
-        assert!(
-            datastore
-                .oximeter_read_policy_insert_latest_version(opctx, &policy)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("policy version 4 is not the most recent")
-        );
-
         // Inserting version 3 should work
         policy.version = 3;
         assert!(
@@ -225,8 +207,28 @@ mod tests {
                 .is_ok()
         );
 
+        // Inserting version 5 should not work, since the prior version is 3
+        policy.version = 5;
+        assert!(
+            datastore
+                .oximeter_read_policy_insert_latest_version(opctx, &policy)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("policy version 5 is not the most recent")
+        );
+
         // Inserting version 4 should work
         policy.version = 4;
+        assert!(
+            datastore
+                .oximeter_read_policy_insert_latest_version(opctx, &policy)
+                .await
+                .is_ok()
+        );
+
+        // Inserting version 4 should work
+        policy.version = 5;
         policy.mode = OximeterReadMode::Cluster;
         assert!(
             datastore
@@ -240,10 +242,10 @@ mod tests {
             .await
             .unwrap();
 
-        for i in 0..=4 {
-            let policy = &history[i];
+        for i in 1..=5 {
+            let policy = &history[i - 1];
             assert_eq!(policy.version, i as u32);
-            if i != 4 {
+            if i != 5 {
                 assert!(matches!(policy.mode, OximeterReadMode::SingleNode));
             } else {
                 assert!(matches!(policy.mode, OximeterReadMode::Cluster));

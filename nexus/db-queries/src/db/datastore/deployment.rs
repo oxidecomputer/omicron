@@ -924,9 +924,9 @@ impl DataStore {
                 })?;
 
             match res {
-                // If policy is empty, we can safely assume we are at version 0 which defaults
+                // If policy is empty, we can safely assume we are at version 1 which defaults
                 // to reading from a single node installation
-                None => (Generation::from(0), OximeterReadMode::SingleNode),
+                None => (Generation::new(), OximeterReadMode::SingleNode),
                 Some(p) => (
                     Generation::from(p.version),
                     OximeterReadMode::from(p.oximeter_read_mode),

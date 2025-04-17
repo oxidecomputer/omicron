@@ -1557,9 +1557,9 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         // reconfigurator only.
         clickhouse_cluster_config: None,
         // The oximeter read policy always defaults to single node. The
-        // initial generation of this policy in the DB is 0
+        // initial generation of this policy in the DB is 1
         oximeter_read_mode: OximeterReadMode::SingleNode,
-        oximeter_read_version: Generation::from(0),
+        oximeter_read_version: Generation::new(),
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),

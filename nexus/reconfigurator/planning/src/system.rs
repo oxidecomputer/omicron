@@ -174,7 +174,7 @@ impl SystemDescription {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
-            // We use the `new()` method, as this is method is only intended
+            // We use the `new()` method, as this method is only intended
             // for testing.
             oximeter_read_policy: OximeterReadPolicy::new(),
         }
