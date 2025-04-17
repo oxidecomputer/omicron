@@ -206,7 +206,7 @@ You should only do this if:
 
         let status = get_saga_sec_status(omdb, opctx, &saga).await;
         status.display_message(should_print_color);
-        status.as_result()?;
+        status.into_result()?;
     } else {
         let text = "Skipping check of whether the Nexus assigned to this saga \
         is running. If this Nexus is running, the control plane state managed \
@@ -354,12 +354,12 @@ circumstances:
   it will not resume executing the saga.
 
 - Other Nexuses will not adopt and resume the saga, even if its current assigned
-  Nexus is removed from the system.
+  Nexus is expunged.
 
 If the saga's current Nexus is actively driving it, the saga will continue to
 execute even if it is abandoned. You should only proceed if:
 
-- you've stopped the saga's assigned Nexus and are prepared to undo any changes
+- you've stopped the saga's assigned Nexus AND are prepared to undo any changes
   the saga may already have made to the system, or
 
 - this is a development system whose state can be wiped.
@@ -380,7 +380,7 @@ execute even if it is abandoned. You should only proceed if:
 
         let status = get_saga_sec_status(omdb, opctx, &saga).await;
         status.display_message(should_print_color);
-        status.as_result()?;
+        status.into_result()?;
     } else {
         let text = "Skipping check of whether the Nexus assigned to this saga \
         is running. If this Nexus is running, the saga may continue executing!";
@@ -548,10 +548,9 @@ impl SagaSecStatus {
         }
     }
 
-    /// If this status indicates that the relevant SEC might be active, returns
-    /// `Err`. If the relevant SEC is thought to be inactive, or the saga used
-    /// to produce this status had no SEC, returns `Ok`.
-    fn as_result(self) -> anyhow::Result<()> {
+    /// Returns `Ok` if this status indicates that there's some reason to
+    /// believe that the relevant SEC is actually offline and `Err` otherwise.
+    fn into_result(self) -> anyhow::Result<()> {
         match self {
             Self::DnsResolverUnavailable(error) => Err(error),
             Self::NexusResolutionFailed(error) => Err(error.into()),
