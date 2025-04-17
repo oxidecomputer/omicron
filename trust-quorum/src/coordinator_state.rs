@@ -100,8 +100,8 @@ impl CoordinatorState {
         // We must collect shares from the last configuration
         // so we can recompute the old rack secret.
         let op = CoordinatorOperation::CollectShares {
-            epoch: last_committed_config.epoch,
-            members: last_committed_config.members.clone(),
+            last_committed_epoch: last_committed_config.epoch,
+            last_committed_members: last_committed_config.members.clone(),
             collected_shares: BTreeMap::new(),
             new_shares,
         };
@@ -149,8 +149,8 @@ impl CoordinatorState {
             self.retry_deadline = now + self.reconfigure_msg.retry_timeout();
             match &self.op {
                 CoordinatorOperation::CollectShares {
-                    epoch,
-                    members,
+                    last_committed_epoch: epoch,
+                    last_committed_members: members,
                     collected_shares,
                     ..
                 } => {}
@@ -200,6 +200,10 @@ impl CoordinatorState {
             }
         }
     }
+
+    pub fn coordinator_status(&mut self) -> CoordinatorStatus {
+        (&self.op).into()
+    }
 }
 
 /// What should the coordinator be doing?
@@ -207,9 +211,13 @@ pub enum CoordinatorOperation {
     // We haven't started implementing this yet
     #[allow(unused)]
     CollectShares {
-        epoch: Epoch,
-        members: BTreeMap<PlatformId, Sha3_256Digest>,
+        last_committed_epoch: Epoch,
+        last_committed_members: BTreeMap<PlatformId, Sha3_256Digest>,
+
+        // Shares collected from `last_committed_members`
         collected_shares: BTreeMap<PlatformId, Share>,
+
+        // New shares to be used when we get to the `Prepare` operation
         new_shares: BTreeMap<PlatformId, Share>,
     },
     // We haven't started implementing this yet
@@ -236,6 +244,33 @@ impl CoordinatorOperation {
                 "collect lrtq shares"
             }
             CoordinatorOperation::Prepare { .. } => "prepare",
+        }
+    }
+}
+
+/// A summary of the coordinator's current operational status
+pub enum CoordinatorStatus {
+    CollectShares { collected_from: BTreeSet<PlatformId> },
+    CollectLrtqShares { collected_from: BTreeSet<PlatformId> },
+    Prepare { acked: BTreeSet<PlatformId> },
+}
+
+impl From<&CoordinatorOperation> for CoordinatorStatus {
+    fn from(value: &CoordinatorOperation) -> Self {
+        match value {
+            CoordinatorOperation::CollectShares {
+                collected_shares, ..
+            } => CoordinatorStatus::CollectShares {
+                collected_from: collected_shares.keys().cloned().collect(),
+            },
+            CoordinatorOperation::CollectLrtqShares { shares, .. } => {
+                CoordinatorStatus::CollectLrtqShares {
+                    collected_from: shares.keys().cloned().collect(),
+                }
+            }
+            CoordinatorOperation::Prepare { prepare_acks, .. } => {
+                CoordinatorStatus::Prepare { acked: prepare_acks.clone() }
+            }
         }
     }
 }
