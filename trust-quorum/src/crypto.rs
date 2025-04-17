@@ -4,9 +4,13 @@
 
 //! Various cryptographic constructs used by trust quroum.
 
+use crate::{Epoch, Threshold};
 use bootstore::trust_quorum::RackSecret as LrtqRackSecret;
+use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, aead, aead::Aead};
 use derive_more::From;
 use gfss::shamir::{self, CombineError, SecretShares, Share, SplitError};
+use hkdf::Hkdf;
+use omicron_uuid_kinds::{GenericUuid, RackUuid};
 use rand::RngCore;
 use rand::rngs::OsRng;
 use secrecy::{DebugSecret, ExposeSecret, Secret};
@@ -15,9 +19,7 @@ use sha3::{Digest, Sha3_256};
 use slog_error_chain::SlogInlineError;
 use std::fmt::Debug;
 use subtle::ConstantTimeEq;
-use zeroize::{Zeroize, ZeroizeOnDrop};
-
-use crate::Threshold;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 /// Each share contains a byte for the y-coordinate of 32 points on 32 different
 /// polynomials over Ed25519. All points share an x-coordinate, which is the 0th
@@ -203,6 +205,15 @@ impl RackSecret {
         let secret = shamir::compute_secret(shares)?.try_into()?;
         Ok(secret)
     }
+
+    pub fn reconstruct_from_iter<'a>(
+        shares: impl Iterator<Item = &'a Share>,
+    ) -> Result<ReconstructedRackSecret, RackSecretReconstructError> {
+        let mut shares: Vec<Share> = shares.cloned().collect();
+        let res = RackSecret::reconstruct(&shares);
+        shares.zeroize();
+        res
+    }
 }
 
 impl DebugSecret for RackSecret {}
@@ -240,6 +251,63 @@ impl Default for Salt {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Encrypt the old rack secret with a key derived from the new rack secret.
+///
+/// A random salt is generated and returned along with the encrypted secret. Key
+/// derivation context includes `rack_id`, `old_epoch`, and `new_epoch`.
+pub fn encrypt_old_rack_secret(
+    old_rack_secret: ReconstructedRackSecret,
+    new_rack_secret: ReconstructedRackSecret,
+    rack_id: RackUuid,
+    old_epoch: Epoch,
+    new_epoch: Epoch,
+) -> aead::Result<(EncryptedRackSecret, Salt)> {
+    let salt = Salt::new();
+    let cipher = derive_encryption_key_for_rack_secret(
+        new_rack_secret,
+        salt,
+        rack_id,
+        old_epoch,
+        new_epoch,
+    );
+
+    // This key is only used to encrypt one plaintext. A nonce of all zeroes is
+    // all that's required.
+    let nonce = [0u8; 12].into();
+    let encrypted_rack_secret = EncryptedRackSecret(
+        cipher.encrypt(&nonce, old_rack_secret.expose_secret().as_ref())?,
+    );
+
+    Ok((encrypted_rack_secret, salt))
+}
+
+fn derive_encryption_key_for_rack_secret(
+    new_rack_secret: ReconstructedRackSecret,
+    salt: Salt,
+    rack_id: RackUuid,
+    old_epoch: Epoch,
+    new_epoch: Epoch,
+) -> ChaCha20Poly1305 {
+    let prk = Hkdf::<Sha3_256>::new(
+        Some(&salt.0[..]),
+        new_rack_secret.expose_secret(),
+    );
+
+    // The "info" string is context to bind the key to its purpose
+    let mut key = Zeroizing::new([0u8; 32]);
+    prk.expand_multi_info(
+        &[
+            b"trust-quorum-v1-rack-secret",
+            rack_id.as_untyped_uuid().as_ref(),
+            &new_epoch.0.to_be_bytes(),
+            &old_epoch.0.to_be_bytes(),
+        ],
+        key.as_mut(),
+    )
+    .unwrap();
+    ChaCha20Poly1305::new(Key::from_slice(key.as_ref()))
 }
 
 #[cfg(test)]

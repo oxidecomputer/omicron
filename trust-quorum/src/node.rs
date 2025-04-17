@@ -4,12 +4,15 @@
 
 //! A trust quorum node that implements the trust quorum protocol
 
-use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
+use crate::errors::{CommitError, MismatchedRackIdError, ReconfigurationError};
+use crate::validators::ValidatedReconfigureMsg;
 use crate::{
     CoordinatorState, Envelope, Epoch, PersistentState, PlatformId, messages::*,
 };
+use gfss::shamir::Share;
+use omicron_uuid_kinds::RackUuid;
 
-use slog::{Logger, o, warn};
+use slog::{Logger, error, info, o, warn};
 use std::time::Instant;
 
 /// An entity capable of participating in trust quorum
@@ -76,6 +79,88 @@ impl Node {
         Ok(persistent_state)
     }
 
+    /// Commit the configuration for the given epoch
+    pub fn commit_reconfiguration(
+        &mut self,
+        epoch: Epoch,
+        rack_id: RackUuid,
+    ) -> Result<Option<PersistentState>, CommitError> {
+        if self.persistent_state.last_committed_epoch() == Some(epoch) {
+            // Idempotent request
+            return Ok(None);
+        }
+
+        // Only commit if we have a `PrepareMsg` and it's the latest `PrepareMsg`.
+        //
+        // This forces a global ordering of `PrepareMsg`s, because it's only
+        // possible to re-derive a key share in a `PrepareMsg` for the current
+        // configuration.
+        //
+        // In practice this check will always succeed if we have the
+        // `PrepareMsg` for this epoch, because later `Prepare` messages would
+        // not have been accepted before this commit arrived. This is because
+        // each `PrepareMsg` contains the `last_committed_epoch` that must have
+        // been seen in order to be accepted. If this commit hadn't occurred,
+        // then it wasn't part of the chain of `last_committed_epoch`s, and was
+        // abandonded/canceled. In that case, if we ended up getting a commit,
+        // then it would not inductively have been part of the existing chain
+        // and so would be a bug in the protocol execution. Because of this we
+        // check and error on this condition.
+        let last_prepared_epoch = self.persistent_state.last_prepared_epoch();
+        if last_prepared_epoch != Some(epoch) {
+            error!(
+                self.log,
+                "Commit message occurred out of order";
+                "epoch" => %epoch,
+                "last_prepared_epoch" => ?last_prepared_epoch
+            );
+            return Err(CommitError::OutOfOrderCommit);
+        }
+        if let Some(prepare) = self.persistent_state.prepares.get(&epoch) {
+            if prepare.config.rack_id != rack_id {
+                error!(
+                    self.log,
+                    "Commit attempted with invalid rack_id";
+                    "expected" => %prepare.config.rack_id,
+                    "got" => %rack_id
+                );
+                return Err(CommitError::InvalidRackId(
+                    MismatchedRackIdError {
+                        expected: prepare.config.rack_id,
+                        got: rack_id,
+                    },
+                ));
+            }
+        } else {
+            // This is an erroneous commit attempt from nexus. Log it.
+            //
+            // Nexus should instead tell this node to retrieve a `Prepare`
+            // from another node that has already committed.
+            error!(
+                self.log,
+                "tried to commit a configuration, but missing prepare msg";
+                "epoch" => %epoch
+            );
+            return Err(CommitError::MissingPrepare);
+        }
+
+        info!(self.log, "Committed configuration"; "epoch" => %epoch);
+
+        // Are we currently coordinating for this epoch?
+        // Stop coordinating if we are
+        if self.coordinator_state.is_some() {
+            info!(
+                self.log,
+                "Stopping coordination due to commit";
+                "epoch" => %epoch
+            );
+            self.coordinator_state = None;
+        }
+
+        self.persistent_state.commits.insert(epoch);
+        Ok(Some(self.persistent_state.clone()))
+    }
+
     /// Process a timer tick
     ///
     /// Ticks are issued by the caller in order to move the protocol forward.
@@ -87,8 +172,8 @@ impl Node {
     /// Handle a message from another node
     pub fn handle(
         &mut self,
-        _now: Instant,
-        _outbox: &mut Vec<Envelope>,
+        now: Instant,
+        outbox: &mut Vec<Envelope>,
         from: PlatformId,
         msg: PeerMsg,
     ) -> Option<PersistentState> {
@@ -96,6 +181,9 @@ impl Node {
             PeerMsg::PrepareAck(epoch) => {
                 self.handle_prepare_ack(from, epoch);
                 None
+            }
+            PeerMsg::Share { epoch, share } => {
+                self.handle_share(now, outbox, from, epoch, share)
             }
             _ => todo!(
                 "cannot handle message variant yet - not implemented: {msg:?}"
@@ -108,6 +196,7 @@ impl Node {
         self.coordinator_state.as_ref()
     }
 
+    // Handle receipt of a `PrepareAck` message
     fn handle_prepare_ack(&mut self, from: PlatformId, epoch: Epoch) {
         // Are we coordinating for this epoch?
         if let Some(cs) = &mut self.coordinator_state {
@@ -131,6 +220,39 @@ impl Node {
                 "acked_epoch" => %epoch
             );
         }
+    }
+
+    // Handle receipt of a `Share` message
+    fn handle_share(
+        &mut self,
+        now: Instant,
+        outbox: &mut Vec<Envelope>,
+        from: PlatformId,
+        epoch: Epoch,
+        share: Share,
+    ) -> Option<PersistentState> {
+        // Are we coordinating and expecting shares for `epoch`, which must
+        // be the last committed epoch?
+        if let Some(cs) = &mut self.coordinator_state {
+            if let Some(my_prepare_msg) =
+                cs.handle_share(now, outbox, from, epoch, share)
+            {
+                // Add the prepare to our `PersistentState`
+                self.persistent_state
+                    .prepares
+                    .insert(my_prepare_msg.config.epoch, my_prepare_msg);
+
+                return Some(self.persistent_state.clone());
+            }
+        } else {
+            warn!(
+                self.log,
+                "Received share when not coordinating";
+                "from" => %from,
+                "epoch" => %epoch
+            );
+        }
+        None
     }
 
     // Send any required messages as a reconfiguration coordinator
@@ -175,7 +297,9 @@ impl Node {
             return Ok(Some(self.persistent_state.clone()));
         }
 
-        // We have a committed configuration that is not LRTQ
+        // Safety: We have a committed configuration that is not LRTQ
+        let our_share =
+            self.persistent_state.last_committed_key_share().unwrap();
         let config =
             self.persistent_state.last_committed_configuration().unwrap();
 
@@ -184,6 +308,7 @@ impl Node {
             now,
             msg,
             &config,
+            our_share,
         )?);
 
         Ok(None)

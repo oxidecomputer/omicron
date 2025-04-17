@@ -4,13 +4,18 @@
 
 //! State of a reconfiguration coordinator inside a [`crate::Node`]
 
-use crate::crypto::{LrtqShare, Sha3_256Digest, ShareDigestLrtq};
+use crate::configuration::PreviousConfiguration;
+use crate::crypto::{self, LrtqShare, Sha3_256Digest, ShareDigestLrtq};
+use crate::errors::ReconfigurationError;
 use crate::messages::{PeerMsg, PrepareMsg};
-use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
-use crate::{Configuration, Envelope, Epoch, PlatformId};
+use crate::validators::ValidatedReconfigureMsg;
+use crate::{
+    Configuration, Envelope, Epoch, PlatformId, RackSecret, Threshold,
+};
 use gfss::shamir::Share;
-use slog::{Logger, o, warn};
+use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 use std::time::Instant;
 
 /// The state of a reconfiguration coordinator.
@@ -77,8 +82,15 @@ impl CoordinatorState {
         }
         let op = CoordinatorOperation::Prepare {
             prepares,
-            prepare_acks: BTreeSet::new(),
+            // Always include ourself
+            prepare_acks: BTreeSet::from([msg.coordinator_id().clone()]),
         };
+
+        info!(
+            log,
+            "Starting coordination on uninitialized node";
+            "epoch" => %config.epoch
+        );
 
         let state = CoordinatorState::new(log, now, msg, config, op);
 
@@ -94,15 +106,28 @@ impl CoordinatorState {
         now: Instant,
         msg: ValidatedReconfigureMsg,
         last_committed_config: &Configuration,
+        our_last_committed_share: Share,
     ) -> Result<CoordinatorState, ReconfigurationError> {
         let (config, new_shares) = Configuration::new(&msg)?;
+
+        info!(
+            log,
+            "Starting coordination on existing node";
+            "epoch" => %config.epoch,
+            "last_committed_epoch" => %last_committed_config.epoch
+        );
 
         // We must collect shares from the last configuration
         // so we can recompute the old rack secret.
         let op = CoordinatorOperation::CollectShares {
-            epoch: last_committed_config.epoch,
-            members: last_committed_config.members.clone(),
-            collected_shares: BTreeMap::new(),
+            last_committed_epoch: last_committed_config.epoch,
+            last_committed_members: last_committed_config.members.clone(),
+            last_committed_threshold: last_committed_config.threshold,
+            // Always include ourself
+            collected_shares: BTreeMap::from([(
+                msg.coordinator_id().clone(),
+                our_last_committed_share,
+            )]),
             new_shares,
         };
 
@@ -146,7 +171,6 @@ impl CoordinatorState {
     // will return a copy of it.
     //
     // This method is "in progress" - allow unused parameters for now
-    #[expect(unused)]
     pub fn send_msgs(&mut self, now: Instant, outbox: &mut Vec<Envelope>) {
         if now < self.retry_deadline {
             return;
@@ -154,13 +178,31 @@ impl CoordinatorState {
         self.retry_deadline = now + self.reconfigure_msg.retry_timeout();
         match &self.op {
             CoordinatorOperation::CollectShares {
-                epoch,
-                members,
+                last_committed_epoch,
+                last_committed_members,
                 collected_shares,
                 ..
-            } => {}
-            CoordinatorOperation::CollectLrtqShares { members, shares } => {}
-            CoordinatorOperation::Prepare { prepares, prepare_acks } => {
+            } => {
+                // Send to all members that we haven't yet collected shares from.
+                // Also exclude ourself.
+                for member in last_committed_members
+                    .keys()
+                    .filter(|&m| {
+                        m != self.reconfigure_msg.coordinator_id()
+                            && !collected_shares.contains_key(m)
+                    })
+                    .cloned()
+                {
+                    outbox.push(Envelope {
+                        to: member,
+                        from: self.reconfigure_msg.coordinator_id().clone(),
+                        msg: PeerMsg::GetShare(*last_committed_epoch),
+                    });
+                }
+            }
+            CoordinatorOperation::CollectLrtqShares { .. } => {}
+            CoordinatorOperation::Prepare { prepares, .. } => {
+                // prepares already filter ourself
                 for (platform_id, prepare) in prepares.clone().into_iter() {
                     outbox.push(Envelope {
                         to: platform_id,
@@ -205,24 +247,300 @@ impl CoordinatorState {
             }
         }
     }
+
+    /// Handle a share response for the last_committed epoch.
+    ///
+    /// If we transition from collecting shares to sending prepare messages,
+    /// we also return our own `PrepareMsg` that must be saved as part of the
+    /// persistent state.
+    pub fn handle_share(
+        &mut self,
+        now: Instant,
+        outbox: &mut Vec<Envelope>,
+        from: PlatformId,
+        epoch: Epoch,
+        share: Share,
+    ) -> Option<PrepareMsg> {
+        match &mut self.op {
+            CoordinatorOperation::CollectShares {
+                last_committed_epoch,
+                last_committed_members,
+                last_committed_threshold,
+                collected_shares,
+                new_shares,
+            } => {
+                // First, perform some validation on the incoming share
+                if *last_committed_epoch != epoch {
+                    warn!(
+                        self.log,
+                        "Received Share from node with wrong epoch";
+                        "epoch" => %epoch,
+                        "from" => %from
+                    );
+                    return None;
+                }
+
+                let Some(expected_digest) = last_committed_members.get(&from)
+                else {
+                    warn!(
+                        self.log,
+                        "Received Share from unexpected node";
+                        "epoch" => %epoch,
+                        "from" => %from
+                    );
+                    return None;
+                };
+
+                let mut digest = Sha3_256Digest::default();
+                share.digest::<sha3::Sha3_256>(&mut digest.0);
+                if digest != *expected_digest {
+                    error!(
+                        self.log,
+                        "Received share with invalid digest";
+                        "epoch" => %epoch,
+                        "from" => %from
+                    );
+                }
+
+                // A valid share was received. Is it new?
+                if collected_shares.insert(from, share).is_some() {
+                    return None;
+                }
+                //
+                // Do we have enough shares to recompute the rack secret
+                // for `epoch`?
+                if collected_shares.len() < last_committed_threshold.0 as usize
+                {
+                    return None;
+                }
+
+                // Reconstruct the old rack secret from the shares we collected.
+                let old_rack_secret = match RackSecret::reconstruct_from_iter(
+                    collected_shares.values(),
+                ) {
+                    Ok(old_rack_secret) => {
+                        info!(
+                            self.log,
+                            "Successfully reconstructed old rack secret";
+                            "last_committed_epoch" => %epoch,
+                            "epoch" => %self.configuration.epoch
+                        );
+
+                        old_rack_secret
+                    }
+                    Err(err) => {
+                        error!(
+                            self.log,
+                            "Failed to reconstruct old rack secret: {err}";
+                            "epoch" => %epoch
+                        );
+                        return None;
+                    }
+                };
+
+                // Reconstruct the new rack secret from the new shares.
+                let new_rack_secret = match RackSecret::reconstruct_from_iter(
+                    new_shares.values(),
+                ) {
+                    Ok(new_rack_secret) => {
+                        info!(
+                            self.log,
+                            "Successfully reconstructed new rack secret";
+                            "last_committed_epoch" => %epoch,
+                            "epoch" => %self.configuration.epoch
+                        );
+                        new_rack_secret
+                    }
+                    Err(err) => {
+                        error!(
+                            self.log,
+                            "Failed to reconstruct new rack secret: {err}";
+                            "epoch" => %epoch
+                        );
+                        return None;
+                    }
+                };
+
+                // Encrypt our old secret with a key derived from the new secret
+                let (encrypted_last_committed_rack_secret, salt) =
+                    match crypto::encrypt_old_rack_secret(
+                        old_rack_secret,
+                        new_rack_secret,
+                        self.configuration.rack_id,
+                        *last_committed_epoch,
+                        self.configuration.epoch,
+                    ) {
+                        Ok(val) => val,
+                        Err(_) => {
+                            error!(
+                                self.log, "Failed to encrypt old rack secret";
+                                "last_committed_epoch" => %epoch,
+                                "epoch" => %self.configuration.epoch
+                            );
+                            return None;
+                        }
+                    };
+
+                // Create and set our previous configuration
+                assert!(self.configuration.previous_configuration.is_none());
+                let previous_config = PreviousConfiguration {
+                    epoch: *last_committed_epoch,
+                    is_lrtq: false,
+                    encrypted_last_committed_rack_secret,
+                    encrypted_last_committed_rack_secret_salt: salt,
+                };
+                self.configuration.previous_configuration =
+                    Some(previous_config);
+
+                // Transition to sending `PrepareMsg`s for this configuration
+                let my_prepare_msg =
+                    self.start_preparing_after_collecting_shares(now, outbox);
+                Some(my_prepare_msg)
+            }
+            op => {
+                warn!(
+                    self.log,
+                    "Share received when coordinator is not expecting it";
+                    "op" => op.name(),
+                    "from" => %from
+                );
+                None
+            }
+        }
+    }
+
+    pub fn coordinator_status(&mut self) -> CoordinatorStatus {
+        (&self.op).into()
+    }
+
+    // Transition from `CoordinationOperation::CollectShares`
+    // or `CoordinationOperation::CollectLrtqShares` to
+    // `CoordinationOperation::Prepare`.
+    //
+    // Return our own prepare message so it can be persisted.
+    //
+    // Panics if the current op is already `CoordinationOperation::Prepare`.
+    fn start_preparing_after_collecting_shares(
+        &mut self,
+        now: Instant,
+        outbox: &mut Vec<Envelope>,
+    ) -> PrepareMsg {
+        // Get the set of members in both the old and new group along with the
+        // shares mapped to all members in the new group.
+        let (existing_members, new_shares) = match &mut self.op {
+            CoordinatorOperation::CollectShares {
+                last_committed_members,
+                new_shares,
+                ..
+            } => {
+                let existing_members: BTreeSet<_> =
+                    mem::take(last_committed_members).into_keys().collect();
+                (existing_members, mem::take(new_shares))
+            }
+            CoordinatorOperation::CollectLrtqShares {
+                last_committed_members,
+                new_shares,
+                ..
+            } => {
+                let existing_members: BTreeSet<_> =
+                    mem::take(last_committed_members).into_keys().collect();
+                (existing_members, mem::take(new_shares))
+            }
+            CoordinatorOperation::Prepare { .. } => {
+                error!(
+                    self.log,
+                    "logic error: already preparing";
+                    "epoch" => %self.configuration.epoch,
+                );
+                panic!(
+                    "logic error: already preparing: epoch = {}",
+                    self.configuration.epoch
+                );
+            }
+        };
+
+        // Build up our set of `PrepareMsgs`
+        //
+        // `my_prepare_msg` is optional only so that we can fill it in via
+        // the loop. It will always become `Some`, as a `Configuration` always
+        // contains the coordinator as a member as validated by construction of
+        // `ValidatedReconfigureMsg`.
+        let mut my_prepare_msg: Option<PrepareMsg> = None;
+        let mut prepares = BTreeMap::new();
+        for (member, share) in new_shares {
+            if existing_members.contains(&member) {
+                let prepare_msg =
+                    PrepareMsg { config: self.configuration.clone(), share };
+                if *self.reconfigure_msg.coordinator_id() == member {
+                    my_prepare_msg = Some(prepare_msg);
+                } else {
+                    prepares.insert(member, prepare_msg);
+                }
+            } else {
+                // New members do not get sent information about the previous
+                // configuration.
+                let mut config = self.configuration.clone();
+                config.previous_configuration = None;
+                let prepare_msg = PrepareMsg { config, share };
+                prepares.insert(member, prepare_msg);
+            }
+        }
+
+        // Actually transition to the new operation
+        self.op = CoordinatorOperation::Prepare {
+            prepares,
+            // Always include ourself
+            prepare_acks: BTreeSet::from([self
+                .reconfigure_msg
+                .coordinator_id()
+                .clone()]),
+        };
+
+        let last_committed_epoch =
+            self.configuration.previous_configuration.as_ref().unwrap().epoch;
+        info!(
+            self.log,
+            "Starting to prepare after collecting shares";
+            "epoch" => %self.configuration.epoch,
+            // Safety: This whole method relies on having a previous configuration
+            "last_committed_epoch" => %last_committed_epoch
+        );
+
+        // Trigger sending of Prepare messages immediately
+        self.retry_deadline = now;
+        self.send_msgs(now, outbox);
+
+        // Return our own `PrepareMsg` for persistence
+        // Safety: Construction of a `ValidatedReconfigureMsg` ensures that
+        // `my_platform_id` is part of the new configuration and has a share.
+        // We can therefore safely unwrap here.
+        my_prepare_msg.unwrap()
+    }
 }
 
 /// What should the coordinator be doing?
 pub enum CoordinatorOperation {
     // We haven't started implementing this yet
-    #[expect(unused)]
     CollectShares {
-        epoch: Epoch,
-        members: BTreeMap<PlatformId, Sha3_256Digest>,
+        last_committed_epoch: Epoch,
+        last_committed_members: BTreeMap<PlatformId, Sha3_256Digest>,
+        last_committed_threshold: Threshold,
+
+        // Shares collected from `last_committed_members`
         collected_shares: BTreeMap<PlatformId, Share>,
+
+        // New shares to be used when we get to the `Prepare` operation
         new_shares: BTreeMap<PlatformId, Share>,
     },
     // We haven't started implementing this yet
     // Epoch is always 0
-    #[allow(unused)]
     CollectLrtqShares {
-        members: BTreeMap<PlatformId, ShareDigestLrtq>,
-        shares: BTreeMap<PlatformId, LrtqShare>,
+        last_committed_members: BTreeMap<PlatformId, ShareDigestLrtq>,
+        last_committed_threshold: Threshold,
+        collected_shares: BTreeMap<PlatformId, LrtqShare>,
+
+        // New shares to be used when we get to the `Prepare` operation
+        new_shares: BTreeMap<PlatformId, Share>,
     },
     Prepare {
         /// The set of Prepares to send to each node
@@ -241,6 +559,34 @@ impl CoordinatorOperation {
                 "collect lrtq shares"
             }
             CoordinatorOperation::Prepare { .. } => "prepare",
+        }
+    }
+}
+
+/// A summary of the coordinator's current operational status
+pub enum CoordinatorStatus {
+    CollectShares { collected_from: BTreeSet<PlatformId> },
+    CollectLrtqShares { collected_from: BTreeSet<PlatformId> },
+    Prepare { acked: BTreeSet<PlatformId> },
+}
+
+impl From<&CoordinatorOperation> for CoordinatorStatus {
+    fn from(value: &CoordinatorOperation) -> Self {
+        match value {
+            CoordinatorOperation::CollectShares {
+                collected_shares, ..
+            } => CoordinatorStatus::CollectShares {
+                collected_from: collected_shares.keys().cloned().collect(),
+            },
+            CoordinatorOperation::CollectLrtqShares {
+                collected_shares,
+                ..
+            } => CoordinatorStatus::CollectLrtqShares {
+                collected_from: collected_shares.keys().cloned().collect(),
+            },
+            CoordinatorOperation::Prepare { prepare_acks, .. } => {
+                CoordinatorStatus::Prepare { acked: prepare_acks.clone() }
+            }
         }
     }
 }
