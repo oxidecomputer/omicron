@@ -18052,8 +18052,9 @@
         "type": "object",
         "properties": {
           "anti_affinity_groups": {
-            "description": "Anti-Affinity groups which this instance should be added.",
-            "default": [],
+            "nullable": true,
+            "description": "Anti-Affinity groups which this instance should be added.\n\nA \"null\" set of groups is equivalent to an empty set of groups.",
+            "default": null,
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NameOrId"
@@ -18632,6 +18633,52 @@
         "required": [
           "memory",
           "ncpus"
+        ]
+      },
+      "InterfaceNum": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "unknown": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "unknown"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "if_index": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "if_index"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "port_number": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "port_number"
+            ],
+            "additionalProperties": false
+          }
         ]
       },
       "InternetGateway": {
@@ -19579,7 +19626,7 @@
             "description": "The LLDP management IP(s) advertised by the neighbor",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNet"
+              "$ref": "#/components/schemas/ManagementAddress"
             }
           },
           "system_description": {
@@ -19743,6 +19790,30 @@
         "minLength": 5,
         "maxLength": 17
       },
+      "ManagementAddress": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "$ref": "#/components/schemas/NetworkAddress"
+          },
+          "interface_num": {
+            "$ref": "#/components/schemas/InterfaceNum"
+          },
+          "oid": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "addr",
+          "interface_num"
+        ]
+      },
       "Measurement": {
         "description": "A `Measurement` is a timestamped datum from a single metric",
         "type": "object",
@@ -19849,6 +19920,40 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
+          }
+        ]
+      },
+      "NetworkAddress": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ip_addr": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "ip_addr"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "i_e_e_e802": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              }
+            },
+            "required": [
+              "i_e_e_e802"
+            ],
+            "additionalProperties": false
           }
         ]
       },

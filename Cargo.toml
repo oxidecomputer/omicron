@@ -45,6 +45,7 @@ members = [
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
     "dev-tools/reconfigurator-exec-unsafe",
+    "dev-tools/reconfigurator-sp-updater",
     "dev-tools/releng",
     "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
@@ -188,6 +189,7 @@ default-members = [
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
     "dev-tools/reconfigurator-exec-unsafe",
+    "dev-tools/reconfigurator-sp-updater",
     "dev-tools/releng",
     "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
@@ -448,7 +450,7 @@ httptest = "0.16.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "1.6.0"
-hyper-util = "0.1.10"
+hyper-util = "0.1.11"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.10.1"
 id-map = { path = "id-map" }
@@ -479,7 +481,8 @@ libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
-lldpd-client = { git = "https://github.com/oxidecomputer/lldp" }
+lldpd_client = { git = "https://github.com/oxidecomputer/lldp", package = "lldpd-client" }
+lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "protocol" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
@@ -687,7 +690,7 @@ tokio = "1.43.0"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.17"
 tokio-tungstenite = "0.23.1"
-tokio-util = { version = "0.7.13", features = ["io", "io-util"] }
+tokio-util = { version = "0.7.13", features = ["io", "io-util", "time"] }
 toml = "0.8.20"
 toml_edit = "0.22.24"
 tough = { version = "0.20.0", features = [ "http" ] }

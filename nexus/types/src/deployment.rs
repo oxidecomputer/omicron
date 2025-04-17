@@ -45,6 +45,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -52,7 +53,9 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactHashId;
 use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::ArtifactVersionError;
 
 mod blueprint_diff;
 mod blueprint_display;
@@ -63,7 +66,11 @@ mod planning_input;
 mod tri_map;
 mod zone_type;
 
+use crate::inventory::BaseboardId;
+pub use blueprint_diff::BlueprintDiffSummary;
+use blueprint_display::BpPendingMgsUpdates;
 pub use clickhouse::ClickhouseClusterConfig;
+use gateway_client::types::SpType;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
@@ -91,6 +98,7 @@ pub use planning_input::SledLookupError;
 pub use planning_input::SledLookupErrorKind;
 pub use planning_input::SledResources;
 pub use planning_input::ZpoolFilter;
+use std::sync::Arc;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
 pub use zone_type::blueprint_zone_type;
@@ -100,8 +108,7 @@ use blueprint_display::{
     BpTable, BpTableData, BpTableRow, KvListWithHeading, constants::*,
 };
 use id_map::{IdMap, IdMappable};
-
-pub use blueprint_diff::BlueprintDiffSummary;
+use std::str::FromStr;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -150,6 +157,9 @@ pub struct Blueprint {
 
     /// A map of sled id -> desired configuration of the sled.
     pub sleds: BTreeMap<SledUuid, BlueprintSledConfig>,
+
+    /// List of pending MGS-mediated updates
+    pub pending_mgs_updates: PendingMgsUpdates,
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<BlueprintUuid>,
@@ -488,6 +498,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
         let Blueprint {
             id,
             sleds,
+            pending_mgs_updates,
             parent_blueprint_id,
             // These two cockroachdb_* fields are handled by
             // `make_cockroachdb_table()`, called below.
@@ -568,6 +579,38 @@ impl fmt::Display for BlueprintDisplay<'_> {
 
         writeln!(f, "{}", self.make_cockroachdb_table())?;
         writeln!(f, "{}", self.make_metadata_table())?;
+
+        writeln!(
+            f,
+            " PENDING MGS-MANAGED UPDATES: {}",
+            pending_mgs_updates.len()
+        )?;
+        if !pending_mgs_updates.is_empty() {
+            writeln!(
+                f,
+                "{}",
+                BpTable::new(
+                    BpPendingMgsUpdates {},
+                    None,
+                    pending_mgs_updates
+                        .iter()
+                        .map(|pu| {
+                            BpTableRow::from_strings(
+                                BpDiffState::Unchanged,
+                                vec![
+                                    pu.sp_type.to_string(),
+                                    pu.slot_id.to_string(),
+                                    pu.baseboard_id.part_number.clone(),
+                                    pu.baseboard_id.serial_number.clone(),
+                                    pu.artifact_hash_id.kind.to_string(),
+                                    pu.artifact_hash_id.hash.to_string(),
+                                ],
+                            )
+                        })
+                        .collect()
+                )
+            )?;
+        }
 
         Ok(())
     }
@@ -996,6 +1039,198 @@ impl fmt::Display for BlueprintZoneImageVersion {
             BlueprintZoneImageVersion::Unknown => {
                 write!(f, "(unknown version)")
             }
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+pub struct PendingMgsUpdates {
+    // The IdMap key is the baseboard_id.  Only one outstanding MGS-managed
+    // update is allowed for a given baseboard.
+    by_baseboard: IdMap<PendingMgsUpdate>,
+}
+
+impl PendingMgsUpdates {
+    pub fn new() -> PendingMgsUpdates {
+        PendingMgsUpdates { by_baseboard: IdMap::new() }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &PendingMgsUpdate> {
+        self.into_iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_baseboard.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_baseboard.is_empty()
+    }
+
+    pub fn contains_key(&self, key: &Arc<BaseboardId>) -> bool {
+        self.by_baseboard.contains_key(key)
+    }
+
+    pub fn get(
+        &self,
+        baseboard_id: &Arc<BaseboardId>,
+    ) -> Option<&PendingMgsUpdate> {
+        self.by_baseboard.get(baseboard_id)
+    }
+
+    pub fn remove(
+        &mut self,
+        baseboard_id: &Arc<BaseboardId>,
+    ) -> Option<PendingMgsUpdate> {
+        self.by_baseboard.remove(baseboard_id)
+    }
+
+    pub fn insert(
+        &mut self,
+        update: PendingMgsUpdate,
+    ) -> Option<PendingMgsUpdate> {
+        self.by_baseboard.insert(update)
+    }
+}
+
+impl<'a> IntoIterator for &'a PendingMgsUpdates {
+    type Item = &'a PendingMgsUpdate;
+    type IntoIter = std::collections::btree_map::Values<
+        'a,
+        Arc<BaseboardId>,
+        PendingMgsUpdate,
+    >;
+    fn into_iter(self) -> Self::IntoIter {
+        self.by_baseboard.iter()
+    }
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+pub struct PendingMgsUpdate {
+    // identity of the baseboard
+    /// id of the baseboard that we're going to update
+    pub baseboard_id: Arc<BaseboardId>,
+
+    // location of the baseboard (that we'd pass to MGS)
+    /// what type of baseboard this is
+    pub sp_type: SpType,
+    /// last known MGS slot (cubby number) of the baseboard
+    pub slot_id: u32,
+
+    /// component-specific details of the pending update
+    pub details: PendingMgsUpdateDetails,
+
+    /// which artifact to apply to this device
+    /// (implies which component is being updated)
+    pub artifact_hash_id: ArtifactHashId,
+    pub artifact_version: ArtifactVersion,
+}
+
+impl slog::KV for PendingMgsUpdate {
+    fn serialize(
+        &self,
+        record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        slog::KV::serialize(&self.baseboard_id, record, serializer)?;
+        serializer
+            .emit_str(Key::from("sp_type"), &format!("{:?}", self.sp_type))?;
+        serializer.emit_u32(Key::from("sp_slot"), self.slot_id)?;
+        slog::KV::serialize(&self.details, record, serializer)?;
+        serializer.emit_str(
+            Key::from("artifact_kind"),
+            &self.artifact_hash_id.kind.as_str(),
+        )?;
+        serializer.emit_str(
+            Key::from("artifact_hash"),
+            &self.artifact_hash_id.hash.to_string(),
+        )
+    }
+}
+
+impl IdMappable for PendingMgsUpdate {
+    type Id = Arc<BaseboardId>;
+    fn id(&self) -> Self::Id {
+        self.baseboard_id.clone()
+    }
+}
+
+/// Describes the component-specific details of a PendingMgsUpdate
+// This needs to specify:
+//
+// - the "component" (that we provide to the SP)
+// - the slot that needs to be updated
+// - any preconditions we expect to be true.  These generally specify what we
+//   think is in each slot.  This is intended to reduce the chance that an
+//   update operation using outdated configuration winds up rolling back the
+//   deployed version.
+//
+// Much of this may be implicit.  See comments below.
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(tag = "component", rename_all = "snake_case")]
+pub enum PendingMgsUpdateDetails {
+    /// the SP itself is being updated
+    Sp {
+        // implicit: component = SP_ITSELF
+        // implicit: firmware slot id = 0 (always 0 for SP itself)
+        /// expected contents of the active slot
+        expected_active_version: ArtifactVersion,
+        /// expected contents of the inactive slot
+        expected_inactive_version: ExpectedVersion,
+    },
+}
+
+impl slog::KV for PendingMgsUpdateDetails {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        match self {
+            PendingMgsUpdateDetails::Sp {
+                expected_active_version,
+                expected_inactive_version,
+            } => {
+                serializer.emit_str(Key::from("component"), "sp")?;
+                serializer.emit_str(
+                    Key::from("expected_active_version"),
+                    &expected_active_version.to_string(),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_inactive_version"),
+                    &format!("{:?}", expected_inactive_version),
+                )
+            }
+        }
+    }
+}
+
+/// Describes the version that we expect to find in some firmware slot
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(tag = "kind", content = "version", rename_all = "snake_case")]
+pub enum ExpectedVersion {
+    /// We expect to find _no_ valid caboose in this slot
+    NoValidVersion,
+    /// We expect to find the specified version in this slot
+    Version(ArtifactVersion),
+}
+
+impl FromStr for ExpectedVersion {
+    type Err = ArtifactVersionError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "invalid" {
+            Ok(ExpectedVersion::NoValidVersion)
+        } else {
+            Ok(ExpectedVersion::Version(s.parse()?))
         }
     }
 }
