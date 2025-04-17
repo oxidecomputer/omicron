@@ -3541,12 +3541,9 @@
             "description": "Hex-encoded Hubris archive ID.",
             "type": "string"
           },
-          "base64_memory": {
-            "description": "Base64-encoded raw memory read from the SP.",
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
+          "base64_zip": {
+            "description": "Base64-encoded zip file containing dehydrated task dump.",
+            "type": "string"
           },
           "bord": {
             "description": "`BORD` field from the caboose.",
@@ -3563,7 +3560,7 @@
             "minimum": 0
           },
           "timestamp": {
-            "description": "Timestamp at which the task crash occurred.",
+            "description": "Hubris timestamp at which the task crash occurred.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
@@ -3576,7 +3573,7 @@
         },
         "required": [
           "archive_id",
-          "base64_memory",
+          "base64_zip",
           "bord",
           "gitc",
           "task_index",
