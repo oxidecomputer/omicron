@@ -11005,7 +11005,6 @@
             "in": "query",
             "name": "router",
             "description": "Name or ID of the router",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
