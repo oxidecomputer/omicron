@@ -12021,6 +12021,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "steno"
 version = "0.4.2-dev"
+source = "git+https://github.com/oxidecomputer/steno?branch=sunshowers%2Fspr%2Fdraft-add-actioncontextmap_user_data#bc9409ea1295b7a8c1ddef1f61ebdda411fe0022"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -254,7 +254,7 @@ default-members = [
     "nexus/reconfigurator/simulation",
     "nexus/saga-interface",
     "nexus/saga-recovery",
-    "nexus/sagas",
+    "nexus/saga-tests",
     "nexus/sagas",
     "nexus/test-interface",
     "nexus/test-utils-macros",
@@ -911,7 +911,7 @@ opt-level = 3
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
 # progenitor = { path = "../progenitor/progenitor" }
 # progenitor-client = { path = "../progenitor/progenitor-client" }
-steno = { path = "../steno" }
+steno = { git = "https://github.com/oxidecomputer/steno", branch = "sunshowers/spr/draft-add-actioncontextmap_user_data" }
 
 # [patch."https://github.com/oxidecomputer/crucible"]
 # crucible-agent-client = { path = "../crucible/agent-client" }
