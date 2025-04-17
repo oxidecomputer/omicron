@@ -45,6 +45,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::ser::SerializeSeq;
 use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -108,6 +109,8 @@ use blueprint_display::{
     BpTable, BpTableData, BpTableRow, KvListWithHeading, constants::*,
 };
 use id_map::{IdMap, IdMappable};
+use serde::de::SeqAccess;
+use serde::de::Visitor;
 use std::str::FromStr;
 
 /// Describes a complete set of software and configuration for the system
@@ -1043,9 +1046,7 @@ impl fmt::Display for BlueprintZoneImageVersion {
     }
 }
 
-#[derive(
-    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
-)]
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Diffable)]
 pub struct PendingMgsUpdates {
     // The IdMap key is the baseboard_id.  Only one outstanding MGS-managed
     // update is allowed for a given baseboard.
@@ -1104,6 +1105,54 @@ impl<'a> IntoIterator for &'a PendingMgsUpdates {
     >;
     fn into_iter(self) -> Self::IntoIter {
         self.by_baseboard.iter()
+    }
+}
+
+// `PendingMgsUpdates` is serialized as a sequence of `PendingMgsUpdate` objects
+// rather than a map.  (A map would not directly work because the keys here are
+// themselves objects, but JSON requires that they be strings.)
+impl Serialize for PendingMgsUpdates {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.len()))?;
+        for item in self {
+            seq.serialize_element(item)?;
+        }
+        seq.end()
+    }
+}
+
+// See the note on the `Serialize` impl above.
+impl<'de> Deserialize<'de> for PendingMgsUpdates {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct MyVisitor;
+
+        impl<'de> Visitor<'de> for MyVisitor {
+            type Value = PendingMgsUpdates;
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a sequence of objects")
+            }
+            fn visit_seq<A>(
+                self,
+                mut seq: A,
+            ) -> Result<PendingMgsUpdates, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut map = PendingMgsUpdates::new();
+                while let Some(u) = seq.next_element()? {
+                    map.insert(u);
+                }
+                Ok(map)
+            }
+        }
+
+        deserializer.deserialize_seq(MyVisitor)
     }
 }
 
@@ -1595,4 +1644,58 @@ pub struct UnstableReconfiguratorState {
     pub external_dns: BTreeMap<Generation, DnsConfigParams>,
     pub silo_names: Vec<omicron_common::api::external::Name>,
     pub external_dns_zone_names: Vec<String>,
+}
+
+#[cfg(test)]
+mod test {
+    use super::ExpectedVersion;
+    use super::PendingMgsUpdate;
+    use super::PendingMgsUpdateDetails;
+    use super::PendingMgsUpdates;
+    use crate::inventory::BaseboardId;
+    use gateway_client::types::SpType;
+    use std::sync::Arc;
+    use tufaceous_artifact::ArtifactHashId;
+    use tufaceous_artifact::ArtifactKind;
+    use tufaceous_artifact::KnownArtifactKind;
+
+    #[test]
+    fn test_serialize_pending_mgs_updates() {
+        // Trivial case: empty map
+        let empty = PendingMgsUpdates::new();
+        let empty_serialized = serde_json::to_string(&empty).unwrap();
+        assert_eq!(empty_serialized, "[]");
+        let empty_deserialized: PendingMgsUpdates =
+            serde_json::from_str(&empty_serialized).unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(empty, empty_deserialized);
+
+        // Non-trivial case: contains an element.
+        let mut pending_mgs_updates = PendingMgsUpdates::new();
+        let update = PendingMgsUpdate {
+            baseboard_id: Arc::new(BaseboardId {
+                part_number: String::from("913-0000019"),
+                serial_number: String::from("BRM27230037"),
+            }),
+            sp_type: SpType::Sled,
+            slot_id: 15,
+            details: PendingMgsUpdateDetails::Sp {
+                expected_active_version: "1.0.36".parse().unwrap(),
+                expected_inactive_version: ExpectedVersion::Version(
+                    "1.0.36".parse().unwrap(),
+                ),
+            },
+            artifact_hash_id: ArtifactHashId {
+            kind: ArtifactKind::from_known(KnownArtifactKind::GimletSp),
+            hash: "47266ede81e13f5f1e36623ea8dd963842606b783397e4809a9a5f0bda0f8170".parse().unwrap(),
+            },
+            artifact_version: "1.0.34".parse().unwrap(),
+        };
+        pending_mgs_updates.insert(update);
+        let serialized = serde_json::to_string(&pending_mgs_updates).unwrap();
+        let deserialized: PendingMgsUpdates =
+            serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, pending_mgs_updates);
+        assert!(!deserialized.is_empty());
+    }
 }
