@@ -18,9 +18,6 @@ use std::collections::BTreeMap;
 /// All the persistent state for this protocol
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PersistentState {
-    // Ledger generation
-    pub generation: u64,
-
     // If this node was an LRTQ node, sled-agent will start it with the ledger
     // data it read from disk. This allows us to upgrade from LRTQ.
     pub lrtq: Option<LrtqShareData>,
@@ -38,7 +35,6 @@ pub struct PersistentState {
 impl PersistentState {
     pub fn empty() -> PersistentState {
         PersistentState {
-            generation: 0,
             lrtq: None,
             prepares: BTreeMap::new(),
             commits: BTreeMap::new(),
