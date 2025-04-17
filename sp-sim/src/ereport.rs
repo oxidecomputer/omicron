@@ -111,15 +111,6 @@ impl EreportState {
         let EreportRequest::V0(req) = request;
         slog::info!(self.log, "ereport request: {req:?}");
 
-        let mut pos = gateway_messages::serialize(
-            buf,
-            &EreportResponseHeader::V0(ResponseHeaderV0 {
-                request_id: req.request_id,
-                restart_id: self.restart_id,
-            }),
-        )
-        .expect("header must serialize");
-
         // If we "restarted", encode the current metadata map, and start at ENA
         // 0.
         let (meta_map, start_ena) = if req.restart_id != self.restart_id {
@@ -158,6 +149,30 @@ impl EreportState {
 
             (&Default::default(), req.start_ena)
         };
+
+        let mut respondant_ereports = self
+            .ereports
+            .iter()
+            .filter(|ereport| ereport.ena >= start_ena)
+            .take(req.limit as usize)
+            .peekable();
+        let start_ena = respondant_ereports
+            .peek()
+            .map(|ereport| ereport.ena)
+            .unwrap_or(Ena(start_ena.0 + 1));
+
+        // Serialize the header.
+        let mut pos = gateway_messages::serialize(
+            buf,
+            &EreportResponseHeader::V0(ResponseHeaderV0 {
+                request_id: req.request_id,
+                restart_id: self.restart_id,
+                start_ena,
+            }),
+        )
+        .expect("header must serialize");
+
+        // Serialize the metadata map.
         pos += {
             use serde::ser::SerializeMap;
 
@@ -179,58 +194,35 @@ impl EreportState {
             cursor.position() as usize
         };
 
-        // Is there enough remaining space for ereports? We need at least 10
-        // bytes (8 for the ENA, and at least two bytes to encode an empty CBOR
-        // list)
-        if buf[pos..].len() < 10 {
+        // Is there enough remaining space for ereports? We need at least two
+        // bytes to encode an empty CBOR list
+        if buf[pos..].len() <= 2 {
             return &buf[..pos];
         }
 
-        let mut respondant_ereports = self
-            .ereports
-            .iter()
-            .filter(|ereport| ereport.ena >= start_ena)
-            .take(req.limit as usize);
-        if let Some(EreportListEntry { ena, ereport, bytes }) =
-            respondant_ereports.next()
-        {
-            pos += gateway_messages::serialize(&mut buf[pos..], ena)
-                .expect("serialing ena shouldn't fail");
-            buf[pos] = 0x9f; // start list
-            pos += 1;
+        buf[pos] = 0x9f; // start list
+        pos += 1;
+
+        // try to fill the rest of the packet with ereports
+        for EreportListEntry { ena, ereport, bytes } in respondant_ereports {
+            // packet full!
+            if buf[pos..].len() < (bytes.len() + 1) {
+                break;
+            }
 
             buf[pos..pos + bytes.len()].copy_from_slice(&bytes[..]);
             pos += bytes.len();
             slog::debug!(
                 self.log,
-                "wrote initial ereport: {ereport:#?}";
+                "wrote ereport: {ereport:#?}";
                 "ena" => ?ena,
                 "packet_bytes" => pos,
                 "ereport_bytes" => bytes.len(),
             );
-
-            // try to fill the rest of the packet
-            for EreportListEntry { ena, ereport, bytes } in respondant_ereports
-            {
-                // packet full!
-                if buf[pos..].len() < (bytes.len() + 1) {
-                    break;
-                }
-
-                buf[pos..pos + bytes.len()].copy_from_slice(&bytes[..]);
-                pos += bytes.len();
-                slog::debug!(
-                    self.log,
-                    "wrote subsequent ereport: {ereport:#?}";
-                    "ena" => ?ena,
-                    "packet_bytes" => pos,
-                    "ereport_bytes" => bytes.len(),
-                );
-            }
-
-            buf[pos] = 0xff; // break list;
-            pos += 1;
         }
+
+        buf[pos] = 0xff; // break list;
+        pos += 1;
 
         &buf[..pos]
     }
