@@ -31,8 +31,6 @@ const NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL: &'static str =
 /// Translates a generic pool error to an external error based
 /// on messages which may be emitted during region provisioning.
 pub fn from_diesel(e: DieselError) -> external::Error {
-    use crate::db::error;
-
     let sentinels = [
         NOT_ENOUGH_DATASETS_SENTINEL,
         NOT_ENOUGH_ZPOOL_SPACE_SENTINEL,
@@ -68,7 +66,10 @@ pub fn from_diesel(e: DieselError) -> external::Error {
         }
     }
 
-    error::public_error_from_diesel(e, error::ErrorHandler::Server)
+    nexus_db_errors::public_error_from_diesel(
+        e,
+        nexus_db_errors::ErrorHandler::Server,
+    )
 }
 
 type SelectableSql<T> = <

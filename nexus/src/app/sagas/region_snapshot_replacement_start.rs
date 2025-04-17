@@ -1219,10 +1219,11 @@ async fn rsrss_update_request_record(
 pub(crate) mod test {
     use crate::{
         app::RegionAllocationStrategy, app::db::DataStore,
-        app::db::lookup::LookupPath, app::saga::create_saga_dag,
+        app::saga::create_saga_dag,
         app::sagas::region_snapshot_replacement_start::*,
         app::sagas::test_helpers::test_opctx,
     };
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::RegionSnapshotReplacement;
     use nexus_db_model::RegionSnapshotReplacementState;
@@ -1274,7 +1275,7 @@ pub(crate) mod test {
         assert_eq!(region_allocations(&datastore).await, 3);
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk_id)
             .fetch()
             .await
@@ -1288,7 +1289,7 @@ pub(crate) mod test {
         assert_eq!(region_allocations(&datastore).await, 6);
 
         let snapshot_id = snapshot.identity.id;
-        let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot_id)
             .fetch()
             .await
@@ -1856,13 +1857,13 @@ pub(crate) mod test {
             create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
 
         // Before expunging any physical disk, save some DB models
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk.identity.id)
             .fetch()
             .await
             .unwrap();
 
-        let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot.identity.id)
             .fetch()
             .await
@@ -2014,13 +2015,13 @@ pub(crate) mod test {
             create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
 
         // Before expunging any physical disk, save some DB models
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk.identity.id)
             .fetch()
             .await
             .unwrap();
 
-        let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot.identity.id)
             .fetch()
             .await

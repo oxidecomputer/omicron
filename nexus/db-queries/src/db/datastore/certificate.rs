@@ -7,8 +7,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::Certificate;
 use crate::db::model::Name;
 use crate::db::model::ServiceKind;
@@ -16,6 +14,8 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;

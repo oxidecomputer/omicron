@@ -46,10 +46,10 @@
 
 use dropshot::{Body, HttpError};
 use http::{Response, StatusCode, header};
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::authn::{Actor, Reason};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
 
 use nexus_types::external_api::params::DeviceAccessTokenRequest;

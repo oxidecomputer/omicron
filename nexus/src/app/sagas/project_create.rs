@@ -104,7 +104,7 @@ async fn spc_create_record_undo(
         sagactx.lookup::<(authz::Project, db::model::Project)>("project")?;
 
     let (.., authz_project, project) =
-        db::lookup::LookupPath::new(&opctx, osagactx.datastore())
+        nexus_db_lookup::LookupPath::new(&opctx, osagactx.datastore())
             .project_id(project.id())
             .fetch_for(authz::Action::Delete)
             .await?;

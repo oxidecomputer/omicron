@@ -7,8 +7,6 @@
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::context::OpContext;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Asset;
 use crate::db::model::OximeterInfo;
 use crate::db::model::ProducerEndpoint;
@@ -21,6 +19,8 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;

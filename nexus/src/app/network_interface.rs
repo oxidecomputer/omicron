@@ -1,3 +1,4 @@
+use nexus_db_lookup::lookup;
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::queries::network_interface;
@@ -15,9 +16,9 @@ use omicron_uuid_kinds::InstanceUuid;
 use oxnet::IpNet;
 use uuid::Uuid;
 
+use nexus_db_lookup::{self, LookupPath};
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
-use nexus_db_queries::db::lookup::{self, LookupPath};
 
 impl super::Nexus {
     pub fn instance_network_interface_lookup<'a>(
