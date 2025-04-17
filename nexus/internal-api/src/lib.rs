@@ -558,7 +558,7 @@ pub trait NexusInternalApi {
     /// Get the current oximeter read policy
     #[endpoint {
             method = GET,
-            path = "/oximeter-read/policy"
+            path = "/oximeter/read-policy"
             }]
     async fn oximeter_read_policy_get(
         rqctx: RequestContext<Self::Context>,
@@ -567,7 +567,7 @@ pub trait NexusInternalApi {
     /// Set the new oximeter read policy
     #[endpoint {
                method = POST,
-               path = "/oximeter-read/policy"
+               path = "/oximeter/read-policy"
            }]
     async fn oximeter_read_policy_set(
         rqctx: RequestContext<Self::Context>,
