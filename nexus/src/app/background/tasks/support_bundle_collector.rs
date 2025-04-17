@@ -14,6 +14,7 @@ use camino_tempfile::tempfile_in;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::BoxFuture;
+use futures::stream::FuturesUnordered;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
@@ -679,6 +680,29 @@ impl BundleCollection<'_> {
                         );
                     }
                 }
+
+                // For each zone we concurrently fire off a request to its
+                // sled-agent to collect its logs in a zip file and write the
+                // result to the support bundle.
+                let zones = sled_client.support_logs().await?.into_inner();
+                let mut log_futs: FuturesUnordered<_> = zones
+                    .iter()
+                    .map(|zone| {
+                        save_zone_log_zip_or_error(
+                            &sled_client,
+                            zone,
+                            &sled_path,
+                        )
+                    })
+                    .collect();
+
+                while let Some(log_collection_result) = log_futs.next().await {
+                    // We log any errors saving the zip file to disk and
+                    // continue on.
+                    if let Err(e) = log_collection_result {
+                        error!(&self.log, "failed to write logs outut: {e}");
+                    }
+                }
             }
         }
 
@@ -788,6 +812,43 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
 
     let digest = ctx.finalize();
     Ok(ArtifactHash(digest.as_slice().try_into()?))
+}
+
+/// For a given zone, save a zip of its log files into a support bundle path.
+async fn save_zone_log_zip_or_error(
+    client: &sled_agent_client::Client,
+    zone: &str,
+    path: &Utf8Path,
+) -> anyhow::Result<()> {
+    match client.support_logs_download(zone).await {
+        Ok(res) => {
+            let bytestream = res.into_inner();
+            let output_dir = path.join("logs");
+            let output_file = output_dir.join(format!("{zone}.zip"));
+
+            // Ensure the logs output directory exists.
+            tokio::fs::create_dir_all(&output_dir).await.with_context(
+                || format!("failed to create output directory: {output_dir}"),
+            )?;
+
+            let mut file =
+                tokio::fs::File::create(&output_file).await.with_context(
+                    || format!("failed to create file: {output_file}"),
+                )?;
+
+            let stream = bytestream.into_inner().map(|chunk| {
+                chunk.map_err(|e| std::io::Error::other(e.to_string()))
+            });
+            let mut reader = tokio_util::io::StreamReader::new(stream);
+            let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
+        }
+        Err(err) => {
+            tokio::fs::write(path.join("{zone}.zip.err"), err.to_string())
+                .await?;
+        }
+    };
+
+    Ok(())
 }
 
 /// Run a `sled-dianostics` future and save its output to a corresponding file.

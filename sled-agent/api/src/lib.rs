@@ -691,6 +691,23 @@ pub trait SledAgentApi {
     async fn support_zpool_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/logs/zones",
+    }]
+    async fn support_logs(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/logs/download/{zone}",
+    }]
+    async fn support_logs_download(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<SledDiagnosticsLogsZonePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -799,6 +816,14 @@ pub enum SupportBundleState {
 pub struct SupportBundleMetadata {
     pub support_bundle_id: SupportBundleUuid,
     pub state: SupportBundleState,
+}
+
+/// Path parameters for sled-diagnostics log requests used by support bundles
+/// (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+pub struct SledDiagnosticsLogsZonePathParam {
+    /// The path of the file to be included in the support bundle
+    pub zone: String,
 }
 
 /// Path parameters for Disk requests (sled agent API)

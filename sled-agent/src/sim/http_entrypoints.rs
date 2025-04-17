@@ -757,6 +757,20 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         method_unimplemented()
     }
+
+    async fn support_logs(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
+        // Return an empty zone list for testing.
+        Ok(HttpResponseOk(Default::default()))
+    }
+
+    async fn support_logs_download(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<SledDiagnosticsLogsZonePathParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        method_unimplemented()
+    }
 }
 
 fn method_unimplemented<T>() -> Result<T, HttpError> {

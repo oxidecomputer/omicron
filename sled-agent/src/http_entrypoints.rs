@@ -1056,4 +1056,29 @@ impl SledAgentApi for SledAgentImpl {
         let res = sa.support_zpool_info().await;
         Ok(HttpResponseOk(res.get_output()))
     }
+
+    async fn support_logs(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
+        let sa = request_context.context();
+        sa.as_support_bundle_logs()
+            .zones_list()
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
+    }
+
+    async fn support_logs_download(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<SledDiagnosticsLogsZonePathParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = request_context.context();
+        let SledDiagnosticsLogsZonePathParam { zone } =
+            path_params.into_inner();
+
+        sa.as_support_bundle_logs()
+            .get_logs_for_zone(zone)
+            .await
+            .map_err(HttpError::from)
+    }
 }
