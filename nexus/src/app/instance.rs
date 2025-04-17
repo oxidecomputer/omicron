@@ -478,15 +478,11 @@ impl super::Nexus {
         )
         .await?;
 
-        let groups = match params.anti_affinity_groups.as_ref() {
-            Some(groups) => groups,
-            None => &Vec::new(),
-        };
         let anti_affinity_groups = normalize_anti_affinity_groups(
             &self.db_datastore,
             opctx,
             &authz_project,
-            groups,
+            &params.anti_affinity_groups,
         )
         .await?;
 
@@ -503,7 +499,7 @@ impl super::Nexus {
             project_id: authz_project.id(),
             create_params: params::InstanceCreate {
                 ssh_public_keys: ssh_keys,
-                anti_affinity_groups: Some(anti_affinity_groups),
+                anti_affinity_groups,
                 ..params.clone()
             },
             boundary_switches: self
@@ -2494,7 +2490,7 @@ mod tests {
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
-            anti_affinity_groups: None,
+            anti_affinity_groups: Vec::new(),
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
