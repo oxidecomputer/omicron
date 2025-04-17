@@ -401,7 +401,7 @@ impl Nexus {
                 format!("failed to build webhook delivery client: {e}")
             })?
         };
-        
+
         let mut mgs_resolver =
             qorb_resolver.for_service(ServiceName::ManagementGatewayService);
         let mut repo_depot_resolver =
