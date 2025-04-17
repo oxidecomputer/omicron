@@ -761,7 +761,8 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn support_logs(
         _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
-        method_unimplemented()
+        // Return an empty zone list for testing.
+        Ok(HttpResponseOk(Default::default()))
     }
 
     async fn support_logs_download(

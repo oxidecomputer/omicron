@@ -370,7 +370,7 @@ impl LogsHandle {
         &self,
         zone: &str,
         service: &str,
-        zip: &mut zip::ZipWriter<&mut W>,
+        zip: &mut zip::ZipWriter<W>,
         permits: &mut Permits,
         logfile: &Utf8Path,
         logtype: LogType,
@@ -553,7 +553,7 @@ impl LogsHandle {
 fn write_log_to_zip<W: Write + Seek>(
     logger: &Logger,
     service: &str,
-    zip: &mut zip::ZipWriter<&mut W>,
+    zip: &mut zip::ZipWriter<W>,
     logtype: LogType,
     snapshot_logfile: &Utf8Path,
 ) -> Result<(), LogError> {
@@ -728,5 +728,360 @@ mod test {
             extra, expected,
             "cockroachdb extra logs are properly sorted"
         );
+    }
+}
+
+#[cfg(all(target_os = "illumos", test))]
+mod illumos_tests {
+    use std::collections::BTreeMap;
+    use std::io::Read;
+
+    use super::*;
+
+    use illumos_utils::zfs::ZFS;
+    use omicron_common::disk::DatasetConfig;
+    use omicron_common::disk::DatasetKind;
+    use omicron_common::disk::DatasetName;
+    use omicron_common::disk::DatasetsConfig;
+    use omicron_common::disk::SharedDatasetConfig;
+    use omicron_common::zpool_name::ZpoolName;
+    use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use sled_storage::manager_test_harness::StorageManagerTestHarness;
+    use tokio::io::AsyncWriteExt;
+    use zip::ZipArchive;
+    use zip::ZipWriter;
+
+    struct SingleU2StorageHarness {
+        storage_test_harness: StorageManagerTestHarness,
+        zpool_id: ZpoolUuid,
+    }
+
+    impl SingleU2StorageHarness {
+        async fn new(log: &Logger) -> Self {
+            let mut harness = StorageManagerTestHarness::new(log).await;
+            harness.handle().key_manager_ready().await;
+            let _raw_internal_disks =
+                harness.add_vdevs(&["m2_left.vdev", "m2_right.vdev"]).await;
+
+            let raw_disks = harness.add_vdevs(&["u2_0.vdev"]).await;
+
+            let config = harness.make_config(1, &raw_disks);
+            let result = harness
+                .handle()
+                .omicron_physical_disks_ensure(config.clone())
+                .await
+                .expect("Failed to ensure disks");
+            assert!(!result.has_error(), "{result:?}");
+
+            let zpool_id = config.disks[0].pool_id;
+            Self { storage_test_harness: harness, zpool_id }
+        }
+
+        async fn configure_dataset(&self, kind: DatasetKind) -> Utf8PathBuf {
+            let zpool_name = ZpoolName::new_external(self.zpool_id);
+            let dataset_id = DatasetUuid::new_v4();
+            let name = DatasetName::new(zpool_name.clone(), kind);
+            let mountpoint = name.mountpoint(
+                &self.storage_test_harness.handle().mount_config().root,
+            );
+            let datasets = BTreeMap::from([(
+                dataset_id,
+                DatasetConfig {
+                    id: dataset_id,
+                    name: name.clone(),
+                    inner: SharedDatasetConfig::default(),
+                },
+            )]);
+            let config = DatasetsConfig { datasets, ..Default::default() };
+            let status = self
+                .storage_test_harness
+                .handle()
+                .datasets_ensure(config.clone())
+                .await
+                .unwrap();
+            assert!(!status.has_error(), "{status:?}");
+
+            mountpoint
+        }
+
+        async fn cleanup(mut self) {
+            self.storage_test_harness.cleanup().await
+        }
+    }
+
+    // TODO MTZ: tests we want
+    //
+    // - Snapshot creation
+    // - Snapshot deletion on drop
+    // - Snapshot creation; mem::forget; LogHandle::cleanup
+    //
+    // - Manual process_logs
+    // - Current logs
+    // - Archived logs
+    // - Extra
+
+    // A custom zfs snapshot list that only shows us our view of the world for
+    // a particular filesystem to prevent races from other concurrent tests.
+    fn list_snapshots(filesystem: &str) -> Vec<Snapshot> {
+        let mut command = std::process::Command::new(ZFS);
+        let cmd = command.args(&[
+            "list", "-H", "-o", "name", "-t", "snapshot", "-r", filesystem,
+        ]);
+        let output = cmd.output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout
+            .trim()
+            .lines()
+            .map(|line| {
+                let (filesystem, snap_name) = line.split_once('@').unwrap();
+                Snapshot {
+                    filesystem: filesystem.to_string(),
+                    snap_name: snap_name.to_string(),
+                }
+            })
+            .collect()
+    }
+
+    /// Find all sled-diagnostics created snapshots
+    fn get_sled_diagnostics_snapshots(filesystem: &str) -> Vec<Snapshot> {
+        list_snapshots(filesystem)
+            .into_iter()
+            .filter(|snap| {
+                if !snap.snap_name.starts_with(SLED_DIAGNOSTICS_SNAPSHOT_PREFIX)
+                {
+                    return false;
+                }
+                let name = snap.to_string();
+                if Zfs::get_values(
+                    &name,
+                    &[SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME],
+                    Some(illumos_utils::zfs::PropertySource::Local),
+                )
+                .unwrap()
+                    == [SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE]
+                {
+                    return true;
+                };
+
+                false
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn snapshot_permits_work() {
+        let logctx = test_setup_log("snapshot_permits_work");
+        let log = &logctx.log;
+
+        // Set up storage
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // Create a new zone dataset
+        let mountpoint = harness
+            .configure_dataset(DatasetKind::TransientZone {
+                name: "oxz_switch".to_string(),
+            })
+            .await;
+        let zfs_filesystem =
+            &ZpoolName::new_external(harness.zpool_id).to_string();
+
+        // Make sure an error in this block results in the correct drop ordering
+        // for test cleanup
+        {
+            let mut permits = Permits::new();
+
+            // Create a new snapshot permit
+            permits.get_or_create(&log, &mountpoint).unwrap();
+            let snapshots = get_sled_diagnostics_snapshots(zfs_filesystem);
+            assert_eq!(snapshots.len(), 1, "single snapshot permit created");
+
+            // Creating a second permit from the same dataset doesn't create a
+            // new permit
+            permits.get_or_create(&log, &mountpoint).unwrap();
+            let snapshots = get_sled_diagnostics_snapshots(zfs_filesystem);
+            assert_eq!(snapshots.len(), 1, "duplicate snapshots not taken");
+
+            // // Free all of the permits
+            drop(permits);
+
+            let snapshots = get_sled_diagnostics_snapshots(zfs_filesystem);
+            assert!(snapshots.is_empty(), "no snapshots left behind");
+
+            // Simulate a crash leaving behind stale snapshots
+            let mut permits = Permits::new();
+            permits.get_or_create(&log, &mountpoint).unwrap();
+
+            // Don't run the drop handler for any permits
+            std::mem::forget(permits);
+
+            let snapshots = get_sled_diagnostics_snapshots(zfs_filesystem);
+            assert_eq!(snapshots.len(), 1, "single snapshot permit created");
+
+            let handle = LogsHandle::new(log.clone());
+            handle.cleanup_snapshots();
+
+            let snapshots = get_sled_diagnostics_snapshots(zfs_filesystem);
+            assert!(snapshots.is_empty(), "all stale snapshots cleaned up");
+        }
+
+        // Cleanup
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn collect_current_logs() {
+        let logctx = test_setup_log("collect_current_logs");
+        let log = &logctx.log;
+
+        // Set up storage
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // Create a new zone dataset
+        let mountpoint = harness
+            .configure_dataset(DatasetKind::TransientZone {
+                name: "oxz_switch".to_string(),
+            })
+            .await;
+
+        let logfile_to_data = [
+            ("oxide-mg-ddm:default.log", "very important log data"),
+            ("oxide-mg-ddm:default.log.0", "life before death"),
+            ("oxide-mg-ddm:default.log.1", "strength before weakness"),
+            ("oxide-mg-ddm:default.log.2", "journey before destination"),
+        ];
+
+        let logdir = mountpoint.join("var/svc/log");
+        tokio::fs::create_dir_all(&logdir).await.unwrap();
+
+        // Populate some sample logs
+        for (name, data) in logfile_to_data {
+            let logfile = logdir.join(name);
+            let mut logfile_handle =
+                tokio::fs::File::create_new(&logfile).await.unwrap();
+            logfile_handle.write_all(data.as_bytes()).await.unwrap();
+        }
+
+        // Make sure an error in this block results in the correct drop ordering
+        // for test cleanup
+        {
+            let loghandle = LogsHandle::new(log.clone());
+            let mut permits = Permits::new();
+
+            let zipfile_path = mountpoint.join("test.zip");
+            let zipfile = std::fs::File::create_new(&zipfile_path).unwrap();
+            let mut zip = ZipWriter::new(zipfile);
+
+            loghandle
+                .process_logs(
+                    "oxz_switch",
+                    "mg-ddm",
+                    &mut zip,
+                    &mut permits,
+                    &mountpoint
+                        .join(format!("var/svc/log/{}", logfile_to_data[0].0)),
+                    LogType::Current,
+                )
+                .unwrap();
+
+            zip.finish().unwrap();
+
+            // Confirm the zip has our file and data
+            let mut archive =
+                ZipArchive::new(std::fs::File::open(zipfile_path).unwrap())
+                    .unwrap();
+            for (name, data) in logfile_to_data {
+                let mut file_in_zip =
+                    archive.by_name(&format!("mg-ddm/current/{name}")).unwrap();
+                let mut contents = String::new();
+                file_in_zip.read_to_string(&mut contents).unwrap();
+
+                assert_eq!(contents.as_str(), data, "log file data matches");
+            }
+        }
+
+        // Cleanup
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn log_collection_comes_from_snapshot() {
+        let logctx = test_setup_log("log_collection_comes_from_snapshot");
+        let log = &logctx.log;
+
+        // Set up storage
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // Create a new zone dataset
+        let mountpoint = harness
+            .configure_dataset(DatasetKind::TransientZone {
+                name: "oxz_switch".to_string(),
+            })
+            .await;
+
+        let mgddm_log = "oxide-mg-ddm:default.log";
+        let data1 = "very important log data";
+        let data2 = "changed log data";
+
+        let logdir = mountpoint.join("var/svc/log");
+        tokio::fs::create_dir_all(&logdir).await.unwrap();
+
+        // Make sure an error in this block results in the correct drop ordering
+        // for test cleanup
+        {
+            // Write the log data before we take a snapshot
+            let logfile = logdir.join(mgddm_log);
+            let mut logfile_handle =
+                tokio::fs::File::create_new(&logfile).await.unwrap();
+            logfile_handle.write_all(data1.as_bytes()).await.unwrap();
+
+            let loghandle = LogsHandle::new(log.clone());
+            let mut permits = Permits::new();
+
+            // Create a permit first
+            permits.get_or_create(&log, &logfile).unwrap();
+
+            // Change the data on disk by truncating the old file first
+            let mut logfile_handle =
+                tokio::fs::File::create(&logfile).await.unwrap();
+            logfile_handle.write_all(data2.as_bytes()).await.unwrap();
+
+            let zipfile_path = mountpoint.join("test.zip");
+            let zipfile = std::fs::File::create_new(&zipfile_path).unwrap();
+            let mut zip = ZipWriter::new(zipfile);
+
+            loghandle
+                .process_logs(
+                    "oxz_switch",
+                    "mg-ddm",
+                    &mut zip,
+                    &mut permits,
+                    &logfile,
+                    LogType::Current,
+                )
+                .unwrap();
+
+            zip.finish().unwrap();
+
+            let mut archive =
+                ZipArchive::new(std::fs::File::open(zipfile_path).unwrap())
+                    .unwrap();
+            let mut file_in_zip = archive
+                .by_name(&format!("mg-ddm/current/{mgddm_log}"))
+                .unwrap();
+            let mut contents = String::new();
+            file_in_zip.read_to_string(&mut contents).unwrap();
+
+            // Confirm we have the data in the snapshot and not the newly
+            // written data.
+            assert_eq!(contents.as_str(), data1, "log file data matches");
+        }
+
+        // Cleanup
+        harness.cleanup().await;
+        logctx.cleanup_successful();
     }
 }

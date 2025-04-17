@@ -1222,8 +1222,8 @@ impl Zfs {
         snap_name: &'a str,
         properties: &'a [(&'a str, &'a str)],
     ) -> Result<(), CreateSnapshotError> {
-        let mut command = std::process::Command::new(ZFS);
-        let mut cmd = command.arg("snapshot");
+        let mut command = std::process::Command::new(PFEXEC);
+        let mut cmd = command.args([ZFS, "snapshot"]);
         for (name, value) in properties.iter() {
             cmd = cmd.arg("-o").arg(&format!("{name}={value}"));
         }
@@ -1240,9 +1240,9 @@ impl Zfs {
         filesystem: &str,
         snap_name: &str,
     ) -> Result<(), DestroySnapshotError> {
-        let mut command = std::process::Command::new(ZFS);
+        let mut command = std::process::Command::new(PFEXEC);
         let path = format!("{filesystem}@{snap_name}");
-        let cmd = command.args(&["destroy", &path]);
+        let cmd = command.args(&[ZFS, "destroy", &path]);
         execute(cmd).map(|_| ()).map_err(|err| DestroySnapshotError {
             filesystem: filesystem.to_string(),
             snap_name: snap_name.to_string(),
