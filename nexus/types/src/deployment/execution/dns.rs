@@ -57,6 +57,7 @@ pub fn blueprint_internal_dns_config(
                     zone.id,
                     ServiceName::Clickhouse,
                     *address,
+                    blueprint.oximeter_read_mode.single_node_enabled(),
                 )?;
                 continue 'all_zones;
             }
@@ -71,6 +72,7 @@ pub fn blueprint_internal_dns_config(
                     zone.id,
                     ServiceName::ClickhouseServer,
                     *address,
+                    blueprint.oximeter_read_mode.cluster_enabled(),
                 )?;
                 continue 'all_zones;
             }

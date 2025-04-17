@@ -340,7 +340,7 @@ impl Nexus {
         let timeseries_client = match &config.pkg.timeseries_db.address {
             None => {
                 let native_resolver =
-                    qorb_resolver.for_service(ServiceName::ClickhouseNative);
+                    qorb_resolver.for_service(ServiceName::OximeterReader);
                 oximeter_db::Client::new_with_resolver(native_resolver, &log)
             }
             Some(address) => oximeter_db::Client::new(*address, &log),

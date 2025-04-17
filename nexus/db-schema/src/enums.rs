@@ -47,6 +47,7 @@ define_enums! {
     IpPoolResourceTypeEnum => "ip_pool_resource_type",
     MigrationStateEnum => "migration_state",
     NetworkInterfaceKindEnum => "network_interface_kind",
+    OximeterReadModeEnum => "oximeter_read_mode",
     PhysicalDiskKindEnum => "physical_disk_kind",
     PhysicalDiskPolicyEnum => "physical_disk_policy",
     PhysicalDiskStateEnum => "physical_disk_state",
