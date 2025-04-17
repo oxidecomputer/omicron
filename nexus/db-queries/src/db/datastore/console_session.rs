@@ -8,11 +8,11 @@ use super::DataStore;
 use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::lookup::LookupPath;
 use crate::db::model::ConsoleSession;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_lookup::LookupPath;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -76,7 +76,7 @@ impl DataStore {
                 ))
             })?;
 
-        let (.., db_silo_user) = LookupPath::new(opctx, &self)
+        let (.., db_silo_user) = LookupPath::new(opctx, self)
             .silo_user_id(console_session.silo_user_id)
             .fetch()
             .await

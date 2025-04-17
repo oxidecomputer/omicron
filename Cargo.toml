@@ -77,7 +77,10 @@ members = [
     "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
+    "nexus/background-task-interface",
+    "nexus/db-errors",
     "nexus/db-fixed-data",
+    "nexus/db-lookup",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -97,7 +100,10 @@ members = [
     "nexus/reconfigurator/preparation",
     "nexus/reconfigurator/rendezvous",
     "nexus/reconfigurator/simulation",
+    "nexus/saga-interface",
     "nexus/saga-recovery",
+    "nexus/saga-tests",
+    "nexus/sagas",
     "nexus/test-interface",
     "nexus/test-utils-macros",
     "nexus/test-utils",
@@ -223,7 +229,10 @@ default-members = [
     "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
+    "nexus/background-task-interface",
+    "nexus/db-errors",
     "nexus/db-fixed-data",
+    "nexus/db-lookup",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -243,7 +252,10 @@ default-members = [
     "nexus/reconfigurator/preparation",
     "nexus/reconfigurator/rendezvous",
     "nexus/reconfigurator/simulation",
+    "nexus/saga-interface",
     "nexus/saga-recovery",
+    "nexus/sagas",
+    "nexus/sagas",
     "nexus/test-interface",
     "nexus/test-utils-macros",
     "nexus/test-utils",
@@ -490,9 +502,12 @@ mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8452936a53c3b16e53cbbf4e34e5e59899afc965" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
+nexus-background-task-interface = { path = "nexus/background-task-interface" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
+nexus-db-errors = { path = "nexus/db-errors" }
 nexus-db-fixed-data = { path = "nexus/db-fixed-data" }
+nexus-db-lookup = { path = "nexus/db-lookup" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-db-schema = { path = "nexus/db-schema" }
@@ -510,7 +525,10 @@ nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
 nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
 nexus-reconfigurator-rendezvous = { path = "nexus/reconfigurator/rendezvous" }
 nexus-reconfigurator-simulation = { path = "nexus/reconfigurator/simulation" }
+nexus-saga-interface = { path = "nexus/saga-interface" }
 nexus-saga-recovery = { path = "nexus/saga-recovery" }
+nexus-saga-tests = { path = "nexus/saga-tests" }
+nexus-sagas = { path = "nexus/sagas" }
 nexus-sled-agent-shared = { path = "nexus-sled-agent-shared" }
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
@@ -668,7 +686,7 @@ static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
 # SHA).  Cut a new Steno release instead.  See omicron#2117.
-steno = "0.4.1"
+steno = { version = "0.4.2-dev" }
 strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
 supports-color = "3.0.2"
@@ -887,13 +905,13 @@ opt-level = 3
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
-# [patch.crates-io]
+[patch.crates-io]
 # diesel = { path = "../../diesel/diesel" }
 # dropshot = { path = "../dropshot/dropshot" }
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
 # progenitor = { path = "../progenitor/progenitor" }
 # progenitor-client = { path = "../progenitor/progenitor-client" }
-# steno = { path = "../steno" }
+steno = { path = "../steno" }
 
 # [patch."https://github.com/oxidecomputer/crucible"]
 # crucible-agent-client = { path = "../crucible/agent-client" }

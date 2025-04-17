@@ -5,13 +5,14 @@
 //! Helper functions for writing saga undo tests and working with instances in
 //! saga tests.
 
-use super::{NexusSaga, instance_common::VmmAndSledIds, instance_start};
+use super::{NexusSaga, instance_common::VmmAndSledIds};
 use crate::{Nexus, app::saga::create_saga_dag};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use diesel::{
     BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
 };
 use futures::future::BoxFuture;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::InstanceState;
 use nexus_db_queries::{
     authz,
@@ -19,9 +20,9 @@ use nexus_db_queries::{
     db::{
         DataStore,
         datastore::{InstanceAndActiveVmm, InstanceGestalt},
-        lookup::LookupPath,
     },
 };
+use nexus_sagas::sagas::instance_start::InstanceStartReason;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::NameOrId;
@@ -57,7 +58,7 @@ pub(crate) async fn instance_start(
     let instance_lookup =
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     nexus
-        .instance_start(&opctx, &instance_lookup, instance_start::Reason::User)
+        .instance_start(&opctx, &instance_lookup, InstanceStartReason::User)
         .await
         .expect("Failed to start instance");
 }
@@ -299,7 +300,7 @@ pub(crate) async fn instance_wait_for_state(
 ) -> InstanceAndActiveVmm {
     let opctx = test_opctx(&cptestctx);
     let datastore = cptestctx.server.server_context().nexus.datastore();
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Read)
         .await

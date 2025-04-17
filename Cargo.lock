@@ -152,9 +152,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.97"
+version = "1.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcfed56ad506cb2c684a14971b8861fdc3baaaae314b9e5f9bb532cbe3ba7a4f"
+checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 dependencies = [
  "backtrace",
 ]
@@ -716,7 +716,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -739,7 +739,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -1615,7 +1615,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5304,7 +5304,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -5870,6 +5870,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-background-task-interface"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "tokio",
+]
+
+[[package]]
 name = "nexus-client"
 version = "0.1.0"
 dependencies = [
@@ -5915,6 +5923,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-db-errors"
+version = "0.1.0"
+dependencies = [
+ "diesel",
+ "nexus-auth",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "nexus-db-fixed-data"
 version = "0.1.0"
 dependencies = [
@@ -5925,6 +5944,34 @@ dependencies = [
  "omicron-workspace-hack",
  "pq-sys",
  "strum",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-db-lookup"
+version = "0.1.0"
+dependencies = [
+ "async-bb8-diesel",
+ "async-trait",
+ "db-macros",
+ "diesel",
+ "diesel-dtrace",
+ "ipnetwork",
+ "nexus-auth",
+ "nexus-db-errors",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-db-schema",
+ "nexus-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "qorb",
+ "slog",
+ "tokio",
  "uuid",
 ]
 
@@ -6007,11 +6054,14 @@ dependencies = [
  "macaddr",
  "nexus-auth",
  "nexus-config",
+ "nexus-db-errors",
  "nexus-db-fixed-data",
+ "nexus-db-lookup",
  "nexus-db-model",
  "nexus-db-schema",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
+ "nexus-saga-interface",
  "nexus-sled-agent-shared",
  "nexus-test-utils",
  "nexus-types",
@@ -6221,6 +6271,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "ipnetwork",
+ "nexus-db-lookup",
  "nexus-db-queries",
  "omicron-common",
  "omicron-workspace-hack",
@@ -6296,6 +6347,7 @@ dependencies = [
  "ipnet",
  "newtype-uuid",
  "nexus-config",
+ "nexus-db-lookup",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
@@ -6432,6 +6484,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-saga-interface"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "nexus-auth",
+ "nexus-background-task-interface",
+ "nexus-db-lookup",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "paste",
+ "serde",
+ "serde_json",
+ "slog",
+ "steno",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-saga-recovery"
 version = "0.1.0"
 dependencies = [
@@ -6455,6 +6526,52 @@ dependencies = [
  "slog-error-chain",
  "steno",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-saga-tests"
+version = "0.1.0"
+dependencies = [
+ "async-bb8-diesel",
+ "diesel",
+ "dropshot 0.16.0",
+ "futures",
+ "nexus-db-lookup",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-db-schema",
+ "nexus-saga-interface",
+ "nexus-sagas",
+ "nexus-test-utils",
+ "nexus-test-utils-macros",
+ "nexus-types",
+ "omicron-common",
+ "omicron-nexus",
+ "omicron-sled-agent",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "sled-agent-client",
+ "slog",
+ "steno",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-sagas"
+version = "0.1.0"
+dependencies = [
+ "nexus-auth",
+ "nexus-db-lookup",
+ "nexus-db-model",
+ "nexus-saga-interface",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "serde",
+ "steno",
  "uuid",
 ]
 
@@ -7252,8 +7369,10 @@ dependencies = [
  "macaddr",
  "mg-admin-client",
  "nexus-auth",
+ "nexus-background-task-interface",
  "nexus-client",
  "nexus-config",
+ "nexus-db-lookup",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
@@ -7268,7 +7387,9 @@ dependencies = [
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
  "nexus-reconfigurator-rendezvous",
+ "nexus-saga-interface",
  "nexus-saga-recovery",
+ "nexus-sagas",
  "nexus-sled-agent-shared",
  "nexus-test-interface",
  "nexus-test-utils",
@@ -7379,6 +7500,8 @@ dependencies = [
  "multimap",
  "nexus-client",
  "nexus-config",
+ "nexus-db-errors",
+ "nexus-db-lookup",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
@@ -8992,13 +9115,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "petgraph"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a98c6720655620a521dcc722d0ad66cd8afd5d86e34a89ef691c50b7b24de06"
+dependencies = [
+ "fixedbitset 0.5.7",
+ "hashbrown 0.15.1",
+ "indexmap 2.7.1",
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
 name = "petname"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "rand 0.8.5",
@@ -11884,9 +12020,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "steno"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a77bea0b19d52c04783569b87bb3e8d47c85e285be239a9b0428241bdbb95460"
+version = "0.4.2-dev"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -11894,12 +12028,12 @@ dependencies = [
  "futures",
  "lazy_static",
  "newtype_derive",
- "petgraph 0.6.5",
+ "petgraph 0.8.1",
  "schemars",
  "serde",
  "serde_json",
  "slog",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "uuid",
 ]
@@ -14070,7 +14204,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

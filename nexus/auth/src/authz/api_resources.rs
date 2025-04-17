@@ -5,7 +5,7 @@
 //! Authz types for resources in the API hierarchy
 //!
 //! The general pattern in Nexus for working with an object is to look it up
-//! (see `nexus_db_queries::db::lookup::LookupPath`) and get back a so-called
+//! (see `nexus_db_lookup::LookupPath`) and get back a so-called
 //! `authz` type.  This type uniquely identifies the resource regardless of
 //! any other changes (e.g., name change or moving it to a different parent
 //! collection). The various datastore functions that modify API resources

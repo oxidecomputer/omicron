@@ -677,7 +677,7 @@ impl super::Nexus {
         endpoint_for_authority(
             log,
             &requested_authority,
-            &self.background_tasks.external_endpoints,
+            &self.background_task_channels.external_endpoints,
         )
     }
 }

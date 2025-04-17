@@ -5,7 +5,11 @@
 //! Interfaces available to saga actions and undo actions
 
 use crate::Nexus;
-use nexus_db_queries::{authz, db};
+use crate::app::background::BackgroundTasks;
+use nexus_auth::{authz, context::OpContext};
+use nexus_db_queries::db;
+use nexus_saga_interface::{DataStoreContext, NexusInterface};
+use omicron_common::api::external::Error;
 use slog::Logger;
 use std::fmt;
 use std::sync::Arc;
@@ -16,6 +20,7 @@ use std::sync::Arc;
 pub struct SagaContext {
     nexus: Arc<Nexus>,
     log: Logger,
+    context2: Arc<nexus_saga_interface::SagaContext>,
 }
 
 impl fmt::Debug for SagaContext {
@@ -26,7 +31,18 @@ impl fmt::Debug for SagaContext {
 
 impl SagaContext {
     pub(crate) fn new(nexus: Arc<Nexus>, log: Logger) -> SagaContext {
-        SagaContext { nexus, log }
+        let nexus_context = nexus_saga_interface::NexusContext::new(Arc::new(
+            NexusWrapper::new(nexus.clone()),
+        ));
+        let context2 = Arc::new(nexus_saga_interface::SagaContext::new(
+            log.clone(),
+            nexus_context,
+        ));
+        SagaContext { nexus, log, context2 }
+    }
+
+    pub(crate) fn context2(&self) -> &Arc<nexus_saga_interface::SagaContext> {
+        &self.context2
     }
 
     pub(crate) fn log(&self) -> &Logger {
@@ -43,5 +59,41 @@ impl SagaContext {
 
     pub(crate) fn datastore(&self) -> &db::DataStore {
         self.nexus.datastore()
+    }
+}
+
+struct NexusWrapper {
+    nexus: Arc<Nexus>,
+    datastore_context: DataStoreContext,
+}
+
+impl NexusWrapper {
+    fn new(nexus: Arc<Nexus>) -> Self {
+        let datastore = nexus.datastore().clone();
+        let datastore_context = DataStoreContext::new(datastore);
+        Self { nexus, datastore_context }
+    }
+}
+
+#[async_trait::async_trait]
+impl NexusInterface for NexusWrapper {
+    fn authz(&self) -> &Arc<authz::Authz> {
+        self.nexus.authz()
+    }
+
+    fn datastore(&self) -> &DataStoreContext {
+        &self.datastore_context
+    }
+
+    fn background_tasks(&self) -> &BackgroundTasks {
+        self.nexus.background_tasks()
+    }
+
+    async fn instance_delete_dpd_config(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> Result<(), Error> {
+        self.nexus.instance_delete_dpd_config(opctx, authz_instance).await
     }
 }

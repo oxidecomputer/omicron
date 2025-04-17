@@ -9,7 +9,7 @@ use super::{
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
-use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_lookup::LookupPath;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
@@ -139,7 +139,7 @@ async fn simc_get_source_volume(
     match &params.create_params.source {
         params::ImageSource::Snapshot { id } => {
             let (.., db_snapshot) =
-                LookupPath::new(&opctx, &osagactx.datastore())
+                LookupPath::new(&opctx, osagactx.datastore())
                     .snapshot_id(*id)
                     .fetch()
                     .await
@@ -324,7 +324,7 @@ async fn simc_create_image_record_undo(
     match &params.image_type {
         ImageType::Project { .. } => {
             let (.., authz_image, db_image) =
-                LookupPath::new(&opctx, &osagactx.datastore())
+                LookupPath::new(&opctx, osagactx.datastore())
                     .project_image_id(image_id)
                     .fetch()
                     .await?;
@@ -337,7 +337,7 @@ async fn simc_create_image_record_undo(
 
         ImageType::Silo { .. } => {
             let (.., authz_image, db_image) =
-                LookupPath::new(&opctx, &osagactx.datastore())
+                LookupPath::new(&opctx, osagactx.datastore())
                     .silo_image_id(image_id)
                     .fetch()
                     .await?;
@@ -386,7 +386,7 @@ pub(crate) mod test {
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         let (.., authz_silo, _authz_project) =
-            LookupPath::new(&opctx, &datastore)
+            LookupPath::new(&opctx, datastore)
                 .project_id(project_id)
                 .lookup_for(nexus_db_queries::authz::Action::Modify)
                 .await
@@ -437,7 +437,7 @@ pub(crate) mod test {
         let opctx = test_opctx(cptestctx);
 
         let (.., authz_silo, authz_project) =
-            LookupPath::new(&opctx, &datastore)
+            LookupPath::new(&opctx, datastore)
                 .project_id(project_id)
                 .lookup_for(nexus_db_queries::authz::Action::Modify)
                 .await

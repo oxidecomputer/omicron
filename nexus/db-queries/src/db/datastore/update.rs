@@ -9,13 +9,13 @@ use std::collections::HashMap;
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use crate::db::model::SemverVersion;
 use crate::db::pagination::paginated;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{ArtifactHash, TufArtifact, TufRepo, TufRepoDescription};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Generation, ListResultVec,

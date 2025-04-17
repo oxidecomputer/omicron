@@ -188,10 +188,10 @@ impl InstanceReincarnation {
 
                 let running_saga = async {
                     let dag = instance_start::SagaInstanceStart::prepare(
-                        &instance_start::Params {
+                        &nexus_sagas::sagas::instance_start::Params {
                             db_instance,
                             serialized_authn: serialized_authn.clone(),
-                            reason: instance_start::Reason::AutoRestart,
+                            reason: nexus_sagas::sagas::instance_start::InstanceStartReason::AutoRestart,
                         },
                     )?;
                     self.sagas.saga_run(dag).await
@@ -307,6 +307,7 @@ mod test {
     use crate::app::sagas::test_helpers;
     use crate::external_api::params;
     use chrono::Utc;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
     use nexus_db_model::InstanceRuntimeState;
     use nexus_db_model::InstanceState;
@@ -314,7 +315,6 @@ mod test {
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_db_queries::authz;
-    use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pool, create_project, object_create,
     };

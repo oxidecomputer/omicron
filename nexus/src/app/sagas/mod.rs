@@ -10,6 +10,8 @@
 // easier it will be to test, version, and update in deployed systems.
 
 use crate::saga_interface::SagaContext;
+use nexus_saga_interface::NexusSaga2;
+use nexus_saga_interface::SagaInitError;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use steno::ActionContext;
@@ -19,7 +21,6 @@ use steno::SagaDag;
 use steno::SagaName;
 use steno::SagaType;
 use steno::new_action_noop_undo;
-use thiserror::Error;
 use uuid::Uuid;
 
 pub mod demo;
@@ -30,7 +31,6 @@ pub mod image_create;
 pub mod image_delete;
 pub(crate) mod instance_common;
 pub mod instance_create;
-pub mod instance_delete;
 pub mod instance_ip_attach;
 pub mod instance_ip_detach;
 pub mod instance_migrate;
@@ -96,42 +96,59 @@ pub(crate) trait NexusSaga {
     }
 }
 
-#[derive(Debug, Error)]
-pub enum SagaInitError {
-    #[error("internal error building saga graph: {0:#}")]
-    DagBuildError(steno::DagBuilderError),
+// Adapter for NexusSaga2
+impl<T: NexusSaga2> NexusSaga for T {
+    const NAME: &'static str = T::NAME;
 
-    #[error("failed to serialize {0:?}: {1:#}")]
-    SerializeError(String, serde_json::Error),
+    type Params = T::Params;
 
-    #[error("invalid parameter: {0}")]
-    InvalidParameter(String),
-}
-
-impl From<steno::DagBuilderError> for SagaInitError {
-    fn from(error: steno::DagBuilderError) -> Self {
-        SagaInitError::DagBuildError(error)
-    }
-}
-
-impl From<SagaInitError> for omicron_common::api::external::Error {
-    fn from(error: SagaInitError) -> Self {
-        match error {
-            SagaInitError::DagBuildError(_)
-            | SagaInitError::SerializeError(_, _) => {
-                // All of these errors reflect things that shouldn't be possible.
-                // They're basically bugs.
-                omicron_common::api::external::Error::internal_error(&format!(
-                    "creating saga: {:#}",
-                    error
-                ))
-            }
-
-            SagaInitError::InvalidParameter(s) => {
-                omicron_common::api::external::Error::invalid_request(&s)
-            }
+    fn register_actions(registry: &mut ActionRegistry) {
+        for action in T::actions() {
+            registry.register(map_action(action));
         }
     }
+
+    fn make_saga_dag(
+        params: &Self::Params,
+        builder: steno::DagBuilder,
+    ) -> Result<steno::Dag, SagaInitError> {
+        T::make_saga_dag(params, builder)
+    }
+}
+
+fn map_action(action: nexus_saga_interface::NexusAction) -> NexusAction {
+    Arc::new(ActionWrapper(action))
+}
+
+#[derive(Debug)]
+struct ActionWrapper(nexus_saga_interface::NexusAction);
+
+impl steno::Action<NexusSagaType> for ActionWrapper {
+    fn do_it(
+        &self,
+        sgctx: ActionContext<NexusSagaType>,
+    ) -> futures::future::BoxFuture<'_, steno::ActionResult> {
+        self.0.do_it(map_action_context(sgctx))
+    }
+
+    fn undo_it(
+        &self,
+        sgctx: ActionContext<NexusSagaType>,
+    ) -> futures::future::BoxFuture<'_, steno::UndoResult> {
+        self.0.undo_it(map_action_context(sgctx))
+    }
+
+    fn name(&self) -> steno::ActionName {
+        self.0.name()
+    }
+}
+
+fn map_action_context(
+    sgctx: ActionContext<NexusSagaType>,
+) -> ActionContext<nexus_saga_interface::NexusSagaType> {
+    sgctx.map_user_data::<_, nexus_saga_interface::NexusSagaType>(|data| {
+        Arc::new(Arc::clone(data.context2()))
+    })
 }
 
 pub(super) static ACTION_GENERATE_ID: LazyLock<NexusAction> =
@@ -160,7 +177,7 @@ fn make_action_registry() -> ActionRegistry {
         disk_delete::SagaDiskDelete,
         finalize_disk::SagaFinalizeDisk,
         instance_create::SagaInstanceCreate,
-        instance_delete::SagaInstanceDelete,
+        nexus_sagas::sagas::instance_delete::SagaInstanceDelete,
         instance_ip_attach::SagaInstanceIpAttach,
         instance_ip_detach::SagaInstanceIpDetach,
         instance_migrate::SagaInstanceMigrate,

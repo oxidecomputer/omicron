@@ -7,8 +7,6 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::Generation;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
@@ -19,6 +17,8 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::migration::dsl;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -178,9 +178,9 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::authz;
-    use crate::db::lookup::LookupPath;
     use crate::db::model::Instance;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::Project;
     use nexus_types::external_api::params;
     use nexus_types::silo::DEFAULT_SILO_ID;
@@ -245,7 +245,7 @@ mod tests {
             .await
             .expect("instance must be created successfully");
 
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await

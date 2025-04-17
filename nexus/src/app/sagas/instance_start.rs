@@ -16,42 +16,14 @@ use crate::app::instance::{
 };
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
-use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
-use nexus_db_queries::{authn, authz, db};
+use nexus_db_lookup::LookupPath;
+use nexus_db_queries::db::identity::Resource;
+use nexus_db_queries::{authz, db};
+use nexus_sagas::sagas::instance_start::{InstanceStartReason, Params};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
-use serde::{Deserialize, Serialize};
 use slog::info;
 use steno::ActionError;
-
-/// Parameters to the instance start saga.
-#[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct Params {
-    pub db_instance: db::model::Instance,
-
-    /// Authentication context to use to fetch the instance's current state from
-    /// the database.
-    pub serialized_authn: authn::saga::Serialized,
-
-    /// Why is this instance being started?
-    pub reason: Reason,
-}
-
-/// Reasons an instance may be started.
-///
-/// Currently, this is primarily used to determine whether the instance's
-/// auto-restart timestamp must be updated. It's also included in log messages
-/// in the start saga.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub(crate) enum Reason {
-    /// The instance was automatically started upon being created.
-    AutoStart,
-    /// The instance was started by a user action.
-    User,
-    /// The instance has failed and is being automatically restarted by the
-    /// control plane.
-    AutoRestart,
-}
 
 declare_saga_actions! {
     instance_start;
@@ -295,7 +267,7 @@ async fn sis_move_to_starting(
 
     // For idempotency, refetch the instance to see if this step already applied
     // its desired update.
-    let (_, _, authz_instance, ..) = LookupPath::new(&opctx, &datastore)
+    let (_, _, authz_instance, ..) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
@@ -350,11 +322,12 @@ async fn sis_move_to_starting(
     let new_runtime = {
         // If we are performing an automated restart of a Failed instance,
         // remember to update the timestamp.
-        let time_last_auto_restarted = if params.reason == Reason::AutoRestart {
-            Some(Utc::now())
-        } else {
-            db_instance.runtime().time_last_auto_restarted
-        };
+        let time_last_auto_restarted =
+            if params.reason == InstanceStartReason::AutoRestart {
+                Some(Utc::now())
+            } else {
+                db_instance.runtime().time_last_auto_restarted
+            };
         db::model::InstanceRuntimeState {
             nexus_state: db::model::InstanceState::Vmm,
             propolis_id: Some(propolis_id.into_untyped_uuid()),
@@ -491,7 +464,7 @@ async fn sis_dpd_ensure(
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
     let sled_uuid = sagactx.lookup::<SledUuid>("sled_id")?;
-    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
+    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
         .sled_id(sled_uuid.into_untyped_uuid())
         .fetch()
         .await
@@ -522,7 +495,7 @@ async fn sis_dpd_ensure_undo(
           "instance_id" => %instance_id,
           "start_reason" => ?params.reason);
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_instance) = LookupPath::new(&opctx, osagactx.datastore())
         .instance_id(instance_id)
         .lookup_for(authz::Action::Modify)
         .await
@@ -576,7 +549,7 @@ async fn sis_ensure_registered(
           "start_reason" => ?params.reason);
 
     let (authz_silo, authz_project, authz_instance) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .instance_id(instance_id)
             .lookup_for(authz::Action::Modify)
             .await
@@ -646,7 +619,7 @@ async fn sis_ensure_registered_undo(
 
     // Fetch the latest record so that this callee can drive the instance into
     // a Failed state if the unregister call fails.
-    let (.., authz_instance, _) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance, _) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await
@@ -868,7 +841,7 @@ mod test {
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             db_instance,
-            reason: Reason::User,
+            reason: InstanceStartReason::User,
         };
 
         nexus
@@ -920,7 +893,7 @@ mod test {
                             serialized_authn:
                                 authn::saga::Serialized::for_opctx(&opctx),
                             db_instance,
-                            reason: Reason::User,
+                            reason: InstanceStartReason::User,
                         }
                     }
                 })
@@ -967,7 +940,7 @@ mod test {
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             db_instance,
-            reason: Reason::User,
+            reason: InstanceStartReason::User,
         };
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
@@ -1008,7 +981,7 @@ mod test {
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             db_instance,
-            reason: Reason::User,
+            reason: InstanceStartReason::User,
         };
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();

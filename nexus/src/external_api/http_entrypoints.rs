@@ -38,12 +38,12 @@ use dropshot::{WebsocketChannelResult, WebsocketConnection};
 use dropshot::{http_response_found, http_response_see_other};
 use http::{Response, StatusCode, header};
 use ipnetwork::IpNetwork;
+use nexus_db_lookup::lookup::ImageLookup;
+use nexus_db_lookup::lookup::ImageParentLookup;
 use nexus_db_queries::authn::external::session_cookie::{self, SessionStore};
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Resource;
-use nexus_db_queries::db::lookup::ImageLookup;
-use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_external_api::*;
 use nexus_types::{
@@ -2242,7 +2242,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_start(
                     &opctx,
                     &instance_lookup,
-                    crate::app::sagas::instance_start::Reason::User,
+                    nexus_sagas::sagas::instance_start::InstanceStartReason::User,
                 )
                 .await?;
             Ok(HttpResponseAccepted(instance.into()))

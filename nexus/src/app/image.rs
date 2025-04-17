@@ -5,14 +5,14 @@
 //! Images (both project and silo scoped)
 
 use crate::external_api::params;
+use nexus_db_lookup::LookupPath;
+use nexus_db_lookup::lookup;
+use nexus_db_lookup::lookup::ImageLookup;
+use nexus_db_lookup::lookup::ImageParentLookup;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::lookup;
-use nexus_db_queries::db::lookup::ImageLookup;
-use nexus_db_queries::db::lookup::ImageParentLookup;
-use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;

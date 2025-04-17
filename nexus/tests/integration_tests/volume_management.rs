@@ -16,6 +16,7 @@ use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_model::RegionSnapshotReplacementState;
@@ -37,7 +38,6 @@ use nexus_db_queries::db::datastore::SourceVolume;
 use nexus_db_queries::db::datastore::VolumeReplaceResult;
 use nexus_db_queries::db::datastore::VolumeToDelete;
 use nexus_db_queries::db::datastore::VolumeWithTarget;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -3510,7 +3510,7 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
 
     let disk_id = disk.identity.id;
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .fetch()
         .await
@@ -4096,7 +4096,7 @@ async fn test_read_only_region_reference_counting(
     // Perform region snapshot replacement for one of the snapshot's regions,
     // causing a read-only region to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -4124,7 +4124,7 @@ async fn test_read_only_region_reference_counting(
 
     // The snapshot's allocated regions should have the one read-only region
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -4146,7 +4146,7 @@ async fn test_read_only_region_reference_counting(
 
     // The disk-from-snap VCR should also reference that read-only region
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_from_snapshot.identity.id)
         .fetch()
         .await
@@ -4366,7 +4366,7 @@ async fn test_read_only_region_reference_counting_layers(
     // Perform region snapshot replacement for one of the snapshot's regions,
     // causing a read-only region to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -4394,7 +4394,7 @@ async fn test_read_only_region_reference_counting_layers(
 
     // Grab the read-only region in the snapshot volume
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -4411,7 +4411,7 @@ async fn test_read_only_region_reference_counting_layers(
 
     // The disk-from-snap VCR should also reference that read-only region
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_from_snapshot.identity.id)
         .fetch()
         .await
@@ -4469,7 +4469,7 @@ async fn test_read_only_region_reference_counting_layers(
 
     // Assert correct volume usage records
 
-    let (.., db_double_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_double_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(double_snapshot.identity.id)
         .fetch()
         .await
@@ -4599,7 +4599,7 @@ async fn test_volume_replace_snapshot_respects_accounting(
 
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -4613,7 +4613,7 @@ async fn test_volume_replace_snapshot_respects_accounting(
     let snapshot =
         create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -4805,7 +4805,7 @@ async fn test_volume_remove_rop_respects_accounting(
 
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -4819,7 +4819,7 @@ async fn test_volume_remove_rop_respects_accounting(
     let snapshot =
         create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -4835,7 +4835,7 @@ async fn test_volume_remove_rop_respects_accounting(
     )
     .await;
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_from_snapshot.identity.id)
         .fetch()
         .await
@@ -4968,7 +4968,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
 
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -4982,7 +4982,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     let snapshot =
         create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -4998,7 +4998,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     )
     .await;
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_from_snapshot.identity.id)
         .fetch()
         .await
@@ -5018,7 +5018,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     .await;
 
     let (.., db_another_disk_from_snapshot) =
-        LookupPath::new(&opctx, &datastore)
+        LookupPath::new(&opctx, datastore)
             .disk_id(another_disk_from_snapshot.identity.id)
             .fetch()
             .await
@@ -5359,7 +5359,7 @@ async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
 
     // Soft-delete the snapshot's volume
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -5624,7 +5624,7 @@ async fn test_double_layer_with_read_only_region_delete(
     // Perform region snapshot replacement for one of the snapshot's targets,
     // causing a read-only region to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -5733,7 +5733,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     // Perform region snapshot replacement for two of the snapshot's targets,
     // causing two read-only regions to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -5917,7 +5917,7 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
 
     // Create a volume that uses the snapshot volume as a read-only parent
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -6495,7 +6495,7 @@ async fn test_volume_create_wont_use_deleted_region_snapshots(
     //
     // 3) pass the disk volume to volume_create
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await

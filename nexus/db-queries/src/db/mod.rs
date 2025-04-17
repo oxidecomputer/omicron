@@ -15,9 +15,7 @@ mod config;
 mod cte_utils;
 // This is marked public for use by the integration tests
 pub mod datastore;
-pub(crate) mod error;
 mod explain;
-pub mod lookup;
 mod on_conflict_ext;
 // Public for doctests.
 pub mod pagination;
@@ -27,6 +25,7 @@ mod pool_connection;
 // sagas.
 pub mod queries;
 mod raw_query_builder;
+mod saga_interface;
 mod sec_store;
 pub(crate) mod true_or_cast_error;
 mod update_and_check;
@@ -44,7 +43,6 @@ pub use nexus_db_fixed_data as fixed_data;
 pub use nexus_db_model as model;
 use nexus_db_model::saga_types;
 
-pub use crate::db::error::TransactionError;
 pub use config::Config;
 pub use datastore::DataStore;
 pub use on_conflict_ext::IncompleteOnConflictExt;

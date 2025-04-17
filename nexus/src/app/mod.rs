@@ -15,6 +15,7 @@ use crate::populate::populate_start;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns_types::names::ServiceName;
+use nexus_background_task_interface::BackgroundTasks;
 use nexus_config::NexusConfig;
 use nexus_config::RegionAllocationStrategy;
 use nexus_config::Tunables;
@@ -227,6 +228,9 @@ pub struct Nexus {
     /// Handles to various specific tasks
     background_tasks: background::BackgroundTasks,
 
+    /// Channels for background tasks
+    background_task_channels: background::BackgroundTaskChannels,
+
     /// Default Crucible region allocation strategy
     default_region_allocation_strategy: RegionAllocationStrategy,
 
@@ -369,8 +373,11 @@ impl Nexus {
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
-        let (background_tasks_initializer, background_tasks) =
-            background::BackgroundTasksInitializer::new();
+        let (
+            background_tasks_initializer,
+            background_tasks,
+            background_task_channels,
+        ) = background::BackgroundTasksInitializer::new();
 
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
@@ -441,6 +448,7 @@ impl Nexus {
                 .clone(),
             background_tasks_driver: OnceLock::new(),
             background_tasks,
+            background_task_channels,
             default_region_allocation_strategy: config
                 .pkg
                 .default_region_allocation_strategy
@@ -536,6 +544,11 @@ impl Nexus {
         &self.authz
     }
 
+    /// For testing only: provides a reference to the saga executor.
+    pub fn sagas(&self) -> &Arc<SagaExecutor> {
+        &self.sagas
+    }
+
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
         let mut my_rx = self.populate_status.clone();
         loop {
@@ -560,7 +573,7 @@ impl Nexus {
         // Wait for the background task to complete at least once.  We don't
         // care about its value.  To do this, we need our own copy of the
         // channel.
-        let mut rx = self.background_tasks.external_endpoints.clone();
+        let mut rx = self.background_task_channels.external_endpoints.clone();
         let _ = rx.wait_for(|s| s.is_some()).await;
         if !tls_enabled {
             return None;
@@ -570,10 +583,14 @@ impl Nexus {
             .with_no_client_auth()
             .with_cert_resolver(Arc::new(NexusCertResolver::new(
                 self.log.new(o!("component" => "NexusCertResolver")),
-                self.background_tasks.external_endpoints.clone(),
+                self.background_task_channels.external_endpoints.clone(),
             )));
         rustls_cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Some(rustls_cfg)
+    }
+
+    pub(crate) fn background_tasks(&self) -> &BackgroundTasks {
+        &self.background_tasks
     }
 
     // Called to trigger inventory collection.
@@ -819,9 +836,9 @@ impl Nexus {
     /// underneath Organizations:
     ///
     /// ```
+    /// use nexus_db_lookup::LookupPath;
     /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
-    /// use nexus_db_queries::db::lookup::LookupPath;
     /// use nexus_db_queries::db::model::Name;
     /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
@@ -849,9 +866,9 @@ impl Nexus {
     /// example stub for the "get" endpoint for that same resource:
     ///
     /// ```
+    /// use nexus_db_lookup::LookupPath;
     /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
-    /// use nexus_db_queries::db::lookup::LookupPath;
     /// use nexus_db_queries::db::model::Name;
     /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;

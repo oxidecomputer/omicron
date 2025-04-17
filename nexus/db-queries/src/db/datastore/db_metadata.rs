@@ -5,12 +5,12 @@
 //! [`DataStore`] methods on Database Metadata.
 
 use super::DataStore;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use anyhow::{Context, bail, ensure};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::AllSchemaVersions;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
