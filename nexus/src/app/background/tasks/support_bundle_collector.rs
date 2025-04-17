@@ -43,6 +43,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
 use tufaceous_artifact::ArtifactHash;
+use zip::ZipArchive;
 use zip::ZipWriter;
 use zip::write::FullFileOptions;
 
@@ -689,6 +690,7 @@ impl BundleCollection<'_> {
                     .iter()
                     .map(|zone| {
                         save_zone_log_zip_or_error(
+                            log,
                             &sled_client,
                             zone,
                             &sled_path,
@@ -816,6 +818,7 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
 
 /// For a given zone, save a zip of its log files into a support bundle path.
 async fn save_zone_log_zip_or_error(
+    logger: &slog::Logger,
     client: &sled_agent_client::Client,
     zone: &str,
     path: &Utf8Path,
@@ -823,8 +826,8 @@ async fn save_zone_log_zip_or_error(
     match client.support_logs_download(zone).await {
         Ok(res) => {
             let bytestream = res.into_inner();
-            let output_dir = path.join("logs");
-            let output_file = output_dir.join(format!("{zone}.zip"));
+            let output_dir = path.join(format!("logs/{zone}"));
+            let output_file = output_dir.join("logs.zip");
 
             // Ensure the logs output directory exists.
             tokio::fs::create_dir_all(&output_dir).await.with_context(
@@ -841,13 +844,49 @@ async fn save_zone_log_zip_or_error(
             });
             let mut reader = tokio_util::io::StreamReader::new(stream);
             let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
+
+            // Unpack the zip so we don't end up with zip files inside of our
+            // final zip
+            let zipfile = output_file.clone();
+            tokio::task::spawn_blocking(move || {
+                extract_zip_file(&output_dir, &zipfile)
+            })
+            .await
+            .map_err(|join_error| {
+                anyhow::anyhow!(join_error)
+                    .context("unzipping support bundle logs zip panicked")
+            })??;
+
+            // Cleanup the zip file since we no longer need it
+            if let Err(e) = tokio::fs::remove_file(&output_file).await {
+                error!(
+                    logger,
+                    "failed to cleanup temporary logs zip file";
+                    "error" => %e,
+                    "file" => %output_file,
+
+                );
+            }
         }
         Err(err) => {
-            tokio::fs::write(path.join("{zone}.zip.err"), err.to_string())
+            tokio::fs::write(path.join("{zone}.logs.err"), err.to_string())
                 .await?;
         }
     };
 
+    Ok(())
+}
+
+fn extract_zip_file(
+    output_dir: &Utf8Path,
+    zip_file: &Utf8Path,
+) -> Result<(), anyhow::Error> {
+    let mut zip = std::fs::File::open(&zip_file)
+        .with_context(|| format!("failed to open zip file: {zip_file}"))?;
+    let mut archive = ZipArchive::new(&mut zip)?;
+    archive.extract(&output_dir).with_context(|| {
+        format!("failed to extract log zip file to: {output_dir}")
+    })?;
     Ok(())
 }
 
