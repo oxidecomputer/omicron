@@ -943,13 +943,13 @@ mod illumos_tests {
         ];
 
         let logdir = mountpoint.join("var/svc/log");
-        tokio::fs::create_dir_all(&logdir).await.unwrap();
+        fs_err::tokio::create_dir_all(&logdir).await.unwrap();
 
         // Populate some sample logs
         for (name, data) in logfile_to_data {
             let logfile = logdir.join(name);
             let mut logfile_handle =
-                tokio::fs::File::create_new(&logfile).await.unwrap();
+                fs_err::tokio::File::create_new(&logfile).await.unwrap();
             logfile_handle.write_all(data.as_bytes()).await.unwrap();
         }
 
@@ -960,7 +960,7 @@ mod illumos_tests {
             let mut permits = Permits::new();
 
             let zipfile_path = mountpoint.join("test.zip");
-            let zipfile = std::fs::File::create_new(&zipfile_path).unwrap();
+            let zipfile = File::create_new(&zipfile_path).unwrap();
             let mut zip = ZipWriter::new(zipfile);
 
             loghandle
@@ -979,8 +979,7 @@ mod illumos_tests {
 
             // Confirm the zip has our file and data
             let mut archive =
-                ZipArchive::new(std::fs::File::open(zipfile_path).unwrap())
-                    .unwrap();
+                ZipArchive::new(File::open(zipfile_path).unwrap()).unwrap();
             for (name, data) in logfile_to_data {
                 let mut file_in_zip =
                     archive.by_name(&format!("mg-ddm/current/{name}")).unwrap();
@@ -1016,7 +1015,7 @@ mod illumos_tests {
         let data2 = "changed log data";
 
         let logdir = mountpoint.join("var/svc/log");
-        tokio::fs::create_dir_all(&logdir).await.unwrap();
+        fs_err::tokio::create_dir_all(&logdir).await.unwrap();
 
         // Make sure an error in this block results in the correct drop ordering
         // for test cleanup
@@ -1024,7 +1023,7 @@ mod illumos_tests {
             // Write the log data before we take a snapshot
             let logfile = logdir.join(mgddm_log);
             let mut logfile_handle =
-                tokio::fs::File::create_new(&logfile).await.unwrap();
+                fs_err::tokio::File::create_new(&logfile).await.unwrap();
             logfile_handle.write_all(data1.as_bytes()).await.unwrap();
 
             let loghandle = LogsHandle::new(log.clone());
@@ -1035,11 +1034,11 @@ mod illumos_tests {
 
             // Change the data on disk by truncating the old file first
             let mut logfile_handle =
-                tokio::fs::File::create(&logfile).await.unwrap();
+                fs_err::tokio::File::create(&logfile).await.unwrap();
             logfile_handle.write_all(data2.as_bytes()).await.unwrap();
 
             let zipfile_path = mountpoint.join("test.zip");
-            let zipfile = std::fs::File::create_new(&zipfile_path).unwrap();
+            let zipfile = File::create_new(&zipfile_path).unwrap();
             let mut zip = ZipWriter::new(zipfile);
 
             loghandle
@@ -1056,8 +1055,7 @@ mod illumos_tests {
             zip.finish().unwrap();
 
             let mut archive =
-                ZipArchive::new(std::fs::File::open(zipfile_path).unwrap())
-                    .unwrap();
+                ZipArchive::new(File::open(zipfile_path).unwrap()).unwrap();
             let mut file_in_zip = archive
                 .by_name(&format!("mg-ddm/current/{mgddm_log}"))
                 .unwrap();
