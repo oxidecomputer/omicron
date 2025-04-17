@@ -481,7 +481,7 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
     cluster.preserve_downgrade_option:   (do not modify)
 
  OXIMETER SETTINGS:
-    generation:   0
+    generation:   1
     read from::   SingleNode
 
  METADATA:

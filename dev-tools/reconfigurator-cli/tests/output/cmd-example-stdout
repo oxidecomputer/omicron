@@ -352,7 +352,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     cluster.preserve_downgrade_option:   (do not modify)
 
  OXIMETER SETTINGS:
-    generation:   0
+    generation:   1
     read from::   SingleNode
 
  METADATA:
@@ -452,7 +452,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     cluster.preserve_downgrade_option:   (do not modify)
 
  OXIMETER SETTINGS:
-    generation:   0
+    generation:   1
     read from::   SingleNode
 
  METADATA:

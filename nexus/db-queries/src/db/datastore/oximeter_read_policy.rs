@@ -80,7 +80,7 @@ impl DataStore {
         policy: &OximeterReadPolicy,
     ) -> Result<(), Error> {
         // We pre-populate the database with version 1, so any new
-        // version must be greater 
+        // version must be greater
         if policy.version < 2 {
             return Err(Error::invalid_request(
                 "policy version must be greater than 1",

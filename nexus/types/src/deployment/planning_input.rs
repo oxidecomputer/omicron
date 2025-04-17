@@ -922,16 +922,17 @@ pub struct Policy {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OximeterReadPolicy {
+    // We set the version as `u32` instead of `Generation` because we later need
+    // to convert to `SqlU32` and the value of `Generation` is u64.
     pub version: u32,
     pub mode: OximeterReadMode,
     pub time_created: DateTime<Utc>,
 }
 
 impl OximeterReadPolicy {
-    // This function should only be used for testing purposes
-    pub fn new() -> Self {
+    pub fn new(version: u32) -> Self {
         OximeterReadPolicy {
-            version: 0,
+            version,
             mode: OximeterReadMode::SingleNode,
             time_created: Utc::now(),
         }
@@ -1085,7 +1086,7 @@ impl PlanningInputBuilder {
                     CockroachDbClusterVersion::POLICY,
                 target_crucible_pantry_zone_count: 0,
                 clickhouse_policy: None,
-                oximeter_read_policy: OximeterReadPolicy::new(),
+                oximeter_read_policy: OximeterReadPolicy::new(1),
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

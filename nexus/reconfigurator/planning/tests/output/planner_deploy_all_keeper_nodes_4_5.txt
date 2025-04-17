@@ -305,7 +305,7 @@ to:   blueprint 2886dab5-61a2-46b4-87af-bc7aeb44cccb
     external DNS version:   1 (unchanged)
 
  OXIMETER SETTINGS:
-    generation:   0 (unchanged)
+    generation:   1 (unchanged)
     read from::   SingleNode (unchanged)
 
  CLICKHOUSE CLUSTER CONFIG:

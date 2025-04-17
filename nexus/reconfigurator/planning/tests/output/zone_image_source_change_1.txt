@@ -115,6 +115,6 @@ to:   blueprint 665dc34a-dbf2-4d13-9ceb-9542d434ab0e
     external DNS version:   1 (unchanged)
 
  OXIMETER SETTINGS:
-    generation:   0 (unchanged)
+    generation:   1 (unchanged)
     read from::   SingleNode (unchanged)
 
