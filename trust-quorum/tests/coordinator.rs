@@ -177,10 +177,6 @@ struct TestState {
     /// The abstract model of our SUT
     pub model: Model,
 
-    // The current time - pretend time is global, instantaneous, and universal for
-    // this test.
-    pub now: Instant,
-
     // All in flight messages to nodes that are not the SUT
     pub network_msgs: BTreeMap<PlatformId, Vec<PeerMsg>>,
 
@@ -196,7 +192,6 @@ impl TestState {
                 persistent_state: PersistentState::empty(),
             },
             model: Model::new(),
-            now: Instant::now(),
             network_msgs: BTreeMap::new(),
             delivered_msgs: BTreeMap::new(),
         }
@@ -216,7 +211,7 @@ impl TestState {
         // We only generate valid configurations when calling this method. Any failure of
         // this method should be considered a test failure.
         let output = self.sut.action_coordinate_reconfiguration(
-            self.now,
+            self.model.now,
             &mut outbox,
             msg,
         )?;
@@ -243,6 +238,7 @@ impl TestState {
             None => {
                 // The request is idempotent
                 // No action should have been taken
+                prop_assert!(outbox.is_empty());
             }
         }
 
@@ -377,8 +373,12 @@ impl TestState {
         // to check this.
         let reply = PeerMsg::PrepareAck(msg.config.epoch);
         let mut outbox = Vec::new();
-        let output =
-            self.sut.node.handle(self.now, &mut outbox, from.clone(), reply);
+        let output = self.sut.node.handle(
+            self.model.now,
+            &mut outbox,
+            from.clone(),
+            reply,
+        );
         prop_assert!(output.is_none());
         prop_assert!(outbox.is_empty());
 
@@ -555,7 +555,7 @@ pub struct GeneratedConfiguration {
     /// still be duplicated due to the shift implementation used. Therefore we
     /// instead just choose from a constrained set of usize values that we can
     /// use directly as indexes into our fixed size structure for all tests.
-    #[strategy(btree_set(0..255usize, MIN_CLUSTER_SIZE..=MAX_CLUSTER_SIZE))]
+    #[strategy(btree_set(0..=255usize, MIN_CLUSTER_SIZE..=MAX_CLUSTER_SIZE))]
     pub members: BTreeSet<usize>,
 
     /// An index is roughly equivalent to a threshold, since a threshold cannot
