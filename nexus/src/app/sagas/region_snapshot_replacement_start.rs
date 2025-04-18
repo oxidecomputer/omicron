@@ -1238,6 +1238,7 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::views;
     use nexus_types::identity::Asset;
+    use omicron_common::disk::DatasetKind;
     use omicron_uuid_kinds::GenericUuid;
     use sled_agent_client::VolumeConstructionRequest;
 
@@ -1259,8 +1260,8 @@ pub(crate) mod test {
 
         assert_eq!(region_allocations(&datastore).await, 0);
 
-        let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+        let disk_test =
+            DiskTestBuilder::new(cptestctx).with_zpool_count(4).build().await;
 
         assert_eq!(region_allocations(&datastore).await, 0);
 
@@ -1501,6 +1502,10 @@ pub(crate) mod test {
 
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
+                if !matches!(dataset.kind, DatasetKind::Crucible) {
+                    continue;
+                }
+
                 let crucible_dataset =
                     sled_agent.get_crucible_dataset(zpool.id, dataset.id);
                 for region in crucible_dataset.list() {

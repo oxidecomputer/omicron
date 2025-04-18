@@ -834,6 +834,7 @@ pub(crate) mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
+    use omicron_common::disk::DatasetKind;
     use omicron_sled_agent::sim::SledAgent;
     use uuid::Uuid;
 
@@ -1011,6 +1012,9 @@ pub(crate) mod test {
     ) -> bool {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
+                if !matches!(dataset.kind, DatasetKind::Crucible) {
+                    continue;
+                }
                 if datastore
                     .regions_total_reserved_size(dataset.id)
                     .await
@@ -1027,6 +1031,9 @@ pub(crate) mod test {
     fn no_regions_ensured(sled_agent: &SledAgent, test: &DiskTest<'_>) -> bool {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
+                if !matches!(dataset.kind, DatasetKind::Crucible) {
+                    continue;
+                }
                 let crucible_dataset =
                     sled_agent.get_crucible_dataset(zpool.id, dataset.id);
                 if !crucible_dataset.is_empty() {
