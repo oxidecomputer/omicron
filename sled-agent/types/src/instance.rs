@@ -20,8 +20,8 @@ use omicron_common::api::{
     },
 };
 use omicron_uuid_kinds::InstanceUuid;
-use propolis_client::types::{
-    ComponentV0, CrucibleStorageBackend, VirtioNetworkBackend,
+use propolis_client::instance_spec::{
+    ComponentV0, CrucibleStorageBackend, SpecKey, VirtioNetworkBackend,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -182,12 +182,12 @@ pub enum InstanceExternalIpBody {
 /// config's network interface list will match the IDs of the virtio network
 /// backends in the instance spec.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct VmmSpec(pub propolis_client::types::InstanceSpecV0);
+pub struct VmmSpec(pub propolis_client::instance_spec::InstanceSpecV0);
 
 impl VmmSpec {
     pub fn crucible_backends(
         &self,
-    ) -> impl Iterator<Item = (&String, &CrucibleStorageBackend)> {
+    ) -> impl Iterator<Item = (&SpecKey, &CrucibleStorageBackend)> {
         self.0.components.iter().filter_map(
             |(key, component)| match component {
                 ComponentV0::CrucibleStorageBackend(be) => Some((key, be)),
@@ -198,7 +198,7 @@ impl VmmSpec {
 
     pub fn viona_backends(
         &self,
-    ) -> impl Iterator<Item = (&String, &VirtioNetworkBackend)> {
+    ) -> impl Iterator<Item = (&SpecKey, &VirtioNetworkBackend)> {
         self.0.components.iter().filter_map(
             |(key, component)| match component {
                 ComponentV0::VirtioNetworkBackend(be) => Some((key, be)),
