@@ -37,6 +37,7 @@ use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::error;
 use std::fmt;
+use strum::Display;
 use strum::IntoEnumIterator;
 
 /// Policy and database inputs to the Reconfigurator planner
@@ -168,6 +169,18 @@ impl PlanningInput {
             return true;
         };
         clickhouse_policy.mode.single_node_enabled()
+    }
+
+    pub fn oximeter_read_settings(&self) -> &OximeterReadPolicy {
+        &self.policy.oximeter_read_policy
+    }
+
+    pub fn oximeter_cluster_read_enabled(&self) -> bool {
+        self.policy.oximeter_read_policy.mode.cluster_enabled()
+    }
+
+    pub fn oximeter_single_node_read_enabled(&self) -> bool {
+        self.policy.oximeter_read_policy.mode.single_node_enabled()
     }
 
     pub fn all_sleds(
@@ -898,6 +911,66 @@ pub struct Policy {
     /// setup. Eventually we will only allow multi-node setups and this will no
     /// longer be an option.
     pub clickhouse_policy: Option<ClickhousePolicy>,
+
+    /// Policy information for defining which ClickHouse setup Oximeter reads
+    /// from.
+    ///
+    /// Eventually we will only allow reads from a cluster and this policy will
+    /// no longer exist.
+    pub oximeter_read_policy: OximeterReadPolicy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct OximeterReadPolicy {
+    // We set the version as `u32` instead of `Generation` because we later need
+    // to convert to `SqlU32` and the value of `Generation` is u64.
+    pub version: u32,
+    pub mode: OximeterReadMode,
+    pub time_created: DateTime<Utc>,
+}
+
+impl OximeterReadPolicy {
+    pub fn new(version: u32) -> Self {
+        OximeterReadPolicy {
+            version,
+            mode: OximeterReadMode::SingleNode,
+            time_created: Utc::now(),
+        }
+    }
+}
+
+/// Where oximeter should read from
+#[derive(
+    Debug,
+    Display,
+    Clone,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Diffable,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum OximeterReadMode {
+    SingleNode,
+    Cluster,
+}
+
+impl OximeterReadMode {
+    pub fn cluster_enabled(&self) -> bool {
+        match self {
+            OximeterReadMode::SingleNode => false,
+            OximeterReadMode::Cluster => true,
+        }
+    }
+
+    pub fn single_node_enabled(&self) -> bool {
+        match self {
+            OximeterReadMode::Cluster { .. } => false,
+            OximeterReadMode::SingleNode => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1013,6 +1086,7 @@ impl PlanningInputBuilder {
                     CockroachDbClusterVersion::POLICY,
                 target_crucible_pantry_zone_count: 0,
                 clickhouse_policy: None,
+                oximeter_read_policy: OximeterReadPolicy::new(1),
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

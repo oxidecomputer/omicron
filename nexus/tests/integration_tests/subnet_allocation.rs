@@ -65,7 +65,7 @@ async fn create_instance_expect_failure(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        anti_affinity_groups: None,
+        anti_affinity_groups: Vec::new(),
     };
 
     NexusRequest::new(

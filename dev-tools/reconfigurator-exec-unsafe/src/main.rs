@@ -26,7 +26,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
-use slog::{debug, info};
+use slog::info;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::num::NonZeroU32;
@@ -245,7 +245,10 @@ impl ReconfiguratorExec {
                 blueprint: &blueprint,
                 creator: OmicronZoneUuid::from_untyped_uuid(creator),
                 sender,
-                mgs_updates,
+                // The driver shuts down when the tx side of this channel gets
+                // closed.  Clone this sender so that it doesn't get shut down
+                // right away.
+                mgs_updates: mgs_updates.clone(),
             }
             .into(),
         )
@@ -278,11 +281,11 @@ impl ReconfiguratorExec {
 
             loop {
                 let status = status_rx.borrow();
-                debug!(&log, "MGS update status"; "status" => ?status);
+                info!(&log, "MGS update status"; "status" => ?status);
                 if !status.recent.is_empty() && status.in_progress.is_empty() {
                     break;
                 }
-                debug!(
+                info!(
                     &log,
                     "waiting for more updates";
                     "nwaiting" => nupdates,
@@ -296,6 +299,8 @@ impl ReconfiguratorExec {
             info!(&log, "waiting for repo depot resolver to stop");
             repo_depot_resolver.terminate().await;
             info!(&log, "waiting for driver to stop");
+            // We're ready to drop this sender so that the driver shuts down.
+            drop(mgs_updates);
             driver_task.await.context("waiting for driver to stop")?;
         }
 

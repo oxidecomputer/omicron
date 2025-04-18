@@ -616,11 +616,13 @@ impl Plan {
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let http_port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
             let http_address = SocketAddrV6::new(ip, http_port, 0, 0);
+            let oximeter_read_mode_enabled = true;
             dns_builder
                 .host_zone_clickhouse_single_node(
                     id,
                     ServiceName::Clickhouse,
                     http_address,
+                    oximeter_read_mode_enabled,
                 )
                 .unwrap();
             let dataset_name =

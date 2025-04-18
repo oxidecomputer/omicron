@@ -33,7 +33,6 @@ use tokio::sync::watch;
 use update_engine::StepSuccess;
 use update_engine::StepWarning;
 use update_engine::merge_anyhow_list;
-
 mod clickhouse;
 mod cockroachdb;
 mod dns;

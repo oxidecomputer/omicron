@@ -5450,7 +5450,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn vpc_router_route_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::RoutePath>,
-        query_params: Query<params::RouterSelector>,
+        query_params: Query<params::OptionalRouterSelector>,
     ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -5462,7 +5462,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let route_selector = params::RouteSelector {
                 project: query.project,
                 vpc: query.vpc,
-                router: Some(query.router),
+                router: query.router,
                 route: path.route,
             };
             let (.., route) = nexus
