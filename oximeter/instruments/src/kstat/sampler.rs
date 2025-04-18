@@ -37,6 +37,7 @@ use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::time::Sleep;
@@ -336,7 +337,7 @@ struct KstatSamplerWorker {
 
     /// Outbound queue on which to publish self statistics, which are expected to
     /// be low-volume.
-    self_stat_queue: mpsc::Sender<Sample>,
+    self_stat_queue: broadcast::Sender<Sample>,
 
     /// The statistics we maintain about ourselves.
     ///
@@ -357,9 +358,18 @@ fn hostname() -> Option<String> {
 
 /// Stores the number of samples taken, used for testing.
 #[cfg(all(test, target_os = "illumos"))]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct SampleCounts {
     pub total: usize,
     pub overflow: usize,
+}
+
+#[cfg(all(test, target_os = "illumos"))]
+impl std::ops::AddAssign for SampleCounts {
+    fn add_assign(&mut self, rhs: Self) {
+        self.total += rhs.total;
+        self.overflow += rhs.overflow;
+    }
 }
 
 impl KstatSamplerWorker {
@@ -367,7 +377,7 @@ impl KstatSamplerWorker {
     fn new(
         log: Logger,
         inbox: mpsc::Receiver<Request>,
-        self_stat_queue: mpsc::Sender<Sample>,
+        self_stat_queue: broadcast::Sender<Sample>,
         samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
         sample_limit: usize,
     ) -> Result<Self, Error> {
@@ -414,93 +424,13 @@ impl KstatSamplerWorker {
                     let Some((id, interval)) = maybe_id else {
                         unreachable!();
                     };
-                    match self.sample_one(id) {
-                        Ok(Some(samples)) => {
-                            if samples.is_empty() {
-                                debug!(
-                                    self.log,
-                                    "no new samples from target, requeueing";
-                                    "id" => ?id,
-                                );
-                                sample_timeouts.push(YieldIdAfter::new(id, interval));
-                                continue;
-                            }
-                            let n_samples = samples.len();
-                            debug!(
-                                self.log,
-                                "pulled samples from target";
-                                "id" => ?id,
-                                "n_samples" => n_samples,
-                            );
-
-                            // Append any samples to the per-target queues.
-                            //
-                            // This returns None if there was no queue, and logs
-                            // the error internally. We'll just go round the
-                            // loop again in that case.
-                            let Some(n_overflow_samples) =
-                                self.append_per_target_samples(id, samples) else {
-                                continue;
-                            };
-
-                            // Safety: We only get here if the `sample_one()`
-                            // method works, which means we have a record of the
-                            // target, and it's not expired.
-                            if n_overflow_samples > 0 {
-                                let SampledObject::Kstat(ks) = self.targets.get(&id).unwrap() else {
-                                    unreachable!();
-                                };
-                                self.increment_dropped_sample_counter(
-                                    id,
-                                    ks.target.name().to_string(),
-                                    n_overflow_samples,
-                                ).await;
-                            }
-
-                            // Send the total number of samples we've actually
-                            // taken and the number we've appended over to any
-                            // testing code which might be listening.
-                            #[cfg(all(test, target_os = "illumos"))]
-                            sample_count_tx.send(SampleCounts {
-                                total: n_samples,
-                                overflow: n_overflow_samples,
-                            }).unwrap();
-
-                            trace!(
-                                self.log,
-                                "re-queueing target for sampling";
-                                "id" => ?id,
-                                "interval" => ?interval,
-                            );
-                            sample_timeouts.push(YieldIdAfter::new(id, interval));
-                        }
-                        Ok(None) => {
-                            debug!(
-                                self.log,
-                                "sample timeout triggered for non-existent target";
-                                "id" => ?id,
-                            );
-                        }
-                        Err(Error::Expired(expiration)) => {
-                            error!(
-                                self.log,
-                                "expiring kstat after too many failures";
-                                "id" => ?id,
-                                "reason" => ?expiration.reason,
-                                "error" => ?expiration.error,
-                            );
-                            let _ = self.targets.insert(id, SampledObject::Expired(expiration));
-                            self.increment_expired_target_counter().await;
-                        }
-                        Err(e) => {
-                            error!(
-                                self.log,
-                                "failed to sample kstat target, requeueing";
-                                "id" => ?id,
-                                "error" => ?e,
-                            );
-                            sample_timeouts.push(YieldIdAfter::new(id, interval));
-                        }
+                    if let Some(next_timeout) = self.sample_next_target(
+                        id,
+                        interval,
+                        #[cfg(all(test, target_os = "illumos"))]
+                        &sample_count_tx,
+                    ) {
+                        sample_timeouts.push(next_timeout);
                     }
                 }
                 maybe_request = self.inbox.recv() => {
@@ -513,148 +443,260 @@ impl KstatSamplerWorker {
                         "received request on inbox";
                         "request" => ?request,
                     );
-                    match request {
-                        Request::AddTarget {
-                            target,
-                            details,
-                            reply_tx,
-                        } => {
-                            match self.add_target(target, details) {
-                                Ok(id) => {
-                                    let timeout = YieldIdAfter::new(id, details.interval);
-                                    sample_timeouts.push(timeout);
-                                    trace!(
-                                        self.log,
-                                        "added target with timeout";
-                                        "id" => ?id,
-                                        "details" => ?details,
-                                    );
-                                    match reply_tx.send(Ok(id)) {
-                                        Ok(_) => trace!(self.log, "sent reply"),
-                                        Err(e) => error!(
-                                            self.log,
-                                            "failed to send reply";
-                                            "id" => ?id,
-                                            "error" => ?e,
-                                        )
-                                    }
-                                }
-                                Err(e) => {
-                                    error!(
-                                        self.log,
-                                        "failed to add target";
-                                        "error" => ?e,
-                                    );
-                                    match reply_tx.send(Err(e)) {
-                                        Ok(_) => trace!(self.log, "sent reply"),
-                                        Err(e) => error!(
-                                            self.log,
-                                            "failed to send reply";
-                                            "error" => ?e,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        Request::UpdateTarget { target, details, reply_tx } => {
-                            match self.update_target(target, details) {
-                                Ok(id) => {
-                                    let timeout = YieldIdAfter::new(id, details.interval);
-                                    sample_timeouts.push(timeout);
-                                    trace!(
-                                        self.log,
-                                        "updated target with timeout";
-                                        "id" => ?id,
-                                        "details" => ?details,
-                                    );
-                                    match reply_tx.send(Ok(id)) {
-                                        Ok(_) => trace!(self.log, "sent reply"),
-                                        Err(e) => error!(
-                                            self.log,
-                                            "failed to send reply";
-                                            "id" => ?id,
-                                            "error" => ?e,
-                                        )
-                                    }
-                                }
-                                Err(e) => {
-                                    error!(
-                                        self.log,
-                                        "failed to update target";
-                                        "error" => ?e,
-                                    );
-                                    match reply_tx.send(Err(e)) {
-                                        Ok(_) => trace!(self.log, "sent reply"),
-                                        Err(e) => error!(
-                                            self.log,
-                                            "failed to send reply";
-                                            "error" => ?e,
-                                        )
-                                    }
-                                }
-                            }
-
-                        }
-                        Request::RemoveTarget { id, reply_tx } => {
-                            self.targets.remove(&id);
-                            if let Some(remaining_samples) = self.samples.lock().unwrap().remove(&id) {
-                                if !remaining_samples.is_empty() {
-                                    warn!(
-                                        self.log,
-                                        "target removed with queued samples";
-                                        "id" => ?id,
-                                        "n_samples" => remaining_samples.len(),
-                                    );
-                                }
-                            }
-                            match reply_tx.send(Ok(())) {
-                                Ok(_) => trace!(self.log, "sent reply"),
-                                Err(e) => error!(
-                                    self.log,
-                                    "failed to send reply";
-                                    "error" => ?e,
-                                )
-                            }
-                        }
-                        Request::TargetStatus { id, reply_tx } => {
-                            trace!(
-                                self.log,
-                                "request for target status";
-                                "id" => ?id,
-                            );
-                            let response = match self.targets.get(&id) {
-                                None => Err(Error::NoSuchTarget),
-                                Some(SampledObject::Kstat(k)) => {
-                                    Ok(TargetStatus::Ok {
-                                        last_collection: k.time_of_last_collection,
-                                    })
-                                }
-                                Some(SampledObject::Expired(e)) => {
-                                    Ok(TargetStatus::Expired {
-                                        reason: e.reason,
-                                        error: e.error.to_string(),
-                                        expired_at: e.expired_at,
-                                    })
-                                }
-                            };
-                            match reply_tx.send(response) {
-                                Ok(_) => trace!(self.log, "sent reply"),
-                                Err(e) => error!(
-                                    self.log,
-                                    "failed to send reply";
-                                    "id" => ?id,
-                                    "error" => ?e,
-                                ),
-                            }
-                        }
-                        #[cfg(all(test, target_os = "illumos"))]
-                        Request::CreationTimes { reply_tx } => {
-                            debug!(self.log, "request for creation times");
-                            reply_tx.send(self.creation_times.clone()).unwrap();
-                            debug!(self.log, "sent reply for creation times");
-                        }
+                    if let Some(next_timeout) = self.handle_inbox_request(request) {
+                        sample_timeouts.push(next_timeout);
                     }
                 }
+            }
+        }
+    }
+
+    // Handle a message on the worker's inbox.
+    fn handle_inbox_request(
+        &mut self,
+        request: Request,
+    ) -> Option<YieldIdAfter> {
+        match request {
+            Request::AddTarget { target, details, reply_tx } => {
+                match self.add_target(target, details) {
+                    Ok(id) => {
+                        trace!(
+                            self.log,
+                            "added target with timeout";
+                            "id" => ?id,
+                            "details" => ?details,
+                        );
+                        match reply_tx.send(Ok(id)) {
+                            Ok(_) => trace!(self.log, "sent reply"),
+                            Err(e) => error!(
+                                self.log,
+                                "failed to send reply";
+                                "id" => ?id,
+                                "error" => ?e,
+                            ),
+                        }
+                        Some(YieldIdAfter::new(id, details.interval))
+                    }
+                    Err(e) => {
+                        error!(
+                            self.log,
+                            "failed to add target";
+                            "error" => ?e,
+                        );
+                        match reply_tx.send(Err(e)) {
+                            Ok(_) => trace!(self.log, "sent reply"),
+                            Err(e) => error!(
+                                self.log,
+                                "failed to send reply";
+                                "error" => ?e,
+                            ),
+                        }
+                        None
+                    }
+                }
+            }
+            Request::UpdateTarget { target, details, reply_tx } => {
+                match self.update_target(target, details) {
+                    Ok(id) => {
+                        trace!(
+                            self.log,
+                            "updated target with timeout";
+                            "id" => ?id,
+                            "details" => ?details,
+                        );
+                        match reply_tx.send(Ok(id)) {
+                            Ok(_) => trace!(self.log, "sent reply"),
+                            Err(e) => error!(
+                                self.log,
+                                "failed to send reply";
+                                "id" => ?id,
+                                "error" => ?e,
+                            ),
+                        }
+                        Some(YieldIdAfter::new(id, details.interval))
+                    }
+                    Err(e) => {
+                        error!(
+                            self.log,
+                            "failed to update target";
+                            "error" => ?e,
+                        );
+                        match reply_tx.send(Err(e)) {
+                            Ok(_) => trace!(self.log, "sent reply"),
+                            Err(e) => error!(
+                                self.log,
+                                "failed to send reply";
+                                "error" => ?e,
+                            ),
+                        }
+                        None
+                    }
+                }
+            }
+            Request::RemoveTarget { id, reply_tx } => {
+                self.targets.remove(&id);
+                if let Some(remaining_samples) =
+                    self.samples.lock().unwrap().remove(&id)
+                {
+                    if !remaining_samples.is_empty() {
+                        warn!(
+                            self.log,
+                            "target removed with queued samples";
+                            "id" => ?id,
+                            "n_samples" => remaining_samples.len(),
+                        );
+                    }
+                }
+                match reply_tx.send(Ok(())) {
+                    Ok(_) => trace!(self.log, "sent reply"),
+                    Err(e) => error!(
+                        self.log,
+                        "failed to send reply";
+                        "error" => ?e,
+                    ),
+                }
+                None
+            }
+            Request::TargetStatus { id, reply_tx } => {
+                trace!(
+                    self.log,
+                    "request for target status";
+                    "id" => ?id,
+                );
+                let response = match self.targets.get(&id) {
+                    None => Err(Error::NoSuchTarget),
+                    Some(SampledObject::Kstat(k)) => Ok(TargetStatus::Ok {
+                        last_collection: k.time_of_last_collection,
+                    }),
+                    Some(SampledObject::Expired(e)) => {
+                        Ok(TargetStatus::Expired {
+                            reason: e.reason,
+                            error: e.error.to_string(),
+                            expired_at: e.expired_at,
+                        })
+                    }
+                };
+                match reply_tx.send(response) {
+                    Ok(_) => trace!(self.log, "sent reply"),
+                    Err(e) => error!(
+                        self.log,
+                        "failed to send reply";
+                        "id" => ?id,
+                        "error" => ?e,
+                    ),
+                }
+                None
+            }
+            #[cfg(all(test, target_os = "illumos"))]
+            Request::CreationTimes { reply_tx } => {
+                debug!(self.log, "request for creation times");
+                reply_tx.send(self.creation_times.clone()).unwrap();
+                debug!(self.log, "sent reply for creation times");
+                None
+            }
+        }
+    }
+
+    fn sample_next_target(
+        &mut self,
+        id: TargetId,
+        interval: Duration,
+        #[cfg(all(test, target_os = "illumos"))]
+        sample_count_tx: &mpsc::UnboundedSender<SampleCounts>,
+    ) -> Option<YieldIdAfter> {
+        match self.sample_one(id) {
+            Ok(Some(samples)) => {
+                if samples.is_empty() {
+                    debug!(
+                        self.log,
+                        "no new samples from target, requeueing";
+                        "id" => ?id,
+                    );
+                    return Some(YieldIdAfter::new(id, interval));
+                }
+                let n_samples = samples.len();
+                debug!(
+                    self.log,
+                    "pulled samples from target";
+                    "id" => ?id,
+                    "n_samples" => n_samples,
+                );
+
+                // Append any samples to the per-target queues.
+                //
+                // This returns None if there was no queue, and logs
+                // the error internally. We'll just go round the
+                // loop again in that case.
+                let Some(n_overflow_samples) =
+                    self.append_per_target_samples(id, samples)
+                else {
+                    return None;
+                };
+
+                // Safety: We only get here if the `sample_one()`
+                // method works, which means we have a record of the
+                // target, and it's not expired.
+                if n_overflow_samples > 0 {
+                    let SampledObject::Kstat(ks) =
+                        self.targets.get(&id).unwrap()
+                    else {
+                        unreachable!();
+                    };
+                    self.increment_dropped_sample_counter(
+                        id,
+                        ks.target.name().to_string(),
+                        n_overflow_samples,
+                    );
+                }
+
+                // Send the total number of samples we've actually
+                // taken and the number we've appended over to any
+                // testing code which might be listening.
+                #[cfg(all(test, target_os = "illumos"))]
+                sample_count_tx
+                    .send(SampleCounts {
+                        total: n_samples,
+                        overflow: n_overflow_samples,
+                    })
+                    .unwrap();
+
+                trace!(
+                    self.log,
+                    "re-queueing target for sampling";
+                    "id" => ?id,
+                    "interval" => ?interval,
+                );
+                Some(YieldIdAfter::new(id, interval))
+            }
+            Ok(None) => {
+                debug!(
+                    self.log,
+                    "sample timeout triggered for non-existent target";
+                    "id" => ?id,
+                );
+                None
+            }
+            Err(Error::Expired(expiration)) => {
+                error!(
+                    self.log,
+                    "expiring kstat after too many failures";
+                    "id" => ?id,
+                    "reason" => ?expiration.reason,
+                    "error" => ?expiration.error,
+                );
+                let _ =
+                    self.targets.insert(id, SampledObject::Expired(expiration));
+                self.increment_expired_target_counter();
+                None
+            }
+            Err(e) => {
+                error!(
+                    self.log,
+                    "failed to sample kstat target, requeueing";
+                    "id" => ?id,
+                    "error" => ?e,
+                );
+                Some(YieldIdAfter::new(id, interval))
             }
         }
     }
@@ -735,7 +777,7 @@ impl KstatSamplerWorker {
             .iter()
             .filter(|kstat| sampled_kstat.target.interested(kstat))
             .map(|mut kstat| {
-                let data = ctl.read(&mut kstat)?;
+                let data = ctl.read(&mut kstat).map_err(Error::Kstat)?;
                 let creation_time = Self::ensure_kstat_creation_time(
                     &self.log,
                     kstat,
@@ -806,7 +848,7 @@ impl KstatSamplerWorker {
         }
     }
 
-    async fn increment_dropped_sample_counter(
+    fn increment_dropped_sample_counter(
         &mut self,
         target_id: TargetId,
         target_name: String,
@@ -837,12 +879,11 @@ impl KstatSamplerWorker {
                     return;
                 }
             };
-            match self.self_stat_queue.send(sample).await {
+            match self.self_stat_queue.send(sample) {
                 Ok(_) => trace!(self.log, "sent dropped sample counter stat"),
-                Err(e) => error!(
+                Err(_) => error!(
                     self.log,
-                    "failed to send dropped sample counter to self stat queue";
-                    "error" => ?e,
+                    "failed to send dropped sample counter to self stat queue"
                 ),
             }
         } else {
@@ -853,7 +894,7 @@ impl KstatSamplerWorker {
         }
     }
 
-    async fn increment_expired_target_counter(&mut self) {
+    fn increment_expired_target_counter(&mut self) {
         if let Some(stats) = self.get_or_try_build_self_stats() {
             stats.expired.datum_mut().increment();
             let sample = match Sample::new(&stats.target, &stats.expired) {
@@ -867,7 +908,7 @@ impl KstatSamplerWorker {
                     return;
                 }
             };
-            match self.self_stat_queue.send(sample).await {
+            match self.self_stat_queue.send(sample) {
                 Ok(_) => trace!(self.log, "sent expired target counter stat"),
                 Err(e) => error!(
                     self.log,
@@ -1094,13 +1135,17 @@ impl KstatSamplerWorker {
 /// A type for reporting kernel statistics as oximeter samples.
 #[derive(Clone, Debug)]
 pub struct KstatSampler {
+    log: Logger,
     samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
     outbox: mpsc::Sender<Request>,
-    self_stat_rx: Arc<Mutex<mpsc::Receiver<Sample>>>,
+    self_stat_rx: Arc<Mutex<broadcast::Receiver<Sample>>>,
     _worker_task: Arc<tokio::task::JoinHandle<()>>,
     #[cfg(all(test, target_os = "illumos"))]
     sample_count_rx: Arc<Mutex<mpsc::UnboundedReceiver<SampleCounts>>>,
 }
+
+// Size of the queue used to report self-stats to oximeter on collection.
+const SELF_STAT_QUEUE_SIZE: usize = 4096;
 
 impl KstatSampler {
     /// The maximum number of samples allowed in the internal buffer, before
@@ -1123,7 +1168,8 @@ impl KstatSampler {
         limit: usize,
     ) -> Result<Self, Error> {
         let samples = Arc::new(Mutex::new(BTreeMap::new()));
-        let (self_stat_tx, self_stat_rx) = mpsc::channel(4096);
+        let (self_stat_tx, self_stat_rx) =
+            broadcast::channel(SELF_STAT_QUEUE_SIZE);
         let (outbox, inbox) = mpsc::channel(1);
         let worker = KstatSamplerWorker::new(
             log.new(o!("component" => "kstat-sampler-worker")),
@@ -1143,6 +1189,7 @@ impl KstatSampler {
         #[cfg(not(all(test, target_os = "illumos")))]
         let _worker_task = Arc::new(tokio::task::spawn(worker.run()));
         Ok(Self {
+            log: log.new(o!("component" => "kstat-sampler")),
             samples,
             outbox,
             self_stat_rx: Arc::new(Mutex::new(self_stat_rx)),
@@ -1161,18 +1208,25 @@ impl KstatSampler {
         target: impl KstatTarget,
         details: CollectionDetails,
     ) -> Result<TargetId, Error> {
+        let name = target.name();
+        debug!(self.log, "adding new target"; "name" => %name);
         let (reply_tx, reply_rx) = oneshot::channel();
         let request =
             Request::AddTarget { target: Box::new(target), details, reply_tx };
+        trace!(self.log, "sending add_target request to worker"; "name" => %name);
         self.outbox.send(request).await.map_err(|_| Error::SendError)?;
+        trace!(self.log, "sent add_target request to worker"; "name" => %name);
         reply_rx.await.map_err(|_| Error::RecvError)?
     }
 
     /// Remove a tracked target.
     pub async fn remove_target(&self, id: TargetId) -> Result<(), Error> {
+        debug!(self.log, "removing target"; "id" => %id);
         let (reply_tx, reply_rx) = oneshot::channel();
         let request = Request::RemoveTarget { id, reply_tx };
+        trace!(self.log, "sending remove_target request to worker"; "id" => %id);
         self.outbox.send(request).await.map_err(|_| Error::SendError)?;
+        trace!(self.log, "sent remove_target request to worker"; "id" => %id);
         reply_rx.await.map_err(|_| Error::RecvError)?
     }
 
@@ -1182,13 +1236,17 @@ impl KstatSampler {
         target: impl KstatTarget,
         details: CollectionDetails,
     ) -> Result<TargetId, Error> {
+        let name = target.name();
+        debug!(self.log, "updating target"; "name" => %name);
         let (reply_tx, reply_rx) = oneshot::channel();
         let request = Request::UpdateTarget {
             target: Box::new(target),
             details,
             reply_tx,
         };
+        trace!(self.log, "sending update_target request to worker"; "name" => %name);
         self.outbox.send(request).await.map_err(|_| Error::SendError)?;
+        trace!(self.log, "sent update_target request to worker"; "name" => %name);
         reply_rx.await.map_err(|_| Error::RecvError)?
     }
 
@@ -1207,7 +1265,9 @@ impl KstatSampler {
     ) -> Result<TargetStatus, Error> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let request = Request::TargetStatus { id, reply_tx };
+        trace!(self.log, "sending target_request to worker"; "id" => %id);
         self.outbox.send(request).await.map_err(|_| Error::SendError)?;
+        trace!(self.log, "sent target_request to worker"; "id" => %id);
         reply_rx.await.map_err(|_| Error::RecvError)?
     }
 
@@ -1250,9 +1310,20 @@ impl oximeter::Producer for KstatSampler {
         loop {
             match rx.try_recv() {
                 Ok(sample) => samples.push(sample),
-                Err(mpsc::error::TryRecvError::Empty) => break,
-                Err(mpsc::error::TryRecvError::Disconnected) => {
-                    panic!("kstat stampler self-stat queue tx disconnected");
+                Err(broadcast::error::TryRecvError::Empty) => break,
+                Err(broadcast::error::TryRecvError::Lagged(n_missed)) => {
+                    warn!(
+                        self.log,
+                        "producer missed some samples because they're \
+                        being produced faster than `oximeter` is collecting";
+                        "n_missed" => %n_missed,
+                    );
+                }
+                Err(broadcast::error::TryRecvError::Closed) => {
+                    debug!(
+                        self.log,
+                        "kstat stampler self-stat queue tx disconnected"
+                    );
                 }
             }
         }
