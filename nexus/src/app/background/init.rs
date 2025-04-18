@@ -128,6 +128,7 @@ use crate::Nexus;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::saga::StartSaga;
 use nexus_background_task_interface::Activator;
+use nexus_background_task_interface::BackgroundTasks;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
@@ -143,10 +144,11 @@ use tokio::sync::watch;
 use update_common::artifacts::ArtifactsWithPlan;
 use uuid::Uuid;
 
-pub use nexus_background_task_interface::BackgroundTasks;
-
-/// Channels for communication between Nexus and background tasks.
-pub(crate) struct BackgroundTaskChannels {
+/// Internal state for communication between Nexus and background tasks.
+///
+/// This is not part of the larger `BackgroundTask` type because it contains
+/// references to internal types.
+pub(crate) struct BackgroundTasksInternal {
     pub(crate) external_endpoints:
         watch::Receiver<Option<external_endpoints::ExternalEndpoints>>,
 }
@@ -172,7 +174,7 @@ impl BackgroundTasksInitializer {
     /// * a long-lived `BackgroundTasks` object that you can use to activate any
     ///   of the tasks that will be started and read data that they provide
     pub fn new()
-    -> (BackgroundTasksInitializer, BackgroundTasks, BackgroundTaskChannels)
+    -> (BackgroundTasksInitializer, BackgroundTasks, BackgroundTasksInternal)
     {
         let (external_endpoints_tx, external_endpoints_rx) =
             watch::channel(None);
@@ -225,11 +227,11 @@ impl BackgroundTasksInitializer {
             task_external_dns_propagation: Activator::new(),
         };
 
-        let channels = BackgroundTaskChannels {
+        let internal = BackgroundTasksInternal {
             external_endpoints: external_endpoints_rx,
         };
 
-        (initializer, background_tasks, channels)
+        (initializer, background_tasks, internal)
     }
 
     /// Starts all the Nexus background tasks

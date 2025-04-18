@@ -115,12 +115,10 @@ impl Driver {
         // requested.  The caller provides their own Activator, which just
         // provides a specific Notify for us to use here.
         let activator = taskdef.activator;
-        if let Err(previous) = activator.mark_wired_up() {
+        if let Err(error) = activator.mark_wired_up() {
             panic!(
-                "attempted to wire up the same background task handle \
-                 twice (previous \"wired_up\" = {}): currently attempting \
-                 to wire it up to task {:?}",
-                previous, name
+                "{error}: currently attempting to wire it up to task {:?}",
+                name
             );
         }
 

@@ -1,25 +1,30 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
 
+use thiserror::Error;
 use tokio::sync::Notify;
 
 /// Activates a background task
 ///
-/// See [`crate::app::background`] module-level documentation for more on what
-/// that means.
+/// For more on what this means, see the documentation at
+/// `nexus/src/app/background/mod.rs`.
 ///
 /// Activators are created with [`Activator::new()`] and then wired up to
-/// specific background tasks using [`Driver::register()`].  If you call
+/// specific background tasks using Nexus's `Driver::register()`.  If you call
 /// `Activator::activate()` before the activator is wired up to a background
 /// task, then once the Activator _is_ wired up to a task, that task will
 /// immediately be activated.
 ///
 /// Activators are designed specifically so they can be created before the
 /// corresponding task has been created and then wired up with just an
-/// `&Activator` (not a `&mut Activator`).  See the [`super::init`] module-level
-/// documentation for more on why.
+/// `&Activator` (not a `&mut Activator`).  See the
+/// `nexus/src/app/background/mod.rs` documentation for more on why.
 #[derive(Clone)]
 pub struct Activator(Arc<ActivatorInner>);
 
@@ -40,8 +45,8 @@ impl Activator {
 
     /// Activate the background task that this Activator has been wired up to
     ///
-    /// If this Activator has not yet been wired up with [`Driver::register()`],
-    /// then whenever it _is_ wired up, that task will be immediately activated.
+    /// If this Activator has not yet been wired up, then whenever it _is_ wired
+    /// up, that task will be immediately activated.
     pub fn activate(&self) {
         self.0.notify.notify_one();
     }
@@ -49,21 +54,31 @@ impl Activator {
     /// Sets the task as wired up.
     ///
     /// Returns an error if the task was already wired up.
-    // XXX return a proper error type here
-    pub fn mark_wired_up(&self) -> Result<bool, bool> {
-        self.0.wired_up.compare_exchange(
+    pub fn mark_wired_up(&self) -> Result<(), AlreadyWiredUpError> {
+        match self.0.wired_up.compare_exchange(
             false,
             true,
             Ordering::SeqCst,
             Ordering::SeqCst,
-        )
+        ) {
+            Ok(false) => Ok(()),
+            Ok(true) => unreachable!(
+                "on success, the return value is always \
+                 the previous value (false)"
+            ),
+            Err(true) => Err(AlreadyWiredUpError {}),
+            Err(false) => unreachable!(
+                "on failure, the return value is always \
+                 the previous and current value (true)"
+            ),
+        }
     }
 
-    /// Blocks until the background task that this Activator has been wired up to
-    /// is activated.
+    /// Blocks until the background task that this Activator has been wired up
+    /// to is activated.
     ///
-    /// If this Activator has not yet been wired up with [`Driver::register()`],
-    /// then whenever it _is_ wired up, that task will be immediately activated.
+    /// If this Activator has not yet been wired up, then whenever it _is_ wired
+    /// up, that task will be immediately activated.
     pub async fn activated(&self) {
         debug_assert!(
             self.0.wired_up.load(Ordering::SeqCst),
@@ -73,3 +88,8 @@ impl Activator {
         self.0.notify.notified().await
     }
 }
+
+/// Indicates that an activator was wired up more than once.
+#[derive(Debug, Error)]
+#[error("activator was already wired up")]
+pub struct AlreadyWiredUpError {}
