@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 progenitor::generate_api!(
     spec = "../../openapi/nexus-internal.json",
+    interface = Positional,
     derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {

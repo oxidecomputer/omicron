@@ -7,6 +7,7 @@
 
 progenitor::generate_api!(
     spec = "../../openapi/clickhouse-admin-single.json",
+    interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
