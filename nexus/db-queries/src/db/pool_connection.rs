@@ -17,7 +17,8 @@ use url::Url;
 pub const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
     "set disallow_full_table_scans = on; set large_full_scan_rows = 0;";
 
-/// A [backend::Connector] which provides access to [PgConnection].
+/// A [backend::Connector] which provides access to
+/// [`PgConnection`](diesel::pg::PgConnection).
 pub(crate) struct DieselPgConnector {
     log: Logger,
     user: String,
