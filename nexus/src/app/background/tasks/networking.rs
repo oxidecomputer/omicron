@@ -104,7 +104,7 @@ pub(crate) fn api_to_dpd_port_settings(
                 addrs: settings
                     .addresses
                     .iter()
-                    .map(|a| a.address.ip())
+                    .map(|a| a.address.addr())
                     .collect(),
             },
         );

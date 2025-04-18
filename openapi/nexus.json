@@ -12127,10 +12127,19 @@
             "items": {
               "$ref": "#/components/schemas/Address"
             }
+          },
+          "link_name": {
+            "description": "Link to assign the address to",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           }
         },
         "required": [
-          "addresses"
+          "addresses",
+          "link_name"
         ]
       },
       "AddressLot": {
@@ -13461,6 +13470,14 @@
       "BgpPeerConfig": {
         "type": "object",
         "properties": {
+          "link_name": {
+            "description": "Link that the peer is reachable on",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "peers": {
             "type": "array",
             "items": {
@@ -13469,6 +13486,7 @@
           }
         },
         "required": [
+          "link_name",
           "peers"
         ]
       },
@@ -19359,6 +19377,14 @@
               }
             ]
           },
+          "link_name": {
+            "description": "Link name",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "lldp": {
             "description": "The link-layer discovery protocol (LLDP) configuration for the link.",
             "allOf": [
@@ -19393,6 +19419,7 @@
         },
         "required": [
           "autoneg",
+          "link_name",
           "lldp",
           "mtu",
           "speed"
@@ -20782,6 +20809,14 @@
         "description": "Route configuration data associated with a switch port configuration.",
         "type": "object",
         "properties": {
+          "link_name": {
+            "description": "Link the route should be active on",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "routes": {
             "description": "The set of routes assigned to a switch port.",
             "type": "array",
@@ -20791,6 +20826,7 @@
           }
         },
         "required": [
+          "link_name",
           "routes"
         ]
       },
@@ -22519,6 +22555,14 @@
               }
             ]
           },
+          "link_name": {
+            "description": "Link the interface will be assigned to",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "v6_enabled": {
             "description": "Whether or not IPv6 is enabled.",
             "type": "boolean"
@@ -22526,6 +22570,7 @@
         },
         "required": [
           "kind",
+          "link_name",
           "v6_enabled"
         ]
       },
@@ -22668,7 +22713,7 @@
           "switch_location"
         ]
       },
-      "SwitchPortAddressConfig": {
+      "SwitchPortAddressView": {
         "description": "An IP address configuration for a port settings object.",
         "type": "object",
         "properties": {
@@ -22684,6 +22729,19 @@
             "description": "The id of the address lot block this address is drawn from.",
             "type": "string",
             "format": "uuid"
+          },
+          "address_lot_id": {
+            "description": "The id of the address lot this address is drawn from.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "address_lot_name": {
+            "description": "The name of the address lot this address is drawn from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "interface_name": {
             "description": "The interface name this address belongs to.",
@@ -22705,6 +22763,8 @@
         "required": [
           "address",
           "address_lot_block_id",
+          "address_lot_id",
+          "address_lot_name",
           "interface_name",
           "port_settings_id"
         ]
@@ -22997,15 +23057,15 @@
         "properties": {
           "addresses": {
             "description": "Addresses indexed by interface name.",
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/AddressConfig"
             }
           },
           "bgp_peers": {
             "description": "BGP peers indexed by interface name.",
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/BgpPeerConfig"
             }
           },
@@ -23020,15 +23080,15 @@
           },
           "interfaces": {
             "description": "Interfaces indexed by link name.",
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/SwitchInterfaceConfigCreate"
             }
           },
           "links": {
             "description": "Links indexed by phy name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/LinkConfigCreate"
             }
           },
@@ -23040,8 +23100,8 @@
           },
           "routes": {
             "description": "Routes indexed by interface name.",
-            "type": "object",
-            "additionalProperties": {
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/RouteConfig"
             }
           }
@@ -23107,7 +23167,7 @@
             "description": "Layer 3 IP address settings.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SwitchPortAddressConfig"
+              "$ref": "#/components/schemas/SwitchPortAddressView"
             }
           },
           "bgp_peers": {
