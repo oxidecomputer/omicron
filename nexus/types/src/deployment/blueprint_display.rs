@@ -31,6 +31,8 @@ pub mod constants {
     pub const CLICKHOUSE_CLUSTER_SECRET: &str = "cluster secret";
     pub const CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX: &str =
         "highest seen keeper leader committed log index";
+    pub const OXIMETER_HEADING: &str = "OXIMETER SETTINGS";
+    pub const OXIMETER_READ_FROM: &str = "read from";
     pub const CREATED_BY: &str = "created by";
     pub const CREATED_AT: &str = "created at";
     pub const INTERNAL_DNS_VERSION: &str = "internal DNS version";

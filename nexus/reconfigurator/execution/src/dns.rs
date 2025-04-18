@@ -339,6 +339,8 @@ mod test {
     pub use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
     pub use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     pub use nexus_types::deployment::OmicronZoneExternalSnatIp;
+    use nexus_types::deployment::OximeterReadMode;
+    use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::blueprint_zone_type;
@@ -697,6 +699,8 @@ mod test {
             external_dns_version: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: "test-suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -1419,6 +1423,7 @@ mod test {
                     CockroachDbClusterVersion::POLICY,
                 target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
                 clickhouse_policy: None,
+                oximeter_read_policy: OximeterReadPolicy::new(1),
                 log,
             }
             .build()

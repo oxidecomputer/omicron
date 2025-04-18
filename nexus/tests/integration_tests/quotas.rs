@@ -89,7 +89,7 @@ impl ResourceAllocator {
                 boot_disk: None,
                 start: false,
                 auto_restart_policy: Default::default(),
-                anti_affinity_groups: None,
+                anti_affinity_groups: Vec::new(),
             },
         )
         .authn_as(self.auth.clone())
