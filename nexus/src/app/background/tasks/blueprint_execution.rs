@@ -194,7 +194,8 @@ mod test {
     use nexus_types::deployment::{
         Blueprint, BlueprintSledConfig, BlueprintTarget, BlueprintZoneConfig,
         BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
-        CockroachDbPreserveDowngrade, PendingMgsUpdates, blueprint_zone_type,
+        CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
+        blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external;
@@ -265,6 +266,8 @@ mod test {
             external_dns_version: dns_version,
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: chrono::Utc::now(),
             creator: "test".to_string(),
             comment: "test blueprint".to_string(),
