@@ -23,6 +23,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 use uuid::Uuid;
 
 type TrackedLinks = HashMap<String, Target>;
@@ -33,7 +34,7 @@ const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(30);
 /// The interval on which we sample link metrics.
 //
 // TODO(https://github.com/oxidecomputer/omicron/issues/5695)
-// These should probably be sampled much densely. We may want to wait for
+// These should probably be sampled much more densely. We may want to wait for
 // https://github.com/oxidecomputer/omicron/issues/740, which would handle
 // pagination between the producer and collector, as sampling at < 1s for many
 // links could lead to quite large requests. Or we can eat the memory cost for
@@ -64,6 +65,9 @@ pub enum Error {
 
     #[error("Failed to start metric producer server")]
     ProducerServer(#[source] oximeter_producer::Error),
+
+    #[error("Could not send request to metrics task")]
+    SendFailed(#[source] TrySendError<Message>),
 }
 
 /// Messages sent to the sled-agent metrics collection task.
@@ -74,7 +78,7 @@ pub enum Error {
 /// for them.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(test, allow(dead_code))]
-pub(crate) enum Message {
+pub enum Message {
     /// Start tracking the named physical link.
     ///
     /// This is only use on startup, to track the underlays.
@@ -276,7 +280,7 @@ async fn add_datalink(
                 Err(err) => {
                     error!(
                         log,
-                        "failed to add VNIC to kstat sampler, \
+                        "failed to add link to kstat sampler, \
                          no metrics will be collected for it";
                         "link_name" => entry.key(),
                         "link_kind" => %link.kind(),
@@ -289,7 +293,7 @@ async fn add_datalink(
         Entry::Occupied(entry) => {
             debug!(
                 log,
-                "received message to track VNIC, \
+                "received message to track link, \
                 but it is already being tracked";
                 "link_name" => entry.key(),
             );
@@ -340,7 +344,7 @@ fn is_transient_link(kind: &str) -> bool {
 /// This object is used to sample kernel statistics and produce other Oximeter
 /// metrics for the sled agent. It runs a small background task responsible for
 /// actually generating / reporting samples. Users operate with it through the
-/// `MetricsHandle`.
+/// `MetricsRequestQueue`.
 #[derive(Debug)]
 pub struct MetricsManager {
     /// Sender-side of a channel used to pass the background task messages.
@@ -382,6 +386,11 @@ impl MetricsManager {
 }
 
 /// A cheap handle used to send requests to the metrics task.
+///
+/// Note that all operations asking the metrics task to collect statistics are
+/// non-blocking, and can fail if the task is currently unavailable (e.g.,
+/// internal queue is full). It's up to the caller to retry the operations if
+/// they really want to block until the request can be completed.
 #[derive(Clone, Debug)]
 pub struct MetricsRequestQueue(mpsc::Sender<Message>);
 
@@ -397,70 +406,76 @@ impl MetricsRequestQueue {
 
     /// Ask the task to start tracking the named physical datalink.
     ///
-    /// Return `true` if the request was successfully sent, and false otherwise.
-    pub async fn track_physical(
+    /// This is non-blocking, and returns an error if the task is currently
+    /// unavailable.
+    pub fn track_physical(
         &self,
         zone_name: impl Into<String>,
         name: impl Into<String>,
-    ) -> bool {
+    ) -> Result<(), Error> {
         self.0
-            .send(Message::TrackPhysical {
+            .try_send(Message::TrackPhysical {
                 zone_name: zone_name.into(),
                 name: name.into(),
             })
-            .await
-            .is_ok()
+            .map_err(|e| Error::SendFailed(e))
     }
 
     /// Ask the task to start tracking the named VNIC.
     ///
-    /// Return `true` if the request was successfully sent, and false otherwise.
-    pub async fn track_vnic(
+    /// This is non-blocking, and returns an error if the task is currently
+    /// unavailable.
+    pub fn track_vnic(
         &self,
         zone_name: impl Into<String>,
         name: impl Into<String>,
-    ) -> bool {
+    ) -> Result<(), Error> {
         self.0
-            .send(Message::TrackVnic {
+            .try_send(Message::TrackVnic {
                 zone_name: zone_name.into(),
                 name: name.into(),
             })
-            .await
-            .is_ok()
+            .map_err(|e| Error::SendFailed(e))
     }
 
     /// Ask the task to stop tracking the named VNIC.
     ///
-    /// Return `true` if the request was successfully sent, and false otherwise.
-    pub async fn untrack_vnic(&self, name: impl Into<String>) -> bool {
-        self.0.send(Message::UntrackVnic { name: name.into() }).await.is_ok()
+    /// This is non-blocking, and returns an error if the task is currently
+    /// unavailable.
+    pub fn untrack_vnic(&self, name: impl Into<String>) -> Result<(), Error> {
+        self.0
+            .try_send(Message::UntrackVnic { name: name.into() })
+            .map_err(|e| Error::SendFailed(e))
     }
 
     /// Ask the task to start tracking the named OPTE port.
     ///
-    /// Return `true` if the request was successfully sent, and false otherwise.
-    pub async fn track_opte_port(
+    /// This is non-blocking, and returns an error if the task is currently
+    /// unavailable.
+    pub fn track_opte_port(
         &self,
         zone_name: impl Into<String>,
         name: impl Into<String>,
-    ) -> bool {
+    ) -> Result<(), Error> {
         self.0
-            .send(Message::TrackOptePort {
+            .try_send(Message::TrackOptePort {
                 zone_name: zone_name.into(),
                 name: name.into(),
             })
-            .await
-            .is_ok()
+            .map_err(|e| Error::SendFailed(e))
     }
 
     /// Ask the task to stop tracking the named OPTE port.
     ///
-    /// Return `true` if the request was successfully sent, and false otherwise.
-    pub async fn untrack_opte_port(&self, name: impl Into<String>) -> bool {
+    /// This is non-blocking, and returns an error if the task is currently
+    /// unavailable.
+    pub fn untrack_opte_port(
+        &self,
+        name: impl Into<String>,
+    ) -> Result<(), Error> {
         self.0
-            .send(Message::UntrackOptePort { name: name.into() })
-            .await
-            .is_ok()
+            .try_send(Message::UntrackOptePort { name: name.into() })
+            .map_err(|e| Error::SendFailed(e))
     }
 
     /// Track all datalinks in a zone.
@@ -471,42 +486,71 @@ impl MetricsRequestQueue {
     /// - The underlay control VNIC, which always exists.
     /// - Any OPTE ports, which only exist for those with external connectivity.
     ///
-    /// Return `true` if the requests were successfully sent, and false
-    /// otherwise. This will attempt to send all requests, even if earlier
-    /// messages fail.
-    pub async fn track_zone_links(&self, running_zone: &RunningZone) -> bool {
+    /// If all operations are successful, return Ok(()). Otherwise, return all
+    /// errors we encountered.
+    ///
+    /// This is non-blocking, and returns an error if the task is currently
+    /// unavailable.
+    pub fn track_zone_links(
+        &self,
+        running_zone: &RunningZone,
+    ) -> Result<(), Vec<Error>> {
         let zone_name = running_zone.name();
-        let mut success =
-            self.track_vnic(zone_name, running_zone.control_vnic_name()).await;
+        let mut errors = Vec::new();
+        if let Err(e) =
+            self.track_vnic(zone_name, running_zone.control_vnic_name())
+        {
+            errors.push(e);
+        }
         if let Some(bootstrap_vnic) = running_zone.bootstrap_vnic_name() {
-            success &= self.track_vnic(zone_name, bootstrap_vnic).await;
+            if let Err(e) = self.track_vnic(zone_name, bootstrap_vnic) {
+                errors.push(e);
+            }
         }
         for port in running_zone.opte_port_names() {
-            success &= self.track_opte_port(zone_name, port).await;
+            if let Err(e) = self.track_opte_port(zone_name, port) {
+                errors.push(e);
+            }
         }
-        success
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 
     /// Stop tracking all datalinks in a zone.
     ///
-    /// Return `true` if the requests were successfully sent, and false
-    /// otherwise. This will attempt to send all requests, even if earlier
-    /// messages fail.
-    pub async fn untrack_zone_links(&self, running_zone: &RunningZone) -> bool {
-        let mut success =
-            self.untrack_vnic(running_zone.control_vnic_name()).await;
+    /// If all operations are successful, return Ok(()). Otherwise, return all
+    /// errors we encountered.
+    ///
+    /// This is non-blocking, and returns an error if the task is currently
+    /// unavailable.
+    pub fn untrack_zone_links(
+        &self,
+        running_zone: &RunningZone,
+    ) -> Result<(), Vec<Error>> {
+        let mut errors = Vec::new();
+        if let Err(e) = self.untrack_vnic(running_zone.control_vnic_name()) {
+            errors.push(e);
+        }
         if let Some(bootstrap_vnic) = running_zone.bootstrap_vnic_name() {
-            success &= self.untrack_vnic(bootstrap_vnic).await;
+            if let Err(e) = self.untrack_vnic(bootstrap_vnic) {
+                errors.push(e);
+            }
         }
         for port in running_zone.opte_port_names() {
-            success &= self.untrack_opte_port(port).await;
+            if let Err(e) = self.untrack_opte_port(port) {
+                errors.push(e);
+            }
         }
-        success
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 
     /// Notify the task that a sled's state has been synchronized with NTP.
-    pub async fn notify_time_synced_sled(&self, sled_id: Uuid) -> bool {
-        self.0.send(Message::TimeSynced { sled_id }).await.is_ok()
+    ///
+    /// This is non-blocking, and returns an error if the task is currently
+    /// unavailable.
+    pub fn notify_time_synced_sled(&self, sled_id: Uuid) -> Result<(), Error> {
+        self.0
+            .try_send(Message::TimeSynced { sled_id })
+            .map_err(|e| Error::SendFailed(e))
     }
 }
 
