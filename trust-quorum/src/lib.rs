@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 mod configuration;
 mod coordinator_state;
 pub(crate) mod crypto;
+pub(crate) mod errors;
 mod messages;
 mod node;
 mod persistent_state;

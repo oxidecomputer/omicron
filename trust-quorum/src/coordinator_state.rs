@@ -5,8 +5,9 @@
 //! State of a reconfiguration coordinator inside a [`crate::Node`]
 
 use crate::crypto::{LrtqShare, Sha3_256Digest, ShareDigestLrtq};
+use crate::errors::ReconfigurationError;
 use crate::messages::{PeerMsg, PrepareMsg};
-use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
+use crate::validators::ValidatedReconfigureMsg;
 use crate::{Configuration, Envelope, Epoch, PlatformId};
 use gfss::shamir::Share;
 use slog::{Logger, warn};

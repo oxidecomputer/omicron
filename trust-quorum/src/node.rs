@@ -4,12 +4,14 @@
 
 //! A trust quorum node that implements the trust quorum protocol
 
-use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
+use crate::errors::{CommitError, MismatchedRackIdError, ReconfigurationError};
+use crate::validators::ValidatedReconfigureMsg;
 use crate::{
     CoordinatorState, Envelope, Epoch, PersistentState, PlatformId, messages::*,
 };
+use omicron_uuid_kinds::RackUuid;
 
-use slog::{Logger, o, warn};
+use slog::{Logger, error, info, o, warn};
 use std::time::Instant;
 
 /// An entity capable of participating in trust quorum
@@ -74,6 +76,70 @@ impl Node {
             self.set_coordinator_state(now, validated_msg)?;
         self.send_coordinator_msgs(now, outbox);
         Ok(persistent_state)
+    }
+
+    /// Commit the configuration for the given epoch
+    pub fn commit_reconfiguration(
+        &mut self,
+        epoch: Epoch,
+        rack_id: RackUuid,
+    ) -> Result<Option<PersistentState>, CommitError> {
+        if self.persistent_state.last_committed_epoch() == Some(epoch) {
+            // Idempotent request
+            return Ok(None);
+        }
+
+        // Only commit if we have a prepare and it's the latest prepare.
+        //
+        // This forces a global ordering of prepares, because it's only possible
+        // to rederive a key share in a `Prepare` for the current configuration.
+        //
+        // In practice this check will always succeed if we have the prepare
+        // for this epoch, because later Prepare messages won't be able to be
+        // accepted. This is because the commmit for the earlier Prepare
+        // would have been rejected as dictated by the `Prepare` messsage's
+        // `last_committed_epoch` field. However, we double check that here
+        // for safety.
+        if self.persistent_state.last_prepared_epoch() != Some(epoch) {
+            return Err(CommitError::StaleCommit);
+        }
+        if let Some(prepare) = self.persistent_state.prepares.get(&epoch) {
+            if prepare.config.rack_id != rack_id {
+                return Err(CommitError::InvalidRackId(
+                    MismatchedRackIdError {
+                        expected: prepare.config.rack_id,
+                        got: rack_id,
+                    },
+                ));
+            }
+        } else {
+            // This is an erroneous commit attempt from nexus. Log it.
+            //
+            // Nexus should instead tell this node to retrieve a `Prepare`
+            // from another node that has already committed.
+            error!(
+                self.log,
+                "tried to commit a configuration, but missing prepare msg";
+                "epoch" => %epoch
+            );
+            return Err(CommitError::MissingPrepare);
+        }
+
+        info!(self.log, "Committed configuration"; "epoch" => %epoch);
+
+        // Are we currently coordinating for this epoch?
+        // Stop coordinating if we are
+        if self.coordinator_state.is_some() {
+            info!(
+                self.log,
+                "Stopping coordination due to commit";
+                "epoch" => %epoch
+            );
+            self.coordinator_state = None;
+        }
+
+        self.persistent_state.commits.insert(epoch);
+        Ok(Some(self.persistent_state.clone()))
     }
 
     /// Process a timer tick
