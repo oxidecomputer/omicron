@@ -716,7 +716,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -739,7 +739,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -1615,7 +1615,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3352,6 +3352,15 @@ name = "fs-err"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88a41f105fe1d5b6b34b2055e3dc59bb79b46b48b2040b9e6c7b4b5de097aa41"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
+name = "fs-err"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f89bda4c2a21204059a977ed3bfe746677dfd137b83c339e702b0ac91d482aa"
 dependencies = [
  "autocfg",
  "tokio",
@@ -7528,7 +7537,7 @@ dependencies = [
  "anyhow",
  "camino",
  "cargo_metadata 0.19.2",
- "fs-err",
+ "fs-err 3.1.0",
  "omicron-workspace-hack",
  "serde",
  "toml_edit 0.22.24",
@@ -7574,7 +7583,7 @@ dependencies = [
  "cargo_metadata 0.19.2",
  "chrono",
  "clap",
- "fs-err",
+ "fs-err 3.1.0",
  "futures",
  "hex",
  "omicron-pins",
@@ -7845,7 +7854,7 @@ dependencies = [
  "elliptic-curve",
  "ff",
  "flate2",
- "fs-err",
+ "fs-err 3.1.0",
  "futures",
  "futures-channel",
  "futures-core",
@@ -7870,7 +7879,7 @@ dependencies = [
  "inout",
  "ipnetwork",
  "itertools 0.10.5",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -8026,7 +8035,7 @@ dependencies = [
  "dns-server-api",
  "dropshot 0.16.0",
  "ereport-api",
- "fs-err",
+ "fs-err 3.1.0",
  "gateway-api",
  "hex",
  "indent_write",
@@ -9044,7 +9053,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "rand 0.8.5",
@@ -11447,16 +11456,27 @@ dependencies = [
 name = "sled-diagnostics"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "camino",
  "cfg-if",
- "fs-err",
+ "fs-err 3.1.0",
  "futures",
+ "illumos-utils",
  "libc",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "once_cell",
+ "oxlog",
+ "rand 0.8.5",
  "schemars",
  "serde",
+ "sled-storage",
  "slog",
  "thiserror 1.0.69",
  "tokio",
+ "zip 2.6.1",
 ]
 
 [[package]]
@@ -13077,7 +13097,7 @@ dependencies = [
  "daft",
  "debug-ignore",
  "flate2",
- "fs-err",
+ "fs-err 2.11.0",
  "futures",
  "hex",
  "hubtools",
@@ -13413,7 +13433,7 @@ dependencies = [
  "display-error-chain",
  "dropshot 0.16.0",
  "flate2",
- "fs-err",
+ "fs-err 3.1.0",
  "futures",
  "hex",
  "hubtools",
@@ -13983,7 +14003,7 @@ dependencies = [
  "expectorate",
  "flate2",
  "flume",
- "fs-err",
+ "fs-err 3.1.0",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -14116,7 +14136,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -14444,7 +14464,7 @@ dependencies = [
  "cargo_toml",
  "clap",
  "dev-tools-common",
- "fs-err",
+ "fs-err 3.1.0",
  "macaddr",
  "serde",
  "swrite",
@@ -14674,6 +14694,7 @@ dependencies = [
  "indexmap 2.7.1",
  "memchr",
  "zopfli",
+ "zstd",
 ]
 
 [[package]]
@@ -14758,4 +14779,32 @@ dependencies = [
  "log",
  "once_cell",
  "simd-adler32",
+]
+
+[[package]]
+name = "zstd"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3051792fbdc2e1e143244dc28c60f73d8470e93f3f9cbd0ead44da5ed802722"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.0.14+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fb060d4926e4ac3a3ad15d864e99ceb5f343c6b34f5bd6d81ae6ed417311be5"
+dependencies = [
+ "cc",
+ "pkg-config",
 ]
