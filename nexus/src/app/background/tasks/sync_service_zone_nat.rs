@@ -13,10 +13,10 @@ use anyhow::Context;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::Ipv4NatValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
@@ -107,7 +107,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
             let mut dns_count = 0;
 
             for (sled_id, sa) in collection.sled_agents {
-                let (_, sled) = match LookupPath::new(opctx, &self.datastore)
+                let (_, sled) = match LookupPath::new(opctx, &*self.datastore)
                     .sled_id(sled_id.into_untyped_uuid())
                     .fetch()
                     .await

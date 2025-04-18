@@ -5870,6 +5870,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-background-task-interface"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "tokio",
+]
+
+[[package]]
 name = "nexus-client"
 version = "0.1.0"
 dependencies = [
@@ -5915,6 +5923,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-db-errors"
+version = "0.1.0"
+dependencies = [
+ "diesel",
+ "nexus-auth",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "nexus-db-fixed-data"
 version = "0.1.0"
 dependencies = [
@@ -5925,6 +5944,34 @@ dependencies = [
  "omicron-workspace-hack",
  "pq-sys",
  "strum",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-db-lookup"
+version = "0.1.0"
+dependencies = [
+ "async-bb8-diesel",
+ "async-trait",
+ "db-macros",
+ "diesel",
+ "diesel-dtrace",
+ "ipnetwork",
+ "nexus-auth",
+ "nexus-db-errors",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-db-schema",
+ "nexus-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "qorb",
+ "slog",
+ "tokio",
  "uuid",
 ]
 
@@ -6007,7 +6054,9 @@ dependencies = [
  "macaddr",
  "nexus-auth",
  "nexus-config",
+ "nexus-db-errors",
  "nexus-db-fixed-data",
+ "nexus-db-lookup",
  "nexus-db-model",
  "nexus-db-schema",
  "nexus-inventory",
@@ -6221,6 +6270,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "ipnetwork",
+ "nexus-db-lookup",
  "nexus-db-queries",
  "omicron-common",
  "omicron-workspace-hack",
@@ -6296,6 +6346,7 @@ dependencies = [
  "ipnet",
  "newtype-uuid",
  "nexus-config",
+ "nexus-db-lookup",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
@@ -7252,8 +7303,10 @@ dependencies = [
  "macaddr",
  "mg-admin-client",
  "nexus-auth",
+ "nexus-background-task-interface",
  "nexus-client",
  "nexus-config",
+ "nexus-db-lookup",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",
@@ -7379,6 +7432,8 @@ dependencies = [
  "multimap",
  "nexus-client",
  "nexus-config",
+ "nexus-db-errors",
+ "nexus-db-lookup",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-db-schema",

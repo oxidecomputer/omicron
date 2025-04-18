@@ -12,8 +12,6 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::column_walker::AllColumnsOf;
 use crate::db::datastore::InstanceStateComputer;
 use crate::db::datastore::OpContext;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::model::AffinityGroup;
 use crate::db::model::AffinityGroupInstanceMembership;
@@ -27,12 +25,14 @@ use crate::db::model::Project;
 use crate::db::model::VmmState;
 use crate::db::pagination::RawPaginator;
 use crate::db::pagination::paginated;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::helper_types::AsSelect;
 use diesel::pg::Pg;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::enums::InstanceStateEnum;
 use nexus_db_schema::enums::VmmStateEnum;
 use omicron_common::api::external;
@@ -1228,10 +1228,10 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use crate::db::lookup::LookupPath;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::create_stopped_instance_record;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::Resources;
     use nexus_db_model::SledResourceVmm;
     use nexus_types::external_api::params;

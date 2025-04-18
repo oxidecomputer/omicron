@@ -1,12 +1,12 @@
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::{Ipv4NatEntry, Ipv4NatValues};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel::sql_types::BigInt;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::Ipv4NatChange;
 use nexus_types::internal_api::views::Ipv4NatEntryView;

@@ -7,12 +7,12 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::DbConnection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::ExpressionMethods;
 use diesel::QueryDsl;
 use diesel::SelectableHelper;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_fixed_data::allow_list::USER_FACING_SERVICES_ALLOW_LIST_ID;
 use nexus_db_model::AllowList;
 use nexus_db_schema::schema::allow_list;

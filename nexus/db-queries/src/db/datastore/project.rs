@@ -11,8 +11,6 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
@@ -21,10 +19,12 @@ use crate::db::model::ProjectUpdate;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_fixed_data::project::SERVICES_PROJECT;
 use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::CreateResult;
@@ -102,7 +102,7 @@ impl DataStore {
 
         debug!(opctx.log, "attempting to create built-in projects");
 
-        let (authz_silo,) = db::lookup::LookupPath::new(&opctx, self)
+        let (authz_silo,) = nexus_db_lookup::LookupPath::new(&opctx, self)
             .silo_id(INTERNAL_SILO_ID)
             .lookup_for(authz::Action::CreateChild)
             .await?;
