@@ -1324,6 +1324,7 @@ impl oximeter::Producer for KstatSampler {
                         self.log,
                         "kstat stampler self-stat queue tx disconnected"
                     );
+                    break;
                 }
             }
         }
