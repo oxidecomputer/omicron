@@ -1322,7 +1322,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57663b653d948a338bfb3eeba9bb2fd5fcfaecb9e199e87e1eda4d9e8b240fd9"
 dependencies = [
  "ciborium-io",
- "half",
+ "half 2.4.1",
 ]
 
 [[package]]
@@ -3066,50 +3066,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
-name = "ereport-api"
-version = "0.1.0"
-dependencies = [
- "dropshot 0.16.0",
- "ereport-types",
- "omicron-workspace-hack",
- "openapi-manager-types",
- "schemars",
- "semver 1.0.25",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "uuid",
-]
-
-[[package]]
-name = "ereport-client"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "ereport-types",
- "expectorate",
- "http",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "progenitor 0.9.1",
- "reqwest",
- "schemars",
- "serde",
- "serde_json",
- "slog",
- "uuid",
-]
-
-[[package]]
 name = "ereport-types"
 version = "0.1.0"
 dependencies = [
+ "dropshot 0.16.0",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars",
  "serde",
  "serde_json",
- "uuid",
 ]
 
 [[package]]
@@ -3501,6 +3466,7 @@ name = "gateway-api"
 version = "0.1.0"
 dependencies = [
  "dropshot 0.16.0",
+ "ereport-types",
  "gateway-types",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -3556,7 +3522,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=f9566e68e0a0ccb7c3eeea081ae1cea279c11b2a#f9566e68e0a0ccb7c3eeea081ae1cea279c11b2a"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=e4f8749ae3eff7657e1d211440fcea272a090172#e4f8749ae3eff7657e1d211440fcea272a090172"
 dependencies = [
  "bitflags 2.9.0",
  "hubpack",
@@ -3573,10 +3539,11 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=f9566e68e0a0ccb7c3eeea081ae1cea279c11b2a#f9566e68e0a0ccb7c3eeea081ae1cea279c11b2a"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=e4f8749ae3eff7657e1d211440fcea272a090172#e4f8749ae3eff7657e1d211440fcea272a090172"
 dependencies = [
  "async-trait",
  "backoff",
+ "base64 0.22.1",
  "futures",
  "fxhash",
  "gateway-messages",
@@ -3590,6 +3557,9 @@ dependencies = [
  "paste",
  "serde",
  "serde-big-array",
+ "serde_bytes",
+ "serde_cbor",
+ "serde_json",
  "slog",
  "slog-error-chain",
  "socket2",
@@ -3814,6 +3784,12 @@ dependencies = [
  "tokio-util",
  "tracing",
 ]
+
+[[package]]
+name = "half"
+version = "1.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b43ede17f21864e81be2fa654110bf1e793774238d86ef8555c37e6519c0403"
 
 [[package]]
 name = "half"
@@ -7146,7 +7122,7 @@ dependencies = [
  "chrono",
  "clap",
  "dropshot 0.16.0",
- "ereport-api",
+ "ereport-types",
  "expectorate",
  "futures",
  "gateway-api",
@@ -7161,6 +7137,7 @@ dependencies = [
  "ipcc",
  "omicron-common",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oximeter 0.1.0",
  "oximeter-instruments",
@@ -7268,7 +7245,6 @@ dependencies = [
  "dns-service-client",
  "dpd-client",
  "dropshot 0.16.0",
- "ereport-client",
  "expectorate",
  "fatfs",
  "futures",
@@ -7662,7 +7638,6 @@ dependencies = [
  "dns-service-client",
  "dpd-client",
  "dropshot 0.16.0",
- "ereport-api",
  "expectorate",
  "flate2",
  "flume",
@@ -8025,7 +8000,6 @@ dependencies = [
  "debug-ignore",
  "dns-server-api",
  "dropshot 0.16.0",
- "ereport-api",
  "fs-err",
  "gateway-api",
  "hex",
@@ -11049,6 +11023,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_bytes"
+version = "0.11.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8437fd221bde2d4ca316d61b90e337e9e702b3820b87d63caa9ba6c02bd06d96"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "serde_cbor"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bef2ebfde456fb76bbcf9f59315333decc4fda0b2b44b420243c11e0f5ec1f5"
+dependencies = [
+ "half 1.8.3",
+ "serde",
+]
+
+[[package]]
 name = "serde_derive"
 version = "1.0.219"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11778,11 +11771,13 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "serde",
+ "serde_cbor",
  "slog",
  "slog-dtrace",
  "thiserror 1.0.69",
  "tokio",
  "toml 0.8.20",
+ "uuid",
 ]
 
 [[package]]
