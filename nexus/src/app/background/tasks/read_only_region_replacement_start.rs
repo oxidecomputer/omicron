@@ -165,6 +165,7 @@ mod test {
     use crate::app::RegionAllocationStrategy;
     use crate::external_api::params;
     use chrono::Utc;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::BlockSize;
     use nexus_db_model::Generation;
     use nexus_db_model::PhysicalDiskPolicy;
@@ -175,7 +176,6 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::db::datastore::RegionAllocationFor;
     use nexus_db_queries::db::datastore::RegionAllocationParameters;
-    use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external;
@@ -257,7 +257,7 @@ mod test {
 
         // Create the fake snapshot
 
-        let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_project) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .lookup_for(authz::Action::CreateChild)
             .await

@@ -4,13 +4,13 @@
 
 //! Insights into capacity and utilization
 
+use nexus_db_lookup::lookup;
 use nexus_db_model::IpPoolUtilization;
 use nexus_db_model::Ipv4Utilization;
 use nexus_db_model::Ipv6Utilization;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::lookup;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::http_pagination::PaginatedBy;

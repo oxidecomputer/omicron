@@ -8,11 +8,11 @@ use std::sync::Arc;
 
 use crate::external_api::views::ExternalIp;
 use crate::external_api::views::FloatingIp;
+use nexus_db_lookup::LookupPath;
+use nexus_db_lookup::lookup;
 use nexus_db_model::IpAttachState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::lookup;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::IpKind;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
