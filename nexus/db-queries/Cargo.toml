@@ -62,6 +62,7 @@ nexus-db-fixed-data.workspace = true
 nexus-db-model.workspace = true
 nexus-db-lookup.workspace = true
 nexus-db-schema.workspace = true
+nexus-saga-interface.workspace = true
 nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true

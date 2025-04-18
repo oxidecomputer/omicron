@@ -544,6 +544,11 @@ impl Nexus {
         &self.authz
     }
 
+    /// For testing only: provides a reference to the saga executor.
+    pub fn sagas(&self) -> &Arc<SagaExecutor> {
+        &self.sagas
+    }
+
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
         let mut my_rx = self.populate_status.clone();
         loop {
@@ -582,6 +587,10 @@ impl Nexus {
             )));
         rustls_cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Some(rustls_cfg)
+    }
+
+    pub(crate) fn background_tasks(&self) -> &BackgroundTasks {
+        &self.background_tasks
     }
 
     // Called to trigger inventory collection.

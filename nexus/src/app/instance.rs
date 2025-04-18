@@ -35,6 +35,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
+use nexus_sagas::sagas::instance_start::InstanceStartReason;
 use nexus_types::external_api::views;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -62,7 +63,6 @@ use propolis_client::support::tungstenite::Message as WebSocketMessage;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use sagas::instance_common::ExternalIpAttach;
-use sagas::instance_start;
 use sagas::instance_update;
 use sled_agent_client::types::InstanceBootSettings;
 use sled_agent_client::types::InstanceMigrationTargetParams;
@@ -390,7 +390,7 @@ impl super::Nexus {
             .await
     }
 
-    pub(crate) async fn project_create_instance(
+    pub async fn project_create_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -528,11 +528,7 @@ impl super::Nexus {
                 .instance_id(instance_id);
 
             let start_result = self
-                .instance_start(
-                    opctx,
-                    &lookup,
-                    instance_start::Reason::AutoStart,
-                )
+                .instance_start(opctx, &lookup, InstanceStartReason::AutoStart)
                 .await;
             if let Err(e) = start_result {
                 info!(self.log, "failed to start newly-created instance";
@@ -575,7 +571,7 @@ impl super::Nexus {
     // This operation may only occur on stopped instances, which implies that
     // the attached disks do not have any running "upstairs" process running
     // within the sled.
-    pub(crate) async fn project_destroy_instance(
+    pub async fn project_destroy_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -594,14 +590,14 @@ impl super::Nexus {
         let boundary_switches =
             self.boundary_switches(&self.opctx_alloc).await?;
 
-        let saga_params = sagas::instance_delete::Params {
+        let saga_params = nexus_sagas::sagas::instance_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             authz_instance,
             instance,
             boundary_switches,
         };
         self.sagas
-            .saga_execute::<sagas::instance_delete::SagaInstanceDelete>(
+            .saga_execute::<nexus_sagas::sagas::instance_delete::SagaInstanceDelete>(
                 saga_params,
             )
             .await?;
@@ -710,11 +706,11 @@ impl super::Nexus {
     }
 
     /// Attempts to start an instance if it is currently stopped.
-    pub(crate) async fn instance_start(
+    pub async fn instance_start(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        reason: instance_start::Reason,
+        reason: InstanceStartReason,
     ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -727,7 +723,7 @@ impl super::Nexus {
         match instance_start_allowed(&self.log, &state, reason)? {
             InstanceStartDisposition::AlreadyStarted => Ok(state),
             InstanceStartDisposition::Start => {
-                let saga_params = sagas::instance_start::Params {
+                let saga_params = nexus_sagas::sagas::instance_start::Params {
                     serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                     db_instance: state.instance().clone(),
                     reason,
@@ -748,7 +744,7 @@ impl super::Nexus {
     }
 
     /// Make sure the given Instance is stopped.
-    pub(crate) async fn instance_stop(
+    pub async fn instance_stop(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -2274,7 +2270,7 @@ fn check_instance_cpu_memory_sizes(
 fn instance_start_allowed(
     log: &slog::Logger,
     state: &InstanceAndActiveVmm,
-    reason: instance_start::Reason,
+    reason: InstanceStartReason,
 ) -> Result<InstanceStartDisposition, Error> {
     let (instance, vmm) = (state.instance(), state.vmm());
 
@@ -2521,7 +2517,7 @@ mod tests {
             instance_start_allowed(
                 &logctx.log,
                 &state,
-                instance_start::Reason::User
+                InstanceStartReason::User
             )
             .is_ok()
         );
@@ -2542,7 +2538,7 @@ mod tests {
             instance_start_allowed(
                 &logctx.log,
                 &state,
-                instance_start::Reason::User
+                InstanceStartReason::User
             )
             .is_ok()
         );
@@ -2560,7 +2556,7 @@ mod tests {
             instance_start_allowed(
                 &logctx.log,
                 &state,
-                instance_start::Reason::User
+                InstanceStartReason::User
             )
             .is_err()
         );
@@ -2580,7 +2576,7 @@ mod tests {
             instance_start_allowed(
                 &logctx.log,
                 &state,
-                instance_start::Reason::User
+                InstanceStartReason::User
             )
             .is_ok()
         );
@@ -2592,7 +2588,7 @@ mod tests {
             instance_start_allowed(
                 &logctx.log,
                 &state,
-                instance_start::Reason::User
+                InstanceStartReason::User
             )
             .is_ok()
         );
@@ -2604,7 +2600,7 @@ mod tests {
             instance_start_allowed(
                 &logctx.log,
                 &state,
-                instance_start::Reason::User
+                InstanceStartReason::User
             )
             .is_ok()
         );
@@ -2615,7 +2611,7 @@ mod tests {
             instance_start_allowed(
                 &logctx.log,
                 &state,
-                instance_start::Reason::User
+                InstanceStartReason::User
             )
             .is_ok()
         );

@@ -188,10 +188,10 @@ impl InstanceReincarnation {
 
                 let running_saga = async {
                     let dag = instance_start::SagaInstanceStart::prepare(
-                        &instance_start::Params {
+                        &nexus_sagas::sagas::instance_start::Params {
                             db_instance,
                             serialized_authn: serialized_authn.clone(),
-                            reason: instance_start::Reason::AutoRestart,
+                            reason: nexus_sagas::sagas::instance_start::InstanceStartReason::AutoRestart,
                         },
                     )?;
                     self.sagas.saga_run(dag).await

@@ -1,0 +1,25 @@
+[package]
+name = "nexus-sagas"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+nexus-auth.workspace = true
+nexus-db-lookup.workspace = true
+nexus-db-model.workspace = true
+# Note: this crate does not depend on nexus-db-queries so that the two crates
+# can be built in parallel.
+nexus-saga-interface.workspace = true
+serde.workspace = true
+steno.workspace = true
+uuid.workspace = true
+
+# Note: integration tests for sagas live in nexus/saga-tests. This is so that
+# smaller unit tests don't have to pay the cost of building all of Nexus.

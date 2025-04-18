@@ -2242,7 +2242,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .instance_start(
                     &opctx,
                     &instance_lookup,
-                    crate::app::sagas::instance_start::Reason::User,
+                    nexus_sagas::sagas::instance_start::InstanceStartReason::User,
                 )
                 .await?;
             Ok(HttpResponseAccepted(instance.into()))

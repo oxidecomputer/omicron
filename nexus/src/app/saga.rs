@@ -58,6 +58,7 @@ use futures::StreamExt;
 use futures::future::BoxFuture;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_saga_interface::NexusSaga2;
 use nexus_types::internal_api::views::DemoSaga;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -153,7 +154,7 @@ impl StartSaga for SagaExecutor {
 /// Handle to a self-contained subsystem for kicking off sagas
 ///
 /// See the module-level documentation for details.
-pub(crate) struct SagaExecutor {
+pub struct SagaExecutor {
     sec_client: Arc<steno::SecClient>,
     log: slog::Logger,
     nexus: OnceLock<Arc<Nexus>>,
@@ -222,7 +223,7 @@ impl SagaExecutor {
     /// execute sagas either from API calls and background tasks, neither of
     /// which can be cancelled.  **This function should not be used in a
     /// `tokio::select!` with a `timeout` or the like.**
-    pub(crate) async fn saga_prepare(
+    pub async fn saga_prepare(
         &self,
         dag: SagaDag,
     ) -> Result<RunnableSaga, Error> {
@@ -326,6 +327,17 @@ impl SagaExecutor {
         let stopped_saga = running_saga.wait_until_stopped().await;
         stopped_saga.into_omicron_result()
     }
+
+    pub async fn saga_execute2<N: NexusSaga2>(
+        &self,
+        params: N::Params,
+    ) -> Result<SagaResultOk, Error> {
+        let dag = nexus_saga_interface::create_saga_dag::<N>(params)?;
+        let runnable_saga = self.saga_prepare(dag).await?;
+        let running_saga = runnable_saga.start().await?;
+        let stopped_saga = running_saga.wait_until_stopped().await;
+        stopped_saga.into_omicron_result()
+    }
 }
 
 /// Encapsulates a saga to be run before we actually start running it
@@ -333,7 +345,7 @@ impl SagaExecutor {
 /// At this point, we've built the DAG, loaded it into the SEC, etc. but haven't
 /// started it running.  This is a useful point to inject errors, inspect the
 /// DAG, etc.
-pub(crate) struct RunnableSaga {
+pub struct RunnableSaga {
     id: SagaId,
     saga_completion_future: BoxFuture<'static, SagaResult>,
     log: slog::Logger,
@@ -341,7 +353,7 @@ pub(crate) struct RunnableSaga {
 }
 
 impl RunnableSaga {
-    pub(crate) fn id(&self) -> SagaId {
+    pub fn id(&self) -> SagaId {
         self.id
     }
 
@@ -367,10 +379,7 @@ impl RunnableSaga {
     /// Start the saga running and wait for it to complete.
     ///
     /// This is a shorthand for `start().await?.wait_until_stopped().await`.
-    // There is no reason this needs to be limited to tests, but it's only used
-    // by the tests today.
-    #[cfg(test)]
-    pub(crate) async fn run_to_completion(self) -> Result<StoppedSaga, Error> {
+    pub async fn run_to_completion(self) -> Result<StoppedSaga, Error> {
         Ok(self.start().await?.wait_until_stopped().await)
     }
 }
@@ -407,7 +416,7 @@ impl RunningSaga {
 }
 
 /// Describes a saga that's finished
-pub(crate) struct StoppedSaga {
+pub struct StoppedSaga {
     id: SagaId,
     result: SagaResult,
     log: slog::Logger,
@@ -415,13 +424,13 @@ pub(crate) struct StoppedSaga {
 
 impl StoppedSaga {
     /// Fetches the raw Steno result for the saga's execution
-    pub(crate) fn into_raw_result(self) -> SagaResult {
+    pub fn into_raw_result(self) -> SagaResult {
         self.result
     }
 
     /// Interprets the result of saga execution as a `Result` whose error type
     /// is `Error`.
-    pub(crate) fn into_omicron_result(self) -> Result<SagaResultOk, Error> {
+    pub fn into_omicron_result(self) -> Result<SagaResultOk, Error> {
         self.result.kind.map_err(|saga_error| {
             let mut error = saga_error
                 .error_source
@@ -497,8 +506,7 @@ impl super::Nexus {
 
     /// For testing only: provides direct access to the underlying SecClient so
     /// that tests can inject errors
-    #[cfg(test)]
-    pub(crate) fn sec(&self) -> &steno::SecClient {
+    pub fn sec(&self) -> &steno::SecClient {
         &self.sagas.sec_client
     }
 

@@ -1,0 +1,25 @@
+[package]
+name = "nexus-saga-interface"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+nexus-auth.workspace = true
+nexus-background-task-interface.workspace = true
+# Note: this crate depends on nexus-db-lookup but not nexus-db-queries, for
+# build speed reasons.
+nexus-db-lookup.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+paste.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+steno.workspace = true
+slog.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

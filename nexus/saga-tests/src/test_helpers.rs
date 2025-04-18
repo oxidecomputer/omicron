@@ -1,12 +1,6 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
-
 //! Helper functions for writing saga undo tests and working with instances in
 //! saga tests.
 
-use super::{NexusSaga, instance_common::VmmAndSledIds};
-use crate::{Nexus, app::saga::create_saga_dag};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use diesel::{
     BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
@@ -22,19 +16,23 @@ use nexus_db_queries::{
         datastore::{InstanceAndActiveVmm, InstanceGestalt},
     },
 };
-use nexus_sagas::sagas::instance_start::InstanceStartReason;
+use nexus_saga_interface::{NexusSaga2, create_saga_dag};
+use nexus_sagas::sagas::{
+    instance_common::VmmAndSledIds, instance_start::InstanceStartReason,
+};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::NameOrId;
+use omicron_nexus::Nexus;
 use omicron_test_utils::dev::poll;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use sled_agent_client::TestInterfaces as _;
-use slog::{Logger, info, warn};
+use slog::{Logger, error, info, o, warn};
 use std::{num::NonZeroU32, sync::Arc, time::Duration};
 use steno::SagaDag;
 
 type ControlPlaneTestContext =
-    nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
     OpContext::for_tests(
@@ -43,7 +41,7 @@ pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
     )
 }
 
-pub(crate) async fn instance_start(
+pub async fn instance_start(
     cptestctx: &ControlPlaneTestContext,
     id: &InstanceUuid,
 ) {
@@ -63,7 +61,7 @@ pub(crate) async fn instance_start(
         .expect("Failed to start instance");
 }
 
-pub(crate) async fn instance_stop(
+pub async fn instance_stop(
     cptestctx: &ControlPlaneTestContext,
     id: &InstanceUuid,
 ) {
@@ -83,7 +81,7 @@ pub(crate) async fn instance_stop(
         .expect("Failed to stop instance");
 }
 
-pub(crate) async fn instance_stop_by_name(
+pub async fn instance_stop_by_name(
     cptestctx: &ControlPlaneTestContext,
     name: &str,
     project_name: &str,
@@ -104,7 +102,7 @@ pub(crate) async fn instance_stop_by_name(
         .expect("Failed to stop instance");
 }
 
-pub(crate) async fn instance_delete_by_name(
+pub async fn instance_delete_by_name(
     cptestctx: &ControlPlaneTestContext,
     name: &str,
     project_name: &str,
@@ -125,7 +123,7 @@ pub(crate) async fn instance_delete_by_name(
         .expect("Failed to destroy instance");
 }
 
-pub(crate) async fn instance_simulate(
+pub async fn instance_simulate(
     cptestctx: &ControlPlaneTestContext,
     instance_id: &InstanceUuid,
 ) {
@@ -142,7 +140,7 @@ pub(crate) async fn instance_simulate(
     sa.vmm_finish_transition(vmm_id).await;
 }
 
-pub(crate) async fn instance_single_step_on_sled(
+pub async fn instance_single_step_on_sled(
     cptestctx: &ControlPlaneTestContext,
     instance_id: &InstanceUuid,
     sled_id: &SledUuid,
@@ -164,7 +162,7 @@ pub(crate) async fn instance_single_step_on_sled(
     sa.vmm_single_step(vmm_id).await;
 }
 
-pub(crate) async fn instance_simulate_by_name(
+pub async fn instance_simulate_by_name(
     cptestctx: &ControlPlaneTestContext,
     name: &str,
     project_name: &str,
@@ -291,21 +289,6 @@ pub async fn instance_fetch_by_name(
     );
 
     db_state
-}
-
-pub(crate) async fn instance_wait_for_state(
-    cptestctx: &ControlPlaneTestContext,
-    instance_id: InstanceUuid,
-    desired_state: InstanceState,
-) -> InstanceAndActiveVmm {
-    let opctx = test_opctx(&cptestctx);
-    let datastore = cptestctx.server.server_context().nexus.datastore();
-    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
-        .instance_id(instance_id.into_untyped_uuid())
-        .lookup_for(authz::Action::Read)
-        .await
-        .expect("test instance should be present in datastore");
-    instance_poll_state(cptestctx, &opctx, authz_instance, desired_state).await
 }
 
 pub async fn instance_wait_for_state_by_name(
@@ -524,11 +507,8 @@ pub async fn sled_resource_vmms_exist_for_vmm(
 ///
 /// Asserts that a saga can be created from the supplied DAG and that it
 /// succeeds when it is executed.
-pub(crate) async fn actions_succeed_idempotently(
-    nexus: &Arc<Nexus>,
-    dag: SagaDag,
-) {
-    let runnable_saga = nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
+pub async fn actions_succeed_idempotently(nexus: &Arc<Nexus>, dag: SagaDag) {
+    let runnable_saga = nexus.sagas().saga_prepare(dag.clone()).await.unwrap();
     for node in dag.get_nodes() {
         nexus
             .sec()
@@ -577,13 +557,13 @@ pub(crate) async fn actions_succeed_idempotently(
 /// This function asserts that each saga it executes (a) starts successfully,
 /// (b) fails, and (c) fails at the specific node at which the function injected
 /// a failure.
-pub(crate) async fn action_failure_can_unwind<'a, S, B, A>(
+pub async fn action_failure_can_unwind<'a, S, B, A>(
     nexus: &Arc<Nexus>,
     before_saga: B,
     after_saga: A,
     log: &Logger,
 ) where
-    S: NexusSaga,
+    S: NexusSaga2,
     B: Fn() -> BoxFuture<'a, S::Params>,
     A: Fn() -> BoxFuture<'a, ()>,
 {
@@ -618,7 +598,7 @@ pub(crate) async fn action_failure_can_unwind<'a, S, B, A>(
         );
 
         let runnable_saga =
-            nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
+            nexus.sagas().saga_prepare(dag.clone()).await.unwrap();
 
         nexus
             .sec()
@@ -672,13 +652,13 @@ pub(crate) async fn action_failure_can_unwind<'a, S, B, A>(
 /// This function asserts that each saga it executes (a) starts successfully,
 /// (b) fails, and (c) fails at the specific node at which the function injected
 /// a failure.
-pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
+pub async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
     nexus: &Arc<Nexus>,
     before_saga: B,
     after_saga: A,
     log: &Logger,
 ) where
-    S: NexusSaga,
+    S: NexusSaga2,
     B: Fn() -> BoxFuture<'a, S::Params>,
     A: Fn() -> BoxFuture<'a, ()>,
 {
@@ -721,7 +701,7 @@ pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
         );
 
         let runnable_saga =
-            nexus.sagas.saga_prepare(dag.clone()).await.unwrap();
+            nexus.sagas().saga_prepare(dag.clone()).await.unwrap();
 
         nexus
             .sec()
@@ -765,10 +745,7 @@ pub(crate) async fn action_failure_can_unwind_idempotently<'a, S, B, A>(
 
 /// Asserts that there are no sagas in the supplied `datastore` for which an
 /// undo step failed.
-pub(crate) async fn assert_no_failed_undo_steps(
-    log: &Logger,
-    datastore: &DataStore,
-) {
+pub async fn assert_no_failed_undo_steps(log: &Logger, datastore: &DataStore) {
     use nexus_db_queries::db::model::saga_types::SagaNodeEvent;
 
     let conn = datastore.pool_connection_for_tests().await.unwrap();

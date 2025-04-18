@@ -25,6 +25,7 @@ mod pool_connection;
 // sagas.
 pub mod queries;
 mod raw_query_builder;
+mod saga_interface;
 mod sec_store;
 pub(crate) mod true_or_cast_error;
 mod update_and_check;
