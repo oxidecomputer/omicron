@@ -2586,7 +2586,7 @@
         ]
       },
       "BlobStorageBackend": {
-        "description": "A storage backend for a disk whose initial contents are given explicitly by the specification.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A storage backend for a disk whose initial contents are given explicitly by the specification.\", \"type\": \"object\", \"required\": [ \"base64\", \"readonly\" ], \"properties\": { \"base64\": { \"description\": \"The disk's initial contents, encoded as a base64 string.\", \"type\": \"string\" }, \"readonly\": { \"description\": \"Indicates whether the storage is read-only.\", \"type\": \"boolean\" } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A storage backend for a disk whose initial contents are given explicitly by the specification.",
         "type": "object",
         "properties": {
           "base64": {
@@ -2605,7 +2605,7 @@
         "additionalProperties": false
       },
       "Board": {
-        "description": "A VM's mainboard.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A VM's mainboard.\", \"type\": \"object\", \"required\": [ \"chipset\", \"cpus\", \"memory_mb\" ], \"properties\": { \"chipset\": { \"description\": \"The chipset to expose to guest software.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Chipset\" } ] }, \"cpuid\": { \"description\": \"The CPUID values to expose to the guest. If `None`, bhyve will derive default values from the host's CPUID values.\", \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/Cpuid\" } ] } ] }, \"cpus\": { \"description\": \"The number of virtual logical processors attached to this VM.\", \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"guest_hv_interface\": { \"description\": \"The hypervisor platform to expose to the guest. The default is a bhyve-compatible interface with no additional features.\\n\\nFor compatibility with older versions of Propolis, this field is only serialized if it specifies a non-default interface.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/GuestHypervisorInterface\" } ] }, \"memory_mb\": { \"description\": \"The amount of guest RAM attached to this VM.\", \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A VM's mainboard.",
         "type": "object",
         "properties": {
           "chipset": {
@@ -2632,7 +2632,6 @@
             "minimum": 0
           },
           "guest_hv_interface": {
-            "nullable": true,
             "description": "The hypervisor platform to expose to the guest. The default is a bhyve-compatible interface with no additional features.\n\nFor compatibility with older versions of Propolis, this field is only serialized if it specifies a non-default interface.",
             "allOf": [
               {
@@ -2811,7 +2810,7 @@
         ]
       },
       "BootOrderEntry": {
-        "description": "An entry in the boot order stored in a [`BootSettings`] component.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"An entry in the boot order stored in a [`BootSettings`] component.\", \"type\": \"object\", \"required\": [ \"id\" ], \"properties\": { \"id\": { \"description\": \"The ID of another component in the spec that Propolis should try to boot from.\\n\\nCurrently, only disk device components are supported.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/SpecKey\" } ] } } } ``` </details>",
+        "description": "An entry in the boot order stored in a [`BootSettings`] component.",
         "type": "object",
         "properties": {
           "id": {
@@ -2828,7 +2827,7 @@
         ]
       },
       "BootSettings": {
-        "description": "Settings supplied to the guest's firmware image that specify the order in which it should consider its options when selecting a device to try to boot from.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Settings supplied to the guest's firmware image that specify the order in which it should consider its options when selecting a device to try to boot from.\", \"type\": \"object\", \"required\": [ \"order\" ], \"properties\": { \"order\": { \"description\": \"An ordered list of components to attempt to boot from.\", \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/BootOrderEntry\" } } }, \"additionalProperties\": false } ``` </details>",
+        "description": "Settings supplied to the guest's firmware image that specify the order in which it should consider its options when selecting a device to try to boot from.",
         "type": "object",
         "properties": {
           "order": {
@@ -2934,7 +2933,7 @@
         "minimum": 0
       },
       "Chipset": {
-        "description": "A kind of virtual chipset.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A kind of virtual chipset.\", \"oneOf\": [ { \"description\": \"An Intel 440FX-compatible chipset.\", \"type\": \"object\", \"required\": [ \"type\", \"value\" ], \"properties\": { \"type\": { \"type\": \"string\", \"enum\": [ \"i440_fx\" ] }, \"value\": { \"$ref\": \"#/components/schemas/I440Fx\" } }, \"additionalProperties\": false } ] } ``` </details>",
+        "description": "A kind of virtual chipset.",
         "oneOf": [
           {
             "description": "An Intel 440FX-compatible chipset.",
@@ -2953,7 +2952,8 @@
             "required": [
               "type",
               "value"
-            ]
+            ],
+            "additionalProperties": false
           }
         ]
       },
@@ -3054,7 +3054,6 @@
         ]
       },
       "ComponentV0": {
-        "description": "ComponentV0\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/VirtioDisk\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"virtio_disk\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/NvmeDisk\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"nvme_disk\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/VirtioNic\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"virtio_nic\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/SerialPort\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"serial_port\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/PciPciBridge\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"pci_pci_bridge\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/QemuPvpanic\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"qemu_pvpanic\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/BootSettings\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"boot_settings\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/SoftNpuPciPort\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"soft_npu_pci_port\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/SoftNpuPort\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"soft_npu_port\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/SoftNpuP9\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"soft_npu_p9\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/P9fs\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"p9fs\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/MigrationFailureInjector\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"migration_failure_injector\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/CrucibleStorageBackend\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"crucible_storage_backend\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/FileStorageBackend\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"file_storage_backend\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/BlobStorageBackend\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"blob_storage_backend\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/VirtioNetworkBackend\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"virtio_network_backend\" ] } }, \"additionalProperties\": false }, { \"type\": \"object\", \"required\": [ \"component\", \"type\" ], \"properties\": { \"component\": { \"$ref\": \"#/components/schemas/DlpiNetworkBackend\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"dlpi_network_backend\" ] } }, \"additionalProperties\": false } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -3072,7 +3071,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3090,7 +3090,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3108,7 +3109,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3126,7 +3128,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3144,7 +3147,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3162,7 +3166,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3180,7 +3185,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3198,7 +3204,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3216,7 +3223,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3234,7 +3242,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3252,7 +3261,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3270,7 +3280,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3288,7 +3299,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3306,7 +3318,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3324,7 +3337,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3342,7 +3356,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
@@ -3360,7 +3375,8 @@
             "required": [
               "component",
               "type"
-            ]
+            ],
+            "additionalProperties": false
           }
         ]
       },
@@ -3471,7 +3487,7 @@
         ]
       },
       "Cpuid": {
-        "description": "A set of CPUID values to expose to a guest.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A set of CPUID values to expose to a guest.\", \"type\": \"object\", \"required\": [ \"entries\", \"vendor\" ], \"properties\": { \"entries\": { \"description\": \"A list of CPUID leaves/subleaves and their associated values.\\n\\nPropolis servers require that each entry's `leaf` be unique and that it falls in either the \\\"standard\\\" (0 to 0xFFFF) or \\\"extended\\\" (0x8000_0000 to 0x8000_FFFF) function ranges, since these are the only valid input ranges currently defined by Intel and AMD. See the Intel 64 and IA-32 Architectures Software Developer's Manual (June 2024) Table 3-17 and the AMD64 Architecture Programmer's Manual (March 2024) Volume 3's documentation of the CPUID instruction.\", \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/CpuidEntry\" } }, \"vendor\": { \"description\": \"The CPU vendor to emulate.\\n\\nCPUID leaves in the extended range (0x8000_0000 to 0x8000_FFFF) have vendor-defined semantics. Propolis uses this value to determine these semantics when deciding whether it needs to specialize the supplied template values for these leaves.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/CpuidVendor\" } ] } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A set of CPUID values to expose to a guest.",
         "type": "object",
         "properties": {
           "entries": {
@@ -3497,7 +3513,7 @@
         "additionalProperties": false
       },
       "CpuidEntry": {
-        "description": "A full description of a CPUID leaf/subleaf and the values it produces.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A full description of a CPUID leaf/subleaf and the values it produces.\", \"type\": \"object\", \"required\": [ \"eax\", \"ebx\", \"ecx\", \"edx\", \"leaf\" ], \"properties\": { \"eax\": { \"description\": \"The value to return in eax.\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"ebx\": { \"description\": \"The value to return in ebx.\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"ecx\": { \"description\": \"The value to return in ecx.\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"edx\": { \"description\": \"The value to return in edx.\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"leaf\": { \"description\": \"The leaf (function) number for this entry.\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"subleaf\": { \"description\": \"The subleaf (index) number for this entry, if it uses subleaves.\", \"type\": [ \"integer\", \"null\" ], \"format\": \"uint32\", \"minimum\": 0.0 } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A full description of a CPUID leaf/subleaf and the values it produces.",
         "type": "object",
         "properties": {
           "eax": {
@@ -3548,7 +3564,7 @@
         "additionalProperties": false
       },
       "CpuidVendor": {
-        "description": "A CPU vendor to use when interpreting the meanings of CPUID leaves in the extended ID range (0x80000000 to 0x8000FFFF).\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A CPU vendor to use when interpreting the meanings of CPUID leaves in the extended ID range (0x80000000 to 0x8000FFFF).\", \"type\": \"string\", \"enum\": [ \"amd\", \"intel\" ] } ``` </details>",
+        "description": "A CPU vendor to use when interpreting the meanings of CPUID leaves in the extended ID range (0x80000000 to 0x8000FFFF).",
         "type": "string",
         "enum": [
           "amd",
@@ -3556,7 +3572,7 @@
         ]
       },
       "CrucibleStorageBackend": {
-        "description": "A Crucible storage backend.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A Crucible storage backend.\", \"type\": \"object\", \"required\": [ \"readonly\", \"request_json\" ], \"properties\": { \"readonly\": { \"description\": \"Indicates whether the storage is read-only.\", \"type\": \"boolean\" }, \"request_json\": { \"description\": \"A serialized `[crucible_client_types::VolumeConstructionRequest]`. This is stored in serialized form so that breaking changes to the definition of a `VolumeConstructionRequest` do not inadvertently break instance spec deserialization.\\n\\nWhen using a spec to initialize a new instance, the spec author must ensure this request is well-formed and can be deserialized by the version of `crucible_client_types` used by the target Propolis.\", \"type\": \"string\" } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A Crucible storage backend.",
         "type": "object",
         "properties": {
           "readonly": {
@@ -4178,7 +4194,7 @@
         ]
       },
       "DlpiNetworkBackend": {
-        "description": "A network backend associated with a DLPI VNIC on the host.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A network backend associated with a DLPI VNIC on the host.\", \"type\": \"object\", \"required\": [ \"vnic_name\" ], \"properties\": { \"vnic_name\": { \"description\": \"The name of the VNIC to use as a backend.\", \"type\": \"string\" } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A network backend associated with a DLPI VNIC on the host.",
         "type": "object",
         "properties": {
           "vnic_name": {
@@ -4316,7 +4332,7 @@
         ]
       },
       "FileStorageBackend": {
-        "description": "A storage backend backed by a file in the host system's file system.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A storage backend backed by a file in the host system's file system.\", \"type\": \"object\", \"required\": [ \"path\", \"readonly\" ], \"properties\": { \"path\": { \"description\": \"A path to a file that backs a disk.\", \"type\": \"string\" }, \"readonly\": { \"description\": \"Indicates whether the storage is read-only.\", \"type\": \"boolean\" } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A storage backend backed by a file in the host system's file system.",
         "type": "object",
         "properties": {
           "path": {
@@ -4341,9 +4357,10 @@
         "minimum": 0
       },
       "GuestHypervisorInterface": {
-        "description": "A hypervisor interface to expose to the guest.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A hypervisor interface to expose to the guest.\", \"oneOf\": [ { \"description\": \"Expose a bhyve-like interface (\\\"bhyve bhyve \\\" as the hypervisor ID in leaf 0x4000_0000 and no additional leaves or features).\", \"type\": \"object\", \"required\": [ \"type\" ], \"properties\": { \"type\": { \"type\": \"string\", \"enum\": [ \"bhyve\" ] } }, \"additionalProperties\": false }, { \"description\": \"Expose a Hyper-V-compatible hypervisor interface with the supplied features enabled.\", \"type\": \"object\", \"required\": [ \"type\", \"value\" ], \"properties\": { \"type\": { \"type\": \"string\", \"enum\": [ \"hyper_v\" ] }, \"value\": { \"type\": \"object\", \"required\": [ \"features\" ], \"properties\": { \"features\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/HyperVFeatureFlag\" }, \"uniqueItems\": true } }, \"additionalProperties\": false } }, \"additionalProperties\": false } ] } ``` </details>",
+        "description": "A hypervisor interface to expose to the guest.",
         "oneOf": [
           {
+            "description": "Expose a bhyve-like interface (\"bhyve bhyve \" as the hypervisor ID in leaf 0x4000_0000 and no additional leaves or features).",
             "type": "object",
             "properties": {
               "type": {
@@ -4375,7 +4392,8 @@
                     "type": "array",
                     "items": {
                       "$ref": "#/components/schemas/HyperVFeatureFlag"
-                    }
+                    },
+                    "uniqueItems": true
                   }
                 },
                 "required": [
@@ -4483,14 +4501,14 @@
         "maxLength": 253
       },
       "HyperVFeatureFlag": {
-        "description": "Flags that enable \"simple\" Hyper-V enlightenments that require no feature-specific configuration.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Flags that enable \\\"simple\\\" Hyper-V enlightenments that require no feature-specific configuration.\", \"type\": \"string\", \"enum\": [ \"reference_tsc\" ] } ``` </details>",
+        "description": "Flags that enable \"simple\" Hyper-V enlightenments that require no feature-specific configuration.",
         "type": "string",
         "enum": [
           "reference_tsc"
         ]
       },
       "I440Fx": {
-        "description": "An Intel 440FX-compatible chipset.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"An Intel 440FX-compatible chipset.\", \"type\": \"object\", \"required\": [ \"enable_pcie\" ], \"properties\": { \"enable_pcie\": { \"description\": \"Specifies whether the chipset should allow PCI configuration space to be accessed through the PCIe extended configuration mechanism.\", \"type\": \"boolean\" } }, \"additionalProperties\": false } ``` </details>",
+        "description": "An Intel 440FX-compatible chipset.",
         "type": "object",
         "properties": {
           "enable_pcie": {
@@ -4731,7 +4749,6 @@
         ]
       },
       "InstanceSpecV0": {
-        "description": "InstanceSpecV0\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"board\", \"components\" ], \"properties\": { \"board\": { \"$ref\": \"#/components/schemas/Board\" }, \"components\": { \"type\": \"object\", \"additionalProperties\": { \"$ref\": \"#/components/schemas/ComponentV0\" } } }, \"additionalProperties\": false } ``` </details>",
         "type": "object",
         "properties": {
           "board": {
@@ -5128,7 +5145,7 @@
         "maxLength": 17
       },
       "MigrationFailureInjector": {
-        "description": "Describes a synthetic device that registers for VM lifecycle notifications and returns errors during attempts to migrate.\n\nThis is only supported by Propolis servers compiled with the `failure-injection` feature.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes a synthetic device that registers for VM lifecycle notifications and returns errors during attempts to migrate.\\n\\nThis is only supported by Propolis servers compiled with the `failure-injection` feature.\", \"type\": \"object\", \"required\": [ \"fail_exports\", \"fail_imports\" ], \"properties\": { \"fail_exports\": { \"description\": \"The number of times this device should fail requests to export state.\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"fail_imports\": { \"description\": \"The number of times this device should fail requests to import state.\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 } }, \"additionalProperties\": false } ``` </details>",
+        "description": "Describes a synthetic device that registers for VM lifecycle notifications and returns errors during attempts to migrate.\n\nThis is only supported by Propolis servers compiled with the `failure-injection` feature.",
         "type": "object",
         "properties": {
           "fail_exports": {
@@ -5339,7 +5356,7 @@
         ]
       },
       "NvmeDisk": {
-        "description": "A disk that presents an NVMe interface to the guest.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A disk that presents an NVMe interface to the guest.\", \"type\": \"object\", \"required\": [ \"backend_id\", \"pci_path\", \"serial_number\" ], \"properties\": { \"backend_id\": { \"description\": \"The name of the disk's backend component.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/SpecKey\" } ] }, \"pci_path\": { \"description\": \"The PCI bus/device/function at which this disk should be attached.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/PciPath\" } ] }, \"serial_number\": { \"description\": \"The serial number to return in response to an NVMe Identify Controller command.\", \"type\": \"array\", \"items\": { \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"maxItems\": 20, \"minItems\": 20 } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A disk that presents an NVMe interface to the guest.",
         "type": "object",
         "properties": {
           "backend_id": {
@@ -5925,7 +5942,7 @@
         ]
       },
       "P9fs": {
-        "description": "Describes a filesystem to expose through a P9 device.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes a filesystem to expose through a P9 device.\\n\\nThis is only supported by Propolis servers compiled with the `falcon` feature.\", \"type\": \"object\", \"required\": [ \"chunk_size\", \"pci_path\", \"source\", \"target\" ], \"properties\": { \"chunk_size\": { \"description\": \"The chunk size to use in the 9P protocol. Vanilla Helios images should use 8192. Falcon Helios base images and Linux can use up to 65536.\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"pci_path\": { \"description\": \"The PCI path at which to attach the guest to this P9 filesystem.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/PciPath\" } ] }, \"source\": { \"description\": \"The host source path to mount into the guest.\", \"type\": \"string\" }, \"target\": { \"description\": \"The 9P target filesystem tag.\", \"type\": \"string\" } }, \"additionalProperties\": false } ``` </details>",
+        "description": "Describes a filesystem to expose through a P9 device.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.",
         "type": "object",
         "properties": {
           "chunk_size": {
@@ -5986,7 +6003,7 @@
         ]
       },
       "PciPciBridge": {
-        "description": "A PCI-PCI bridge.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A PCI-PCI bridge.\", \"type\": \"object\", \"required\": [ \"downstream_bus\", \"pci_path\" ], \"properties\": { \"downstream_bus\": { \"description\": \"The logical bus number of this bridge's downstream bus. Other devices may use this bus number in their PCI paths to indicate they should be attached to this bridge's bus.\", \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"pci_path\": { \"description\": \"The PCI path at which to attach this bridge.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/PciPath\" } ] } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A PCI-PCI bridge.",
         "type": "object",
         "properties": {
           "downstream_bus": {
@@ -6149,7 +6166,6 @@
         "maxItems": 2
       },
       "QemuPvpanic": {
-        "description": "QemuPvpanic\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"enable_isa\" ], \"properties\": { \"enable_isa\": { \"description\": \"Enable the QEMU PVPANIC ISA bus device (I/O port 0x505).\", \"type\": \"boolean\" } }, \"additionalProperties\": false } ``` </details>",
         "type": "object",
         "properties": {
           "enable_isa": {
@@ -6513,7 +6529,7 @@
         ]
       },
       "SerialPort": {
-        "description": "A serial port device.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A serial port device.\", \"type\": \"object\", \"required\": [ \"num\" ], \"properties\": { \"num\": { \"description\": \"The serial port number for this port.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/SerialPortNumber\" } ] } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A serial port device.",
         "type": "object",
         "properties": {
           "num": {
@@ -6531,7 +6547,7 @@
         "additionalProperties": false
       },
       "SerialPortNumber": {
-        "description": "A serial port identifier, which determines what I/O ports a guest can use to access a port.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A serial port identifier, which determines what I/O ports a guest can use to access a port.\", \"type\": \"string\", \"enum\": [ \"com1\", \"com2\", \"com3\", \"com4\" ] } ``` </details>",
+        "description": "A serial port identifier, which determines what I/O ports a guest can use to access a port.",
         "type": "string",
         "enum": [
           "com1",
@@ -6694,7 +6710,7 @@
         ]
       },
       "SoftNpuP9": {
-        "description": "Describes a PCI device that shares host files with the guest using the P9 protocol.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes a PCI device that shares host files with the guest using the P9 protocol.\\n\\nThis is only supported by Propolis servers compiled with the `falcon` feature.\", \"type\": \"object\", \"required\": [ \"pci_path\" ], \"properties\": { \"pci_path\": { \"description\": \"The PCI path at which to attach the guest to this port.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/PciPath\" } ] } }, \"additionalProperties\": false } ``` </details>",
+        "description": "Describes a PCI device that shares host files with the guest using the P9 protocol.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.",
         "type": "object",
         "properties": {
           "pci_path": {
@@ -6712,7 +6728,7 @@
         "additionalProperties": false
       },
       "SoftNpuPciPort": {
-        "description": "Describes a SoftNPU PCI device.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes a SoftNPU PCI device.\\n\\nThis is only supported by Propolis servers compiled with the `falcon` feature.\", \"type\": \"object\", \"required\": [ \"pci_path\" ], \"properties\": { \"pci_path\": { \"description\": \"The PCI path at which to attach the guest to this port.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/PciPath\" } ] } }, \"additionalProperties\": false } ``` </details>",
+        "description": "Describes a SoftNPU PCI device.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.",
         "type": "object",
         "properties": {
           "pci_path": {
@@ -6730,7 +6746,7 @@
         "additionalProperties": false
       },
       "SoftNpuPort": {
-        "description": "Describes a port in a SoftNPU emulated ASIC.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes a port in a SoftNPU emulated ASIC.\\n\\nThis is only supported by Propolis servers compiled with the `falcon` feature.\", \"type\": \"object\", \"required\": [ \"backend_id\", \"link_name\" ], \"properties\": { \"backend_id\": { \"description\": \"The name of the port's associated DLPI backend.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/SpecKey\" } ] }, \"link_name\": { \"description\": \"The data link name for this port.\", \"type\": \"string\" } }, \"additionalProperties\": false } ``` </details>",
+        "description": "Describes a port in a SoftNPU emulated ASIC.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.",
         "type": "object",
         "properties": {
           "backend_id": {
@@ -7060,7 +7076,7 @@
         ]
       },
       "VirtioDisk": {
-        "description": "A disk that presents a virtio-block interface to the guest.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A disk that presents a virtio-block interface to the guest.\", \"type\": \"object\", \"required\": [ \"backend_id\", \"pci_path\" ], \"properties\": { \"backend_id\": { \"description\": \"The name of the disk's backend component.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/SpecKey\" } ] }, \"pci_path\": { \"description\": \"The PCI bus/device/function at which this disk should be attached.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/PciPath\" } ] } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A disk that presents a virtio-block interface to the guest.",
         "type": "object",
         "properties": {
           "backend_id": {
@@ -7087,7 +7103,7 @@
         "additionalProperties": false
       },
       "VirtioNetworkBackend": {
-        "description": "A network backend associated with a virtio-net (viona) VNIC on the host.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A network backend associated with a virtio-net (viona) VNIC on the host.\", \"type\": \"object\", \"required\": [ \"vnic_name\" ], \"properties\": { \"vnic_name\": { \"description\": \"The name of the viona VNIC to use as a backend.\", \"type\": \"string\" } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A network backend associated with a virtio-net (viona) VNIC on the host.",
         "type": "object",
         "properties": {
           "vnic_name": {
@@ -7101,7 +7117,7 @@
         "additionalProperties": false
       },
       "VirtioNic": {
-        "description": "A network card that presents a virtio-net interface to the guest.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A network card that presents a virtio-net interface to the guest.\", \"type\": \"object\", \"required\": [ \"backend_id\", \"interface_id\", \"pci_path\" ], \"properties\": { \"backend_id\": { \"description\": \"The name of the device's backend.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/SpecKey\" } ] }, \"interface_id\": { \"description\": \"A caller-defined correlation identifier for this interface. If Propolis is configured to collect network interface kstats in its Oximeter metrics, the metric series for this interface will be associated with this identifier.\", \"type\": \"string\", \"format\": \"uuid\" }, \"pci_path\": { \"description\": \"The PCI path at which to attach this device.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/PciPath\" } ] } }, \"additionalProperties\": false } ``` </details>",
+        "description": "A network card that presents a virtio-net interface to the guest.",
         "type": "object",
         "properties": {
           "backend_id": {

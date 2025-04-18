@@ -47,6 +47,7 @@ use omicron_uuid_kinds::{
     SupportBundleUuid, ZpoolUuid,
 };
 use oxnet::Ipv6Net;
+use propolis_client::instance_spec::SpecKey;
 use propolis_client::{
     Client as PropolisClient, types::InstanceInitializationMethod,
 };
@@ -217,9 +218,9 @@ impl SledAgent {
         };
 
         for (id, _disk) in vmm_spec.crucible_backends() {
-            let Ok(id) = Uuid::parse_str(id.as_str()) else {
+            let SpecKey::Uuid(id) = id else {
                 return Err(Error::invalid_value(
-                    id,
+                    id.to_string(),
                     "Crucible disks in a Propolis spec must have UUID keys",
                 ));
             };
@@ -244,7 +245,7 @@ impl SledAgent {
                 )
                 .await?;
             self.disks
-                .sim_ensure_producer(&id, (self.nexus_address, id))
+                .sim_ensure_producer(id, (self.nexus_address, *id))
                 .await?;
         }
 
@@ -324,12 +325,12 @@ impl SledAgent {
             .await?;
 
         for (id, disk_request) in vmm_spec.crucible_backends() {
-            let Ok(id) = Uuid::parse_str(id.as_str()) else {
+            let SpecKey::Uuid(id) = id else {
                 unreachable!("already verified Crucible disks have UUID keys");
             };
 
             let vcr = serde_json::from_str(&disk_request.request_json)?;
-            self.simulated_upstairs.map_id_to_vcr(id, &vcr);
+            self.simulated_upstairs.map_id_to_vcr(*id, &vcr);
         }
 
         let mut routes = self.vpc_routes.lock().unwrap();

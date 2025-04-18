@@ -33,7 +33,7 @@ use omicron_uuid_kinds::{
 };
 use propolis_api_types::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
-use propolis_client::types::ComponentV0;
+use propolis_client::instance_spec::{ComponentV0, SpecKey};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_types::instance::*;
@@ -1040,8 +1040,9 @@ impl InstanceRunner {
         running_zone: &RunningZone,
         migrate: Option<InstanceMigrationTargetParams>,
     ) -> Result<(), Error> {
-        use propolis_client::types::{
-            InstanceInitializationMethod, ReplacementComponent,
+        use propolis_client::{
+            instance_spec::ReplacementComponent,
+            types::InstanceInitializationMethod,
         };
 
         let mut spec = self.propolis_spec.clone();
@@ -1154,7 +1155,8 @@ impl InstanceRunner {
             // The caller is presumed to have arranged things so that NICs in
             // the requested NIC list appear with the same IDs in the instance
             // spec. Bail if this isn't the case.
-            let Some(backend) = spec.0.components.get_mut(&nic.id.to_string())
+            let Some(backend) =
+                spec.0.components.get_mut(&SpecKey::Uuid(nic.id))
             else {
                 return Err(Error::NicNotInPropolisSpec(nic.id));
             };
@@ -2277,8 +2279,7 @@ mod tests {
     use omicron_common::api::internal::nexus::VmmState;
     use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
     use propolis_client::types::{
-        Chipset, I440Fx, InstanceMigrateStatusResponse,
-        InstanceStateMonitorResponse,
+        InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
@@ -2475,13 +2476,13 @@ mod tests {
     fn fake_instance_initial_state(
         propolis_addr: SocketAddr,
     ) -> InstanceInitialState {
-        use propolis_client::types::{Board, InstanceSpecV0};
+        use propolis_client::instance_spec::{Board, InstanceSpecV0};
         let spec = VmmSpec(InstanceSpecV0 {
             board: Board {
                 cpus: 1,
                 memory_mb: 1024,
-                chipset: Chipset::I440Fx(I440Fx { enable_pcie: false }),
-                guest_hv_interface: None,
+                chipset: Default::default(),
+                guest_hv_interface: Default::default(),
                 cpuid: None,
             },
             components: Default::default(),

@@ -691,7 +691,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418#0b1c7c5c75be8d395246286a48cee26199c08418"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d49feefb8554da6229ab32a0dc0f3cb7f9602f3b#d49feefb8554da6229ab32a0dc0f3cb7f9602f3b"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -701,7 +701,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418#0b1c7c5c75be8d395246286a48cee26199c08418"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d49feefb8554da6229ab32a0dc0f3cb7f9602f3b#d49feefb8554da6229ab32a0dc0f3cb7f9602f3b"
 dependencies = [
  "libc",
  "strum",
@@ -7333,7 +7333,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client 0.9.1",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d49feefb8554da6229ab32a0dc0f3cb7f9602f3b)",
  "qorb",
  "rand 0.8.5",
  "range-requests",
@@ -7693,7 +7693,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d49feefb8554da6229ab32a0dc0f3cb7f9602f3b)",
  "propolis-mock-server",
  "propolis_api_types",
  "rand 0.8.5",
@@ -9627,7 +9627,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418#0b1c7c5c75be8d395246286a48cee26199c08418"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d49feefb8554da6229ab32a0dc0f3cb7f9602f3b#d49feefb8554da6229ab32a0dc0f3cb7f9602f3b"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -9672,7 +9672,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418#0b1c7c5c75be8d395246286a48cee26199c08418"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d49feefb8554da6229ab32a0dc0f3cb7f9602f3b#d49feefb8554da6229ab32a0dc0f3cb7f9602f3b"
 dependencies = [
  "anyhow",
  "atty",
@@ -9716,7 +9716,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418#0b1c7c5c75be8d395246286a48cee26199c08418"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d49feefb8554da6229ab32a0dc0f3cb7f9602f3b#d49feefb8554da6229ab32a0dc0f3cb7f9602f3b"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -9729,7 +9729,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418#0b1c7c5c75be8d395246286a48cee26199c08418"
+source = "git+https://github.com/oxidecomputer/propolis?rev=d49feefb8554da6229ab32a0dc0f3cb7f9602f3b#d49feefb8554da6229ab32a0dc0f3cb7f9602f3b"
 dependencies = [
  "schemars",
  "serde",
@@ -11402,7 +11402,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.9.1",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d49feefb8554da6229ab32a0dc0f3cb7f9602f3b)",
  "regress",
  "reqwest",
  "schemars",
@@ -11429,7 +11429,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=d49feefb8554da6229ab32a0dc0f3cb7f9602f3b)",
  "rcgen",
  "schemars",
  "serde",
