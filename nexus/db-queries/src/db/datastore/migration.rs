@@ -6,7 +6,6 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::model::Generation;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
@@ -19,6 +18,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::migration::dsl;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -131,7 +131,7 @@ impl DataStore {
 
     pub(crate) async fn migration_update_source_on_connection(
         &self,
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         vmm_id: &PropolisUuid,
         migration: &nexus::MigrationRuntimeState,
     ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
@@ -153,7 +153,7 @@ impl DataStore {
 
     pub(crate) async fn migration_update_target_on_connection(
         &self,
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         vmm_id: &PropolisUuid,
         migration: &nexus::MigrationRuntimeState,
     ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {

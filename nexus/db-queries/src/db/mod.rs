@@ -45,7 +45,7 @@ use nexus_db_model::saga_types;
 pub use config::Config;
 pub use datastore::DataStore;
 pub use on_conflict_ext::IncompleteOnConflictExt;
-pub use pool::{DbConnection, Pool};
+pub use pool::Pool;
 pub use saga_types::SecId;
 pub use sec_store::CockroachDbSecStore;
 

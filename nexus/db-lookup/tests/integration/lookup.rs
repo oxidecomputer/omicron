@@ -9,7 +9,7 @@ use nexus_db_model::Name;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use omicron_test_utils::dev;
 
-/* This is a smoke test that things basically appear to work. */
+/// This is a smoke test that things basically appear to work.
 #[tokio::test]
 async fn test_lookup() {
     let logctx = dev::test_setup_log("test_lookup");

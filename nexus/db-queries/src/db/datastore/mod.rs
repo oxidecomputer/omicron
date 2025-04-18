@@ -19,7 +19,6 @@
 // complicated to do safely and generally compared to what we have now.
 
 use super::Pool;
-use super::pool::DbConnection;
 use crate::authz;
 use crate::context::OpContext;
 use ::oximeter::types::ProducerRegistry;
@@ -31,6 +30,7 @@ use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::{ExpressionMethods, QueryDsl};
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
+use nexus_db_lookup::{DataStoreConnection, DbConnection};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
@@ -173,9 +173,6 @@ impl<U, T> RunnableQuery<U> for T where
     T: RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
 }
-
-pub type DataStoreConnection =
-    qorb::claim::Handle<async_bb8_diesel::Connection<DbConnection>>;
 
 pub struct DataStore {
     log: Logger,

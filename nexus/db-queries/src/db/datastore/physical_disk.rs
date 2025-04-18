@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::model::ApplySledFilterExt;
@@ -27,6 +26,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplyPhysicalDiskFilterExt;
 use nexus_types::deployment::{DiskFilter, SledFilter};
 use omicron_common::api::external::CreateResult;
@@ -115,7 +115,7 @@ impl DataStore {
     }
 
     pub async fn physical_disk_insert_on_connection(
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         disk: PhysicalDisk,
     ) -> Result<PhysicalDisk, TransactionError<Error>> {

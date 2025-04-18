@@ -6,7 +6,6 @@
 
 use crate::db;
 use crate::db::model::IncompleteNetworkInterface;
-use crate::db::pool::DbConnection;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::{NextItem, NextItemSelfJoined};
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -26,6 +25,7 @@ use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel, retryable};
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::SqlU8;
 use nexus_db_model::{MAX_NICS_PER_INSTANCE, NetworkInterfaceKind};
 use nexus_db_schema::enums::NetworkInterfaceKindEnum;

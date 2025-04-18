@@ -10,6 +10,7 @@ use crate::db::pool_connection::{DieselPgConnector, DieselPgConnectorArgs};
 
 use internal_dns_resolver::QorbResolver;
 use internal_dns_types::names::ServiceName;
+use nexus_db_lookup::DbConnection;
 use qorb::backend;
 use qorb::policy::Policy;
 use qorb::resolver::{AllBackends, Resolver};
@@ -17,8 +18,6 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::watch;
-
-pub use super::pool_connection::DbConnection;
 
 type QorbConnection = async_bb8_diesel::Connection<DbConnection>;
 type QorbPool = qorb::pool::Pool<QorbConnection>;

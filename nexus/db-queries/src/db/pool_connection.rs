@@ -9,13 +9,10 @@ use async_bb8_diesel::AsyncR2D2Connection;
 use async_bb8_diesel::AsyncSimpleConnection;
 use async_trait::async_trait;
 use diesel::Connection;
-use diesel::PgConnection;
-use diesel_dtrace::DTraceConnection;
+use nexus_db_lookup::DbConnection;
 use qorb::backend::{self, Backend, Error};
 use slog::Logger;
 use url::Url;
-
-pub type DbConnection = DTraceConnection<PgConnection>;
 
 pub const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
     "set disallow_full_table_scans = on; set large_full_scan_rows = 0;";
