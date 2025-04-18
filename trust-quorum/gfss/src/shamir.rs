@@ -165,7 +165,7 @@ fn split_secret_impl<R: Rng>(
 
 /// Combine the shares to reconstruct the secret
 ///
-/// The secret is the concatenation of the y-coordinates at x=0.
+/// The secret is the concatenation of the y-coordinates at `x=0`.
 pub fn compute_secret(
     shares: &[Share],
 ) -> Result<Secret<Box<[u8]>>, CombineError> {
@@ -190,7 +190,7 @@ pub fn compute_share(
 }
 
 /// Interpolate the points for each polynomial to find the value `y = f(x)`
-/// and then concatenate them and return the corrseponding [`Share`].
+/// and then concatenate them and return the corresponding [`Share`].
 ///
 /// Calling this function for `x=0` reveals the secret.
 fn interpolate_polynomials(shares: ValidShares, x: Gf256) -> Share {

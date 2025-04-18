@@ -2,7 +2,7 @@
 name = "gfss"
 version = "0.1.0"
 description = "Shamir secret sharing over GF(2^8)"
-edition = "2024"
+edition = "2021"
 license = "MPL-2.0"
 
 [lints]
@@ -11,7 +11,7 @@ workspace = true
 [dependencies]
 rand = { workspace = true, features = ["getrandom"] }
 secrecy.workspace = true
-subtle = "2.6"
+subtle.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true
 omicron-workspace-hack.workspace = true

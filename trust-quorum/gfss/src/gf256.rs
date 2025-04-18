@@ -20,7 +20,7 @@
 //! are handy.
 
 // Don't tell me what operations to use in my implementations
-#![allow(clippy::suspicious_arithmetic_impl)]
+#![expect(clippy::suspicious_arithmetic_impl)]
 
 use core::fmt::{self, Binary, Display, Formatter, LowerHex, UpperHex};
 use core::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub};
@@ -47,12 +47,14 @@ impl Gf256 {
         self.0
     }
 
-    /// Return the multiplicative inverse (self^-1) of self
+    /// Return the multiplicative inverse (`self^-1`) of self
     ///
+    /// ```text
     /// self * self^-1 = 1
+    /// ```
     ///
-    /// It turns out that self^-1 = self^254 for GF(2^8), so we calculate that
-    /// in a simple, unrolled fashion.
+    /// By Fermat's little theorem: `self^-1 = self^254 for GF(2^8)`.
+    /// We calculate `self^254` in a simple, unrolled fashion.
     ///
     /// This strategy was borrowed from <https://github.com/dsprenkels/sss/blob/16c3fdb175497b25eb90b966991fa7ff19fbdcfe/hazmat.c#L247-L266>
     #[rustfmt::skip]
@@ -110,9 +112,14 @@ impl ConstantTimeEq for Gf256 {
         self.0.ct_eq(&other.0)
     }
 }
+
 impl Add for Gf256 {
     type Output = Self;
 
+    /// This is a fundamental operation.
+    ///
+    /// In `GF(2^n)`, we always do carryless addition `mod 2` which ends up
+    /// being exactly equal to bitwise xor.
     fn add(self, rhs: Self) -> Self::Output {
         Gf256(self.0 ^ rhs.0)
     }
@@ -140,6 +147,7 @@ impl MulAssign for Gf256 {
 impl Sub for Gf256 {
     type Output = Self;
 
+    /// Subtraction is identical to addition in `GF(2^n)`
     fn sub(self, rhs: Self) -> Self {
         Gf256(self.0 ^ rhs.0)
     }
@@ -163,28 +171,32 @@ impl Div for Gf256 {
 /// it is no longer inside the finite field, we reduce it modulo our irreducible
 /// (prime) polynomial:
 ///
-///    m(x) = x^8 + x^4 + x^3 + x + 1
+/// ```text
+/// m(x) = x^8 + x^4 + x^3 + x + 1
+/// ```
 ///
 /// As an example, with our accumulator named `product`:
 ///
-///    product = 0
-///    self = 0x21 = 0b0010_0001 = x^5 + 1
-///    rhs  = 0x12 = 0b0001_0010 = x^4 + x
+/// ```text
+/// product = 0
+/// self = 0x21 = 0b0010_0001 = x^5 + 1
+/// rhs  = 0x12 = 0b0001_0010 = x^4 + x
 ///
-///    step 1 = ((x^5 + 1) * x) mod m(x)
-///           = x^6 + x
-///    
-///    product += step1
+/// step 1 = ((x^5 + 1) * x) mod m(x)
+///        = x^6 + x
 ///
-///    step 2 = ((x^5 + 1) * x^4) mod m(x)
-///           = (x^9 + x^4) mod (x^8 + x^4 + x^3 +x + 1)
-///           = x^5 + x^2 + x
+/// product += step1
 ///
-///    product += step2
-///            = x^6 + x + x^5 + x^2 + x
-///            = x^6 + x^5 + x^2
-///            = 0b0110_0100
-///            = 0x64
+/// step 2 = ((x^5 + 1) * x^4) mod m(x)
+///        = (x^9 + x^4) mod (x^8 + x^4 + x^3 +x + 1)
+///        = x^5 + x^2 + x
+///
+/// product += step2
+///         = x^6 + x + x^5 + x^2 + x
+///         = x^6 + x^5 + x^2
+///         = 0b0110_0100
+///         = 0x64
+/// ```
 ///
 /// See the `test_docs_example` unit test at the bottom of this file to confirm
 /// this math.
@@ -193,7 +205,9 @@ impl Div for Gf256 {
 /// polynomial without the high term. We do this because of the following
 /// equality in GF(2^8), which follows from long-division of polynomials:
 ///
-///    `x^8 mod m(x) = x^4 + x^3 + x + 1 = 0x1b`
+/// ```text
+/// `x^8 mod m(x) = x^4 + x^3 + x + 1 = 0x1b`
+/// ```
 ///
 /// A rationale and description of this algorithm can be found in sections 7.9
 /// and 7.10 of the lecture notes at
@@ -218,7 +232,7 @@ impl Mul for Gf256 {
             // previous line.
             rhs.0 >>= 1;
 
-            // Track if the hibh bit is currently set in `self`. If it is, then
+            // Track if the high bit is currently set in `self`. If it is, then
             // we have an `x^7` term, and multiplying by `x` will require a
             // modulo reduction to stay within our field.
             let carry: u8 = self.0 >> 7;
