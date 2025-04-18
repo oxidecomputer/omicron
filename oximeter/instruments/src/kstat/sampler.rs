@@ -1318,6 +1318,7 @@ impl oximeter::Producer for KstatSampler {
                         being produced faster than `oximeter` is collecting";
                         "n_missed" => %n_missed,
                     );
+                    break;
                 }
                 Err(broadcast::error::TryRecvError::Closed) => {
                     debug!(
