@@ -261,6 +261,9 @@ impl TestState {
                 Action::Tick(time_jump) => {
                     self.action_tick(time_jump)?;
                 }
+                Action::Commit(index) => {
+                    todo!()
+                }
             }
         }
         Ok(())
@@ -541,6 +544,16 @@ pub enum Action {
          )]
         Duration,
     ),
+    // Attempt to Commit a reconfiguration if possible
+    //
+    // We'll only attempt to commit a reconfiguration if K+Z nodes
+    // have acked prepares for that epoch.
+    //
+    // Z is randomly chosen between 0 and N-K, and is a "safety parameter"
+    // described in RFD 238.
+    //
+    // `Index` is used to compute Z here.
+    Commit(Index),
 }
 
 /// Informnation about configurations used at test generation time
