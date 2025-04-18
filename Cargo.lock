@@ -8578,8 +8578,10 @@ dependencies = [
  "camino",
  "chrono",
  "clap",
+ "glob",
  "jiff",
  "omicron-workspace-hack",
+ "rayon",
  "sigpipe",
  "uuid",
 ]
