@@ -5870,6 +5870,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-background-task-interface"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "nexus-client"
 version = "0.1.0"
 dependencies = [
@@ -7295,6 +7304,7 @@ dependencies = [
  "macaddr",
  "mg-admin-client",
  "nexus-auth",
+ "nexus-background-task-interface",
  "nexus-client",
  "nexus-config",
  "nexus-db-lookup",
