@@ -120,6 +120,7 @@ fn main() -> Result<(), anyhow::Error> {
         }
         Commands::Logs { zone, service, metadata, filter, before, after } => {
             let zones = Zones::load()?;
+            let pattern = glob::Pattern::new(&zone)?;
             let date_range = match (before, after) {
                 (None, None) => None,
                 _ => Some(DateRange::new(
@@ -145,37 +146,41 @@ fn main() -> Result<(), anyhow::Error> {
                 );
             };
 
-            let logs = zones.zone_logs(&zone, filter);
-            for (svc_name, svc_logs) in logs {
-                if let Some(service) = &service {
-                    if svc_name != service.as_str() {
-                        continue;
-                    }
-                }
-                if filter.current {
-                    if let Some(current) = &svc_logs.current {
-                        if metadata {
-                            print_metadata(current);
-                        } else {
-                            println!("{}", current.path);
+            for zone_name in zones.zones.keys() {
+                if pattern.matches(zone_name) {
+                    let logs = zones.zone_logs(&zone, filter);
+                    for (svc_name, svc_logs) in logs {
+                        if let Some(service) = &service {
+                            if svc_name != service.as_str() {
+                                continue;
+                            }
                         }
-                    }
-                }
-                if filter.archived {
-                    for f in &svc_logs.archived {
-                        if metadata {
-                            print_metadata(f);
-                        } else {
-                            println!("{}", f.path);
+                        if filter.current {
+                            if let Some(current) = &svc_logs.current {
+                                if metadata {
+                                    print_metadata(current);
+                                } else {
+                                    println!("{}", current.path);
+                                }
+                            }
                         }
-                    }
-                }
-                if filter.extra {
-                    for f in &svc_logs.extra {
-                        if metadata {
-                            print_metadata(f);
-                        } else {
-                            println!("{}", f.path);
+                        if filter.archived {
+                            for f in &svc_logs.archived {
+                                if metadata {
+                                    print_metadata(f);
+                                } else {
+                                    println!("{}", f.path);
+                                }
+                            }
+                        }
+                        if filter.extra {
+                            for f in &svc_logs.extra {
+                                if metadata {
+                                    print_metadata(f);
+                                } else {
+                                    println!("{}", f.path);
+                                }
+                            }
                         }
                     }
                 }
