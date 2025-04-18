@@ -35,8 +35,8 @@ use nexus_client::types::PhysicalDiskPath;
 use nexus_client::types::SagaState;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_inventory::now_db_precision;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
@@ -3167,7 +3167,7 @@ async fn cmd_nexus_sled_expunge_with_datastore(
     let opctx = &opctx;
 
     // First, we need to look up the sled so we know its serial number.
-    let (_authz_sled, sled) = LookupPath::new(opctx, &datastore)
+    let (_authz_sled, sled) = LookupPath::new(opctx, datastore)
         .sled_id(args.sled_id.into_untyped_uuid())
         .fetch()
         .await
@@ -3271,7 +3271,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 
     // First, we need to look up the disk so we can lookup identity information.
     let (_authz_physical_disk, physical_disk) =
-        LookupPath::new(opctx, &datastore)
+        LookupPath::new(opctx, datastore)
             .physical_disk(args.physical_disk_id)
             .fetch()
             .await

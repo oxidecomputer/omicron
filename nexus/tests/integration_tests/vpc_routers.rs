@@ -7,8 +7,8 @@ use crate::integration_tests::instances::instance_simulate;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -524,7 +524,7 @@ async fn test_vpc_routers_custom_delivered_to_instance(
         )
         .await;
 
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance.identity.id)
             .lookup_for(nexus_db_queries::authz::Action::Read)
             .await

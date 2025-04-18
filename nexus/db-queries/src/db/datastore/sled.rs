@@ -9,10 +9,7 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::TransactionError;
 use crate::db::datastore::ValidateTransition;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::AffinityPolicy;
 use crate::db::model::Sled;
 use crate::db::model::SledResourceVmm;
@@ -21,14 +18,17 @@ use crate::db::model::SledUpdate;
 use crate::db::model::to_db_sled_policy;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use crate::db::pool::DbConnection;
 use crate::db::queries::sled_reservation::sled_find_targets_query;
 use crate::db::queries::sled_reservation::sled_insert_resource_query;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledPolicy;
@@ -1068,7 +1068,6 @@ pub(in crate::db::datastore) mod test {
     use crate::db::datastore::test_utils::{
         Expected, IneligibleSleds, sled_set_policy, sled_set_state,
     };
-    use crate::db::lookup::LookupPath;
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
     use crate::db::model::to_db_typed_uuid;
@@ -1080,6 +1079,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::small_resource_request;
     use anyhow::{Context, Result};
     use itertools::Itertools;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
@@ -1217,7 +1217,7 @@ pub(in crate::db::datastore) mod test {
         assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
 
         // The sled should not have been updated.
-        let (_, observed_sled_2) = LookupPath::new(&opctx, &datastore)
+        let (_, observed_sled_2) = LookupPath::new(&opctx, datastore)
             .sled_id(observed_sled.id())
             .fetch_for(authz::Action::Modify)
             .await

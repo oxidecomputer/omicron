@@ -8,14 +8,14 @@ use crate::context::OpContext;
 use crate::db::datastore::address_lot::{
     ReserveBlockError, ReserveBlockTxnError,
 };
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::LoopbackAddress;
 use crate::db::pagination::paginated;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_types::external_api::params::LoopbackAddressCreate;
 use omicron_common::api::external::{

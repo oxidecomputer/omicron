@@ -15,10 +15,7 @@ use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
-use crate::db::lookup::LookupPath;
 use crate::db::model::Disk;
 use crate::db::model::DiskRuntimeState;
 use crate::db::model::DiskUpdate;
@@ -36,6 +33,9 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::LookupPath;
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
@@ -903,7 +903,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (.., authz_disk, db_disk) = LookupPath::new(&opctx, &db_datastore)
+        let (.., authz_disk, db_disk) = LookupPath::new(&opctx, db_datastore)
             .disk_id(disk.id())
             .fetch()
             .await
@@ -929,7 +929,7 @@ mod tests {
         // Assert initial state - deleting the Disk will make LookupPath::fetch
         // not work.
         {
-            LookupPath::new(&opctx, &db_datastore)
+            LookupPath::new(&opctx, db_datastore)
                 .disk_id(disk.id())
                 .fetch()
                 .await
@@ -946,7 +946,7 @@ mod tests {
         // Assert state change
 
         {
-            let (.., db_disk) = LookupPath::new(&opctx, &db_datastore)
+            let (.., db_disk) = LookupPath::new(&opctx, db_datastore)
                 .disk_id(disk.id())
                 .fetch()
                 .await
@@ -967,7 +967,7 @@ mod tests {
         // Assert state is the same after the second call
 
         {
-            let (.., db_disk) = LookupPath::new(&opctx, &db_datastore)
+            let (.., db_disk) = LookupPath::new(&opctx, db_datastore)
                 .disk_id(disk.id())
                 .fetch()
                 .await

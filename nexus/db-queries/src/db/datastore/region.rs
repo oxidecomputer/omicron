@@ -10,9 +10,6 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
-use crate::db::lookup::LookupPath;
 use crate::db::model::CrucibleDataset;
 use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Region;
@@ -27,6 +24,9 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::LookupPath;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
@@ -134,7 +134,7 @@ impl DataStore {
                     .map_err(|e| Error::invalid_request(&e.to_string()))?)
             }
             params::DiskSource::Snapshot { snapshot_id } => {
-                let (.., db_snapshot) = LookupPath::new(opctx, &self)
+                let (.., db_snapshot) = LookupPath::new(opctx, self)
                     .snapshot_id(*snapshot_id)
                     .fetch()
                     .await?;
@@ -142,7 +142,7 @@ impl DataStore {
                 Ok(db_snapshot.block_size)
             }
             params::DiskSource::Image { image_id } => {
-                let (.., db_image) = LookupPath::new(opctx, &self)
+                let (.., db_image) = LookupPath::new(opctx, self)
                     .image_id(*image_id)
                     .fetch()
                     .await?;
