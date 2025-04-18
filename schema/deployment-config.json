@@ -26,6 +26,15 @@
         "format": "ip"
       }
     },
+    "external_http_clients": {
+      "description": "Configuration for HTTP clients to external services.",
+      "default": {},
+      "allOf": [
+        {
+          "$ref": "#/definitions/ExternalHttpClientConfig"
+        }
+      ]
+    },
     "id": {
       "description": "Uuid of the Nexus instance",
       "allOf": [
@@ -84,6 +93,19 @@
           }
         }
       ]
+    },
+    "ExternalHttpClientConfig": {
+      "description": "Configuration for HTTP clients to external services.",
+      "type": "object",
+      "properties": {
+        "interface": {
+          "description": "If present, bind all TCP connections for external HTTP clients on the specified interface name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     },
     "InternalDns": {
       "description": "The mechanism Nexus should use to contact the internal DNS servers.",

@@ -31,6 +31,8 @@
 //    001de000-074c   built-in services vpc
 //    001de000-c470   built-in services vpc subnets
 //    001de000-all0   singleton ID for source IP allowlist ("all0" is like "allow")
+//    001de000-7768   singleton ID for webhook probe event ('wh' for 'webhook'
+//                    is ascii 0x77 0x68).
 
 use std::sync::LazyLock;
 

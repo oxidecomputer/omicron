@@ -352,7 +352,7 @@ impl<'a> Project<'a> {
         let (authz_silo, _) = Silo::lookup_by_id_no_authz(
                 opctx,
                 datastore,
-                &db_row.silo_id,
+                &db_row.silo_id.into(),
             )
             .await?;
         let authz_project = Self::make_authz(

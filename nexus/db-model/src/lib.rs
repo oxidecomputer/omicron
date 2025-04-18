@@ -62,11 +62,19 @@ mod producer_endpoint;
 mod project;
 mod rendezvous_debug_dataset;
 mod semver_version;
+mod serde_time_delta;
 mod switch_interface;
 mod switch_port;
 mod target_release;
 mod v2p_mapping;
 mod vmm_state;
+mod webhook_delivery;
+mod webhook_delivery_attempt_result;
+mod webhook_delivery_state;
+mod webhook_delivery_trigger;
+mod webhook_event;
+mod webhook_event_class;
+mod webhook_rx;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
@@ -233,6 +241,13 @@ pub use vpc_firewall_rule::*;
 pub use vpc_route::*;
 pub use vpc_router::*;
 pub use vpc_subnet::*;
+pub use webhook_delivery::*;
+pub use webhook_delivery_attempt_result::*;
+pub use webhook_delivery_state::*;
+pub use webhook_delivery_trigger::*;
+pub use webhook_event::*;
+pub use webhook_event_class::*;
+pub use webhook_rx::*;
 pub use zpool::*;
 
 // TODO: The existence of both impl_enum_type and impl_enum_wrapper is a
