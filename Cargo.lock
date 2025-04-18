@@ -7182,6 +7182,7 @@ dependencies = [
  "toml 0.8.20",
  "tufaceous-artifact",
  "uuid",
+ "zip 2.6.1",
 ]
 
 [[package]]
