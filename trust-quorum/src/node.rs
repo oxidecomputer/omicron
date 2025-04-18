@@ -89,22 +89,40 @@ impl Node {
             return Ok(None);
         }
 
-        // Only commit if we have a prepare and it's the latest prepare.
+        // Only commit if we have a `PrepareMsg` and it's the latest `PrepareMsg`.
         //
-        // This forces a global ordering of prepares, because it's only possible
-        // to rederive a key share in a `Prepare` for the current configuration.
+        // This forces a global ordering of `PrepareMsg`s, because it's only
+        // possible to re-derive a key share in a `PrepareMsg` for the current
+        // configuration.
         //
-        // In practice this check will always succeed if we have the prepare
-        // for this epoch, because later Prepare messages won't be able to be
-        // accepted. This is because the commmit for the earlier Prepare
-        // would have been rejected as dictated by the `Prepare` messsage's
-        // `last_committed_epoch` field. However, we double check that here
-        // for safety.
-        if self.persistent_state.last_prepared_epoch() != Some(epoch) {
-            return Err(CommitError::StaleCommit);
+        // In practice this check will always succeed if we have the
+        // `PrepareMsg` for this epoch, because later `Prepare` messages would
+        // not have been accepted before this commit arrived. This is because
+        // each `PrepareMsg` contains the `last_committed_epoch` that must have
+        // been seen in order to be accepted. If this commit hadn't occurred,
+        // then it wasn't part of the chain of `last_committed_epoch`s, and was
+        // abandonded/canceled. In that case, if we ended up getting a commit,
+        // then it would not inductively have been part of the existing chain
+        // and so would be a bug in the protocol execution. Because of this we
+        // check and error on this condition.
+        let last_prepared_epoch = self.persistent_state.last_prepared_epoch();
+        if last_prepared_epoch != Some(epoch) {
+            error!(
+                self.log,
+                "Commit message occurred out of order";
+                "epoch" => %epoch,
+                "last_prepared_epoch" => ?last_prepared_epoch
+            );
+            return Err(CommitError::OutOfOrderCommit);
         }
         if let Some(prepare) = self.persistent_state.prepares.get(&epoch) {
             if prepare.config.rack_id != rack_id {
+                error!(
+                    self.log,
+                    "Commit attempted with invalid rack_id";
+                    "expected" => %prepare.config.rack_id,
+                    "got" => %rack_id
+                );
                 return Err(CommitError::InvalidRackId(
                     MismatchedRackIdError {
                         expected: prepare.config.rack_id,

@@ -10,7 +10,7 @@ use crate::messages::{PeerMsg, PrepareMsg};
 use crate::validators::ValidatedReconfigureMsg;
 use crate::{Configuration, Envelope, Epoch, PlatformId};
 use gfss::shamir::Share;
-use slog::{Logger, warn};
+use slog::{Logger, info, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
@@ -81,6 +81,12 @@ impl CoordinatorState {
             prepare_acks: BTreeSet::new(),
         };
 
+        info!(
+            log,
+            "Starting coordination on uninitialized node";
+            "epoch" => %config.epoch
+        );
+
         let state = CoordinatorState::new(log, now, msg, config, op);
 
         // Safety: Construction of a `ValidatedReconfigureMsg` ensures that
@@ -97,6 +103,13 @@ impl CoordinatorState {
         last_committed_config: &Configuration,
     ) -> Result<CoordinatorState, ReconfigurationError> {
         let (config, new_shares) = Configuration::new(&msg)?;
+
+        info!(
+            log,
+            "Starting coordination on existing node";
+            "epoch" => %config.epoch,
+            "last_committed_epoch" => %last_committed_config.epoch
+        );
 
         // We must collect shares from the last configuration
         // so we can recompute the old rack secret.

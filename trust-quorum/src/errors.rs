@@ -21,7 +21,7 @@ pub enum CommitError {
     MissingPrepare,
 
     #[error("prepare for a later configuration exists")]
-    StaleCommit,
+    OutOfOrderCommit,
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
