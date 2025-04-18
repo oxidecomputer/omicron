@@ -9,4 +9,5 @@ workspace = true
 
 [dependencies]
 omicron-workspace-hack.workspace = true
+thiserror.workspace = true
 tokio.workspace = true

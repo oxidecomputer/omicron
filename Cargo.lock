@@ -5874,6 +5874,7 @@ name = "nexus-background-task-interface"
 version = "0.1.0"
 dependencies = [
  "omicron-workspace-hack",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
