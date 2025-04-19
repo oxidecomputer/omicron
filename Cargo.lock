@@ -716,7 +716,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -739,7 +739,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -920,7 +920,7 @@ dependencies = [
  "pq-sys",
  "proptest",
  "rand 0.8.5",
- "secrecy",
+ "secrecy 0.10.3",
  "serde",
  "serde_with",
  "sha3",
@@ -1615,7 +1615,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3688,7 +3688,7 @@ dependencies = [
  "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
- "secrecy",
+ "secrecy 0.10.3",
  "subtle",
  "test-strategy",
  "thiserror 1.0.69",
@@ -5146,7 +5146,7 @@ dependencies = [
  "hkdf",
  "omicron-common",
  "omicron-workspace-hack",
- "secrecy",
+ "secrecy 0.10.3",
  "sha3",
  "slog",
  "thiserror 1.0.69",
@@ -5318,7 +5318,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -7884,7 +7884,7 @@ dependencies = [
  "inout",
  "ipnetwork",
  "itertools 0.10.5",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -9058,7 +9058,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "rand 0.8.5",
@@ -10996,6 +10996,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "secrecy"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e891af845473308773346dc847b2c23ee78fe442e0472ac50e22a18a93d3ae5a"
+dependencies = [
+ "zeroize",
+]
+
+[[package]]
 name = "security-framework"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11833,7 +11842,7 @@ dependencies = [
  "libipcc",
  "pem-rfc7468",
  "rustls 0.23.19",
- "secrecy",
+ "secrecy 0.8.0",
  "serde",
  "sha2",
  "sha3",
@@ -14130,7 +14139,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
