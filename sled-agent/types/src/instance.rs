@@ -9,14 +9,20 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
-use omicron_common::NoDebug;
-use omicron_common::api::internal::{
-    nexus::{InstanceProperties, SledVmmState, VmmRuntimeState},
-    shared::{
-        DhcpConfig, NetworkInterface, ResolvedVpcFirewallRule, SourceNatConfig,
+use omicron_common::api::{
+    external::Hostname,
+    internal::{
+        nexus::{SledVmmState, VmmRuntimeState},
+        shared::{
+            DhcpConfig, NetworkInterface, ResolvedVpcFirewallRule,
+            SourceNatConfig,
+        },
     },
 };
 use omicron_uuid_kinds::InstanceUuid;
+use propolis_client::instance_spec::{
+    ComponentV0, CrucibleStorageBackend, SpecKey, VirtioNetworkBackend,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -25,9 +31,13 @@ use uuid::Uuid;
 /// agent.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
-    /// A description of the instance's virtual hardware and the initial runtime
-    /// state this sled agent should store for this incarnation of the instance.
-    pub hardware: InstanceHardware,
+    /// The virtual hardware configuration this virtual machine should have when
+    /// it is started.
+    pub vmm_spec: VmmSpec,
+
+    /// Information about the sled-local configuration that needs to be
+    /// established to make the VM's virtual hardware fully functional.
+    pub local_config: InstanceSledLocalConfig,
 
     /// The initial VMM runtime state for the VMM being registered.
     pub vmm_runtime: VmmRuntimeState,
@@ -47,43 +57,11 @@ pub struct InstanceEnsureBody {
     pub metadata: InstanceMetadata,
 }
 
-/// A request to attach a disk to an instance.
+/// Describes sled-local configuration that a sled-agent must establish to make
+/// the instance's virtual hardware fully functional.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct InstanceDisk {
-    /// The disk's UUID.
-    pub disk_id: Uuid,
-    /// The logical slot number assigned to the disk in its database record.
-    pub slot: u8,
-    /// True if the disk is read-only.
-    pub read_only: bool,
-    /// A JSON representation of the Crucible volume construction request for
-    /// this attachment.
-    //
-    // This is marked as `NoDebug` because the VCR contains the volume's
-    // encryption keys.
-    pub vcr_json: NoDebug<String>,
-
-    /// The disk's name, used to generate the serial number for the virtual disk
-    /// exposed to the guest.
-    //
-    // TODO(#7153): Making this depend on the disk name means that a disk's ID
-    // may change if it is renamed or if a snapshot of it is used to create a
-    // new disk.
-    pub name: String,
-}
-
-/// Configures how an instance is told to try to boot.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct InstanceBootSettings {
-    /// Propolis should tell guest firmware to try to boot from devices in this
-    /// order.
-    pub order: Vec<Uuid>,
-}
-
-/// Describes the instance hardware.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct InstanceHardware {
-    pub properties: InstanceProperties,
+pub struct InstanceSledLocalConfig {
+    pub hostname: Hostname,
     pub nics: Vec<NetworkInterface>,
     pub source_nat: SourceNatConfig,
     /// Zero or more external IP addresses (either floating or ephemeral),
@@ -92,9 +70,6 @@ pub struct InstanceHardware {
     pub floating_ips: Vec<IpAddr>,
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
-    pub disks: Vec<InstanceDisk>,
-    pub boot_settings: Option<InstanceBootSettings>,
-    pub cloud_init_bytes: Option<NoDebug<String>>,
 }
 
 /// Metadata used to track statistics about an instance.
@@ -197,4 +172,38 @@ pub struct InstanceMigrationTargetParams {
 pub enum InstanceExternalIpBody {
     Ephemeral(IpAddr),
     Floating(IpAddr),
+}
+
+/// Specifies the virtual hardware configuration of a new Propolis VMM in the
+/// form of a Propolis instance specification.
+///
+/// Sled-agent expects that when an instance spec is provided alongside an
+/// `InstanceSledLocalConfig` to initialize a new instance, the NIC IDs in that
+/// config's network interface list will match the IDs of the virtio network
+/// backends in the instance spec.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VmmSpec(pub propolis_client::instance_spec::InstanceSpecV0);
+
+impl VmmSpec {
+    pub fn crucible_backends(
+        &self,
+    ) -> impl Iterator<Item = (&SpecKey, &CrucibleStorageBackend)> {
+        self.0.components.iter().filter_map(
+            |(key, component)| match component {
+                ComponentV0::CrucibleStorageBackend(be) => Some((key, be)),
+                _ => None,
+            },
+        )
+    }
+
+    pub fn viona_backends(
+        &self,
+    ) -> impl Iterator<Item = (&SpecKey, &VirtioNetworkBackend)> {
+        self.0.components.iter().filter_map(
+            |(key, component)| match component {
+                ComponentV0::VirtioNetworkBackend(be) => Some((key, be)),
+                _ => None,
+            },
+        )
+    }
 }
