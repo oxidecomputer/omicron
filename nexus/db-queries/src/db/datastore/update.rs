@@ -16,6 +16,7 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::{ArtifactHash, TufArtifact, TufRepo, TufRepoDescription};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Generation, ListResultVec,
@@ -47,7 +48,7 @@ impl TufRepoInsertResponse {
 
 async fn artifacts_for_repo(
     repo_id: TypedUuid<TufRepoKind>,
-    conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+    conn: &async_bb8_diesel::Connection<DbConnection>,
 ) -> Result<Vec<TufArtifact>, DieselError> {
     use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
     use nexus_db_schema::schema::tuf_repo_artifact::dsl as tuf_repo_artifact_dsl;
@@ -174,7 +175,7 @@ impl DataStore {
 // of text.
 async fn insert_impl(
     log: slog::Logger,
-    conn: async_bb8_diesel::Connection<crate::db::DbConnection>,
+    conn: async_bb8_diesel::Connection<DbConnection>,
     desc: &external::TufRepoDescription,
     err: OptionalError<InsertError>,
 ) -> Result<TufRepoInsertResponse, DieselError> {
@@ -423,7 +424,7 @@ async fn insert_impl(
 }
 
 async fn get_generation(
-    conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+    conn: &async_bb8_diesel::Connection<DbConnection>,
 ) -> Result<Generation, DieselError> {
     use nexus_db_schema::schema::tuf_generation::dsl;
 
@@ -436,7 +437,7 @@ async fn get_generation(
 }
 
 async fn put_generation(
-    conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+    conn: &async_bb8_diesel::Connection<DbConnection>,
     old_generation: nexus_db_model::Generation,
     new_generation: nexus_db_model::Generation,
 ) -> Result<nexus_db_model::Generation, DieselError> {

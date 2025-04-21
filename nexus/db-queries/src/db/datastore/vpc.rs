@@ -55,6 +55,7 @@ use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::DbBpZoneDisposition;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::InternetGateway;
@@ -1772,7 +1773,7 @@ impl DataStore {
 
     pub async fn router_create_route_on_connection(
         route: RouterRoute,
-        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> CreateResult<RouterRoute> {
         use nexus_db_schema::schema::router_route::dsl;
         let router_id = route.vpc_router_id;

@@ -22,7 +22,6 @@ use crate::db::model::IpPoolUpdate;
 use crate::db::model::Name;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -34,6 +33,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
+use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::InternetGateway;
 use nexus_db_model::InternetGatewayIpPool;
@@ -527,7 +527,7 @@ impl DataStore {
         opctx: &OpContext,
         silo_id: Uuid,
         ip_pool_id: Uuid,
-        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> UpdateResult<()> {
         use nexus_db_schema::schema::internet_gateway::dsl as igw_dsl;
         use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as igw_ip_pool_dsl;
@@ -620,7 +620,7 @@ impl DataStore {
         opctx: &OpContext,
         silo_id: Uuid,
         ip_pool_id: Uuid,
-        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> UpdateResult<()> {
         use nexus_db_schema::schema::internet_gateway::dsl as igw_dsl;
         use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as igw_ip_pool_dsl;

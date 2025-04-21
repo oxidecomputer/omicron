@@ -16,7 +16,7 @@ pub use propolis_client::{CrucibleOpts, VolumeConstructionRequest};
 
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent.json",
-    derives = [schemars::JsonSchema, PartialEq],
+    interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -28,6 +28,7 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
+    derives = [schemars::JsonSchema, PartialEq],
     patch = {
         BfdPeerConfig = { derives = [Eq, Hash] },
         BgpConfig = { derives = [Eq, Hash] },

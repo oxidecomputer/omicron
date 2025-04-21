@@ -786,6 +786,7 @@ mod test {
 
     progenitor::generate_api!(
         spec = "tests/output/test-server.json",
+        interface = Positional,
         inner_type = slog::Logger,
         pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
             slog::debug!(log, "client request";

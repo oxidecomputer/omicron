@@ -7,6 +7,7 @@
 use async_bb8_diesel::AsyncConnection;
 use chrono::Utc;
 use diesel::result::Error as DieselError;
+use nexus_db_lookup::DbConnection;
 use oximeter::{MetricsError, types::Sample};
 use rand::{Rng, thread_rng};
 use slog::{Logger, info, warn};
@@ -96,15 +97,14 @@ impl RetryHelper {
     /// Calls the function "f" in an asynchronous, retryable transaction.
     pub async fn transaction<R, Func, Fut>(
         self,
-        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         f: Func,
     ) -> Result<R, DieselError>
     where
         R: Send + 'static,
         Fut: std::future::Future<Output = Result<R, DieselError>> + Send,
-        Func: Fn(async_bb8_diesel::Connection<crate::db::DbConnection>) -> Fut
-            + Send
-            + Sync,
+        Func:
+            Fn(async_bb8_diesel::Connection<DbConnection>) -> Fut + Send + Sync,
     {
         crate::probes::transaction__start!(|| {
             (conn.as_sync_conn().id(), self.name)
@@ -200,14 +200,14 @@ impl NonRetryHelper {
     /// Calls the function "f" in an asynchronous, non-retryable transaction.
     pub async fn transaction<R, E, Func, Fut>(
         self,
-        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         f: Func,
     ) -> Result<R, E>
     where
         R: Send + 'static,
         E: From<DieselError> + std::fmt::Debug + Send + 'static,
         Fut: std::future::Future<Output = Result<R, E>> + Send,
-        Func: FnOnce(async_bb8_diesel::Connection<crate::db::DbConnection>) -> Fut
+        Func: FnOnce(async_bb8_diesel::Connection<DbConnection>) -> Fut
             + Send
             + Sync,
     {

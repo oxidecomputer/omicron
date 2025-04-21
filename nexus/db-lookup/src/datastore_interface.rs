@@ -41,7 +41,12 @@ where
     }
 }
 
-// These are duplicated from nexus-db-queries for now.
+// It's a bit funky for these general type aliases to live in something as
+// specific as nexus-db-lookup, but there isn't a more obvious place to put them
+// that doesn't introduce new, unnecessary dependency edges.
+//
+// If a more natural location becomes available in the future, consider moving
+// these aliases there.
 pub type DbConnection = DTraceConnection<PgConnection>;
 pub type DataStoreConnection =
     qorb::claim::Handle<async_bb8_diesel::Connection<DbConnection>>;
