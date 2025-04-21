@@ -124,9 +124,6 @@ use tokio::sync::{MutexGuard, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-#[cfg(test)]
-use illumos_utils::zone::MockZones as Zones;
-#[cfg(not(test))]
 use illumos_utils::zone::Zones;
 
 const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
@@ -477,6 +474,34 @@ impl Config {
     }
 }
 
+/// Describes the host OS interfaces used by [ServiceManager].
+///
+/// Default implementations cause this trait to access the host
+/// OS, but can be overwritten to intercept calls to the host
+/// for testing.
+pub trait SystemApi: Send + Sync {
+    fn fake_install_dir(&self) -> Option<&Utf8Path> {
+        None
+    }
+
+    fn dladm(&self) -> Arc<dyn illumos_utils::dladm::Api> {
+        Arc::new(illumos_utils::dladm::Dladm::real_api())
+    }
+    fn zones(&self) -> Arc<dyn illumos_utils::zone::Api> {
+        Arc::new(illumos_utils::zone::Zones::real_api())
+    }
+}
+
+pub struct RealSystemApi {}
+
+impl RealSystemApi {
+    pub fn new() -> Box<dyn SystemApi> {
+        Box::new(RealSystemApi {})
+    }
+}
+
+impl SystemApi for RealSystemApi {}
+
 // The filename of the ledger, within the provided directory.
 const ZONES_LEDGER_FILENAME: &str = "omicron-zones.json";
 
@@ -744,6 +769,7 @@ pub struct ServiceManagerInner {
     zone_bundler: ZoneBundler,
     ledger_directory_override: OnceLock<Utf8PathBuf>,
     image_directory_override: OnceLock<Utf8PathBuf>,
+    system_api: Box<dyn SystemApi>,
 }
 
 // Late-binding information, only known once the sled agent is up and
@@ -773,6 +799,100 @@ pub struct ServiceManager {
     inner: Arc<ServiceManagerInner>,
 }
 
+/// Ensure that a NAT entry exists, overwriting a previous conflicting entry if
+/// applicable.
+///
+/// nat_ipv\[46\]_create are not idempotent (see oxidecomputer/dendrite#343),
+/// but this wrapper function is. Call this from sagas instead.
+#[allow(clippy::too_many_arguments)]
+async fn dpd_ensure_nat_entry(
+    client: &DpdClient,
+    log: &Logger,
+    target_ip: IpAddr,
+    target_mac: DpdTypes::MacAddr,
+    target_first_port: u16,
+    target_last_port: u16,
+    target_vni: u32,
+    sled_ip_address: &std::net::Ipv6Addr,
+) -> Result<(), Error> {
+    let existing_nat = match &target_ip {
+        IpAddr::V4(ip) => client.nat_ipv4_get(ip, target_first_port).await,
+        IpAddr::V6(ip) => client.nat_ipv6_get(ip, target_first_port).await,
+    };
+
+    // If a NAT entry already exists, but has the wrong internal
+    // IP address, delete the old entry before continuing (the
+    // DPD entry-creation API won't replace an existing entry).
+    // If the entry exists and has the right internal IP, there's
+    // no more work to do for this external IP.
+    match existing_nat {
+        Ok(existing) => {
+            let existing = existing.into_inner();
+            if existing.internal_ip != *sled_ip_address {
+                info!(log, "deleting old nat entry";
+                      "target_ip" => ?target_ip);
+
+                match &target_ip {
+                    IpAddr::V4(ip) => {
+                        client.nat_ipv4_delete(ip, target_first_port).await
+                    }
+                    IpAddr::V6(ip) => {
+                        client.nat_ipv6_delete(ip, target_first_port).await
+                    }
+                }?;
+            } else {
+                info!(log,
+                      "nat entry with expected internal ip exists";
+                      "target_ip" => ?target_ip,
+                      "existing_entry" => ?existing);
+
+                return Ok(());
+            }
+        }
+        Err(e) => {
+            if e.status() == Some(http::StatusCode::NOT_FOUND) {
+                info!(log, "no nat entry found for: {target_ip:#?}");
+            } else {
+                return Err(Error::DpdError(e));
+            }
+        }
+    }
+
+    info!(log, "creating nat entry for: {target_ip:#?}");
+    let nat_target = DpdTypes::NatTarget {
+        inner_mac: target_mac,
+        internal_ip: *sled_ip_address,
+        vni: target_vni.into(),
+    };
+
+    match &target_ip {
+        IpAddr::V4(ip) => {
+            client
+                .nat_ipv4_create(
+                    ip,
+                    target_first_port,
+                    target_last_port,
+                    &nat_target,
+                )
+                .await
+        }
+        IpAddr::V6(ip) => {
+            client
+                .nat_ipv6_create(
+                    ip,
+                    target_first_port,
+                    target_last_port,
+                    &nat_target,
+                )
+                .await
+        }
+    }?;
+
+    info!(log, "creation of nat entry successful for: {target_ip:#?}");
+
+    Ok(())
+}
+
 impl ServiceManager {
     /// Creates a service manager.
     ///
@@ -799,6 +919,33 @@ impl ServiceManager {
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
     ) -> Self {
+        Self::new_inner(
+            log,
+            ddm_reconciler,
+            bootstrap_networking,
+            sled_mode,
+            time_sync_config,
+            sidecar_revision,
+            switch_zone_maghemite_links,
+            storage,
+            zone_bundler,
+            RealSystemApi::new(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_inner(
+        log: &Logger,
+        ddm_reconciler: DdmReconciler,
+        bootstrap_networking: BootstrapNetworking,
+        sled_mode: SledMode,
+        time_sync_config: TimeSyncConfig,
+        sidecar_revision: SidecarRevision,
+        switch_zone_maghemite_links: Vec<PhysicalLink>,
+        storage: StorageHandle,
+        zone_bundler: ZoneBundler,
+        system_api: Box<dyn SystemApi>,
+    ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
         info!(log, "Creating ServiceManager");
         Self {
@@ -818,11 +965,13 @@ impl ServiceManager {
                 underlay_vnic_allocator: VnicAllocator::new(
                     "Service",
                     bootstrap_networking.underlay_etherstub,
+                    system_api.dladm(),
                 ),
                 underlay_vnic: bootstrap_networking.underlay_etherstub_vnic,
                 bootstrap_vnic_allocator: VnicAllocator::new(
                     "Bootstrap",
                     bootstrap_networking.bootstrap_etherstub,
+                    system_api.dladm(),
                 ),
                 ddm_reconciler,
                 sled_info: OnceLock::new(),
@@ -832,6 +981,7 @@ impl ServiceManager {
                 zone_bundler,
                 ledger_directory_override: OnceLock::new(),
                 image_directory_override: OnceLock::new(),
+                system_api,
             }),
         }
     }
@@ -969,7 +1119,6 @@ impl ServiceManager {
         self.ensure_all_omicron_zones(
             &mut existing_zones,
             omicron_zones_config,
-            None,
         )
         .await?;
         Ok(LoadServicesResult::ServicesLoaded)
@@ -1148,7 +1297,8 @@ impl ServiceManager {
                     // The tfport service requires a MAC device to/from which
                     // sidecar packets may be multiplexed.  If the link isn't
                     // present, don't bother trying to start the zone.
-                    match Dladm::verify_link(pkt_source) {
+                    match self.inner.system_api.dladm().verify_link(pkt_source)
+                    {
                         Ok(link) => {
                             // It's important that tfpkt does **not** receive a
                             // link local address! See: https://github.com/oxidecomputer/stlouis/issues/391
@@ -1167,7 +1317,12 @@ impl ServiceManager {
                     // If on a non-gimlet, sled-agent can be configured to map
                     // links into the switch zone. Validate those links here.
                     for link in &self.inner.switch_zone_maghemite_links {
-                        match Dladm::verify_link(&link.to_string()) {
+                        match self
+                            .inner
+                            .system_api
+                            .dladm()
+                            .verify_link(&link.to_string())
+                        {
                             Ok(link) => {
                                 // Link local addresses should be created in the
                                 // zone so that maghemite can listen on them.
@@ -1323,22 +1478,18 @@ impl ServiceManager {
                     "zone_type" => zone_kind.report_str(),
                 );
 
-                dpd_client
-                    .ensure_nat_entry(
-                        &self.inner.log,
-                        target_ip,
-                        dpd_client::types::MacAddr {
-                            a: port.0.mac().into_array(),
-                        },
-                        first_port,
-                        last_port,
-                        port.0.vni().as_u32(),
-                        underlay_address,
-                    )
-                    .await
-                    .map_err(BackoffError::transient)?;
-
-                Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
+                dpd_ensure_nat_entry(
+                    dpd_client,
+                    &self.inner.log,
+                    target_ip,
+                    dpd_client::types::MacAddr { a: port.0.mac().into_array() },
+                    first_port,
+                    last_port,
+                    port.0.vni().as_u32(),
+                    underlay_address,
+                )
+                .await
+                .map_err(BackoffError::transient)
             };
             let log_failure = |error, _| {
                 warn!(
@@ -1405,12 +1556,12 @@ impl ServiceManager {
         // not creating a new property group, nor are we configuring a property
         // group on the instance.
         //
-        // Callers may decide to provide specific addresses to set as
+        // Callers may decide to provide specific addresses to set as additional
         // nameservers; e.g., boundary NTP zones need to specify upstream DNS
         // servers to resolve customer-provided NTP server names.
-        let nameservers = ip_addrs.unwrap_or_else(|| {
-            get_internal_dns_server_addresses(info.underlay_address)
-        });
+        let mut nameservers =
+            get_internal_dns_server_addresses(info.underlay_address);
+        nameservers.extend(ip_addrs.into_iter().flatten());
 
         let mut dns_config_builder = PropertyGroupBuilder::new("install_props");
         for ns_addr in &nameservers {
@@ -1504,7 +1655,6 @@ impl ServiceManager {
         zone_root_path: PathInPool,
         filesystems: &[zone::Fs],
         data_links: &[String],
-        fake_install_dir: Option<&String>,
     ) -> Result<RunningZone, Error> {
         let device_names = Self::devices_needed(&request)?;
         let (bootstrap_vnic, bootstrap_name_and_address) =
@@ -1572,9 +1722,13 @@ impl ServiceManager {
         };
 
         // We use the fake initialiser for testing
-        let mut zone_builder = match fake_install_dir {
-            None => ZoneBuilderFactory::default().builder(),
-            Some(dir) => ZoneBuilderFactory::fake(Some(dir)).builder(),
+        let mut zone_builder = match self.inner.system_api.fake_install_dir() {
+            None => ZoneBuilderFactory::new().builder(),
+            Some(dir) => ZoneBuilderFactory::fake(
+                Some(&dir.as_str().to_string()),
+                illumos_utils::fakes::zone::Zones::new(),
+            )
+            .builder(),
         };
         if let Some(uuid) = unique_name {
             zone_builder = zone_builder.with_unique_name(uuid);
@@ -1817,7 +1971,7 @@ impl ServiceManager {
                             "astring",
                             format!("{CLICKHOUSE_KEEPER_CONFIG_DIR}/{CLICKHOUSE_KEEPER_CONFIG_FILE}"),
                         );
-                let disaled_clickhouse_keeper_service =
+                let disabled_clickhouse_keeper_service =
                     ServiceBuilder::new("oxide/clickhouse_keeper")
                         .add_instance(
                             ServiceInstanceBuilder::new("default")
@@ -1856,7 +2010,7 @@ impl ServiceManager {
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
-                    .add_service(disaled_clickhouse_keeper_service)
+                    .add_service(disabled_clickhouse_keeper_service)
                     .add_service(dns_service)
                     .add_service(enabled_dns_client_service)
                     .add_service(clickhouse_admin_service);
@@ -3298,7 +3452,6 @@ impl ServiceManager {
         zone: &OmicronZoneConfig,
         time_is_synchronized: bool,
         all_u2_pools: &Vec<ZpoolName>,
-        fake_install_dir: Option<&String>,
     ) -> Result<OmicronZone, Error> {
         // Ensure the zone has been fully removed before we try to boot it.
         //
@@ -3333,7 +3486,6 @@ impl ServiceManager {
                 &[],
                 // data_links=
                 &[],
-                fake_install_dir,
             )
             .await?;
 
@@ -3354,7 +3506,6 @@ impl ServiceManager {
         requests: impl Iterator<Item = &OmicronZoneConfig> + Clone,
         time_is_synchronized: bool,
         all_u2_pools: &Vec<ZpoolName>,
-        fake_install_dir: Option<&String>,
     ) -> Result<StartZonesResult, Error> {
         if let Some(name) =
             requests.clone().map(|zone| zone.zone_name()).duplicates().next()
@@ -3371,7 +3522,6 @@ impl ServiceManager {
                 &zone,
                 time_is_synchronized,
                 all_u2_pools,
-                fake_install_dir,
             )
             .await
             .map_err(|err| (zone.zone_name(), err))
@@ -3454,7 +3604,6 @@ impl ServiceManager {
     pub async fn ensure_all_omicron_zones_persistent(
         &self,
         mut request: OmicronZonesConfig,
-        fake_install_dir: Option<&String>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
@@ -3517,12 +3666,7 @@ impl ServiceManager {
 
         let omicron_generation = request.generation;
         let ledger_generation = ledger_zone_config.ledger_generation;
-        self.ensure_all_omicron_zones(
-            &mut existing_zones,
-            request,
-            fake_install_dir,
-        )
-        .await?;
+        self.ensure_all_omicron_zones(&mut existing_zones, request).await?;
         let zones = existing_zones
             .values()
             .map(|omicron_zone| omicron_zone.config.clone())
@@ -3573,7 +3717,6 @@ impl ServiceManager {
         // lock held when calling this function.
         existing_zones: &mut MutexGuard<'_, ZoneMap>,
         new_request: OmicronZonesConfig,
-        fake_install_dir: Option<&String>,
     ) -> Result<(), Error> {
         // Do some data-normalization to ensure we can compare the "requested
         // set" vs the "existing set" as HashSets.
@@ -3610,7 +3753,6 @@ impl ServiceManager {
                 zones_to_be_added.iter(),
                 time_is_synchronized,
                 &all_u2_pools,
-                fake_install_dir,
             )
             .await?;
 
@@ -3687,7 +3829,7 @@ impl ServiceManager {
         zone_config: &OmicronZoneConfig,
     ) -> Result<(), Error> {
         let zone_name = zone_config.zone_name();
-        match Zones::find(&zone_name).await {
+        match self.inner.system_api.zones().find(&zone_name).await {
             Ok(Some(zone)) => {
                 warn!(
                     self.inner.log,
@@ -3701,9 +3843,12 @@ impl ServiceManager {
                 // zone. These links are about to be deleted, and the metrics
                 // task will expire them after a while anyway, but it might be
                 // worth the trouble to do that in the future.
-                if let Err(e) =
-                    Zones::halt_and_remove_logged(&self.inner.log, &zone_name)
-                        .await
+                if let Err(e) = self
+                    .inner
+                    .system_api
+                    .zones()
+                    .halt_and_remove_logged(&self.inner.log, &zone_name)
+                    .await
                 {
                     error!(
                         self.inner.log,
@@ -4798,13 +4943,7 @@ impl ServiceManager {
         let zone_args = ZoneArgs::Switch(&request);
         info!(self.inner.log, "Starting switch zone");
         let zone = self
-            .initialize_zone(
-                zone_args,
-                zone_root_path,
-                filesystems,
-                data_links,
-                None,
-            )
+            .initialize_zone(zone_args, zone_root_path, filesystems, data_links)
             .await?;
         *sled_zone =
             SwitchZoneState::Running { request: request.clone(), zone };
@@ -5012,19 +5151,14 @@ mod illumos_tests {
     use crate::metrics;
 
     use super::*;
-    use illumos_utils::{
-        dladm::{
-            BOOTSTRAP_ETHERSTUB_NAME, Etherstub, MockDladm,
-            UNDERLAY_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_VNIC_NAME,
-        },
-        svc,
-        zone::MockZones,
+    use illumos_utils::dladm::{
+        BOOTSTRAP_ETHERSTUB_NAME, Etherstub, UNDERLAY_ETHERSTUB_NAME,
+        UNDERLAY_ETHERSTUB_VNIC_NAME,
     };
 
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
-    use std::os::unix::process::ExitStatusExt;
     use std::{
         net::{Ipv6Addr, SocketAddrV6},
         time::Duration,
@@ -5036,12 +5170,41 @@ mod illumos_tests {
     const GLOBAL_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
     const SWITCH_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
 
-    const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_ntp";
     const EXPECTED_PORT: u16 = 12223;
 
     // Timeout within which we must have received a message about a zone's links
     // to track. This is very generous.
     const LINK_NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(5);
+
+    struct FakeSystemApi {
+        fake_install_dir: Utf8PathBuf,
+        dladm: Arc<illumos_utils::fakes::dladm::Dladm>,
+        zones: Arc<illumos_utils::fakes::zone::Zones>,
+    }
+
+    impl FakeSystemApi {
+        fn new(fake_install_dir: Utf8PathBuf) -> Box<dyn SystemApi> {
+            Box::new(Self {
+                fake_install_dir,
+                dladm: illumos_utils::fakes::dladm::Dladm::new(),
+                zones: illumos_utils::fakes::zone::Zones::new(),
+            })
+        }
+    }
+
+    impl SystemApi for FakeSystemApi {
+        fn fake_install_dir(&self) -> Option<&Utf8Path> {
+            Some(&self.fake_install_dir)
+        }
+
+        fn dladm(&self) -> Arc<dyn illumos_utils::dladm::Api> {
+            self.dladm.clone()
+        }
+
+        fn zones(&self) -> Arc<dyn illumos_utils::zone::Api> {
+            self.zones.clone()
+        }
+    }
 
     fn make_bootstrap_networking_config() -> BootstrapNetworking {
         BootstrapNetworking {
@@ -5058,175 +5221,11 @@ mod illumos_tests {
         }
     }
 
-    // Returns the expectations for a new service to be created.
-    fn expect_new_service(
-        expected_zone_name_prefix: &str,
-    ) -> Vec<Box<dyn std::any::Any>> {
-        illumos_utils::USE_MOCKS.store(true, Ordering::SeqCst);
-
-        // Ensure zone doesn't already exist
-        let find_zone_ctx = MockZones::find_context();
-        let prefix = expected_zone_name_prefix.to_string();
-        find_zone_ctx.expect().return_once(move |zone_name| {
-            assert!(zone_name.starts_with(&prefix));
-            Ok(None)
-        });
-
-        // Create a VNIC
-        let create_vnic_ctx = MockDladm::create_vnic_context();
-        create_vnic_ctx.expect().return_once(
-            |physical_link: &Etherstub, _, _, _, _| {
-                assert_eq!(&physical_link.0, &UNDERLAY_ETHERSTUB_NAME);
-                Ok(())
-            },
-        );
-        // Install the Omicron Zone
-        let install_ctx = MockZones::install_omicron_zone_context();
-        let prefix = expected_zone_name_prefix.to_string();
-        install_ctx.expect().return_once(
-            move |_, _, name, _, _, _, _, _, _| {
-                assert!(name.starts_with(&prefix));
-                Ok(())
-            },
-        );
-
-        // Boot the zone.
-        let boot_ctx = MockZones::boot_context();
-        let prefix = expected_zone_name_prefix.to_string();
-        boot_ctx.expect().return_once(move |name| {
-            assert!(name.starts_with(&prefix));
-            Ok(())
-        });
-
-        // After calling `MockZones::boot`, `RunningZone::boot` will then look
-        // up the zone ID for the booted zone. This goes through
-        // `MockZone::id` to find the zone and get its ID.
-        let id_ctx = MockZones::id_context();
-        let prefix = expected_zone_name_prefix.to_string();
-        id_ctx.expect().return_once(move |name| {
-            assert!(name.starts_with(&prefix));
-            Ok(Some(1))
-        });
-
-        // Ensure the address exists
-        let ensure_address_ctx = MockZones::ensure_address_context();
-        ensure_address_ctx.expect().return_once(|_, _, _| {
-            Ok(ipnetwork::IpNetwork::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 64)
-                .unwrap())
-        });
-
-        // Wait for the networking service.
-        let wait_ctx = svc::wait_for_service_context();
-        wait_ctx.expect().return_once(|_, _, _| Ok(()));
-
-        let execute_ctx = illumos_utils::execute_helper_context();
-        execute_ctx.expect().times(..).returning(|_| {
-            Ok(std::process::Output {
-                status: std::process::ExitStatus::from_raw(0),
-                stdout: vec![],
-                stderr: vec![],
-            })
-        });
-
-        vec![
-            Box::new(find_zone_ctx),
-            Box::new(create_vnic_ctx),
-            Box::new(install_ctx),
-            Box::new(boot_ctx),
-            Box::new(id_ctx),
-            Box::new(ensure_address_ctx),
-            Box::new(wait_ctx),
-            Box::new(execute_ctx),
-        ]
-    }
-
-    // Configures our mock implementations to work for cases where we configure
-    // multiple zones in one `ensure_all_omicron_zones_persistent()` call.
-    //
-    // This is looser than the expectations created by ensure_new_service()
-    // because these functions may return any number of times.
-    fn expect_new_services() -> Vec<Box<dyn std::any::Any>> {
-        illumos_utils::USE_MOCKS.store(true, Ordering::SeqCst);
-
-        // Ensure zones don't already exist
-        let find_zone_ctx = MockZones::find_context();
-        find_zone_ctx.expect().returning(move |_zone_name| Ok(None));
-
-        // Create a VNIC
-        let create_vnic_ctx = MockDladm::create_vnic_context();
-        create_vnic_ctx.expect().returning(
-            |physical_link: &Etherstub, _, _, _, _| {
-                assert_eq!(&physical_link.0, &UNDERLAY_ETHERSTUB_NAME);
-                Ok(())
-            },
-        );
-
-        // Install the Omicron Zone
-        let install_ctx = MockZones::install_omicron_zone_context();
-        install_ctx.expect().returning(|_, _, name, _, _, _, _, _, _| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            Ok(())
-        });
-
-        // Boot the zone.
-        let boot_ctx = MockZones::boot_context();
-        boot_ctx.expect().returning(|name| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            Ok(())
-        });
-
-        // After calling `MockZones::boot`, `RunningZone::boot` will then look
-        // up the zone ID for the booted zone. This goes through
-        // `MockZone::id` to find the zone and get its ID.
-        let id_ctx = MockZones::id_context();
-        let id = Arc::new(std::sync::Mutex::new(1));
-        id_ctx.expect().returning(move |name| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            let mut value = id.lock().unwrap();
-            let rv = *value;
-            *value = rv + 1;
-            Ok(Some(rv))
-        });
-
-        // Ensure the address exists
-        let ensure_address_ctx = MockZones::ensure_address_context();
-        ensure_address_ctx.expect().returning(|_, _, _| {
-            Ok(ipnetwork::IpNetwork::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 64)
-                .unwrap())
-        });
-
-        // Wait for the networking service.
-        let wait_ctx = svc::wait_for_service_context();
-        wait_ctx.expect().returning(|_, _, _| Ok(()));
-
-        // Import the manifest, enable the service
-        let execute_ctx = illumos_utils::execute_helper_context();
-        execute_ctx.expect().times(..).returning(|_| {
-            Ok(std::process::Output {
-                status: std::process::ExitStatus::from_raw(0),
-                stdout: vec![],
-                stderr: vec![],
-            })
-        });
-
-        vec![
-            Box::new(find_zone_ctx),
-            Box::new(create_vnic_ctx),
-            Box::new(install_ctx),
-            Box::new(boot_ctx),
-            Box::new(id_ctx),
-            Box::new(ensure_address_ctx),
-            Box::new(wait_ctx),
-            Box::new(execute_ctx),
-        ]
-    }
-
     // Prepare to call "ensure" for a new service, then actually call "ensure".
     async fn ensure_new_service(
         mgr: &ServiceManager,
         id: OmicronZoneUuid,
         generation: Generation,
-        tmp_dir: String,
     ) {
         let address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, EXPECTED_PORT, 0, 0);
@@ -5235,7 +5234,6 @@ mod illumos_tests {
             id,
             generation,
             OmicronZoneType::InternalNtp { address },
-            tmp_dir,
         )
         .await
         .expect("Could not create service");
@@ -5246,26 +5244,17 @@ mod illumos_tests {
         id: OmicronZoneUuid,
         generation: Generation,
         zone_type: OmicronZoneType,
-        tmp_dir: String,
     ) -> Result<(), Error> {
-        let zone_prefix = format!("oxz_{}", zone_type.kind().zone_prefix());
-        let _expectations = expect_new_service(&zone_prefix);
-        let r = mgr
-            .ensure_all_omicron_zones_persistent(
-                OmicronZonesConfig {
-                    generation,
-                    zones: vec![OmicronZoneConfig {
-                        id,
-                        zone_type,
-                        filesystem_pool: None,
-                        image_source: OmicronZoneImageSource::InstallDataset,
-                    }],
-                },
-                Some(&tmp_dir),
-            )
-            .await;
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
-        r
+        mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
+            generation,
+            zones: vec![OmicronZoneConfig {
+                id,
+                zone_type,
+                filesystem_pool: None,
+                image_source: OmicronZoneImageSource::InstallDataset,
+            }],
+        })
+        .await
     }
 
     // Prepare to call "ensure" for a service which already exists. We should
@@ -5274,22 +5263,18 @@ mod illumos_tests {
         mgr: &ServiceManager,
         id: OmicronZoneUuid,
         generation: Generation,
-        tmp_dir: String,
     ) {
         let address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, EXPECTED_PORT, 0, 0);
-        mgr.ensure_all_omicron_zones_persistent(
-            OmicronZonesConfig {
-                generation,
-                zones: vec![OmicronZoneConfig {
-                    id,
-                    zone_type: OmicronZoneType::InternalNtp { address },
-                    filesystem_pool: None,
-                    image_source: OmicronZoneImageSource::InstallDataset,
-                }],
-            },
-            Some(&tmp_dir),
-        )
+        mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
+            generation,
+            zones: vec![OmicronZoneConfig {
+                id,
+                zone_type: OmicronZoneType::InternalNtp { address },
+                filesystem_pool: None,
+                image_source: OmicronZoneImageSource::InstallDataset,
+            }],
+        })
         .await
         .unwrap();
     }
@@ -5299,14 +5284,6 @@ mod illumos_tests {
     // This will shut down all allocated zones, and delete their
     // associated VNICs.
     async fn drop_service_manager(mgr: ServiceManager) {
-        let halt_ctx = MockZones::halt_and_remove_logged_context();
-        halt_ctx.expect().returning(|_, name| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            Ok(())
-        });
-        let delete_vnic_ctx = MockDladm::delete_vnic_context();
-        delete_vnic_ctx.expect().returning(|_| Ok(()));
-
         // Also send a message to the metrics task that the VNIC has been
         // deleted.
         let queue = mgr.metrics_queue();
@@ -5400,19 +5377,23 @@ mod illumos_tests {
             self.storage_test_harness.cleanup().await;
         }
 
-        fn new_service_manager(&self) -> ServiceManager {
-            self.new_service_manager_with_timesync(TimeSyncConfig::Skip)
+        fn new_service_manager(
+            &self,
+            system: Box<dyn SystemApi>,
+        ) -> ServiceManager {
+            self.new_service_manager_with_timesync(TimeSyncConfig::Skip, system)
         }
 
         fn new_service_manager_with_timesync(
             &self,
             time_sync_config: TimeSyncConfig,
+            system: Box<dyn SystemApi>,
         ) -> ServiceManager {
             let log = &self.log;
             let reconciler =
                 DdmReconciler::new(Ipv6Subnet::new(Ipv6Addr::LOCALHOST), log)
                     .expect("created DdmReconciler");
-            let mgr = ServiceManager::new(
+            let mgr = ServiceManager::new_inner(
                 log,
                 reconciler,
                 make_bootstrap_networking_config(),
@@ -5422,6 +5403,7 @@ mod illumos_tests {
                 vec![],
                 self.storage_test_harness.handle().clone(),
                 self.zone_bundler.clone(),
+                system,
             );
             self.test_config.override_paths(&mgr);
             mgr
@@ -5460,7 +5442,9 @@ mod illumos_tests {
         let test_config = TestConfig::new().await;
         let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
-        let mgr = helper.new_service_manager();
+        let mgr = helper.new_service_manager(FakeSystemApi::new(
+            test_config.config_dir.path().to_path_buf(),
+        ));
         let (metrics_queue, mut metrics_rx) = MetricsRequestQueue::for_test();
         LedgerTestHelper::sled_agent_started(
             &logctx.log,
@@ -5477,13 +5461,7 @@ mod illumos_tests {
 
         let v2 = v1.next();
         let id = OmicronZoneUuid::new_v4();
-        ensure_new_service(
-            &mgr,
-            id,
-            v2,
-            String::from(test_config.config_dir.path().as_str()),
-        )
-        .await;
+        ensure_new_service(&mgr, id, v2).await;
 
         let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v2);
@@ -5536,8 +5514,10 @@ mod illumos_tests {
         let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
 
-        let mgr =
-            helper.new_service_manager_with_timesync(TimeSyncConfig::Fail);
+        let mgr = helper.new_service_manager_with_timesync(
+            TimeSyncConfig::Fail,
+            FakeSystemApi::new(test_config.config_dir.path().to_path_buf()),
+        );
         let (metrics_queue, mut metrics_rx) = MetricsRequestQueue::for_test();
         LedgerTestHelper::sled_agent_started(
             &logctx.log,
@@ -5563,7 +5543,6 @@ mod illumos_tests {
             id,
             v2,
             OmicronZoneType::Oximeter { address },
-            String::from(test_config.config_dir.path().as_str()),
         )
         .await;
 
@@ -5597,7 +5576,6 @@ mod illumos_tests {
             id,
             v2,
             OmicronZoneType::InternalNtp { address },
-            String::from(test_config.config_dir.path().as_str()),
         )
         .await
         .unwrap();
@@ -5615,7 +5593,9 @@ mod illumos_tests {
         let test_config = TestConfig::new().await;
         let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
-        let mgr = helper.new_service_manager();
+        let mgr = helper.new_service_manager(FakeSystemApi::new(
+            test_config.config_dir.path().to_path_buf(),
+        ));
         let (metrics_queue, mut metrics_rx) = MetricsRequestQueue::for_test();
         LedgerTestHelper::sled_agent_started(
             &logctx.log,
@@ -5627,10 +5607,9 @@ mod illumos_tests {
 
         let v2 = Generation::new().next();
         let id = OmicronZoneUuid::new_v4();
-        let dir = String::from(test_config.config_dir.path().as_str());
-        ensure_new_service(&mgr, id, v2, dir.clone()).await;
+        ensure_new_service(&mgr, id, v2).await;
         let v3 = v2.next();
-        ensure_existing_service(&mgr, id, v3, dir).await;
+        ensure_existing_service(&mgr, id, v3).await;
         let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v3);
         assert_eq!(found.zones.len(), 1);
@@ -5686,7 +5665,9 @@ mod illumos_tests {
 
         // First, spin up a ServiceManager, create a new zone, and then tear
         // down the ServiceManager.
-        let mgr = helper.new_service_manager();
+        let mgr = helper.new_service_manager(FakeSystemApi::new(
+            test_config.config_dir.path().to_path_buf(),
+        ));
         let (metrics_queue, mut metrics_rx) = MetricsRequestQueue::for_test();
         LedgerTestHelper::sled_agent_started(
             &logctx.log,
@@ -5698,13 +5679,7 @@ mod illumos_tests {
 
         let v2 = Generation::new().next();
         let id = OmicronZoneUuid::new_v4();
-        ensure_new_service(
-            &mgr,
-            id,
-            v2,
-            String::from(test_config.config_dir.path().as_str()),
-        )
-        .await;
+        ensure_new_service(&mgr, id, v2).await;
 
         let sled_id = mgr.sled_id();
         drop_service_manager(mgr).await;
@@ -5748,8 +5723,10 @@ mod illumos_tests {
 
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
-        let _expectations = expect_new_service(EXPECTED_ZONE_NAME_PREFIX);
-        let mgr = helper.new_service_manager();
+        // TODO?
+        let mgr = helper.new_service_manager(FakeSystemApi::new(
+            test_config.config_dir.path().to_path_buf(),
+        ));
         let (metrics_queue, mut metrics_rx) = MetricsRequestQueue::for_test();
         LedgerTestHelper::sled_agent_started(
             &logctx.log,
@@ -5758,7 +5735,6 @@ mod illumos_tests {
             metrics_queue,
         )
         .await;
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
 
         let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v2);
@@ -5788,7 +5764,9 @@ mod illumos_tests {
 
         // First, spin up a ServiceManager, create a new zone, and then tear
         // down the ServiceManager.
-        let mgr = helper.new_service_manager();
+        let mgr = helper.new_service_manager(FakeSystemApi::new(
+            test_config.config_dir.path().to_path_buf(),
+        ));
         let metrics_handles = MetricsRequestQueue::for_test();
         LedgerTestHelper::sled_agent_started(
             &logctx.log,
@@ -5801,13 +5779,7 @@ mod illumos_tests {
         let v1 = Generation::new();
         let v2 = v1.next();
         let id = OmicronZoneUuid::new_v4();
-        ensure_new_service(
-            &mgr,
-            id,
-            v2,
-            String::from(test_config.config_dir.path().as_str()),
-        )
-        .await;
+        ensure_new_service(&mgr, id, v2).await;
         drop_service_manager(mgr).await;
 
         // Next, delete the ledger. This means the zone we just created will not
@@ -5818,7 +5790,9 @@ mod illumos_tests {
         .unwrap();
 
         // Observe that the old service is not re-initialized.
-        let mgr = helper.new_service_manager();
+        let mgr = helper.new_service_manager(FakeSystemApi::new(
+            test_config.config_dir.path().to_path_buf(),
+        ));
         let metrics_handles = MetricsRequestQueue::for_test();
         LedgerTestHelper::sled_agent_started(
             &logctx.log,
@@ -5846,7 +5820,9 @@ mod illumos_tests {
         let test_config = TestConfig::new().await;
         let mut helper =
             LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
-        let mgr = helper.new_service_manager();
+        let mgr = helper.new_service_manager(FakeSystemApi::new(
+            test_config.config_dir.path().to_path_buf(),
+        ));
         let metrics_handles = MetricsRequestQueue::for_test();
         LedgerTestHelper::sled_agent_started(
             &logctx.log,
@@ -5861,7 +5837,6 @@ mod illumos_tests {
         let v2 = v1.next();
         let id1 = OmicronZoneUuid::new_v4();
 
-        let _expectations = expect_new_services();
         let address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, EXPECTED_PORT, 0, 0);
         let mut zones = vec![OmicronZoneConfig {
@@ -5871,11 +5846,10 @@ mod illumos_tests {
             image_source: OmicronZoneImageSource::InstallDataset,
         }];
 
-        let tmp_dir = String::from(test_config.config_dir.path().as_str());
-        mgr.ensure_all_omicron_zones_persistent(
-            OmicronZonesConfig { generation: v2, zones: zones.clone() },
-            Some(&tmp_dir),
-        )
+        mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
+            generation: v2,
+            zones: zones.clone(),
+        })
         .await
         .unwrap();
 
@@ -5896,12 +5870,11 @@ mod illumos_tests {
 
         // Now try to apply that list with an older generation number.  This
         // shouldn't work and the reported state should be unchanged.
-        let tmp_dir = String::from(test_config.config_dir.path().as_str());
         let error = mgr
-            .ensure_all_omicron_zones_persistent(
-                OmicronZonesConfig { generation: v1, zones: zones.clone() },
-                Some(&tmp_dir),
-            )
+            .ensure_all_omicron_zones_persistent(OmicronZonesConfig {
+                generation: v1,
+                zones: zones.clone(),
+            })
             .await
             .expect_err("unexpectedly went backwards in zones generation");
         assert!(matches!(
@@ -5915,10 +5888,10 @@ mod illumos_tests {
         // Now try to apply that list with the same generation number that we
         // used before.  This shouldn't work either.
         let error = mgr
-            .ensure_all_omicron_zones_persistent(
-                OmicronZonesConfig { generation: v2, zones: zones.clone() },
-                Some(&tmp_dir),
-            )
+            .ensure_all_omicron_zones_persistent(OmicronZonesConfig {
+                generation: v2,
+                zones: zones.clone(),
+            })
             .await
             .expect_err("unexpectedly changed a single zone generation");
         assert!(matches!(
@@ -5931,10 +5904,10 @@ mod illumos_tests {
         // But we should be able to apply this new list of zones as long as we
         // advance the generation number.
         let v3 = v2.next();
-        mgr.ensure_all_omicron_zones_persistent(
-            OmicronZonesConfig { generation: v3, zones: zones.clone() },
-            Some(&tmp_dir),
-        )
+        mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
+            generation: v3,
+            zones: zones.clone(),
+        })
         .await
         .expect("failed to remove all zones in a new generation");
         let found4 = mgr.omicron_zones_list().await;
@@ -5947,7 +5920,6 @@ mod illumos_tests {
 
         drop_service_manager(mgr).await;
 
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         helper.cleanup().await;
         logctx.cleanup_successful();
     }

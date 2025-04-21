@@ -10,13 +10,13 @@ use crate::db::model::ResourceTypeProvisioned;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::model::VirtualProvisioningResource;
 use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
-use crate::db::schema::virtual_provisioning_collection;
-use crate::db::schema::virtual_provisioning_resource;
 use crate::db::true_or_cast_error::matches_sentinel;
 use const_format::concatcp;
 use diesel::pg::Pg;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
+use nexus_db_schema::schema::virtual_provisioning_collection;
+use nexus_db_schema::schema::virtual_provisioning_resource;
 use omicron_common::api::external;
 use omicron_common::api::external::MessagePair;
 use omicron_uuid_kinds::GenericUuid;
@@ -35,8 +35,6 @@ const NOT_ENOUGH_STORAGE_SENTINEL: &'static str = "Not enough storage";
 /// on messages which may be emitted when provisioning virtual resources
 /// such as instances and disks.
 pub fn from_diesel(e: DieselError) -> external::Error {
-    use crate::db::error;
-
     let sentinels = [
         NOT_ENOUGH_CPUS_SENTINEL,
         NOT_ENOUGH_MEMORY_SENTINEL,
@@ -71,7 +69,10 @@ pub fn from_diesel(e: DieselError) -> external::Error {
             _ => {}
         }
     }
-    error::public_error_from_diesel(e, error::ErrorHandler::Server)
+    nexus_db_errors::public_error_from_diesel(
+        e,
+        nexus_db_errors::ErrorHandler::Server,
+    )
 }
 
 /// The virtual resource collection is only updated when a resource is inserted

@@ -4,10 +4,10 @@
 
 use super::impl_enum_type;
 use crate::RegionSnapshot;
-use crate::schema::region_snapshot_replacement;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::DateTime;
 use chrono::Utc;
+use nexus_db_schema::schema::region_snapshot_replacement;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::VolumeKind;
@@ -16,12 +16,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "region_snapshot_replacement_state", schema = "public"))]
-    pub struct RegionSnapshotReplacementStateEnum;
+    RegionSnapshotReplacementStateEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = RegionSnapshotReplacementStateEnum)]
     pub enum RegionSnapshotReplacementState;
 
     // Enum values
@@ -57,12 +54,9 @@ impl std::str::FromStr for RegionSnapshotReplacementState {
 }
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "read_only_target_replacement_type", schema = "public"))]
-    pub struct ReadOnlyTargetReplacementTypeEnum;
+    ReadOnlyTargetReplacementTypeEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = ReadOnlyTargetReplacementTypeEnum)]
     pub enum ReadOnlyTargetReplacementType;
 
     // Enum values
@@ -122,7 +116,7 @@ impl slog::KV for ReadOnlyTargetReplacement {
             }
 
             ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
-                serializer.emit_str("type".into(), "region_snapshot")?;
+                serializer.emit_str("type".into(), "read_only_region")?;
                 serializer
                     .emit_str("region_id".into(), &region_id.to_string())?;
             }

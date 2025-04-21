@@ -12,14 +12,14 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use crate::gf256::{self, Gf256};
 use crate::shamir::ValidThreshold;
 
-/// A polynomial of degree `k-1` with random coefficients in GF(256) for
+/// A polynomial of degree `k-1` with random coefficients in `GF(256)` for
 /// non-constant terms, and a seeded constant term.
 ///
 /// The constant term is one byte of our secret. A separate polynomial is
 /// constucted for each byte of the secret.
 ///
-/// We only store the coefficients. The coeffecients are pushed from low (0) to
-/// high (k-1). We include all coefficients, even zero ones, for a few reasons:
+/// We only store the coefficients. The coeffecients are pushed from low (`0`) to
+/// high (`k-1`). We include all coefficients, even zero ones, for a few reasons:
 ///   1. So that we don't also have to track exponents, as that is implicit in
 ///      the length of the inner boxed slice.
 ///   2. To allow direct indexing if desired.
@@ -120,7 +120,7 @@ mod tests {
         /// Evaluate the polynomial function at the given `x` coordinate
         /// and return the resulting `y` coordinate.
         ///
-        /// This is the 0(n^2) naive method used for testing
+        /// This is the `0(n^2)` naive method used for testing.
         fn naive_eval(&self, x: Gf256) -> Gf256 {
             let mut y = Gf256::new(0);
             for (exponent, coefficient) in self.0.iter().enumerate() {
@@ -140,7 +140,10 @@ mod tests {
 
     /// Exponentiation via repeated multiplication
     ///
-    /// This is very slow
+    /// This is a very slow, but clearly correct implementation. We use it to
+    /// implement `naive_eval`, which is a model implementation used to check
+    /// the correctness of the production "Horner's rule" implementation for
+    /// polynomial evaluation.
     fn pow(base: Gf256, exponent: u8) -> Gf256 {
         let mut result = Gf256::new(1);
         for _ in 0..exponent as usize {

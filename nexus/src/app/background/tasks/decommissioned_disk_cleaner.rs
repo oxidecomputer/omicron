@@ -38,10 +38,7 @@ struct ActivationResults {
     error_count: usize,
 }
 
-const MAX_BATCH: NonZeroU32 = unsafe {
-    // Safety: last time I checked, 100 was greater than zero.
-    NonZeroU32::new_unchecked(100)
-};
+const MAX_BATCH: NonZeroU32 = NonZeroU32::new(100).unwrap();
 
 impl DecommissionedDiskCleaner {
     pub fn new(datastore: Arc<DataStore>, disable: bool) -> Self {
@@ -185,6 +182,7 @@ mod tests {
     use nexus_db_model::Region;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::ByteCount;
     use omicron_uuid_kinds::{
         DatasetUuid, PhysicalDiskUuid, RegionUuid, SledUuid, VolumeUuid,
     };
@@ -225,7 +223,12 @@ mod tests {
         let zpool = datastore
             .zpool_insert(
                 opctx,
-                Zpool::new(Uuid::new_v4(), sled_id.into_untyped_uuid(), id),
+                Zpool::new(
+                    Uuid::new_v4(),
+                    sled_id.into_untyped_uuid(),
+                    id,
+                    ByteCount::from(0).into(),
+                ),
             )
             .await
             .unwrap();
@@ -260,7 +263,7 @@ mod tests {
         };
         let region_id = region.id();
         let conn = datastore.pool_connection_for_tests().await.unwrap();
-        use nexus_db_model::schema::region::dsl;
+        use nexus_db_schema::schema::region::dsl;
         diesel::insert_into(dsl::region)
             .values(region)
             .execute_async(&*conn)
@@ -307,7 +310,7 @@ mod tests {
 
         async fn delete_region(&self, datastore: &DataStore) {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            use nexus_db_model::schema::region::dsl;
+            use nexus_db_schema::schema::region::dsl;
 
             diesel::delete(
                 dsl::region
@@ -324,7 +327,7 @@ mod tests {
                 ExpressionMethods, OptionalExtension, QueryDsl,
                 SelectableHelper,
             };
-            use nexus_db_queries::db::schema::zpool::dsl as zpool_dsl;
+            use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             let fetched_zpool = zpool_dsl::zpool
@@ -336,7 +339,7 @@ mod tests {
                 .optional()
                 .expect("Zpool query should succeed");
 
-            use nexus_db_queries::db::schema::crucible_dataset::dsl as dataset_dsl;
+            use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
             let fetched_dataset = dataset_dsl::crucible_dataset
                 .filter(dataset_dsl::id.eq(self.dataset_id.into_untyped_uuid()))
                 .filter(dataset_dsl::time_deleted.is_null())

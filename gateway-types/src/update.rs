@@ -5,9 +5,9 @@
 use std::time::Duration;
 
 use gateway_messages::UpdateStatus;
-use omicron_common::update::ArtifactHash;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

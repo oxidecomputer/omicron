@@ -11,8 +11,6 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
@@ -21,10 +19,12 @@ use crate::db::model::ProjectUpdate;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_fixed_data::project::SERVICES_PROJECT;
 use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::CreateResult;
@@ -57,7 +57,7 @@ macro_rules! generate_fn_to_ensure_none_in_project {
                 opctx: &OpContext,
                 authz_project: &authz::Project,
             ) -> DeleteResult {
-                use db::schema::$i;
+                use nexus_db_schema::schema::$i;
 
                 let maybe_label = $i::dsl::$i
                     .filter($i::dsl::project_id.eq(authz_project.id()))
@@ -102,7 +102,7 @@ impl DataStore {
 
         debug!(opctx.log, "attempting to create built-in projects");
 
-        let (authz_silo,) = db::lookup::LookupPath::new(&opctx, self)
+        let (authz_silo,) = nexus_db_lookup::LookupPath::new(&opctx, self)
             .silo_id(INTERNAL_SILO_ID)
             .lookup_for(authz::Action::CreateChild)
             .await?;
@@ -149,7 +149,7 @@ impl DataStore {
         let silo_id = authz_silo.id();
         let authz_silo_inner = authz_silo.clone();
 
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
 
         let err = OptionalError::new();
         let name = project.name().as_str().to_string();
@@ -248,7 +248,7 @@ impl DataStore {
         self.ensure_no_anti_affinity_groups_in_project(opctx, authz_project)
             .await?;
 
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -311,7 +311,7 @@ impl DataStore {
             opctx.authn.silo_required().internal_context("listing Projects")?;
         opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
 
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::project, dsl::id, &pagparams)
@@ -339,7 +339,7 @@ impl DataStore {
     ) -> UpdateResult<Project> {
         opctx.authorize(authz::Action::Modify, authz_project).await?;
 
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
         diesel::update(dsl::project)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_project.id()))

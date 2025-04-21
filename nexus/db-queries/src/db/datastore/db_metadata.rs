@@ -5,13 +5,12 @@
 //! [`DataStore`] methods on Database Metadata.
 
 use super::DataStore;
-use crate::db;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use anyhow::{Context, bail, ensure};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::AllSchemaVersions;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
@@ -344,7 +343,7 @@ impl DataStore {
     pub async fn database_schema_version(
         &self,
     ) -> Result<(Version, Option<Version>), Error> {
-        use db::schema::db_metadata::dsl;
+        use nexus_db_schema::schema::db_metadata::dsl;
 
         let (version, target): (String, Option<String>) = dsl::db_metadata
             .filter(dsl::singleton.eq(true))
@@ -385,7 +384,7 @@ impl DataStore {
         from_version: &Version,
         target_step: &StepSemverVersion,
     ) -> Result<(), Error> {
-        use db::schema::db_metadata::dsl;
+        use nexus_db_schema::schema::db_metadata::dsl;
 
         let mut valid_prior_targets = vec![target_step.version.to_string()];
         if let Some(previous) = target_step.previous() {
@@ -464,7 +463,7 @@ impl DataStore {
         from_version: &Version,
         last_step: &StepSemverVersion,
     ) -> Result<(), Error> {
-        use db::schema::db_metadata::dsl;
+        use nexus_db_schema::schema::db_metadata::dsl;
 
         let to_version = last_step.without_prerelease();
         let rows_updated = diesel::update(
@@ -566,7 +565,7 @@ mod test {
         // To trigger this action within a test, we manually set the "known to
         // DB" version.
         let v0 = Version::new(0, 0, 0);
-        use db::schema::db_metadata::dsl;
+        use nexus_db_schema::schema::db_metadata::dsl;
         diesel::update(dsl::db_metadata.filter(dsl::singleton.eq(true)))
             .set(dsl::version.eq(v0.to_string()))
             .execute_async(&*conn)
@@ -674,7 +673,7 @@ mod test {
         //
         // To trigger this action within a test, we manually set the "known to DB" version.
         let v0 = Version::new(0, 0, 0);
-        use db::schema::db_metadata::dsl;
+        use nexus_db_schema::schema::db_metadata::dsl;
         diesel::update(dsl::db_metadata.filter(dsl::singleton.eq(true)))
             .set(dsl::version.eq(v0.to_string()))
             .execute_async(&*conn)

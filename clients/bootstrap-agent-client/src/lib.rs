@@ -6,6 +6,7 @@
 
 progenitor::generate_api!(
     spec = "../../openapi/bootstrap-agent.json",
+    interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -27,12 +28,6 @@ progenitor::generate_api!(
         TypedUuidForRackInitKind = omicron_uuid_kinds::RackInitUuid,
         TypedUuidForRackResetKind = omicron_uuid_kinds::RackResetUuid,
     },
-    convert = {
-        {
-            type = "string",
-            pattern = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$",
-        } = semver::Version,
-    }
 );
 
 impl omicron_common::api::external::ClientError for types::Error {

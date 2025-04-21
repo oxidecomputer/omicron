@@ -5,9 +5,9 @@
 use super::{Generation, Region, SqlU16};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
-use crate::schema::{crucible_dataset, region};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_db_schema::schema::{crucible_dataset, region};
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
@@ -41,6 +41,10 @@ pub struct CrucibleDataset {
     port: SqlU16,
 
     pub size_used: i64,
+
+    /// Do not consider this dataset as a candidate during region allocation
+    #[serde(default)]
+    no_provision: bool,
 }
 
 impl CrucibleDataset {
@@ -57,7 +61,12 @@ impl CrucibleDataset {
             ip: addr.ip().into(),
             port: addr.port().into(),
             size_used: 0,
+            no_provision: false,
         }
+    }
+
+    pub fn time_deleted(&self) -> Option<DateTime<Utc>> {
+        self.time_deleted
     }
 
     pub fn address(&self) -> SocketAddrV6 {
@@ -66,6 +75,10 @@ impl CrucibleDataset {
 
     pub fn address_with_port(&self, port: u16) -> SocketAddrV6 {
         SocketAddrV6::new(Ipv6Addr::from(self.ip), port, 0, 0)
+    }
+
+    pub fn no_provision(&self) -> bool {
+        self.no_provision
     }
 }
 

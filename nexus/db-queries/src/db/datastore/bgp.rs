@@ -4,15 +4,14 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use crate::db::model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name};
 use crate::db::pagination::paginated;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{
     BgpPeerView, SwitchPortBgpPeerConfigAllowExport,
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
@@ -33,8 +32,8 @@ impl DataStore {
         opctx: &OpContext,
         config: &params::BgpConfigCreate,
     ) -> CreateResult<BgpConfig> {
-        use db::schema::bgp_config::dsl;
-        use db::schema::{
+        use nexus_db_schema::schema::bgp_config::dsl;
+        use nexus_db_schema::schema::{
             bgp_announce_set, bgp_announce_set::dsl as announce_set_dsl,
         };
 
@@ -225,11 +224,11 @@ impl DataStore {
         opctx: &OpContext,
         sel: &params::BgpConfigSelector,
     ) -> DeleteResult {
-        use db::schema::bgp_config;
-        use db::schema::bgp_config::dsl as bgp_config_dsl;
+        use nexus_db_schema::schema::bgp_config;
+        use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
 
-        use db::schema::switch_port_settings_bgp_peer_config as sps_bgp_peer_config;
-        use db::schema::switch_port_settings_bgp_peer_config::dsl as sps_bgp_peer_config_dsl;
+        use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as sps_bgp_peer_config;
+        use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl as sps_bgp_peer_config_dsl;
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -328,8 +327,8 @@ impl DataStore {
         opctx: &OpContext,
         name_or_id: &NameOrId,
     ) -> LookupResult<BgpConfig> {
-        use db::schema::bgp_config;
-        use db::schema::bgp_config::dsl;
+        use nexus_db_schema::schema::bgp_config;
+        use nexus_db_schema::schema::bgp_config::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let name_or_id = name_or_id.clone();
@@ -380,7 +379,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<BgpConfig> {
-        use db::schema::bgp_config::dsl;
+        use nexus_db_schema::schema::bgp_config::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -409,7 +408,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<BgpAnnounceSet> {
-        use db::schema::bgp_announce_set::dsl;
+        use nexus_db_schema::schema::bgp_announce_set::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -438,7 +437,7 @@ impl DataStore {
         opctx: &OpContext,
         sel: &params::BgpAnnounceSetSelector,
     ) -> ListResultVec<BgpAnnouncement> {
-        use db::schema::{
+        use nexus_db_schema::schema::{
             bgp_announce_set, bgp_announce_set::dsl as announce_set_dsl,
             bgp_announcement::dsl as announce_dsl,
         };
@@ -531,8 +530,8 @@ impl DataStore {
         opctx: &OpContext,
         announce: &params::BgpAnnounceSetCreate,
     ) -> CreateResult<(BgpAnnounceSet, Vec<BgpAnnouncement>)> {
-        use db::schema::bgp_announce_set::dsl as announce_set_dsl;
-        use db::schema::bgp_announcement::dsl as bgp_announcement_dsl;
+        use nexus_db_schema::schema::bgp_announce_set::dsl as announce_set_dsl;
+        use nexus_db_schema::schema::bgp_announcement::dsl as bgp_announcement_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -610,8 +609,8 @@ impl DataStore {
         opctx: &OpContext,
         announce: &params::BgpAnnounceSetCreate,
     ) -> CreateResult<(BgpAnnounceSet, Vec<BgpAnnouncement>)> {
-        use db::schema::bgp_announce_set::dsl as announce_set_dsl;
-        use db::schema::bgp_announcement::dsl as bgp_announcement_dsl;
+        use nexus_db_schema::schema::bgp_announce_set::dsl as announce_set_dsl;
+        use nexus_db_schema::schema::bgp_announcement::dsl as bgp_announcement_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         self.transaction_retry_wrapper("bgp_create_announce_set")
@@ -697,12 +696,12 @@ impl DataStore {
         opctx: &OpContext,
         sel: &params::BgpAnnounceSetSelector,
     ) -> DeleteResult {
-        use db::schema::bgp_announce_set;
-        use db::schema::bgp_announce_set::dsl as announce_set_dsl;
-        use db::schema::bgp_announcement::dsl as bgp_announcement_dsl;
+        use nexus_db_schema::schema::bgp_announce_set;
+        use nexus_db_schema::schema::bgp_announce_set::dsl as announce_set_dsl;
+        use nexus_db_schema::schema::bgp_announcement::dsl as bgp_announcement_dsl;
 
-        use db::schema::bgp_config;
-        use db::schema::bgp_config::dsl as bgp_config_dsl;
+        use nexus_db_schema::schema::bgp_config;
+        use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let name_or_id = sel.announce_set.clone();
@@ -812,7 +811,7 @@ impl DataStore {
         switch: SwitchLocation,
         port: String,
     ) -> ListResultVec<BgpPeerView> {
-        use db::schema::bgp_peer_view::dsl;
+        use nexus_db_schema::schema::bgp_peer_view::dsl;
 
         let results = dsl::bgp_peer_view
             .filter(dsl::switch_location.eq(switch.to_string()))
@@ -836,7 +835,7 @@ impl DataStore {
         interface_name: &str,
         addr: IpNetwork,
     ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
-        use db::schema::switch_port_settings_bgp_peer_config_communities::dsl;
+        use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl;
 
         let results = dsl::switch_port_settings_bgp_peer_config_communities
             .filter(dsl::port_settings_id.eq(port_settings_id))
@@ -860,10 +859,10 @@ impl DataStore {
         interface_name: &str,
         addr: IpNetwork,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowExport>>> {
-        use db::schema::switch_port_settings_bgp_peer_config as db_peer;
-        use db::schema::switch_port_settings_bgp_peer_config::dsl as peer_dsl;
-        use db::schema::switch_port_settings_bgp_peer_config_allow_export as db_allow;
-        use db::schema::switch_port_settings_bgp_peer_config_allow_export::dsl;
+        use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as db_peer;
+        use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl as peer_dsl;
+        use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export as db_allow;
+        use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
@@ -931,10 +930,10 @@ impl DataStore {
         interface_name: &str,
         addr: IpNetwork,
     ) -> LookupResult<Option<Vec<SwitchPortBgpPeerConfigAllowImport>>> {
-        use db::schema::switch_port_settings_bgp_peer_config as db_peer;
-        use db::schema::switch_port_settings_bgp_peer_config::dsl as peer_dsl;
-        use db::schema::switch_port_settings_bgp_peer_config_allow_import as db_allow;
-        use db::schema::switch_port_settings_bgp_peer_config_allow_import::dsl;
+        use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as db_peer;
+        use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl as peer_dsl;
+        use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import as db_allow;
+        use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import::dsl;
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;

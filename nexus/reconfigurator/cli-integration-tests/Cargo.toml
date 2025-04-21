@@ -1,0 +1,40 @@
+[package]
+name = "nexus-reconfigurator-cli-integration-tests"
+description = "Integration tests for reconfigurator-cli with Nexus"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+omicron-workspace-hack.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+reconfigurator-cli.workspace = true
+
+[dev-dependencies]
+camino-tempfile.workspace = true
+camino.workspace = true
+nexus-client.workspace = true
+nexus-db-queries.workspace = true
+nexus-reconfigurator-preparation.workspace = true
+nexus-test-utils-macros.workspace = true
+nexus-test-utils.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+omicron-nexus.workspace = true
+omicron-test-utils.workspace = true
+omicron-uuid-kinds.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slog.workspace = true
+subprocess.workspace = true
+swrite.workspace = true
+tokio.workspace = true

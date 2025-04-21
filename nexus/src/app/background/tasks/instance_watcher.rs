@@ -64,10 +64,7 @@ pub(crate) struct InstanceWatcher {
 /// forgotten about the instances it was supposed to know about.  For now, we
 /// tune this pretty low, choosing safety over low recovery latency for these
 /// relatively rare events.
-const MAX_CONCURRENT_CHECKS: NonZeroU32 = unsafe {
-    // Safety: last time I checked, 16 was greater than zero.
-    NonZeroU32::new_unchecked(16)
-};
+const MAX_CONCURRENT_CHECKS: NonZeroU32 = NonZeroU32::new(16).unwrap();
 
 impl InstanceWatcher {
     pub(crate) fn new(

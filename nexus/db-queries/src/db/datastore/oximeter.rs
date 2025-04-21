@@ -7,9 +7,6 @@
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Asset;
 use crate::db::model::OximeterInfo;
 use crate::db::model::ProducerEndpoint;
@@ -22,6 +19,8 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -48,7 +47,7 @@ impl DataStore {
         opctx: &OpContext,
         id: &Uuid,
     ) -> Result<OximeterInfo, Error> {
-        use db::schema::oximeter::dsl;
+        use nexus_db_schema::schema::oximeter::dsl;
         dsl::oximeter
             .filter(dsl::time_expunged.is_null())
             .find(*id)
@@ -63,7 +62,7 @@ impl DataStore {
         opctx: &OpContext,
         info: &OximeterInfo,
     ) -> Result<(), Error> {
-        use db::schema::oximeter::dsl;
+        use nexus_db_schema::schema::oximeter::dsl;
 
         // If we get a conflict on the Oximeter ID, this means that collector
         // instance was previously registered, and it's re-registering due to
@@ -110,7 +109,7 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
     ) -> Result<(), Error> {
-        use db::schema::oximeter::dsl;
+        use nexus_db_schema::schema::oximeter::dsl;
 
         let now = Utc::now();
 
@@ -133,7 +132,7 @@ impl DataStore {
         opctx: &OpContext,
         page_params: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<OximeterInfo> {
-        use db::schema::oximeter::dsl;
+        use nexus_db_schema::schema::oximeter::dsl;
         paginated(dsl::oximeter, dsl::id, page_params)
             .filter(dsl::time_expunged.is_null())
             .load_async::<OximeterInfo>(
@@ -203,7 +202,7 @@ impl DataStore {
         opctx: &OpContext,
         id: &Uuid,
     ) -> Result<Option<Uuid>, Error> {
-        use db::schema::metric_producer::dsl;
+        use nexus_db_schema::schema::metric_producer::dsl;
         diesel::delete(dsl::metric_producer.find(*id))
             .returning(dsl::oximeter_id)
             .get_result_async::<Uuid>(
@@ -221,7 +220,7 @@ impl DataStore {
         oximeter_id: Uuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ProducerEndpoint> {
-        use db::schema::metric_producer::dsl;
+        use nexus_db_schema::schema::metric_producer::dsl;
         paginated(dsl::metric_producer, dsl::id, &pagparams)
             .filter(dsl::oximeter_id.eq(oximeter_id))
             .order_by((dsl::oximeter_id, dsl::id))
@@ -247,7 +246,7 @@ impl DataStore {
         expiration: DateTime<Utc>,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ProducerEndpoint> {
-        use db::schema::metric_producer::dsl;
+        use nexus_db_schema::schema::metric_producer::dsl;
 
         paginated(dsl::metric_producer, dsl::id, pagparams)
             .filter(dsl::time_modified.lt(expiration))
@@ -302,7 +301,7 @@ mod tests {
         datastore: &DataStore,
         producer_id: Uuid,
     ) -> DateTime<Utc> {
-        use db::schema::metric_producer::dsl;
+        use nexus_db_schema::schema::metric_producer::dsl;
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         match dsl::metric_producer
@@ -412,7 +411,7 @@ mod tests {
                     .pool_connection_authorized(opctx)
                     .await
                     .expect("acquired connection");
-                use db::schema::oximeter::dsl;
+                use nexus_db_schema::schema::oximeter::dsl;
                 let info: OximeterInfo = dsl::oximeter
                     .find(id)
                     .first_async(&*conn)

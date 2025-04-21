@@ -6,11 +6,7 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::TransactionError;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::Region;
 use crate::db::model::RegionReplacement;
 use crate::db::model::RegionReplacementState;
@@ -22,9 +18,12 @@ use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::DownstairsRegionKind;
 use omicron_uuid_kinds::TypedUuid;
@@ -70,7 +69,7 @@ impl DataStore {
                 let request = request.clone();
                 let err = err.clone();
                 async move {
-                    use db::schema::region_replacement::dsl;
+                    use nexus_db_schema::schema::region_replacement::dsl;
 
                     Self::volume_repair_insert_in_txn(
                         &conn,
@@ -103,7 +102,7 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
     ) -> Result<RegionReplacement, Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
 
         dsl::region_replacement
             .filter(dsl::id.eq(id))
@@ -125,7 +124,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         while let Some(p) = paginator.next() {
-            use db::schema::region_replacement::dsl;
+            use nexus_db_schema::schema::region_replacement::dsl;
 
             let batch = paginated(
                 dsl::region_replacement,
@@ -152,7 +151,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<Vec<RegionReplacement>, Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
 
         dsl::region_replacement
             .filter(dsl::replacement_state.eq(RegionReplacementState::Running))
@@ -170,7 +169,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<Vec<RegionReplacement>, Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
 
         dsl::region_replacement
             .filter(
@@ -193,7 +192,7 @@ impl DataStore {
         region_replacement_id: Uuid,
         operating_saga_id: Uuid,
     ) -> Result<(), Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
             .filter(dsl::id.eq(region_replacement_id))
             .filter(
@@ -242,7 +241,7 @@ impl DataStore {
         region_replacement_id: Uuid,
         operating_saga_id: Uuid,
     ) -> Result<(), Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
             .filter(dsl::id.eq(region_replacement_id))
             .filter(
@@ -292,7 +291,7 @@ impl DataStore {
         new_region_id: Uuid,
         old_region_volume_id: VolumeUuid,
     ) -> Result<(), Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
             .filter(dsl::id.eq(region_replacement_id))
             .filter(dsl::operating_saga_id.eq(operating_saga_id))
@@ -345,7 +344,7 @@ impl DataStore {
         opctx: &OpContext,
         new_region_id: TypedUuid<DownstairsRegionKind>,
     ) -> Result<Option<RegionReplacement>, Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
 
         dsl::region_replacement
             .filter(
@@ -367,7 +366,7 @@ impl DataStore {
         opctx: &OpContext,
         old_region_id: TypedUuid<DownstairsRegionKind>,
     ) -> Result<Option<RegionReplacement>, Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
 
         dsl::region_replacement
             .filter(
@@ -390,7 +389,7 @@ impl DataStore {
         region_replacement_id: Uuid,
         operating_saga_id: Uuid,
     ) -> Result<(), Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
             .filter(dsl::id.eq(region_replacement_id))
             .filter(dsl::replacement_state.eq(RegionReplacementState::Running))
@@ -437,7 +436,7 @@ impl DataStore {
         region_replacement_id: Uuid,
         operating_saga_id: Uuid,
     ) -> Result<(), Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
             .filter(dsl::id.eq(region_replacement_id))
             .filter(dsl::replacement_state.eq(RegionReplacementState::Driving))
@@ -484,7 +483,7 @@ impl DataStore {
         region_replacement_id: Uuid,
         operating_saga_id: Uuid,
     ) -> Result<(), Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
             .filter(dsl::id.eq(region_replacement_id))
             .filter(dsl::replacement_state.eq(RegionReplacementState::Driving))
@@ -530,7 +529,7 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
     ) -> Result<Option<RegionReplacementStep>, Error> {
-        use db::schema::region_replacement_step::dsl;
+        use nexus_db_schema::schema::region_replacement_step::dsl;
 
         dsl::region_replacement_step
             .filter(dsl::replacement_id.eq(id))
@@ -549,7 +548,7 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
     ) -> Result<Vec<RegionReplacementStep>, Error> {
-        use db::schema::region_replacement_step::dsl;
+        use nexus_db_schema::schema::region_replacement_step::dsl;
 
         dsl::region_replacement_step
             .filter(dsl::replacement_id.eq(id))
@@ -567,7 +566,7 @@ impl DataStore {
         opctx: &OpContext,
         step: RegionReplacementStep,
     ) -> Result<(), Error> {
-        use db::schema::region_replacement_step::dsl;
+        use nexus_db_schema::schema::region_replacement_step::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -590,7 +589,7 @@ impl DataStore {
         region_replacement_id: Uuid,
         operating_saga_id: Uuid,
     ) -> Result<(), Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
             .filter(dsl::id.eq(region_replacement_id))
             .filter(
@@ -640,7 +639,7 @@ impl DataStore {
         region_replacement_id: Uuid,
         operating_saga_id: Uuid,
     ) -> Result<(), Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
             .filter(dsl::id.eq(region_replacement_id))
             .filter(
@@ -708,7 +707,7 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
 
-                    use db::schema::region_replacement::dsl;
+                    use nexus_db_schema::schema::region_replacement::dsl;
 
                     let result = diesel::update(dsl::region_replacement)
                         .filter(dsl::id.eq(request.id))
@@ -783,7 +782,7 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
 
-                    use db::schema::region_replacement::dsl;
+                    use nexus_db_schema::schema::region_replacement::dsl;
 
                     let result = diesel::update(dsl::region_replacement)
                         .filter(dsl::id.eq(request.id))
@@ -843,7 +842,7 @@ impl DataStore {
         opctx: &OpContext,
         region_replacement_id: Uuid,
     ) -> Result<(), Error> {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
             .filter(dsl::id.eq(region_replacement_id))
             .filter(dsl::operating_saga_id.is_null())
@@ -905,7 +904,7 @@ impl DataStore {
             )));
         };
 
-        use db::schema::upstairs_repair_notification::dsl;
+        use nexus_db_schema::schema::upstairs_repair_notification::dsl;
 
         let maybe_notification = dsl::upstairs_repair_notification
             .filter(dsl::region_id.eq(new_region_id))
