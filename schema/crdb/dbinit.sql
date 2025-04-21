@@ -1194,9 +1194,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
      'best_effort'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.instance_min_cpu_platform AS ENUM (
+  'amd_milan',
+  'amd_turin'
+);
+
 /*
  * Represents the *desired* state of an instance, as requested by the user.
-*/
+ */
 CREATE TYPE IF NOT EXISTS omicron.public.instance_intended_state AS ENUM (
     /* The instance should be running. */
     'running',
@@ -1305,6 +1310,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * action should be taken when the instance's VMM state changes.
      */
     intended_state omicron.public.instance_intended_state NOT NULL,
+
+    /*
+     * The minimum required CPU platform for this instance. If set, the
+     * instance's VMs may make use of all the CPU features supplied by their
+     * minimum platform, but in exchange they may only run on sleds whose
+     * CPUs support all of those features.
+     *
+     * If this is NULL, the control plane ignores CPU constraints when
+     * selecting a sled for this instance. Then, once it has selected a
+     * sled, it supplies a "lowest common denominator" CPU platform that
+     * is compatible with that sled to maximize the number of sleds the VM
+     * can migrate to.
+     */
+    min_cpu_platform omicron.public.instance_min_cpu_platform,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
@@ -5040,6 +5059,12 @@ CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_instance_membership_by_ins
     instance_id
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.vmm_cpu_platform AS ENUM (
+  'sled_default',
+  'amd_milan',
+  'amd_turin'
+);
+
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     id UUID PRIMARY KEY,
@@ -5051,7 +5076,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     sled_id UUID NOT NULL,
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400,
-    state omicron.public.vmm_state NOT NULL
+    state omicron.public.vmm_state NOT NULL,
+    cpu_platform omicron.public.vmm_cpu_platform
 );
 
 CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
@@ -6363,7 +6389,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '174.0.0', NULL)
+    (TRUE, NOW(), NOW(), '175.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

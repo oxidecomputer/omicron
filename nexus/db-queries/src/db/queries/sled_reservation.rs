@@ -9,7 +9,9 @@ use crate::db::model::SledResourceVmm;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TypedSqlQuery;
 use diesel::sql_types;
+use nexus_db_model::SledCpuFamily;
 use nexus_db_schema::enums::AffinityPolicyEnum;
+use nexus_db_schema::enums::SledCpuFamilyEnum;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 
@@ -86,6 +88,7 @@ fn subquery_other_a_instances(query: &mut QueryBuilder) {
 pub fn sled_find_targets_query(
     instance_id: InstanceUuid,
     resources: &Resources,
+    sled_families: Option<&[SledCpuFamily]>,
 ) -> TypedSqlQuery<(
     sql_types::Uuid,
     sql_types::Bool,
@@ -93,7 +96,8 @@ pub fn sled_find_targets_query(
     sql_types::Nullable<AffinityPolicyEnum>,
 )> {
     let mut query = QueryBuilder::new();
-    query.sql("
+    query.sql(
+        "
         WITH sled_targets AS (
             SELECT sled.id as sled_id
             FROM sled
@@ -103,7 +107,27 @@ pub fn sled_find_targets_query(
                 sled.time_deleted IS NULL AND
                 sled.sled_policy = 'in_service' AND
                 sled.sled_state = 'active'
-            GROUP BY sled.id
+        ",
+    );
+
+    // TODO(gjc): eww. the correct way to do this is to write this as
+    //
+    // "AND sled.cpu_family = ANY ("
+    //
+    // and then just have one `param` which can be bound to a
+    // `sql_types::Array<SledCpuFamilyEnum>`
+    if let Some(families) = sled_families {
+        query.sql(" AND sled.cpu_family IN (");
+        for i in 0..families.len() {
+            if i > 0 {
+                query.sql(", ");
+            }
+            query.param();
+        }
+        query.sql(")");
+    }
+
+    query.sql("GROUP BY sled.id
             HAVING
                 COALESCE(SUM(CAST(sled_resource_vmm.hardware_threads AS INT8)), 0) + "
             ).param().sql(" <= sled.usable_hardware_threads AND
@@ -215,14 +239,21 @@ pub fn sled_find_targets_query(
     // - Sled UUID
     // - Whether or not there is space on the sled for the specified instance
     // - What affinity/anti-affinity policies apply
-    query
-        .sql(
-            "
+    query.sql(
+        "
         SELECT sled_id, TRUE, a_policy, aa_policy FROM sleds_with_space
         UNION
         SELECT sled_id, FALSE, a_policy, aa_policy FROM sleds_without_space
     ",
-        )
+    );
+
+    if let Some(families) = sled_families {
+        for f in families {
+            query.bind::<SledCpuFamilyEnum, _>(*f);
+        }
+    }
+
+    query
         .bind::<sql_types::BigInt, _>(resources.hardware_threads)
         .bind::<sql_types::BigInt, _>(resources.rss_ram)
         .bind::<sql_types::BigInt, _>(resources.reservoir_ram)
@@ -411,10 +442,31 @@ mod test {
             model::ByteCount::from(external::ByteCount::from_gibibytes_u32(0)),
         );
 
-        let query = sled_find_targets_query(id, &resources);
+        let query = sled_find_targets_query(id, &resources, None);
         expectorate_query_contents(
             &query,
             "tests/output/sled_find_targets_query.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_sled_find_targets_query_with_cpu() {
+        let id = InstanceUuid::nil();
+        let resources = Resources::new(
+            0,
+            model::ByteCount::from(external::ByteCount::from_gibibytes_u32(0)),
+            model::ByteCount::from(external::ByteCount::from_gibibytes_u32(0)),
+        );
+
+        let query = sled_find_targets_query(
+            id,
+            &resources,
+            Some(&[SledCpuFamily::AmdMilan]),
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/sled_find_targets_query_with_cpu.sql",
         )
         .await;
     }
@@ -433,7 +485,12 @@ mod test {
             model::ByteCount::from(external::ByteCount::from_gibibytes_u32(0)),
         );
 
-        let query = sled_find_targets_query(id, &resources);
+        let query = sled_find_targets_query(
+            id,
+            &resources,
+            Some(&[SledCpuFamily::AmdMilan]),
+        );
+
         let _ = query
             .explain_async(&conn)
             .await

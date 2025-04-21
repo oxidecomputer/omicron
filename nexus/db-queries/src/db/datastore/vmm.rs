@@ -446,6 +446,7 @@ mod tests {
     use crate::db::model::VmmRuntimeState;
     use crate::db::model::VmmState;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_model::VmmCpuPlatform;
     use omicron_common::api::internal::nexus;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::InstanceUuid;
@@ -470,6 +471,7 @@ mod tests {
                     sled_id: Uuid::new_v4(),
                     propolis_ip: "10.1.9.32".parse().unwrap(),
                     propolis_port: 420.into(),
+                    cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),
@@ -491,6 +493,7 @@ mod tests {
                     sled_id: Uuid::new_v4(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
+                    cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),
@@ -601,6 +604,7 @@ mod tests {
                     sled_id: Uuid::new_v4(),
                     propolis_ip: "10.1.9.69".parse().unwrap(),
                     propolis_port: 420.into(),
+                    cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),

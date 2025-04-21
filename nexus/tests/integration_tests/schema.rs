@@ -1391,6 +1391,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                             params::InstanceNetworkInterfaceAttachment::Default,
                         external_ips: vec![],
                         boot_disk: None,
+                        min_cpu_platform: None,
                         disks: Vec::new(),
                         start: false,
                         auto_restart_policy: Default::default(),
