@@ -406,7 +406,7 @@ impl BpTableSchema for BpClickhouseServersTableSchema {
 pub struct BpPendingMgsUpdates {}
 impl BpTableSchema for BpPendingMgsUpdates {
     fn table_name(&self) -> &'static str {
-        "Pending MGS-managed updates"
+        "Pending MGS-managed updates (all baseboards)"
     }
 
     fn column_names(&self) -> &'static [&'static str] {

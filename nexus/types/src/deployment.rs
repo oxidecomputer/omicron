@@ -625,16 +625,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
                         .map(|pu| {
                             BpTableRow::from_strings(
                                 BpDiffState::Unchanged,
-                                vec![
-                                    pu.sp_type.to_string(),
-                                    pu.slot_id.to_string(),
-                                    pu.baseboard_id.part_number.clone(),
-                                    pu.baseboard_id.serial_number.clone(),
-                                    pu.artifact_hash_id.kind.to_string(),
-                                    pu.artifact_hash_id.hash.to_string(),
-                                    pu.artifact_version.to_string(),
-                                    format!("{:?}", pu.details),
-                                ],
+                                pu.to_bp_table_values(),
                             )
                         })
                         .collect()
@@ -1232,6 +1223,21 @@ impl IdMappable for PendingMgsUpdate {
     type Id = Arc<BaseboardId>;
     fn id(&self) -> Self::Id {
         self.baseboard_id.clone()
+    }
+}
+
+impl PendingMgsUpdate {
+    fn to_bp_table_values(&self) -> Vec<String> {
+        vec![
+            self.sp_type.to_string(),
+            self.slot_id.to_string(),
+            self.baseboard_id.part_number.clone(),
+            self.baseboard_id.serial_number.clone(),
+            self.artifact_hash_id.kind.to_string(),
+            self.artifact_hash_id.hash.to_string(),
+            self.artifact_version.to_string(),
+            format!("{:?}", self.details),
+        ]
     }
 }
 
