@@ -16,6 +16,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -38,12 +39,14 @@ use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::test_params;
+use nexus_test_utils::start_sled_agent_with_config;
 use nexus_test_utils::wait_for_producer;
 use nexus_types::external_api::params::SshKeyCreate;
 use nexus_types::external_api::shared::IpKind;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::SiloIdentityMode;
+use nexus_types::external_api::views::Sled;
 use nexus_types::external_api::views::SshKey;
 use nexus_types::external_api::{params, views};
 use nexus_types::identity::Resource;
@@ -60,6 +63,7 @@ use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::InstanceMinimumCpuPlatform;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
@@ -118,6 +122,10 @@ fn get_instance_url(instance_name: &str) -> String {
 
 fn get_instance_start_url(instance_name: &str) -> String {
     format!("/v1/instances/{}/start?{}", instance_name, get_project_selector())
+}
+
+fn get_instance_stop_url(instance_name: &str) -> String {
+    format!("/v1/instances/{}/stop?{}", instance_name, get_project_selector())
 }
 
 fn get_disks_url() -> String {
@@ -233,6 +241,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: false,
         ssh_public_keys: None,
         auto_restart_policy: Default::default(),
@@ -341,6 +350,7 @@ async fn test_instances_create_reboot_halt(
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
+                min_cpu_platform: None,
                 start: true,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
@@ -587,7 +597,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        get_instance_url(format!("{}/start", instance_name).as_str()).as_str(),
+        get_instance_start_url(instance_name).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -597,7 +607,7 @@ async fn test_instances_create_reboot_halt(
         client,
         StatusCode::NOT_FOUND,
         Method::POST,
-        get_instance_url(format!("{}/stop", instance_name).as_str()).as_str(),
+        get_instance_stop_url(instance_name).as_str(),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -1686,6 +1696,22 @@ async fn expect_instance_reboot_fail(
         .expect("expected instance reboot to fail");
 }
 
+async fn expect_instance_start_fail(
+    client: &ClientTestContext,
+    instance_name: &str,
+    status: http::StatusCode,
+) {
+    let url = get_instance_url(format!("{instance_name}/start").as_str());
+    let builder = RequestBuilder::new(client, Method::POST, &url)
+        .body(None as Option<&serde_json::Value>)
+        .expect_status(Some(status));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("expected instance start to fail");
+}
+
 async fn expect_instance_stop_fail(
     client: &ClientTestContext,
     instance_name: &str,
@@ -2015,6 +2041,7 @@ async fn test_instances_create_stopped_start(
             external_ips: vec![],
             disks: vec![],
             boot_disk: None,
+            min_cpu_platform: None,
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
@@ -2199,6 +2226,7 @@ async fn test_instance_using_image_from_other_project_fails(
                     },
                 )],
                 boot_disk: None,
+                min_cpu_platform: None,
                 start: true,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
@@ -2265,6 +2293,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -2296,6 +2325,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -2388,6 +2418,7 @@ async fn test_instance_with_single_explicit_ip_address(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
 
         auto_restart_policy: Default::default(),
@@ -2507,6 +2538,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -2625,6 +2657,7 @@ async fn test_instance_create_delete_network_interface(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -2872,6 +2905,7 @@ async fn test_instance_update_network_interfaces(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -3503,6 +3537,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -3575,6 +3610,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         boot_disk: Some(params::InstanceDiskAttachment::Attach(
             params::InstanceDiskAttach { name: disk_name.clone() },
         )),
+        min_cpu_platform: None,
         disks: Vec::new(),
         start: true,
         auto_restart_policy: Default::default(),
@@ -3667,6 +3703,7 @@ async fn test_instance_create_attach_disks(
                 },
             ),
         ],
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -3765,6 +3802,7 @@ async fn test_instance_create_attach_disks_undo(
             ),
         ],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -3849,6 +3887,7 @@ async fn test_attach_eight_disks_to_instance(
                 )
             })
             .collect(),
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -3937,6 +3976,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
                 )
             })
             .collect(),
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -4039,6 +4079,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
                 )
             })
             .collect(),
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -4130,6 +4171,7 @@ async fn test_disks_detached_when_instance_destroyed(
                 )
             })
             .collect(),
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -4228,6 +4270,7 @@ async fn test_disks_detached_when_instance_destroyed(
                 )
             })
             .collect(),
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -4312,6 +4355,7 @@ async fn test_duplicate_disk_attach_requests_ok(
             ),
         ],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -4356,6 +4400,7 @@ async fn test_duplicate_disk_attach_requests_ok(
                 name: Name::try_from(String::from("alsodata")).unwrap(),
             },
         )],
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -4412,6 +4457,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
                 name: Name::try_from(String::from("probablydata0")).unwrap(),
             },
         )),
+        min_cpu_platform: None,
         disks: Vec::new(),
         start: false,
         auto_restart_policy: Default::default(),
@@ -4475,6 +4521,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             boot_disk: None,
             auto_restart_policy: None,
+            min_cpu_platform: None,
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },
@@ -4547,6 +4594,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
         boot_disk: Some(params::InstanceDiskAttachment::Attach(
             params::InstanceDiskAttach { name: probablydata.clone() },
         )),
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -4578,6 +4626,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
         params::InstanceUpdate {
             boot_disk: Some(alsodata.clone().into()),
             auto_restart_policy: None,
+            min_cpu_platform: None,
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },
@@ -4596,6 +4645,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
             // was created.
             boot_disk: Some(probablydata.clone().into()),
             auto_restart_policy: Some(InstanceAutoRestartPolicy::BestEffort),
+            min_cpu_platform: None,
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },
@@ -4618,6 +4668,7 @@ async fn test_updating_missing_instance_is_not_found(
         params::InstanceUpdate {
             boot_disk: None,
             auto_restart_policy: None,
+            min_cpu_platform: None,
             ncpus: InstanceCpuCount::try_from(0).unwrap(),
             memory: ByteCount::from_gibibytes_u32(0),
         },
@@ -4707,6 +4758,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         disks: Vec::new(),
         start: true,
         // Start out with None
@@ -4739,6 +4791,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             auto_restart_policy,
             boot_disk: boot_disk_nameorid.clone(),
+            min_cpu_platform: None,
             ncpus: new_ncpus,
             memory: new_memory,
         },
@@ -4746,7 +4799,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    assert_eq!(err.message, "instance must be stopped to be resized");
+    assert_eq!(err.message, "instance must be stopped to change CPU or memory");
 
     instance_post(&client, instance_name, InstanceOp::Stop).await;
     let nexus = &cptestctx.server.server_context().nexus;
@@ -4761,6 +4814,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             auto_restart_policy,
             boot_disk: boot_disk_nameorid.clone(),
+            min_cpu_platform: None,
             ncpus: new_ncpus,
             memory: new_memory,
         },
@@ -4776,6 +4830,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             auto_restart_policy,
             boot_disk: boot_disk_nameorid.clone(),
+            min_cpu_platform: None,
             ncpus: initial_ncpus,
             memory: new_memory,
         },
@@ -4790,6 +4845,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             auto_restart_policy,
             boot_disk: boot_disk_nameorid.clone(),
+            min_cpu_platform: None,
             ncpus: initial_ncpus,
             memory: initial_memory,
         },
@@ -4808,6 +4864,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             auto_restart_policy,
             boot_disk: boot_disk_nameorid.clone(),
+            min_cpu_platform: None,
             ncpus: InstanceCpuCount(MAX_VCPU_PER_INSTANCE + 1),
             memory: instance.memory,
         },
@@ -4829,6 +4886,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             auto_restart_policy,
             boot_disk: boot_disk_nameorid.clone(),
+            min_cpu_platform: None,
             ncpus: instance.ncpus,
             memory: ByteCount::from_mebibytes_u32(0),
         },
@@ -4844,6 +4902,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             auto_restart_policy,
             boot_disk: boot_disk_nameorid.clone(),
+            min_cpu_platform: None,
             ncpus: instance.ncpus,
             memory: ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE - 1)
                 .unwrap(),
@@ -4861,6 +4920,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             auto_restart_policy,
             boot_disk: boot_disk_nameorid.clone(),
+            min_cpu_platform: None,
             ncpus: instance.ncpus,
             memory: ByteCount::from_mebibytes_u32(
                 (max_mib + 1024).try_into().unwrap(),
@@ -4883,6 +4943,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             auto_restart_policy,
             boot_disk: boot_disk_nameorid.clone(),
+            min_cpu_platform: None,
             ncpus: new_ncpus,
             memory: new_memory,
         },
@@ -4914,6 +4975,7 @@ async fn test_auto_restart_policy_can_be_changed(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         disks: Vec::new(),
         start: true,
         // Start out with None
@@ -4943,6 +5005,7 @@ async fn test_auto_restart_policy_can_be_changed(
             dbg!(params::InstanceUpdate {
                 auto_restart_policy,
                 boot_disk: None,
+                min_cpu_platform: None,
                 ncpus: InstanceCpuCount::try_from(2).unwrap(),
                 memory: ByteCount::from_gibibytes_u32(4),
             }),
@@ -4959,6 +5022,78 @@ async fn test_auto_restart_policy_can_be_changed(
 
     // Reconfigure to BestEffort
     assert_reconfigured(Some(InstanceAutoRestartPolicy::BestEffort)).await;
+
+    // Reconfigure back to None.
+    assert_reconfigured(None).await;
+}
+
+// Test reconfiguring an instance's minimum CPU platform.
+#[nexus_test]
+async fn test_min_cpu_platform_can_be_changed(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "milan-is-enough-for-anyone";
+
+    create_project_and_pool(&client).await;
+
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("stuff"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        boot_disk: None,
+        // Start out with None
+        min_cpu_platform: None,
+        disks: Vec::new(),
+        start: false,
+        auto_restart_policy: None,
+        anti_affinity_groups: Vec::new(),
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    // Starts out as None.
+    assert_eq!(instance.min_cpu_platform, None);
+
+    let assert_reconfigured = |min_cpu_platform| async move {
+        let instance = expect_instance_reconfigure_ok(
+            client,
+            &instance.identity.id,
+            dbg!(params::InstanceUpdate {
+                auto_restart_policy: None,
+                boot_disk: None,
+                min_cpu_platform,
+                ncpus: InstanceCpuCount::try_from(2).unwrap(),
+                memory: ByteCount::from_gibibytes_u32(4),
+            }),
+        )
+        .await;
+        assert_eq!(dbg!(instance).min_cpu_platform, min_cpu_platform,);
+    };
+
+    // Reconfigure to Milan.
+    assert_reconfigured(Some(InstanceMinimumCpuPlatform::AmdMilan)).await;
+
+    // Reconfigure to Turin (even though we have no Turin in the test env!)
+    assert_reconfigured(Some(InstanceMinimumCpuPlatform::AmdTurin)).await;
 
     // Reconfigure back to None.
     assert_reconfigured(None).await;
@@ -5012,6 +5147,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
                 name: Name::try_from(String::from("probablydata1")).unwrap(),
             },
         )],
+        min_cpu_platform: None,
         start: false,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -5039,6 +5175,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             boot_disk: Some(disks[1].identity.id.into()),
             auto_restart_policy: None,
+            min_cpu_platform: None,
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },
@@ -5082,6 +5219,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: false,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -5106,6 +5244,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             boot_disk: Some(disks[0].identity.id.into()),
             auto_restart_policy: None,
+            min_cpu_platform: None,
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },
@@ -5139,6 +5278,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         params::InstanceUpdate {
             boot_disk: Some(disks[0].identity.id.into()),
             auto_restart_policy: None,
+            min_cpu_platform: None,
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
         },
@@ -5174,6 +5314,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -5227,6 +5368,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -5280,6 +5422,7 @@ async fn test_instances_memory_greater_than_max_size(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -5387,6 +5530,7 @@ async fn test_instance_create_with_anti_affinity_groups(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: anti_affinity_groups_param,
     };
@@ -5456,6 +5600,7 @@ async fn test_instance_create_with_duplicate_anti_affinity_groups(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: anti_affinity_groups_param,
     };
@@ -5526,6 +5671,7 @@ async fn test_instance_create_with_anti_affinity_groups_that_do_not_exist(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: anti_affinity_groups_param,
     };
@@ -5609,6 +5755,7 @@ async fn test_instance_create_with_ssh_keys(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
     };
@@ -5658,6 +5805,7 @@ async fn test_instance_create_with_ssh_keys(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
     };
@@ -5706,6 +5854,7 @@ async fn test_instance_create_with_ssh_keys(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
     };
@@ -5772,6 +5921,24 @@ async fn expect_instance_start_ok(
         .expect("Expected instance start to succeed with 202 Accepted");
 }
 
+async fn expect_instance_stop_ok(
+    client: &ClientTestContext,
+    instance_name: &str,
+) {
+    let builder = RequestBuilder::new(
+        client,
+        http::Method::POST,
+        &get_instance_stop_url(instance_name),
+    )
+    .expect_status(Some(http::StatusCode::ACCEPTED));
+
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance stop to succeed with 202 Accepted");
+}
+
 async fn expect_instance_creation_ok(
     client: &ClientTestContext,
     url_instances: &str,
@@ -5829,6 +5996,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             external_ips: vec![],
             disks: vec![],
             boot_disk: None,
+            min_cpu_platform: None,
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
@@ -5888,6 +6056,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: false,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -5944,6 +6113,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
             external_ips: vec![],
             disks: vec![],
             boot_disk: None,
+            min_cpu_platform: None,
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
@@ -5974,6 +6144,205 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     expect_instance_start_ok(client, configs[2].0).await;
+}
+
+#[nexus_test]
+async fn test_can_start_instance_with_min_cpu_platform(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    let name1 = Name::try_from(String::from("test")).unwrap();
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: name1.clone(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(1).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "test".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        // Note that we're actually setting min_cpu_platform this time!
+        min_cpu_platform: Some(InstanceMinimumCpuPlatform::AmdMilan),
+        start: false,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+    };
+    let url_instances = get_instances_url();
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to succeed.");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    // Now that the instance is created, lets try to start it.
+
+    let nexus = &cptestctx.server.server_context().nexus;
+
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+
+    // Great, now let's update the instance to require Turin and start it again.
+    // This will fail because there is no Turin in our simulated environment
+    // (yet!)
+    expect_instance_stop_ok(client, instance.identity.name.as_str()).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            boot_disk: None,
+            auto_restart_policy: None,
+            min_cpu_platform: Some(InstanceMinimumCpuPlatform::AmdTurin),
+            ncpus: InstanceCpuCount::try_from(1).unwrap(),
+            memory: ByteCount::from_gibibytes_u32(4),
+        },
+    )
+    .await;
+
+    expect_instance_start_fail_507(client, instance.identity.name.as_str())
+        .await;
+
+    // We'd like to see the instance actually start, so add a Turin sled and try again.
+
+    // There should be one sled from `#[nexus_test]`, check that first.
+    let sleds_url = "/v1/system/hardware/sleds";
+    assert_eq!(
+        objects_list_page_authz::<Sled>(&client, &sleds_url).await.items.len(),
+        1
+    );
+
+    let nexus_address =
+        cptestctx.server.get_http_server_internal_address().await;
+
+    let fake_turin_sled_id = SledUuid::new_v4();
+    let turin_sled_agent_log = cptestctx
+        .logctx
+        .log
+        .new(o!( "sled_id" => fake_turin_sled_id.to_string() ));
+
+    let config = omicron_sled_agent::sim::Config::for_testing(
+        fake_turin_sled_id,
+        omicron_sled_agent::sim::SimMode::Explicit,
+        Some(nexus_address),
+        Some(&camino::Utf8Path::new("/an/unused/update/directory")),
+        omicron_sled_agent::sim::ZpoolConfig::None,
+        nexus_client::types::SledCpuFamily::AmdTurin,
+    );
+
+    // We have to hold on to the new simulated sled-agent otherwise it will be immediately dropped
+    // and shut down.
+    let _agent = start_sled_agent_with_config(
+        turin_sled_agent_log,
+        &config,
+        3,
+        &cptestctx.first_sled_agent().simulated_upstairs,
+    )
+    .await
+    .expect("can start test sled-agent");
+
+    // Wait for Nexus to report that the new sled is present..
+    poll::wait_for_condition(
+        || async {
+            let items = objects_list_page_authz::<Sled>(&client, &sleds_url)
+                .await
+                .items;
+
+            if items.len() == 2 {
+                Ok(())
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &Duration::from_secs(5),
+        &Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+
+    // Finally, start the Turin-requiring instance for real!
+    expect_instance_start_ok(client, instance.identity.name.as_str()).await;
+
+    // The VMM should specifically be on our new fake Turin sled.
+    let instance_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled")
+        .sled_id;
+
+    assert_eq!(instance_sled, fake_turin_sled_id);
+}
+
+#[nexus_test]
+async fn test_cannot_start_instance_with_unsatisfiable_min_cpu(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    let name1 = Name::try_from(String::from("test")).unwrap();
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: name1.clone(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(1).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "test".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        // Require Turin to start the instance, but there are no Turin sleds in
+        // our fake environment. Creating this instance should succeed, but
+        // starting it won't.
+        min_cpu_platform: Some(InstanceMinimumCpuPlatform::AmdTurin),
+        start: false,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+    };
+    let url_instances = get_instances_url();
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let _response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to succeed.");
+
+    // Starting the instance, which should fail because we can't pick a sled
+    // that satisfies the instance's requirements.
+
+    expect_instance_start_fail(
+        client,
+        name1.as_str(),
+        http::StatusCode::INSUFFICIENT_STORAGE,
+    )
+    .await;
 }
 
 #[nexus_test]
@@ -6244,6 +6613,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         ssh_public_keys: None,
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -6314,6 +6684,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         ssh_public_keys: None,
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -6378,6 +6749,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         ssh_public_keys: None,
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -6516,6 +6888,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
         external_ips: vec![ephemeral_create.clone(), ephemeral_create],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -6650,6 +7023,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         }],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
@@ -6697,7 +7071,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!("/v1/instances/{}/stop", instance.identity.id),
+            &get_instance_stop_url(instance.identity.name.as_str()),
         )
         .body(None as Option<&serde_json::Value>)
         .expect_status(Some(StatusCode::ACCEPTED)),

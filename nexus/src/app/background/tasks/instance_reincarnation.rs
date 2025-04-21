@@ -316,6 +316,7 @@ mod test {
     use nexus_db_model::InstanceRuntimeState;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Vmm;
+    use nexus_db_model::VmmCpuPlatform;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_db_queries::authz;
@@ -389,6 +390,7 @@ mod test {
                     external_ips: Vec::new(),
                     disks: Vec::new(),
                     boot_disk: None,
+                    min_cpu_platform: None,
                     ssh_public_keys: None,
                     start: state == InstanceState::Vmm,
                     auto_restart_policy,
@@ -437,6 +439,7 @@ mod test {
                     sled_id: Uuid::new_v4(),
                     propolis_ip: "10.1.9.42".parse().unwrap(),
                     propolis_port: 420.into(),
+                    cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),

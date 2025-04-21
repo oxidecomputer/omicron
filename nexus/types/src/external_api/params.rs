@@ -13,8 +13,8 @@ use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
-    LinkFec, LinkSpeed, Name, NameOrId, Nullable, PaginationOrder,
-    RouteDestination, RouteTarget, UserId,
+    InstanceMinimumCpuPlatform, LinkFec, LinkSpeed, Name, NameOrId, Nullable,
+    PaginationOrder, RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -1263,6 +1263,11 @@ pub struct InstanceCreate {
     /// Anti-Affinity groups which this instance should be added.
     #[serde(default)]
     pub anti_affinity_groups: Vec<NameOrId>,
+
+    /// The minimum required CPU platform for this instance. If this is `null`,
+    /// the instance requires no particular CPU platform.
+    #[serde(default)]
+    pub min_cpu_platform: Option<InstanceMinimumCpuPlatform>,
 }
 
 /// Parameters of an `Instance` that can be reconfigured after creation.
@@ -1294,6 +1299,10 @@ pub struct InstanceUpdate {
     /// In that case, any configured default policy will be used if this is
     /// `null`.
     pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+
+    /// The minimum required CPU platform for this instance. If this is `null`,
+    /// the instance requires no particular CPU platform.
+    pub min_cpu_platform: Option<InstanceMinimumCpuPlatform>,
 }
 
 #[inline]

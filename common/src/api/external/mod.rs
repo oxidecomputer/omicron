@@ -1194,6 +1194,10 @@ pub struct Instance {
 
     #[serde(flatten)]
     pub auto_restart_status: InstanceAutoRestartStatus,
+
+    /// The minimum required CPU platform for this instance. If this is `null`,
+    /// the instance requires no particular CPU platform.
+    pub min_cpu_platform: Option<InstanceMinimumCpuPlatform>,
 }
 
 /// Status of control-plane driven automatic failure recovery for this instance.
@@ -1256,6 +1260,46 @@ pub enum InstanceAutoRestartPolicy {
     /// best-effort attempt to restart it. The control plane may choose not to
     /// restart the instance to preserve the overall availability of the system.
     BestEffort,
+}
+
+/// A minimum required CPU platform for an instance.
+///
+/// When an instance specifies a minimum required CPU platform:
+///
+/// - The system may expose (to the VM) new CPU features that are only present
+///   on that platform (or on newer platforms of the same lineage that also
+///   support those features).
+/// - The instance must run on hosts that have CPUs that support all the
+///   features of the supplied minimum platform.
+///
+/// That is, the instance is restricted to hosts that have the specified minimum
+/// host CPU type (or a more advanced, but still compatible, CPU), but in
+/// exchange the CPU features exposed by the minimum platform are available for
+/// the guest to use. Note that this may prevent an instance from starting (if
+/// the hosts it requires are full but there is capacity on other incompatible
+/// hosts).
+///
+/// If an instance does not specify a minimum required CPU platform, then when
+/// it starts, the control plane selects a host for the instance and then
+/// supplies the guest with the "minimum" CPU platform supported by that host.
+/// This maximizes the number of hosts that can run the VM if it later needs to
+/// migrate to another host.
+///
+/// In all cases, the CPU features presented by a given CPU platform are a
+/// subset of what the corresponding hardware may actually support; features
+/// which cannot be used from a virtual environment or do not have full
+/// hypervisor support may be masked off. See RFD 314 for specific CPU features
+/// in a CPU platform.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceMinimumCpuPlatform {
+    /// An AMD Milan-like CPU platform.
+    AmdMilan,
+
+    /// An AMD Turin-like CPU platform.
+    AmdTurin,
 }
 
 // AFFINITY GROUPS

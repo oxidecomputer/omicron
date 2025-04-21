@@ -19845,6 +19845,15 @@
               }
             ]
           },
+          "min_cpu_platform": {
+            "nullable": true,
+            "description": "The minimum required CPU platform for this instance. If this is `null`, the instance requires no particular CPU platform.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceMinimumCpuPlatform"
+              }
+            ]
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -19997,6 +20006,16 @@
               }
             ]
           },
+          "min_cpu_platform": {
+            "nullable": true,
+            "description": "The minimum required CPU platform for this instance. If this is `null`, the instance requires no particular CPU platform.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceMinimumCpuPlatform"
+              }
+            ]
+          },
           "name": {
             "$ref": "#/components/schemas/Name"
           },
@@ -20113,6 +20132,25 @@
             "required": [
               "name",
               "type"
+            ]
+          }
+        ]
+      },
+      "InstanceMinimumCpuPlatform": {
+        "description": "A minimum required CPU platform for an instance.\n\nWhen an instance specifies a minimum required CPU platform:\n\n- The system may expose (to the VM) new CPU features that are only present on that platform (or on newer platforms of the same lineage that also support those features). - The instance must run on hosts that have CPUs that support all the features of the supplied minimum platform.\n\nThat is, the instance is restricted to hosts that have the specified minimum host CPU type (or a more advanced, but still compatible, CPU), but in exchange the CPU features exposed by the minimum platform are available for the guest to use. Note that this may prevent an instance from starting (if the hosts it requires are full but there is capacity on other incompatible hosts).\n\nIf an instance does not specify a minimum required CPU platform, then when it starts, the control plane selects a host for the instance and then supplies the guest with the \"minimum\" CPU platform supported by that host. This maximizes the number of hosts that can run the VM if it later needs to migrate to another host.",
+        "oneOf": [
+          {
+            "description": "An AMD Zen 3-compatible CPU platform.",
+            "type": "string",
+            "enum": [
+              "amd_milan"
+            ]
+          },
+          {
+            "description": "An AMD Zen 5-compatible CPU platform.",
+            "type": "string",
+            "enum": [
+              "amd_turin"
             ]
           }
         ]
@@ -20500,6 +20538,15 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "min_cpu_platform": {
+            "nullable": true,
+            "description": "The minimum required CPU platform for this instance. If this is `null`, the instance requires no particular CPU platform.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceMinimumCpuPlatform"
               }
             ]
           },

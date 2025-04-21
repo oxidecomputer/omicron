@@ -4760,6 +4760,7 @@ async fn cmd_db_instance_info(
                     propolis_ip: _,
                     propolis_port: _,
                     instance_id: _,
+                    cpu_platform: _,
                     time_created,
                     time_deleted,
                     runtime:
@@ -7356,6 +7357,7 @@ fn prettyprint_vmm(
     const INSTANCE_ID: &'static str = "instance ID";
     const SLED_ID: &'static str = "sled ID";
     const SLED_SERIAL: &'static str = "sled serial";
+    const CPU_PLATFORM: &'static str = "CPU platform";
     const ADDRESS: &'static str = "propolis address";
     const STATE: &'static str = "state";
     const WIDTH: usize = const_max_len(&[
@@ -7366,6 +7368,7 @@ fn prettyprint_vmm(
         INSTANCE_ID,
         SLED_ID,
         SLED_SERIAL,
+        CPU_PLATFORM,
         STATE,
         ADDRESS,
     ]);
@@ -7379,6 +7382,7 @@ fn prettyprint_vmm(
         sled_id,
         propolis_ip,
         propolis_port,
+        cpu_platform,
         runtime: db::model::VmmRuntimeState { state, r#gen, time_state_updated },
     } = vmm;
 
@@ -7405,6 +7409,7 @@ fn prettyprint_vmm(
     if let Some(serial) = sled_serial {
         println!("{indent}{SLED_SERIAL:>width$}: {serial}");
     }
+    println!("{indent}{CPU_PLATFORM:>width$}: {cpu_platform}");
 }
 
 async fn cmd_db_vmm_list(
@@ -7480,6 +7485,7 @@ async fn cmd_db_vmm_list(
                 sled_id,
                 propolis_ip: _,
                 propolis_port: _,
+                cpu_platform: _,
                 runtime:
                     db::model::VmmRuntimeState {
                         state,

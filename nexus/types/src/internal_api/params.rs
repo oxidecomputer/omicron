@@ -31,7 +31,7 @@ use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 /// Identifies the kind of CPU present on a sled, determined by reading CPUID.
-#[derive(Serialize, Deserialize, Debug, JsonSchema)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SledCpuFamily {
     /// The CPU vendor or its family number don't correspond to any of the

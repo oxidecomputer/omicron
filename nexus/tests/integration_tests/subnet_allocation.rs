@@ -63,6 +63,7 @@ async fn create_instance_expect_failure(
         external_ips: vec![],
         disks: vec![],
         boot_disk: None,
+        min_cpu_platform: None,
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),

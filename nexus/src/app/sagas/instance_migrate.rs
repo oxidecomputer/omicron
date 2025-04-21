@@ -319,6 +319,7 @@ async fn sim_create_vmm_record(
         propolis_id,
         sled_id,
         propolis_ip,
+        params.src_vmm.cpu_platform,
     )
     .await
 }
@@ -612,6 +613,7 @@ mod tests {
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
+                min_cpu_platform: None,
                 start: true,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
