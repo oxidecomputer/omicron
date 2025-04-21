@@ -2047,7 +2047,7 @@ fn after_134_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_136_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async {
         let probe_event_id: Uuid =
             "001de000-7768-4000-8000-000000000001".parse().unwrap();
@@ -2156,8 +2156,8 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new().before(before_134_0_0).after(after_134_0_0),
     );
     map.insert(
-        Version::new(136, 0, 0),
-        DataMigrationFns::new().after(after_136_0_0),
+        Version::new(139, 0, 0),
+        DataMigrationFns::new().after(after_139_0_0),
     );
 
     map
