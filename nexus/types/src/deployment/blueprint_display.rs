@@ -417,6 +417,8 @@ impl BpTableSchema for BpPendingMgsUpdates {
             "serial_number",
             "artifact_kind",
             "artifact_hash",
+            "artifact_version",
+            "details",
         ]
     }
 }

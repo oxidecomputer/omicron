@@ -22,9 +22,6 @@ use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
 use nexus_reconfigurator_simulation::SimState;
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::Simulator;
-use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneImageSource;
-use nexus_types::deployment::BlueprintZoneImageVersion;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -32,8 +29,14 @@ use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
+use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
+use nexus_types::deployment::{
+    BlueprintZoneImageSource, PendingMgsUpdateDetails,
+};
+use nexus_types::deployment::{BlueprintZoneImageVersion, PendingMgsUpdate};
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::inventory::SpType;
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
@@ -53,9 +56,11 @@ use std::fmt::Write;
 use std::io::IsTerminal;
 use swrite::{SWrite, swriteln};
 use tabled::Tabled;
-use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
+use tufaceous_artifact::{
+    ArtifactHash, ArtifactHashId, ArtifactKind, KnownArtifactKind,
+};
 
 mod log_capture;
 
@@ -372,6 +377,31 @@ enum BlueprintEditCommands {
     },
     /// expunge a zone
     ExpungeZone { zone_id: OmicronZoneUuid },
+    /// configure an SP update
+    SpUpdateSet {
+        /// serial number to update
+        serial: String,
+        /// artifact hash id
+        artifact_hash: ArtifactHash,
+        /// version
+        version: String,
+        /// component to update
+        #[command(subcommand)]
+        component: SpUpdateComponent,
+    },
+    /// delete a configured SP update
+    SpUpdateDelete {
+        /// baseboard serial number whose update to delete
+        serial: String,
+    },
+}
+
+#[derive(Clone, Debug, Subcommand)]
+enum SpUpdateComponent {
+    Sp {
+        expected_active_version: ArtifactVersion,
+        expected_inactive_version: ExpectedVersion,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -873,6 +903,71 @@ fn cmd_blueprint_edit(
                 .sled_expunge_zone(sled_id, zone_id)
                 .context("failed to expunge zone")?;
             format!("expunged zone {zone_id} from sled {sled_id}")
+        }
+        BlueprintEditCommands::SpUpdateSet {
+            serial,
+            artifact_hash,
+            version,
+            component,
+        } => {
+            let (baseboard_id, sp) = latest_collection
+                .sps
+                .iter()
+                .find(|(b, _)| b.serial_number == serial)
+                .ok_or_else(|| {
+                    anyhow!("unknown baseboard serial: {serial:?}")
+                })?;
+
+            let (known_artifact_kind, details) = match component {
+                SpUpdateComponent::Sp {
+                    expected_active_version,
+                    expected_inactive_version,
+                } => {
+                    let known_artifact_kind = match sp.sp_type {
+                        SpType::Sled => KnownArtifactKind::GimletSp,
+                        SpType::Power => KnownArtifactKind::PscSp,
+                        SpType::Switch => KnownArtifactKind::SwitchSp,
+                    };
+                    let details = PendingMgsUpdateDetails::Sp {
+                        expected_active_version,
+                        expected_inactive_version,
+                    };
+                    (known_artifact_kind, details)
+                }
+            };
+
+            let artifact_kind = ArtifactKind::from_known(known_artifact_kind);
+            let artifact_hash_id =
+                ArtifactHashId { kind: artifact_kind, hash: artifact_hash };
+            let artifact_version = ArtifactVersion::new(version)
+                .context("parsing artifact version")?;
+
+            let update = PendingMgsUpdate {
+                baseboard_id: baseboard_id.clone(),
+                sp_type: sp.sp_type,
+                slot_id: u32::from(sp.sp_slot),
+                details,
+                artifact_hash_id,
+                artifact_version,
+            };
+
+            builder.pending_mgs_update_insert(update);
+            format!(
+                "configured update for serial {serial}\n\
+                 warn: no validation is done on the requested artifact \
+                 hash or version"
+            )
+        }
+        BlueprintEditCommands::SpUpdateDelete { serial } => {
+            let baseboard_id = latest_collection
+                .baseboards
+                .iter()
+                .find(|b| b.serial_number == serial)
+                .ok_or_else(|| {
+                    anyhow!("unknown baseboard serial: {serial:?}")
+                })?;
+            builder.pending_mgs_update_delete(baseboard_id);
+            format!("deleted configured update for serial {serial}")
         }
     };
 

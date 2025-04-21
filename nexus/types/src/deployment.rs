@@ -632,6 +632,8 @@ impl fmt::Display for BlueprintDisplay<'_> {
                                     pu.baseboard_id.serial_number.clone(),
                                     pu.artifact_hash_id.kind.to_string(),
                                     pu.artifact_hash_id.hash.to_string(),
+                                    pu.artifact_version.to_string(),
+                                    format!("{:?}", pu.details),
                                 ],
                             )
                         })
