@@ -1339,11 +1339,11 @@ to:   blueprint 5bf974f3-81f9-455b-b24e-3099f765664c
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_kind   artifact_hash                                                      artifact_version   details                                                                                                               
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--   sled      2      model2        serial2         gimlet_sp       e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   1.1.0              Sp { expected_active_version: ArtifactVersion("1.0.0"), expected_inactive_version: Version(ArtifactVersion("1.0.1")) }
-+   sled      2      model2        serial2         gimlet_sp       e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   newest             Sp { expected_active_version: ArtifactVersion("newer"), expected_inactive_version: Version(ArtifactVersion("older")) }
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_kind   artifact_hash                                                      artifact_version   details                                                                                                                 
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      2      model2        serial2         gimlet_sp       e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   - 1.1.0            - Sp { expected_active_version: ArtifactVersion("1.0.0"), expected_inactive_version: Version(ArtifactVersion("1.0.1")) }
+     └─                                                                                                                               + newest           + Sp { expected_active_version: ArtifactVersion("newer"), expected_inactive_version: Version(ArtifactVersion("older")) }
 
 
 internal DNS:
@@ -1640,11 +1640,11 @@ to:   blueprint cca24b71-09b5-4042-9185-b33e9f2ebba0
  PENDING MGS UPDATES:
 
     Pending MGS-managed updates (all baseboards):
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    sp_type   slot   part_number   serial_number   artifact_kind   artifact_hash                                                      artifact_version   details                                                                                                               
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--   sled      2      model2        serial2         gimlet_sp       e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   newest             Sp { expected_active_version: ArtifactVersion("newer"), expected_inactive_version: Version(ArtifactVersion("older")) }
-+   sled      2      model2        serial2         gimlet_sp       e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   1.1.0              Sp { expected_active_version: ArtifactVersion("1.0.0"), expected_inactive_version: Version(ArtifactVersion("1.0.1")) }
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_kind   artifact_hash                                                      artifact_version   details                                                                                                                 
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      2      model2        serial2         gimlet_sp       e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   - newest           - Sp { expected_active_version: ArtifactVersion("newer"), expected_inactive_version: Version(ArtifactVersion("older")) }
+     └─                                                                                                                               + 1.1.0            + Sp { expected_active_version: ArtifactVersion("1.0.0"), expected_inactive_version: Version(ArtifactVersion("1.0.1")) }
 
 
 internal DNS:

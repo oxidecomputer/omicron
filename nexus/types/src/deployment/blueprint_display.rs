@@ -47,6 +47,7 @@ pub mod constants {
     pub const GENERATION: &str = "generation";
 }
 use constants::*;
+use std::fmt::Display;
 
 /// The state of a sled or resource (e.g. zone or physical disk) in this
 /// blueprint, with regards to the parent blueprint
@@ -131,11 +132,14 @@ pub enum BpTableColumn {
 }
 
 impl BpTableColumn {
-    pub fn new(before: String, after: String) -> BpTableColumn {
+    pub fn new<T: Display + Eq>(before: T, after: T) -> BpTableColumn {
         if before != after {
-            BpTableColumn::Diff { before, after }
+            BpTableColumn::Diff {
+                before: before.to_string(),
+                after: after.to_string(),
+            }
         } else {
-            BpTableColumn::Value(before)
+            BpTableColumn::Value(before.to_string())
         }
     }
 

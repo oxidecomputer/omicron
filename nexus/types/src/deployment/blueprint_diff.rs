@@ -1622,13 +1622,47 @@ impl<'a> BpDiffPendingMgsUpdates<'a> {
             has_changed = true;
             let u1 = &update.before;
             let u2 = &update.after;
-            rows.push(BpTableRow::from_strings(
-                BpDiffState::Removed,
-                u1.to_bp_table_values(),
-            ));
-            rows.push(BpTableRow::from_strings(
-                BpDiffState::Added,
-                u2.to_bp_table_values(),
+
+            let sp_type = BpTableColumn::new(&u1.sp_type, &u2.sp_type);
+            let slot_id = BpTableColumn::new(&u1.slot_id, &u2.slot_id);
+            let part_number = BpTableColumn::new(
+                &u1.baseboard_id.part_number,
+                &u2.baseboard_id.part_number,
+            );
+            let serial_number = BpTableColumn::new(
+                &u1.baseboard_id.serial_number,
+                &u2.baseboard_id.serial_number,
+            );
+            let artifact_kind = BpTableColumn::new(
+                &u1.artifact_hash_id.kind,
+                &u2.artifact_hash_id.kind,
+            );
+            let artifact_hash = BpTableColumn::new(
+                &u1.artifact_hash_id.hash,
+                &u2.artifact_hash_id.hash,
+            );
+            let artifact_version =
+                BpTableColumn::new(&u1.artifact_version, &u2.artifact_version);
+            let details = if u1.details != u2.details {
+                BpTableColumn::diff(
+                    format!("{:?}", &u1.details),
+                    format!("{:?}", &u2.details),
+                )
+            } else {
+                BpTableColumn::value(format!("{:?}", &u1.details))
+            };
+            rows.push(BpTableRow::new(
+                BpDiffState::Modified,
+                vec![
+                    sp_type,
+                    slot_id,
+                    part_number,
+                    serial_number,
+                    artifact_kind,
+                    artifact_hash,
+                    artifact_version,
+                    details,
+                ],
             ));
         }
         for (_, update) in &map.added {
