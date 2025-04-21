@@ -11,7 +11,6 @@ mod error;
 pub mod http_pagination;
 pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
-use crate::update::ArtifactHash;
 use crate::update::ArtifactId;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -45,6 +44,7 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 // The type aliases below exist primarily to ensure consistency among return
@@ -2717,7 +2717,7 @@ pub struct LldpNeighbor {
     pub system_description: Option<String>,
 
     /// The LLDP management IP(s) advertised by the neighbor
-    pub management_ip: Vec<oxnet::IpNet>,
+    pub management_ip: Vec<lldp_protocol::types::ManagementAddress>,
 }
 
 impl SimpleIdentity for LldpNeighbor {

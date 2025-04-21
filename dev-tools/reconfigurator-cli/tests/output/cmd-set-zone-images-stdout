@@ -87,6 +87,10 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     state fingerprint:::::::::::::::::   (none)
     cluster.preserve_downgrade_option:   (do not modify)
 
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   test suite
     created at:::::::::::   <REDACTED_TIMESTAMP>
@@ -94,6 +98,7 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     internal DNS version:   1
     external DNS version:   1
 
+ PENDING MGS-MANAGED UPDATES: 0
 
 
 > 
@@ -191,6 +196,10 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     state fingerprint:::::::::::::::::   (none)
     cluster.preserve_downgrade_option:   (do not modify)
 
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   reconfigurator-cli
     created at:::::::::::   <REDACTED_TIMESTAMP>
@@ -198,6 +207,7 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     internal DNS version:   1
     external DNS version:   1
 
+ PENDING MGS-MANAGED UPDATES: 0
 
 
 > blueprint-diff 971eeb12-1830-4fa0-a699-98ea0164505c f714e6ea-e85a-4d7d-93c2-a018744fe176
@@ -289,6 +299,10 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
     internal DNS version:   1 (unchanged)
     external DNS version:   1 (unchanged)
 
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
@@ -312,6 +326,8 @@ internal DNS:
         AAAA fd00:1122:3344:101::26
     name: 805cba8f-a039-44e1-8cb0-1ff2c6b89997.host          (records: 1)
         AAAA fd00:1122:3344:101::23
+    name: 868d5b02-7792-4fc0-b6a9-654afcae9ea0.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
     name: _clickhouse-admin-single-server._tcp               (records: 1)
         SRV  port  8888 4fc6cb68-8ce9-4171-91b3-0106b8fed386.host.control-plane.oxide.internal
     name: _clickhouse-native._tcp                            (records: 1)
@@ -342,6 +358,10 @@ internal DNS:
         SRV  port 12221 296ab8b3-3fd4-4c2b-9e0a-1f909e4993e5.host.control-plane.oxide.internal
         SRV  port 12221 50dcee18-a857-4596-8cb7-fc9cf90b698d.host.control-plane.oxide.internal
         SRV  port 12221 805cba8f-a039-44e1-8cb0-1ff2c6b89997.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 4fc6cb68-8ce9-4171-91b3-0106b8fed386.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 1)
+        SRV  port 12348 868d5b02-7792-4fc0-b6a9-654afcae9ea0.sled.control-plane.oxide.internal
     name: ac0f0ca6-02dd-43c7-b029-f34b247f7392.host          (records: 1)
         AAAA fd00:1122:3344:101::28
     name: ae74917b-2c6a-477d-9b90-fe2c2a4247f7.host          (records: 1)
@@ -459,6 +479,10 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
     state fingerprint:::::::::::::::::   (none)
     cluster.preserve_downgrade_option:   (do not modify)
 
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   reconfigurator-cli
     created at:::::::::::   <REDACTED_TIMESTAMP>
@@ -466,6 +490,7 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
     internal DNS version:   1
     external DNS version:   1
 
+ PENDING MGS-MANAGED UPDATES: 0
 
 
 > blueprint-diff f714e6ea-e85a-4d7d-93c2-a018744fe176 d9c572a1-a68c-4945-b1ec-5389bd588fe9
@@ -557,6 +582,10 @@ to:   blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9
     internal DNS version:   1 (unchanged)
     external DNS version:   1 (unchanged)
 
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
@@ -580,6 +609,8 @@ internal DNS:
         AAAA fd00:1122:3344:101::26
     name: 805cba8f-a039-44e1-8cb0-1ff2c6b89997.host          (records: 1)
         AAAA fd00:1122:3344:101::23
+    name: 868d5b02-7792-4fc0-b6a9-654afcae9ea0.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
     name: _clickhouse-admin-single-server._tcp               (records: 1)
         SRV  port  8888 4fc6cb68-8ce9-4171-91b3-0106b8fed386.host.control-plane.oxide.internal
     name: _clickhouse-native._tcp                            (records: 1)
@@ -610,6 +641,10 @@ internal DNS:
         SRV  port 12221 296ab8b3-3fd4-4c2b-9e0a-1f909e4993e5.host.control-plane.oxide.internal
         SRV  port 12221 50dcee18-a857-4596-8cb7-fc9cf90b698d.host.control-plane.oxide.internal
         SRV  port 12221 805cba8f-a039-44e1-8cb0-1ff2c6b89997.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 4fc6cb68-8ce9-4171-91b3-0106b8fed386.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 1)
+        SRV  port 12348 868d5b02-7792-4fc0-b6a9-654afcae9ea0.sled.control-plane.oxide.internal
     name: ac0f0ca6-02dd-43c7-b029-f34b247f7392.host          (records: 1)
         AAAA fd00:1122:3344:101::28
     name: ae74917b-2c6a-477d-9b90-fe2c2a4247f7.host          (records: 1)

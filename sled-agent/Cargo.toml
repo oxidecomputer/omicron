@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+atomicwrites.workspace = true
 base64.workspace = true
 bootstore.workspace = true
 bootstrap-agent-api.workspace = true
@@ -74,7 +75,6 @@ repo-depot-api.workspace = true
 repo-depot-client.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
-semver.workspace = true
 serde.workspace = true
 serde_human_bytes.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
@@ -101,6 +101,8 @@ tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
 tokio-util.workspace = true
 toml.workspace = true
+tufaceous-artifact.workspace = true
+tufaceous-brand-metadata.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
@@ -110,7 +112,6 @@ omicron-workspace-hack.workspace = true
 slog-error-chain.workspace = true
 walkdir.workspace = true
 zip.workspace = true
-tufaceous-brand-metadata.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true
@@ -127,7 +128,6 @@ omicron-test-utils.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
-semver.workspace = true
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true

@@ -11,11 +11,12 @@ use crate::addrobj::{
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
-use crate::svc::wait_for_service;
 use crate::zone::AddressRequest;
+use crate::zone::Zones;
 use crate::zpool::{PathInPool, ZpoolOrRamdisk};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
+use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -27,11 +28,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 #[cfg(target_os = "illumos")]
 use std::thread;
-
-#[cfg(any(test, feature = "testing"))]
-use crate::zone::MockZones as Zones;
-#[cfg(not(any(test, feature = "testing")))]
-use crate::zone::Zones;
 
 /// Errors returned from methods for fetching SMF services and log files
 #[derive(thiserror::Error, Debug)]
@@ -469,18 +465,13 @@ impl RunningZone {
         I: IntoIterator<Item = S>,
         S: AsRef<std::ffi::OsStr>,
     {
-        // NOTE: This implementation is useless, and will never work. However,
-        // it must actually call `crate::execute()` for the testing purposes.
-        // That's mocked by `mockall` to return known data, and so the command
-        // that's actually run is irrelevant.
-        let mut command = std::process::Command::new("echo");
-        let command = command.args(args);
-        crate::execute(command)
-            .map_err(|err| RunCommandError {
-                zone: self.name().to_string(),
-                err,
-            })
-            .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+        let all_args = args
+            .into_iter()
+            .map(|arg| arg.as_ref().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        panic!(
+            "Attempting to run a host OS command on a non-illumos platform: {all_args:?}"
+        );
     }
 
     /// Boots a new zone.
@@ -490,7 +481,7 @@ impl RunningZone {
         // Boot the zone.
         info!(zone.log, "Booting {} zone", zone.name);
 
-        Zones::boot(&zone.name).await?;
+        zone.zones_api.boot(&zone.name).await?;
 
         // Wait until the zone reaches the 'single-user' SMF milestone.
         // At this point, we know that the dependent
@@ -499,16 +490,18 @@ impl RunningZone {
         // services are up, so future requests to create network addresses
         // or manipulate services will work.
         let fmri = "svc:/milestone/single-user:default";
-        wait_for_service(Some(&zone.name), fmri, zone.log.clone())
+        zone.zones_api
+            .wait_for_service(Some(&zone.name), fmri, zone.log.clone())
             .await
             .map_err(|_| BootError::Timeout {
                 service: fmri.to_string(),
                 zone: zone.name.to_string(),
             })?;
 
-        let id = Zones::id(&zone.name)
-            .await?
-            .ok_or_else(|| BootError::NoZoneId { zone: zone.name.clone() })?;
+        let id =
+            zone.zones_api.id(&zone.name).await?.ok_or_else(|| {
+                BootError::NoZoneId { zone: zone.name.clone() }
+            })?;
 
         let running_zone = RunningZone { id: Some(id), inner: zone };
 
@@ -544,32 +537,6 @@ impl RunningZone {
         let network =
             Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
         Ok(network)
-    }
-
-    /// This is the API for creating a bootstrap address on the switch zone.
-    pub async fn ensure_bootstrap_address(
-        &self,
-        address: Ipv6Addr,
-    ) -> Result<(), EnsureAddressError> {
-        let vnic = self.inner.bootstrap_vnic.as_ref().ok_or_else(|| {
-            EnsureAddressError::MissingBootstrapVnic {
-                address: address.to_string(),
-                zone: self.inner.name.clone(),
-            }
-        })?;
-        let addrtype =
-            AddressRequest::new_static(std::net::IpAddr::V6(address), None);
-        let addrobj =
-            AddrObject::new(vnic.name(), "bootstrap6").map_err(|err| {
-                EnsureAddressError::AddrObject {
-                    request: addrtype,
-                    zone: self.inner.name.clone(),
-                    err,
-                }
-            })?;
-        let _ =
-            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
-        Ok(())
     }
 
     pub async fn ensure_address_for_port(
@@ -742,7 +709,9 @@ impl RunningZone {
         if let Some(_) = self.id.take() {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
-            Zones::halt_and_remove_logged(&log, &name)
+            self.inner
+                .zones_api
+                .halt_and_remove_logged(&log, &name)
                 .await
                 .map_err(|err| err.to_string())?;
         }
@@ -862,8 +831,9 @@ impl Drop for RunningZone {
         if let Some(_) = self.id.take() {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
+            let zones_api = self.inner.zones_api.clone();
             tokio::task::spawn(async move {
-                match Zones::halt_and_remove_logged(&log, &name).await {
+                match zones_api.halt_and_remove_logged(&log, &name).await {
                     Ok(()) => {
                         info!(log, "Stopped and uninstalled zone")
                     }
@@ -935,6 +905,9 @@ pub struct InstalledZone {
 
     // Physical NICs possibly provisioned to the zone.
     links: Vec<Link>,
+
+    // API to underlying zone commands
+    zones_api: DebugIgnore<Arc<dyn crate::zone::Api>>,
 }
 
 impl InstalledZone {
@@ -1005,7 +978,7 @@ pub struct FakeZoneBuilderConfig {
     temp_dir: Arc<Utf8PathBuf>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ZoneBuilderFactory {
     // Why this is part of this builder/factory and not some separate builder
     // type: At time of writing, to the best of my knowledge:
@@ -1016,11 +989,22 @@ pub struct ZoneBuilderFactory {
     //   needs to construct zones (and anything else with a lot of parameters)
     //   seems like a worse idea.
     fake_cfg: Option<FakeZoneBuilderConfig>,
+    zones_api: Arc<dyn crate::zone::Api>,
 }
 
 impl ZoneBuilderFactory {
+    pub fn new() -> Self {
+        Self {
+            fake_cfg: None,
+            zones_api: Arc::new(crate::zone::Zones::real_api()),
+        }
+    }
+
     /// For use in unit tests that don't require actual zone creation to occur.
-    pub fn fake(temp_dir: Option<&String>) -> Self {
+    pub fn fake(
+        temp_dir: Option<&String>,
+        zones_api: Arc<dyn crate::zone::Api>,
+    ) -> Self {
         let temp_dir = match temp_dir {
             Some(dir) => Utf8PathBuf::from(dir),
             None => Utf8TempDir::new().unwrap().into_path(),
@@ -1029,12 +1013,21 @@ impl ZoneBuilderFactory {
             fake_cfg: Some(FakeZoneBuilderConfig {
                 temp_dir: Arc::new(temp_dir),
             }),
+            zones_api,
         }
+    }
+
+    pub fn zones_api(&self) -> &Arc<dyn crate::zone::Api> {
+        &self.zones_api
     }
 
     /// Create a [ZoneBuilder] that inherits this factory's fakeness.
     pub fn builder<'a>(&self) -> ZoneBuilder<'a> {
-        ZoneBuilder { fake_cfg: self.fake_cfg.clone(), ..Default::default() }
+        ZoneBuilder {
+            fake_cfg: self.fake_cfg.clone(),
+            zones_api: Some(self.zones_api.clone()),
+            ..Default::default()
+        }
     }
 }
 
@@ -1081,6 +1074,8 @@ pub struct ZoneBuilder<'a> {
     /// temporary directories according to the contents of the provided
     /// `FakeZoneBuilderConfig`.
     fake_cfg: Option<FakeZoneBuilderConfig>,
+
+    zones_api: Option<Arc<dyn crate::zone::Api>>,
 }
 
 impl<'a> ZoneBuilder<'a> {
@@ -1177,7 +1172,8 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     // (used in unit tests)
-    fn fake_install(self) -> Result<InstalledZone, InstallZoneError> {
+    fn fake_install(mut self) -> Result<InstalledZone, InstallZoneError> {
+        let zones_api = self.zones_api.take().unwrap();
         let zone = self
             .zone_type
             .ok_or(InstallZoneError::IncompleteBuilder)?
@@ -1208,6 +1204,7 @@ impl<'a> ZoneBuilder<'a> {
                 bootstrap_vnic: self.bootstrap_vnic,
                 opte_ports: self.opte_ports?,
                 links: self.links?,
+                zones_api: DebugIgnore(zones_api),
             };
             let xml_path = iz.site_profile_xml_path().parent()?.to_path_buf();
             std::fs::create_dir_all(&xml_path)
@@ -1220,7 +1217,7 @@ impl<'a> ZoneBuilder<'a> {
     /// Create the zone with the provided parameters.
     /// Returns `Err(InstallZoneError::IncompleteBuilder)` if a necessary
     /// parameter was not provided.
-    pub async fn install(self) -> Result<InstalledZone, InstallZoneError> {
+    pub async fn install(mut self) -> Result<InstalledZone, InstallZoneError> {
         if self.fake_cfg.is_some() {
             return self.fake_install();
         }
@@ -1289,23 +1286,26 @@ impl<'a> ZoneBuilder<'a> {
         net_device_names.dedup();
 
         zone_root_path.path = zone_root_path.path.join(&full_zone_name);
-        Zones::install_omicron_zone(
-            &log,
-            &zone_root_path,
-            &full_zone_name,
-            &zone_image_path,
-            datasets,
-            filesystems,
-            devices,
-            net_device_names,
-            limit_priv,
-        )
-        .await
-        .map_err(|err| InstallZoneError::InstallZone {
-            zone: full_zone_name.to_string(),
-            image_path: zone_image_path.clone(),
-            err,
-        })?;
+
+        let zones_api = self.zones_api.take().unwrap();
+        zones_api
+            .install_omicron_zone(
+                &log,
+                &zone_root_path,
+                &full_zone_name,
+                &zone_image_path,
+                datasets,
+                filesystems,
+                devices,
+                net_device_names,
+                limit_priv,
+            )
+            .await
+            .map_err(|err| InstallZoneError::InstallZone {
+                zone: full_zone_name.to_string(),
+                image_path: zone_image_path.clone(),
+                err,
+            })?;
 
         Ok(InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
@@ -1315,6 +1315,7 @@ impl<'a> ZoneBuilder<'a> {
             bootstrap_vnic,
             opte_ports,
             links,
+            zones_api: DebugIgnore(zones_api),
         })
     }
 }

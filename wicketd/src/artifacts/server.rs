@@ -17,9 +17,9 @@ use installinator_api::InstallinatorApi;
 use installinator_api::ReportQuery;
 use installinator_api::body_to_artifact_response;
 use installinator_common::EventReport;
-use omicron_common::update::ArtifactHashId;
 use slog::Logger;
 use slog::error;
+use tufaceous_artifact::ArtifactHashId;
 
 use super::WicketdArtifactStore;
 

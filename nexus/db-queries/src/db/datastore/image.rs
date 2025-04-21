@@ -1,11 +1,8 @@
 use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::Image;
 use crate::db::model::Project;
 use crate::db::model::ProjectImage;
@@ -15,6 +12,8 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::Name;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -37,7 +36,7 @@ impl DataStore {
     ) -> ListResultVec<Image> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
-        use db::schema::project_image::dsl as project_dsl;
+        use nexus_db_schema::schema::project_image::dsl as project_dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => paginated(
                 project_dsl::project_image,
@@ -69,7 +68,7 @@ impl DataStore {
     ) -> ListResultVec<Image> {
         opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
 
-        use db::schema::silo_image::dsl;
+        use nexus_db_schema::schema::silo_image::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::silo_image, dsl::id, &pagparams)
@@ -103,7 +102,7 @@ impl DataStore {
         let name = image.name().clone();
         let silo_id = image.silo_id;
 
-        use db::schema::image::dsl;
+        use nexus_db_schema::schema::image::dsl;
         let image: Image = Silo::insert_resource(
             silo_id,
             diesel::insert_into(dsl::image)
@@ -141,7 +140,7 @@ impl DataStore {
 
         let name = image.name().clone();
 
-        use db::schema::image::dsl;
+        use nexus_db_schema::schema::image::dsl;
         let image: Image = Project::insert_resource(
             project_id,
             diesel::insert_into(dsl::image)
@@ -177,7 +176,7 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
         opctx.authorize(authz::Action::Modify, authz_project_image).await?;
 
-        use db::schema::image::dsl;
+        use nexus_db_schema::schema::image::dsl;
         let image = diesel::update(dsl::image)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_project_image.id()))
@@ -211,7 +210,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_silo_image).await?;
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        use db::schema::image::dsl;
+        use nexus_db_schema::schema::image::dsl;
         let image: Image = diesel::update(dsl::image)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_silo_image.id()))
@@ -259,7 +258,7 @@ impl DataStore {
         opctx: &OpContext,
         image: Image,
     ) -> DeleteResult {
-        use db::schema::image::dsl;
+        use nexus_db_schema::schema::image::dsl;
         diesel::update(dsl::image)
             .filter(dsl::id.eq(image.id()))
             .set(dsl::time_deleted.eq(Utc::now()))

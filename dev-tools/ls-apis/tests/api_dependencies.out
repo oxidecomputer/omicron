@@ -34,8 +34,9 @@ DNS Server (client: dns-service-client)
 
 Dendrite DPD (client: dpd-client)
     consumed by: ddmd (maghemite/ddmd) via 2 paths
+    consumed by: lldpd (lldp/lldpd) via 2 paths
     consumed by: mgd (maghemite/mgd) via 1 path
-    consumed by: omicron-nexus (omicron/nexus) via 1 path
+    consumed by: omicron-nexus (omicron/nexus) via 2 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
     consumed by: tfportd (dendrite/tfportd) via 1 path
     consumed by: wicketd (omicron/wicketd) via 2 paths
@@ -47,7 +48,7 @@ ereport (client: ereport-client)
 
 Management Gateway Service (client: gateway-client)
     consumed by: dpd (dendrite/dpd) via 1 path
-    consumed by: omicron-nexus (omicron/nexus) via 3 paths
+    consumed by: omicron-nexus (omicron/nexus) via 4 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
     consumed by: wicketd (omicron/wicketd) via 3 paths
 
@@ -82,6 +83,7 @@ Crucible Repair (client: repair-client)
     consumed by: crucible-downstairs (crucible/downstairs) via 1 path
 
 Repo Depot API (client: repo-depot-client)
+    consumed by: omicron-nexus (omicron/nexus) via 1 path
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
 
 Sled Agent (client: sled-agent-client)

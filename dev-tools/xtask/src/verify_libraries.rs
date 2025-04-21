@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail};
 use camino::Utf8Path;
 use cargo_metadata::Message;
 use clap::Parser;
+use dev_tools_common::{CargoLocation, cargo_command};
 use fs_err as fs;
 use serde::Deserialize;
 use std::{
@@ -15,7 +16,6 @@ use std::{
 };
 use swrite::{SWrite, swriteln};
 
-use crate::common::cargo_command;
 use crate::load_workspace;
 
 #[derive(Parser)]
@@ -99,7 +99,7 @@ pub fn run_cmd(args: Args) -> Result<()> {
     config_path.push(".cargo/xtask.toml");
     let config = read_xtask_toml(&config_path)?;
 
-    let mut command = cargo_command();
+    let mut command = cargo_command(CargoLocation::FromEnv);
     command.args([
         "build",
         "--bins",

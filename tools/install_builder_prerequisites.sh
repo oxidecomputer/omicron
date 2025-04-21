@@ -213,7 +213,6 @@ retry xtask download \
     cockroach \
     clickhouse \
     console \
-    dendrite-openapi \
     dendrite-stub \
     maghemite-mgd \
     transceiver-control

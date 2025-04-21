@@ -9,10 +9,7 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::TransactionError;
 use crate::db::datastore::ValidateTransition;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::AffinityPolicy;
 use crate::db::model::Sled;
 use crate::db::model::SledResourceVmm;
@@ -21,14 +18,17 @@ use crate::db::model::SledUpdate;
 use crate::db::model::to_db_sled_policy;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use crate::db::pool::DbConnection;
 use crate::db::queries::sled_reservation::sled_find_targets_query;
 use crate::db::queries::sled_reservation::sled_insert_resource_query;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledPolicy;
@@ -287,7 +287,7 @@ impl DataStore {
         &self,
         sled_update: SledUpdate,
     ) -> CreateResult<(Sled, bool)> {
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
         // required for conditional upsert
         use diesel::query_dsl::methods::FilterDsl;
 
@@ -351,7 +351,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         sled_id: SledUuid,
     ) -> Result<(), TransactionError<Error>> {
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
         let sled_exists_and_in_service = diesel::select(diesel::dsl::exists(
             dsl::sled
                 .filter(dsl::time_deleted.is_null())
@@ -377,7 +377,7 @@ impl DataStore {
         sled_filter: SledFilter,
     ) -> ListResultVec<Sled> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
             .sled_filter(sled_filter)
@@ -453,7 +453,7 @@ impl DataStore {
         // This check makes this function idempotent. Beyond this point, however
         // we rely on primary key constraints in the database to prevent
         // concurrent reservations for same propolis_id.
-        use db::schema::sled_resource_vmm::dsl as resource_dsl;
+        use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
         let old_resource = resource_dsl::sled_resource_vmm
             .filter(resource_dsl::id.eq(*propolis_id.as_untyped_uuid()))
             .select(SledResourceVmm::as_select())
@@ -571,7 +571,7 @@ impl DataStore {
         opctx: &OpContext,
         vmm_id: PropolisUuid,
     ) -> DeleteResult {
-        use db::schema::sled_resource_vmm::dsl as resource_dsl;
+        use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
         diesel::delete(resource_dsl::sled_resource_vmm)
             .filter(resource_dsl::id.eq(vmm_id.into_untyped_uuid()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -653,7 +653,7 @@ impl DataStore {
                     let valid_old_policies = t.valid_old_policies();
                     let valid_old_states = t.valid_old_states();
 
-                    use db::schema::sled::dsl;
+                    use nexus_db_schema::schema::sled::dsl;
                     let query = diesel::update(dsl::sled)
                         .filter(dsl::time_deleted.is_null())
                         .filter(dsl::id.eq(sled_id));
@@ -731,7 +731,7 @@ impl DataStore {
                         }
                     };
                     if let Some(new_disk_policy) = new_disk_policy {
-                        use db::schema::physical_disk::dsl as physical_disk_dsl;
+                        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
                         diesel::update(physical_disk_dsl::physical_disk)
                             .filter(physical_disk_dsl::time_deleted.is_null())
                             .filter(physical_disk_dsl::sled_id.eq(sled_id))
@@ -792,7 +792,7 @@ impl DataStore {
         new_sled_state: SledState,
         check: ValidateTransition,
     ) -> Result<SledState, TransitionError> {
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
 
         opctx.authorize(authz::Action::Modify, authz_sled).await?;
 
@@ -888,7 +888,7 @@ impl DataStore {
                         ),
                     };
                     if let Some(new_disk_state) = new_disk_state {
-                        use db::schema::physical_disk::dsl as physical_disk_dsl;
+                        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
                         diesel::update(physical_disk_dsl::physical_disk)
                             .filter(physical_disk_dsl::time_deleted.is_null())
                             .filter(physical_disk_dsl::sled_id.eq(sled_id))
@@ -1068,7 +1068,6 @@ pub(in crate::db::datastore) mod test {
     use crate::db::datastore::test_utils::{
         Expected, IneligibleSleds, sled_set_policy, sled_set_state,
     };
-    use crate::db::lookup::LookupPath;
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
     use crate::db::model::to_db_typed_uuid;
@@ -1080,6 +1079,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::small_resource_request;
     use anyhow::{Context, Result};
     use itertools::Itertools;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
@@ -1217,7 +1217,7 @@ pub(in crate::db::datastore) mod test {
         assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
 
         // The sled should not have been updated.
-        let (_, observed_sled_2) = LookupPath::new(&opctx, &datastore)
+        let (_, observed_sled_2) = LookupPath::new(&opctx, datastore)
             .sled_id(observed_sled.id())
             .fetch_for(authz::Action::Modify)
             .await
@@ -1349,7 +1349,7 @@ pub(in crate::db::datastore) mod test {
         instance_id: InstanceUuid,
     ) {
         use db::model::AntiAffinityGroupInstanceMembership;
-        use db::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
+        use nexus_db_schema::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
 
         diesel::insert_into(
             membership_dsl::anti_affinity_group_instance_membership,
@@ -1370,7 +1370,7 @@ pub(in crate::db::datastore) mod test {
         instance_id: InstanceUuid,
     ) {
         use db::model::AffinityGroupInstanceMembership;
-        use db::schema::affinity_group_instance_membership::dsl as membership_dsl;
+        use nexus_db_schema::schema::affinity_group_instance_membership::dsl as membership_dsl;
 
         diesel::insert_into(membership_dsl::affinity_group_instance_membership)
             .values(AffinityGroupInstanceMembership::new(group_id, instance_id))
@@ -2648,7 +2648,7 @@ pub(in crate::db::datastore) mod test {
         datastore: &DataStore,
         id: PhysicalDiskUuid,
     ) -> PhysicalDisk {
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         dsl::physical_disk
             .filter(dsl::id.eq(to_db_typed_uuid(id)))
             .filter(dsl::time_deleted.is_null())
@@ -3015,7 +3015,7 @@ pub(in crate::db::datastore) mod test {
         let values_to_insert: Vec<_> =
             new_sleds.into_iter().map(|s| s.into_insertable()).collect();
         let ninserted = {
-            use db::schema::sled::dsl;
+            use nexus_db_schema::schema::sled::dsl;
             diesel::insert_into(dsl::sled)
                 .values(values_to_insert)
                 .execute_async(

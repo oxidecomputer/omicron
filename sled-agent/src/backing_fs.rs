@@ -23,7 +23,7 @@
 
 use camino::Utf8PathBuf;
 use illumos_utils::zfs::{
-    DatasetEnsureArgs, EnsureDatasetError, GetValueError, Mountpoint,
+    CanMount, DatasetEnsureArgs, EnsureDatasetError, GetValueError, Mountpoint,
     SizeDetails, Zfs,
 };
 use omicron_common::api::external::ByteCount;
@@ -134,7 +134,7 @@ pub(crate) fn ensure_backing_fs(
             sled_storage::dataset::M2_BACKING_DATASET,
             bfs.name
         );
-        let mountpoint = Mountpoint::Path(Utf8PathBuf::from(bfs.mountpoint));
+        let mountpoint = Mountpoint(Utf8PathBuf::from(bfs.mountpoint));
 
         info!(log, "Ensuring dataset {}", dataset);
 
@@ -147,11 +147,12 @@ pub(crate) fn ensure_backing_fs(
         Zfs::ensure_dataset(DatasetEnsureArgs {
             name: &dataset,
             mountpoint: mountpoint.clone(),
+            can_mount: CanMount::NoAuto,
             zoned: false,
             encryption_details: None,
             size_details,
             id: None,
-            additional_options: Some(vec!["canmount=noauto".to_string()]),
+            additional_options: None,
         })?;
 
         // Check if a ZFS filesystem is already mounted on bfs.mountpoint by

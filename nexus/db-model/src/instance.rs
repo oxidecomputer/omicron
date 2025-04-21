@@ -7,13 +7,13 @@ use super::{
     InstanceCpuCount, InstanceState, Vmm, VmmState,
 };
 use crate::collection::DatastoreAttachTargetConfig;
-use crate::schema::{disk, external_ip, instance};
 use chrono::{DateTime, TimeDelta, Utc};
 use db_macros::Resource;
 use diesel::expression::{ValidGrouping, is_aggregate};
 use diesel::pg;
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
+use nexus_db_schema::schema::{disk, external_ip, instance};
 use nexus_types::external_api::params;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;

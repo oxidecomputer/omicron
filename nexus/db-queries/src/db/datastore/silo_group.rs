@@ -10,15 +10,15 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::IncompleteOnConflictExt;
 use crate::db::datastore::RunnableQueryNoReturn;
-use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -37,7 +37,7 @@ impl DataStore {
     ) -> Result<impl RunnableQueryNoReturn, Error> {
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
 
-        use db::schema::silo_group::dsl;
+        use nexus_db_schema::schema::silo_group::dsl;
         Ok(diesel::insert_into(dsl::silo_group)
             .values(silo_group)
             .on_conflict((dsl::silo_id, dsl::external_id))
@@ -73,7 +73,7 @@ impl DataStore {
     ) -> LookupResult<Option<db::model::SiloGroup>> {
         opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
 
-        use db::schema::silo_group::dsl;
+        use nexus_db_schema::schema::silo_group::dsl;
 
         dsl::silo_group
             .filter(dsl::silo_id.eq(authz_silo.id()))
@@ -94,7 +94,7 @@ impl DataStore {
     ) -> ListResultVec<SiloGroupMembership> {
         opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
 
-        use db::schema::silo_group_membership::dsl;
+        use nexus_db_schema::schema::silo_group_membership::dsl;
         dsl::silo_group_membership
             .filter(dsl::silo_user_id.eq(silo_user_id))
             .select(SiloGroupMembership::as_returning())
@@ -116,7 +116,9 @@ impl DataStore {
             .actor_required()
             .internal_context("fetching current user's group memberships")?;
 
-        use db::schema::{silo_group as sg, silo_group_membership as sgm};
+        use nexus_db_schema::schema::{
+            silo_group as sg, silo_group_membership as sgm,
+        };
         paginated(sg::dsl::silo_group, sg::id, pagparams)
             .inner_join(sgm::table.on(sgm::silo_group_id.eq(sg::id)))
             .filter(sgm::silo_user_id.eq(actor.actor_id()))
@@ -150,7 +152,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let silo_group_ids = silo_group_ids.clone();
                 async move {
-                    use db::schema::silo_group_membership::dsl;
+                    use nexus_db_schema::schema::silo_group_membership::dsl;
 
                     // Delete existing memberships for user
                     let silo_user_id = authz_silo_user.id();
@@ -202,7 +204,7 @@ impl DataStore {
         // Prefer to use "transaction_retry_wrapper"
         self.transaction_non_retry_wrapper("silo_group_delete")
             .transaction(&conn, |conn| async move {
-                use db::schema::silo_group_membership;
+                use nexus_db_schema::schema::silo_group_membership;
 
                 // Don't delete groups that still have memberships
                 let group_memberships =
@@ -223,7 +225,7 @@ impl DataStore {
                 }
 
                 // Delete silo group
-                use db::schema::silo_group::dsl;
+                use nexus_db_schema::schema::silo_group::dsl;
                 diesel::update(dsl::silo_group)
                     .filter(dsl::id.eq(group_id))
                     .filter(dsl::time_deleted.is_null())
@@ -253,7 +255,7 @@ impl DataStore {
         authz_silo: &authz::Silo,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloGroup> {
-        use db::schema::silo_group::dsl;
+        use nexus_db_schema::schema::silo_group::dsl;
 
         opctx.authorize(authz::Action::Read, authz_silo).await?;
         paginated(dsl::silo_group, dsl::id, pagparams)

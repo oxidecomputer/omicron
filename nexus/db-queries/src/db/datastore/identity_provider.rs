@@ -8,10 +8,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
-use crate::db::lookup::LookupPath;
 use crate::db::model;
 use crate::db::model::IdentityProvider;
 use crate::db::model::Name;
@@ -19,6 +16,9 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_auth::authn::silos::IdentityProviderType;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::LookupPath;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -79,7 +79,7 @@ impl DataStore {
     ) -> ListResultVec<IdentityProvider> {
         opctx.authorize(authz::Action::ListChildren, authz_idp_list).await?;
 
-        use db::schema::identity_provider::dsl;
+        use nexus_db_schema::schema::identity_provider::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::identity_provider, dsl::id, pagparams)
@@ -117,7 +117,7 @@ impl DataStore {
                 let provider = provider.clone();
                 async move {
                     // insert silo identity provider record with type Saml
-                    use db::schema::identity_provider::dsl as idp_dsl;
+                    use nexus_db_schema::schema::identity_provider::dsl as idp_dsl;
                     diesel::insert_into(idp_dsl::identity_provider)
                         .values(db::model::IdentityProvider {
                             identity: db::model::IdentityProviderIdentity {
@@ -139,7 +139,7 @@ impl DataStore {
                         .await?;
 
                     // insert silo saml identity provider record
-                    use db::schema::saml_identity_provider::dsl;
+                    use nexus_db_schema::schema::saml_identity_provider::dsl;
                     let result =
                         diesel::insert_into(dsl::saml_identity_provider)
                             .values(provider)

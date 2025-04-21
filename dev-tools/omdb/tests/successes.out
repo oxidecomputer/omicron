@@ -1416,6 +1416,10 @@ parent:    <none>
     state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED>
     cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED>
 
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   nexus-test-utils
     created at:::::::::::   <REDACTED_TIMESTAMP>
@@ -1423,6 +1427,7 @@ parent:    <none>
     internal DNS version:   1
     external DNS version:   2
 
+ PENDING MGS-MANAGED UPDATES: 0
 
 ---------------------------------------------
 stderr:
@@ -1512,6 +1517,10 @@ parent:    <none>
     state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED>
     cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED>
 
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   nexus-test-utils
     created at:::::::::::   <REDACTED_TIMESTAMP>
@@ -1519,6 +1528,7 @@ parent:    <none>
     internal DNS version:   1
     external DNS version:   2
 
+ PENDING MGS-MANAGED UPDATES: 0
 
 ---------------------------------------------
 stderr:
@@ -1600,6 +1610,10 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
  METADATA:
     internal DNS version:   1 (unchanged)
     external DNS version:   2 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
 
 
 ---------------------------------------------

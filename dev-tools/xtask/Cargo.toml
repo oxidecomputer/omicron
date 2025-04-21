@@ -28,6 +28,7 @@ camino-tempfile.workspace = true
 cargo_toml = "0.21"
 cargo_metadata.workspace = true
 clap.workspace = true
+dev-tools-common.workspace = true
 fs-err.workspace = true
 macaddr.workspace = true
 serde.workspace = true

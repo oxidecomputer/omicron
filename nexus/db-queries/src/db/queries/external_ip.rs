@@ -8,10 +8,7 @@
 use crate::db::model::ExternalIp;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
-use crate::db::model::IpKindEnum;
 use crate::db::model::Name;
-use crate::db::pool::DbConnection;
-use crate::db::schema;
 use crate::db::true_or_cast_error::{TrueOrCastError, matches_sentinel};
 use chrono::DateTime;
 use chrono::Utc;
@@ -26,10 +23,13 @@ use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::InstanceState as DbInstanceState;
 use nexus_db_model::IpAttachState;
-use nexus_db_model::IpAttachStateEnum;
 use nexus_db_model::VmmState as DbVmmState;
+use nexus_db_schema::enums::IpAttachStateEnum;
+use nexus_db_schema::enums::IpKindEnum;
+use nexus_db_schema::schema;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external;
 use uuid::Uuid;
@@ -70,8 +70,6 @@ const REALLOCATION_WITH_DIFFERENT_IP_SENTINEL: &'static str =
 
 /// Translates a generic pool error to an external error.
 pub fn from_diesel(e: DieselError) -> external::Error {
-    use crate::db::error;
-
     let sentinels = [REALLOCATION_WITH_DIFFERENT_IP_SENTINEL];
     if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
         match sentinel {
@@ -85,7 +83,10 @@ pub fn from_diesel(e: DieselError) -> external::Error {
         }
     }
 
-    error::public_error_from_diesel(e, error::ErrorHandler::Server)
+    nexus_db_errors::public_error_from_diesel(
+        e,
+        nexus_db_errors::ErrorHandler::Server,
+    )
 }
 
 const MAX_PORT: u16 = u16::MAX;
@@ -867,7 +868,6 @@ mod tests {
     use crate::authz;
     use crate::db::datastore::SERVICE_IP_POOL_NAME;
     use crate::db::identity::Resource;
-    use crate::db::lookup::LookupPath;
     use crate::db::model::IpKind;
     use crate::db::model::IpPool;
     use crate::db::model::IpPoolRange;
@@ -875,6 +875,7 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::ByteCount;
     use nexus_db_model::Instance;
     use nexus_db_model::InstanceCpuCount;
@@ -945,7 +946,7 @@ mod tests {
 
             self.initialize_ip_pool(name, range).await;
 
-            LookupPath::new(self.db.opctx(), &self.db.datastore())
+            LookupPath::new(self.db.opctx(), self.db.datastore())
                 .ip_pool_id(pool.id())
                 .lookup_for(authz::Action::Read)
                 .await
@@ -955,7 +956,7 @@ mod tests {
 
         async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
             // Find the target IP pool
-            use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
+            use nexus_db_schema::schema::ip_pool::dsl as ip_pool_dsl;
             let conn = self
                 .db
                 .datastore()
@@ -973,7 +974,7 @@ mod tests {
             // Insert a range into this IP pool
             let pool_range = IpPoolRange::new(&range, pool.id());
             diesel::insert_into(
-                crate::db::schema::ip_pool_range::dsl::ip_pool_range,
+                nexus_db_schema::schema::ip_pool_range::dsl::ip_pool_range,
             )
             .values(pool_range)
             .execute_async(
@@ -1014,7 +1015,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            use crate::db::schema::instance::dsl as instance_dsl;
+            use nexus_db_schema::schema::instance::dsl as instance_dsl;
             diesel::insert_into(instance_dsl::instance)
                 .values(instance.clone())
                 .execute_async(&*conn)

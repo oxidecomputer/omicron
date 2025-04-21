@@ -104,7 +104,7 @@ async fn spc_create_record_undo(
         sagactx.lookup::<(authz::Project, db::model::Project)>("project")?;
 
     let (.., authz_project, project) =
-        db::lookup::LookupPath::new(&opctx, osagactx.datastore())
+        nexus_db_lookup::LookupPath::new(&opctx, osagactx.datastore())
             .project_id(project.id())
             .fetch_for(authz::Action::Delete)
             .await?;
@@ -205,7 +205,7 @@ mod test {
     async fn no_projects_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::fixed_data::project::SERVICES_PROJECT_ID;
         use nexus_db_queries::db::model::Project;
-        use nexus_db_queries::db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
 
         dsl::project
             .filter(dsl::time_deleted.is_null())
@@ -229,7 +229,7 @@ mod test {
     ) -> bool {
         use nexus_db_queries::db::fixed_data::project::SERVICES_PROJECT_ID;
         use nexus_db_queries::db::model::VirtualProvisioningCollection;
-        use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
+        use nexus_db_schema::schema::virtual_provisioning_collection::dsl;
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 

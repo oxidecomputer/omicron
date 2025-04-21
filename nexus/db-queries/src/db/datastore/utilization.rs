@@ -1,15 +1,14 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::Name;
 use crate::db::model::SiloUtilization;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::BoolExpressionMethods;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -24,7 +23,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, authz_silo).await?;
         let silo_id = authz_silo.id();
 
-        use db::schema::silo_utilization::dsl;
+        use nexus_db_schema::schema::silo_utilization::dsl;
         dsl::silo_utilization
             .filter(dsl::silo_id.eq(silo_id))
             .select(SiloUtilization::as_select())
@@ -39,7 +38,7 @@ impl DataStore {
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<SiloUtilization> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use db::schema::silo_utilization::dsl;
+        use nexus_db_schema::schema::silo_utilization::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::silo_utilization, dsl::silo_id, pagparams)

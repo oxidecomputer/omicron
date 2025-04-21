@@ -6,6 +6,7 @@
 
 use futures::future::join_all;
 use ipnetwork::IpNetwork;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -14,8 +15,6 @@ use nexus_db_queries::db::fixed_data::vpc::SERVICES_VPC_ID;
 use nexus_db_queries::db::fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE_NAME;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::identity::Resource;
-use nexus_db_queries::db::lookup;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::Name;
 use omicron_common::api::external;
 use omicron_common::api::external::AllowedSourceIps;
@@ -36,7 +35,7 @@ use uuid::Uuid;
 pub async fn vpc_list_firewall_rules(
     datastore: &DataStore,
     opctx: &OpContext,
-    vpc_lookup: &lookup::Vpc<'_>,
+    vpc_lookup: &nexus_db_lookup::lookup::Vpc<'_>,
 ) -> ListResultVec<db::model::VpcFirewallRule> {
     let (.., authz_vpc) = vpc_lookup.lookup_for(authz::Action::Read).await?;
     let rules = datastore.vpc_list_firewall_rules(&opctx, &authz_vpc).await?;

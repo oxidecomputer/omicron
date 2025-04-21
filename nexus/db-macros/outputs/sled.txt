@@ -40,7 +40,7 @@ impl<'a> Sled<'a> {
     ) -> LookupResult<(authz::Sled, nexus_db_model::Sled)> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
-        let datastore = &lookup.datastore;
+        let datastore = lookup.datastore;
         match &self {
             Sled::Error(_, error) => Err(error.clone()),
             Sled::PrimaryKey(_, v0) => {
@@ -98,7 +98,7 @@ impl<'a> Sled<'a> {
     async fn lookup(&self) -> LookupResult<(authz::Sled,)> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
-        let datastore = &lookup.datastore;
+        let datastore = lookup.datastore;
         match &self {
             Sled::Error(_, error) => Err(error.clone()),
             Sled::PrimaryKey(_, v0) => {
@@ -134,7 +134,7 @@ impl<'a> Sled<'a> {
     /// outside this module.  See `fetch_for(authz::Action)`.
     async fn fetch_by_id_for(
         opctx: &OpContext,
-        datastore: &DataStore,
+        datastore: &dyn LookupDataStore,
         v0: &::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::SledKind>,
         action: authz::Action,
     ) -> LookupResult<(authz::Sled, nexus_db_model::Sled)> {
@@ -151,10 +151,10 @@ impl<'a> Sled<'a> {
     /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
     async fn lookup_by_id_no_authz(
         opctx: &OpContext,
-        datastore: &DataStore,
+        datastore: &dyn LookupDataStore,
         v0: &::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::SledKind>,
     ) -> LookupResult<(authz::Sled, nexus_db_model::Sled)> {
-        use db::schema::sled::dsl;
+        use ::nexus_db_schema::schema::sled::dsl;
         let db_row = dsl::sled
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(::nexus_db_model::to_db_typed_uuid(v0.clone())))

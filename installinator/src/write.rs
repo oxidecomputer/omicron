@@ -20,16 +20,14 @@ use installinator_common::{
     StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
     WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
-use omicron_common::{
-    disk::M2Slot,
-    update::{ArtifactHash, ArtifactHashId},
-};
+use omicron_common::disk::M2Slot;
 use sha2::{Digest, Sha256};
 use slog::{Logger, info, warn};
 use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt},
 };
+use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::{
     StepSpec, errors::NestedEngineError, events::ProgressUnits,

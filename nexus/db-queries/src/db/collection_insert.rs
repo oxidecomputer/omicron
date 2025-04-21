@@ -9,7 +9,6 @@
 //! 2) updates the collection's child resource generation number
 //! 3) inserts the child resource row
 
-use super::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::helper_types::*;
@@ -20,6 +19,7 @@ use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::result::Error as DieselError;
 use diesel::sql_types::SingleValue;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::DatastoreCollectionConfig;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -413,6 +413,7 @@ mod test {
     use diesel::QueryDsl;
     use diesel::expression_methods::ExpressionMethods;
     use diesel::pg::Pg;
+    use nexus_db_lookup::DataStoreConnection;
     use omicron_test_utils::dev;
 
     table! {
@@ -439,9 +440,7 @@ mod test {
         }
     }
 
-    async fn setup_db(
-        pool: &crate::db::Pool,
-    ) -> crate::db::datastore::DataStoreConnection {
+    async fn setup_db(pool: &crate::db::Pool) -> DataStoreConnection {
         let connection = pool.claim().await.unwrap();
         (*connection)
             .batch_execute_async(
