@@ -13,7 +13,7 @@ use std::{collections::BTreeSet, time::Duration};
 
 /// A request from nexus informing a node to start coordinating a
 /// reconfiguration.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReconfigureMsg {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
@@ -32,8 +32,20 @@ pub enum PeerMsg {
     PrepareAck(Epoch),
     Commit(CommitMsg),
 
+    /// When a node learns about a commit for a given epoch
+    /// but does not have a `PrepareMsg`, it must ask for it
+    /// from another node.
+    GetPrepare(Epoch),
+
+    /// Nodes reply with `PrepareAndCommit` to `GetPrepare` requests when they
+    /// are able to.
+    PrepareAndCommit,
+
     GetShare(Epoch),
-    Share { epoch: Epoch, share: Share },
+    Share {
+        epoch: Epoch,
+        share: Share,
+    },
 
     // LRTQ shares are always at epoch 0
     GetLrtqShare,
@@ -47,9 +59,7 @@ pub struct PrepareMsg {
     pub share: Share,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitMsg {
     epoch: Epoch,
 }

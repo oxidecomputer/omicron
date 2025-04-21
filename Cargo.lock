@@ -13010,6 +13010,7 @@ dependencies = [
 name = "trust-quorum"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "bcs",
  "bootstore",
  "camino",
@@ -13018,6 +13019,7 @@ dependencies = [
  "gfss",
  "hex",
  "hkdf",
+ "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
