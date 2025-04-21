@@ -236,7 +236,7 @@ async fn cmd_reconfigurator_history(
     // Select recent targets.
     let limit = history_args.limit;
     let mut targets: Vec<_> = {
-        use nexus_db_queries::db::schema::bp_target::dsl;
+        use nexus_db_schema::schema::bp_target::dsl;
         let conn = datastore
             .pool_connection_for_tests()
             .await

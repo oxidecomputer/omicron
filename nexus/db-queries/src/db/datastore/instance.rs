@@ -14,10 +14,7 @@ use crate::db::collection_detach_many::DetachManyError;
 use crate::db::collection_detach_many::DetachManyFromCollectionStatement;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
-use crate::db::lookup::LookupPath;
 use crate::db::model::ByteCount;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
@@ -36,14 +33,17 @@ use crate::db::model::Vmm;
 use crate::db::model::VmmState;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
-use crate::db::pool::DbConnection;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::Disk;
 use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
@@ -351,7 +351,7 @@ impl DataStore {
         authz_project: &authz::Project,
         instance: Instance,
     ) -> CreateResult<Instance> {
-        use db::schema::instance::dsl;
+        use nexus_db_schema::schema::instance::dsl;
 
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
@@ -401,8 +401,8 @@ impl DataStore {
     ) -> ListResultVec<InstanceAndActiveVmm> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
-        use db::schema::instance::dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
+        use nexus_db_schema::schema::instance::dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
         Ok(match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::instance, dsl::id, &pagparams)
@@ -442,8 +442,8 @@ impl DataStore {
         opctx: &OpContext,
         vmm_state: VmmState,
     ) -> ListResultVec<Instance> {
-        use db::schema::instance::dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
+        use nexus_db_schema::schema::instance::dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
 
         vmm_dsl::vmm
             .filter(vmm_dsl::state.eq(vmm_state))
@@ -475,8 +475,8 @@ impl DataStore {
         opctx: &OpContext,
     ) -> ListResultVec<Instance> {
         use db::model::MigrationState;
-        use db::schema::instance::dsl;
-        use db::schema::migration::dsl as migration_dsl;
+        use nexus_db_schema::schema::instance::dsl;
+        use nexus_db_schema::schema::migration::dsl as migration_dsl;
 
         dsl::instance
             .filter(dsl::time_deleted.is_null())
@@ -521,8 +521,8 @@ impl DataStore {
         reason: ReincarnationReason,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Instance> {
-        use db::schema::instance::dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
+        use nexus_db_schema::schema::instance::dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
 
         let q = paginated(dsl::instance, dsl::id, &pagparams)
             // Select only those instances which may be reincarnated.
@@ -611,8 +611,8 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         authz_instance: &authz::Instance,
     ) -> Result<InstanceAndActiveVmm, diesel::result::Error> {
-        use db::schema::instance::dsl as instance_dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
 
         let (instance, vmm) = instance_dsl::instance
             .filter(instance_dsl::id.eq(authz_instance.id()))
@@ -667,9 +667,9 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         instance_id: &InstanceUuid,
     ) -> LookupResult<InstanceGestalt> {
-        use db::schema::instance::dsl as instance_dsl;
-        use db::schema::migration::dsl as migration_dsl;
-        use db::schema::vmm;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::migration::dsl as migration_dsl;
+        use nexus_db_schema::schema::vmm;
 
         let id = instance_id.into_untyped_uuid();
 
@@ -747,7 +747,7 @@ impl DataStore {
         instance_id: &InstanceUuid,
         new_runtime: &InstanceRuntimeState,
     ) -> Result<bool, Error> {
-        use db::schema::instance::dsl;
+        use nexus_db_schema::schema::instance::dsl;
 
         let updated = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
@@ -796,9 +796,9 @@ impl DataStore {
         migration_id: Uuid,
         target_propolis_id: PropolisUuid,
     ) -> Result<Instance, Error> {
-        use db::schema::instance::dsl;
-        use db::schema::migration::dsl as migration_dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
+        use nexus_db_schema::schema::instance::dsl;
+        use nexus_db_schema::schema::migration::dsl as migration_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
 
         // Only allow migrating out if the active VMM is running or rebooting.
         const ALLOWED_ACTIVE_VMM_STATES: &[VmmState] =
@@ -919,7 +919,7 @@ impl DataStore {
         migration_id: Uuid,
         target_propolis_id: PropolisUuid,
     ) -> Result<bool, Error> {
-        use db::schema::instance::dsl;
+        use nexus_db_schema::schema::instance::dsl;
 
         let instance_id = instance_id.into_untyped_uuid();
         let target_propolis_id = target_propolis_id.into_untyped_uuid();
@@ -965,7 +965,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (Uuid, Uuid)>,
     ) -> ListResultVec<(Sled, Instance, Vmm, Project)> {
-        use crate::db::schema::{
+        use nexus_db_schema::schema::{
             instance::dsl as instance_dsl, project::dsl as project_dsl,
             sled::dsl as sled_dsl, vmm::dsl as vmm_dsl,
         };
@@ -1041,7 +1041,7 @@ impl DataStore {
     ) -> Result<InstanceAndActiveVmm, Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
-        use db::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -1161,8 +1161,8 @@ impl DataStore {
         authz_instance: &authz::Instance,
         boot_disk_id: Option<Uuid>,
     ) -> Result<(), diesel::result::Error> {
-        use db::schema::disk::dsl as disk_dsl;
-        use db::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::disk::dsl as disk_dsl;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
 
         if let Some(disk_id) = boot_disk_id {
             // Ensure the disk is currently attached before updating the
@@ -1261,7 +1261,7 @@ impl DataStore {
         ncpus: InstanceCpuCount,
         memory: ByteCount,
     ) -> Result<(), diesel::result::Error> {
-        use db::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
 
         let r = diesel::update(instance_dsl::instance)
             .filter(instance_dsl::id.eq(authz_instance.id()))
@@ -1403,7 +1403,7 @@ impl DataStore {
         authz_instance: &authz::Instance,
         ok_to_delete_instance_states: &'static [InstanceState],
     ) -> DeleteResult {
-        use db::schema::{disk, instance};
+        use nexus_db_schema::schema::{disk, instance};
 
         opctx.authorize(authz::Action::Delete, authz_instance).await?;
 
@@ -1518,7 +1518,7 @@ impl DataStore {
         authz_instance: &authz::Instance,
         updater_id: Uuid,
     ) -> Result<UpdaterLock, UpdaterLockError> {
-        use db::schema::instance::dsl;
+        use nexus_db_schema::schema::instance::dsl;
 
         let mut instance = self.instance_refetch(opctx, authz_instance).await?;
         let instance_id = instance.id();
@@ -1675,7 +1675,7 @@ impl DataStore {
         parent_lock: UpdaterLock,
         child_lock_id: Uuid,
     ) -> Result<UpdaterLock, UpdaterLockError> {
-        use db::schema::instance::dsl;
+        use nexus_db_schema::schema::instance::dsl;
         let UpdaterLock { updater_id: parent_id, locked_gen } = parent_lock;
         let instance_id = authz_instance.id();
         let new_gen = Generation(locked_gen.0.next());
@@ -1772,7 +1772,7 @@ impl DataStore {
         authz_instance: &authz::Instance,
         lock: &UpdaterLock,
     ) -> Result<bool, Error> {
-        use db::schema::instance::dsl;
+        use nexus_db_schema::schema::instance::dsl;
 
         let instance_id = authz_instance.id();
         let UpdaterLock { updater_id, locked_gen } = *lock;
@@ -1926,7 +1926,7 @@ impl DataStore {
         lock: &UpdaterLock,
         new_runtime: &InstanceRuntimeState,
     ) -> Result<bool, Error> {
-        use db::schema::instance::dsl;
+        use nexus_db_schema::schema::instance::dsl;
 
         let instance_id = authz_instance.id();
         let UpdaterLock { updater_id, locked_gen } = *lock;
@@ -2081,7 +2081,7 @@ impl DataStore {
         instance_id: &InstanceUuid,
         cooldown: chrono::TimeDelta,
     ) -> UpdateResult<bool> {
-        use db::schema::instance::dsl;
+        use nexus_db_schema::schema::instance::dsl;
         let id = instance_id.into_untyped_uuid();
 
         let r = diesel::update(dsl::instance)
@@ -2116,9 +2116,9 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::datastore::sled;
-    use crate::db::lookup::LookupPath;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmRuntimeState;
@@ -2194,7 +2194,7 @@ mod tests {
             .await
             .expect("instance must be created successfully");
 
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await

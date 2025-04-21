@@ -8,12 +8,11 @@ use super::DataStore;
 use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::lookup::LookupPath;
 use crate::db::model::ConsoleSession;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_lookup::LookupPath;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -41,7 +40,7 @@ impl DataStore {
             .authorize(authz::Action::CreateChild, &authz::CONSOLE_SESSION_LIST)
             .await?;
 
-        use db::schema::console_session::dsl;
+        use nexus_db_schema::schema::console_session::dsl;
 
         diesel::insert_into(dsl::console_session)
             .values(session)
@@ -63,7 +62,7 @@ impl DataStore {
     ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
         opctx.authorize(authz::Action::Modify, authz_session).await?;
 
-        use db::schema::console_session::dsl;
+        use nexus_db_schema::schema::console_session::dsl;
         let console_session = diesel::update(dsl::console_session)
             .filter(dsl::token.eq(authz_session.id()))
             .set((dsl::time_last_used.eq(Utc::now()),))
@@ -77,7 +76,7 @@ impl DataStore {
                 ))
             })?;
 
-        let (.., db_silo_user) = LookupPath::new(opctx, &self)
+        let (.., db_silo_user) = LookupPath::new(opctx, self)
             .silo_user_id(console_session.silo_user_id)
             .fetch()
             .await
@@ -126,7 +125,7 @@ impl DataStore {
             .silo_user_id()
             .ok_or_else(|| Error::invalid_request("not a Silo user"))?;
 
-        use db::schema::console_session::dsl;
+        use nexus_db_schema::schema::console_session::dsl;
         diesel::delete(dsl::console_session)
             .filter(dsl::silo_user_id.eq(silo_user_id))
             .filter(dsl::token.eq(authz_session.id()))

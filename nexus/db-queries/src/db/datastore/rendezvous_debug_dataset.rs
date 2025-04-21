@@ -8,14 +8,13 @@ use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::RendezvousDebugDataset;
 use nexus_db_model::to_db_typed_uuid;
 use omicron_common::api::external::CreateResult;
@@ -37,7 +36,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, DatasetUuid>,
     ) -> ListResultVec<RendezvousDebugDataset> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use db::schema::rendezvous_debug_dataset::dsl;
+        use nexus_db_schema::schema::rendezvous_debug_dataset::dsl;
 
         paginated(
             dsl::rendezvous_debug_dataset,
@@ -93,7 +92,7 @@ impl DataStore {
     ) -> CreateResult<Option<RendezvousDebugDataset>> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
-        use db::schema::rendezvous_debug_dataset::dsl;
+        use nexus_db_schema::schema::rendezvous_debug_dataset::dsl;
 
         diesel::insert_into(dsl::rendezvous_debug_dataset)
             .values(dataset)
@@ -122,7 +121,7 @@ impl DataStore {
     ) -> Result<bool, Error> {
         opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
 
-        use db::schema::rendezvous_debug_dataset::dsl;
+        use nexus_db_schema::schema::rendezvous_debug_dataset::dsl;
 
         diesel::update(dsl::rendezvous_debug_dataset)
             .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))

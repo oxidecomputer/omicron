@@ -500,7 +500,73 @@ pub async fn delete_disk(
     project_name: &str,
     disk_name: &str,
 ) {
-    let url = format!("/v1/disks/{}?project={}", disk_name, project_name,);
+    let url = format!("/v1/disks/{}?project={}", disk_name, project_name);
+    object_delete(client, &url).await
+}
+
+pub async fn delete_snapshot(
+    client: &ClientTestContext,
+    project_name: &str,
+    snapshot_name: &str,
+) {
+    let url =
+        format!("/v1/snapshots/{}?project={}", snapshot_name, project_name);
+    object_delete(client, &url).await
+}
+
+pub async fn create_alpine_project_image(
+    client: &ClientTestContext,
+    project_name: &str,
+    image_name: &str,
+) -> views::Image {
+    let images_url = format!("/v1/images?project={}", project_name);
+    object_create(
+        client,
+        &images_url,
+        &params::ImageCreate {
+            identity: IdentityMetadataCreateParams {
+                name: image_name.parse().unwrap(),
+                description: String::from(
+                    "you can boot any image, as long as it's alpine",
+                ),
+            },
+            source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+            os: "alpine".to_string(),
+            version: "edge".to_string(),
+        },
+    )
+    .await
+}
+
+pub async fn create_project_image_from_snapshot(
+    client: &ClientTestContext,
+    project_name: &str,
+    image_name: &str,
+    snapshot_id: Uuid,
+) -> views::Image {
+    let images_url = format!("/v1/images?project={}", project_name);
+    object_create(
+        client,
+        &images_url,
+        &params::ImageCreate {
+            identity: IdentityMetadataCreateParams {
+                name: image_name.parse().unwrap(),
+                description: String::from("it's an image alright"),
+            },
+            source: params::ImageSource::Snapshot { id: snapshot_id },
+            os: "os".to_string(),
+            version: "version".to_string(),
+        },
+    )
+    .await
+}
+
+pub async fn delete_image(
+    client: &ClientTestContext,
+    project_name: &str,
+    image_name: &str,
+) {
+    let url = format!("/v1/image/{}?project={}", image_name, project_name);
     object_delete(client, &url).await
 }
 
@@ -1185,7 +1251,7 @@ pub struct DiskTest<'a, N: NexusServer> {
 }
 
 impl<'a, N: NexusServer> DiskTest<'a, N> {
-    pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
+    pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 16;
     pub const DEFAULT_ZPOOL_COUNT: u32 = 3;
 
     /// Creates a new [DiskTest] with default configuration.

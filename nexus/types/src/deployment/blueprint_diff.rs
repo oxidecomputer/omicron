@@ -58,6 +58,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         let BlueprintDiff {
             // Fields in which changes are meaningful.
             sleds,
+            pending_mgs_updates,
             clickhouse_cluster_config,
             // Metadata fields for which changes don't reflect semantic
             // changes from one blueprint to the next.
@@ -67,6 +68,8 @@ impl<'a> BlueprintDiffSummary<'a> {
             external_dns_version: _,
             cockroachdb_fingerprint: _,
             cockroachdb_setting_preserve_downgrade: _,
+            oximeter_read_version: _,
+            oximeter_read_mode,
             creator: _,
             comment: _,
         } = &self.diff;
@@ -79,8 +82,21 @@ impl<'a> BlueprintDiffSummary<'a> {
             return true;
         }
 
+        // Did we modify, add, or remove any pending MGS updates?
+        if pending_mgs_updates.by_baseboard.modified().next().is_some()
+            || !pending_mgs_updates.by_baseboard.added.is_empty()
+            || !pending_mgs_updates.by_baseboard.removed.is_empty()
+        {
+            return true;
+        }
+
         // Did the clickhouse config change?
         if clickhouse_cluster_config.before != clickhouse_cluster_config.after {
+            return true;
+        }
+
+        // Did oximeter read policy change?
+        if oximeter_read_mode.before != oximeter_read_mode.after {
             return true;
         }
 
@@ -1644,6 +1660,47 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         ]
     }
 
+    pub fn make_oximeter_read_diff_tables(
+        &self,
+    ) -> impl IntoIterator<Item = KvListWithHeading> {
+        macro_rules! diff_row {
+            ($member:ident, $label:expr) => {
+                diff_row!($member, $label, std::convert::identity)
+            };
+
+            ($member:ident, $label:expr, $display:expr) => {
+                if self.summary.diff.$member.before
+                    == self.summary.diff.$member.after
+                {
+                    KvPair::new(
+                        BpDiffState::Unchanged,
+                        $label,
+                        linear_table_unchanged(&$display(
+                            &self.summary.diff.$member.after,
+                        )),
+                    )
+                } else {
+                    KvPair::new(
+                        BpDiffState::Modified,
+                        $label,
+                        linear_table_modified(
+                            &$display(&self.summary.diff.$member.before),
+                            &$display(&self.summary.diff.$member.after),
+                        ),
+                    )
+                }
+            };
+        }
+
+        [KvListWithHeading::new(
+            OXIMETER_HEADING,
+            vec![
+                diff_row!(oximeter_read_version, GENERATION),
+                diff_row!(oximeter_read_mode, OXIMETER_READ_FROM),
+            ],
+        )]
+    }
+
     pub fn make_clickhouse_cluster_config_diff_tables(
         &self,
     ) -> Option<ClickhouseClusterConfigDiffTables> {
@@ -1844,6 +1901,11 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
 
         // Write out metadata diff table
         for table in self.make_metadata_diff_tables() {
+            writeln!(f, "{}", table)?;
+        }
+
+        // Write out oximeter read policy diff table
+        for table in self.make_oximeter_read_diff_tables() {
             writeln!(f, "{}", table)?;
         }
 

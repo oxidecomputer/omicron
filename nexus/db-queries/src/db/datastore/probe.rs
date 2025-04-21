@@ -2,14 +2,14 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::DataStoreConnection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
-use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::Probe;
 use nexus_db_model::VpcSubnet;
@@ -59,8 +59,8 @@ impl super::DataStore {
     ) -> ListResultVec<ProbeInfo> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
-        use db::schema::probe::dsl;
-        use db::schema::vpc_subnet::dsl as vpc_subnet_dsl;
+        use nexus_db_schema::schema::probe::dsl;
+        use nexus_db_schema::schema::vpc_subnet::dsl as vpc_subnet_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -128,7 +128,7 @@ impl super::DataStore {
         probe: &Probe,
         conn: &DataStoreConnection,
     ) -> LookupResult<ProbeInfo> {
-        use db::schema::vpc_subnet::dsl as vpc_subnet_dsl;
+        use nexus_db_schema::schema::vpc_subnet::dsl as vpc_subnet_dsl;
 
         let external_ips = self
             .probe_lookup_external_ips(opctx, probe.id())
@@ -170,7 +170,7 @@ impl super::DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ProbeInfo> {
-        use db::schema::probe::dsl;
+        use nexus_db_schema::schema::probe::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -198,8 +198,8 @@ impl super::DataStore {
         authz_project: &authz::Project,
         name_or_id: &NameOrId,
     ) -> LookupResult<ProbeInfo> {
-        use db::schema::probe;
-        use db::schema::probe::dsl;
+        use nexus_db_schema::schema::probe;
+        use nexus_db_schema::schema::probe::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let name_or_id = name_or_id.clone();
@@ -252,7 +252,7 @@ impl super::DataStore {
         ip_pool: Option<authz::IpPool>,
     ) -> CreateResult<Probe> {
         //TODO in transaction
-        use db::schema::probe::dsl;
+        use nexus_db_schema::schema::probe::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let _eip = self
@@ -320,8 +320,8 @@ impl super::DataStore {
         authz_project: &authz::Project,
         name_or_id: &NameOrId,
     ) -> DeleteResult {
-        use db::schema::probe;
-        use db::schema::probe::dsl;
+        use nexus_db_schema::schema::probe;
+        use nexus_db_schema::schema::probe::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let name_or_id = name_or_id.clone();

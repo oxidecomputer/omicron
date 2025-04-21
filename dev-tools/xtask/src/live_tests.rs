@@ -4,9 +4,10 @@
 
 //! Subcommand: cargo xtask live-tests
 
-use crate::common::{cargo_command, run_subcmd};
+use crate::common::run_subcmd;
 use anyhow::{Context, Result, bail};
 use clap::Parser;
+use dev_tools_common::{CargoLocation, cargo_command};
 use std::process::Command;
 
 #[derive(Parser)]
@@ -45,7 +46,7 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     std::fs::create_dir(&proto_root)
         .with_context(|| format!("mkdir {:?}", &proto_root))?;
 
-    let mut command = cargo_command();
+    let mut command = cargo_command(CargoLocation::FromEnv);
 
     command.arg("nextest");
     command.arg("archive");

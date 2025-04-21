@@ -38,12 +38,12 @@ use dropshot::{WebsocketChannelResult, WebsocketConnection};
 use dropshot::{http_response_found, http_response_see_other};
 use http::{Response, StatusCode, header};
 use ipnetwork::IpNetwork;
+use nexus_db_lookup::lookup::ImageLookup;
+use nexus_db_lookup::lookup::ImageParentLookup;
 use nexus_db_queries::authn::external::session_cookie::{self, SessionStore};
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Resource;
-use nexus_db_queries::db::lookup::ImageLookup;
-use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_external_api::*;
 use nexus_types::{
@@ -5450,7 +5450,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn vpc_router_route_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::RoutePath>,
-        query_params: Query<params::RouterSelector>,
+        query_params: Query<params::OptionalRouterSelector>,
     ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -5462,7 +5462,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let route_selector = params::RouteSelector {
                 project: query.project,
                 vpc: query.vpc,
-                router: Some(query.router),
+                router: query.router,
                 route: path.route,
             };
             let (.., route) = nexus

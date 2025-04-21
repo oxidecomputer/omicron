@@ -12,7 +12,8 @@ WITH
         region.extent_count,
         region.port,
         region.read_only,
-        region.deleting
+        region.deleting,
+        region.reservation_percent
       FROM
         region
       WHERE
@@ -57,8 +58,9 @@ WITH
         INNER JOIN (zpool INNER JOIN sled ON zpool.sled_id = sled.id) ON
             zpool.id = old_zpool_usage.pool_id
         INNER JOIN physical_disk ON zpool.physical_disk_id = physical_disk.id
+        INNER JOIN crucible_dataset ON crucible_dataset.pool_id = zpool.id
       WHERE
-        (old_zpool_usage.size_used + $3)
+        (old_zpool_usage.size_used + $3 + zpool.control_plane_storage_buffer)
         <= (
             SELECT
               total_size
@@ -76,6 +78,8 @@ WITH
         AND physical_disk.disk_policy = 'in_service'
         AND physical_disk.disk_state = 'active'
         AND NOT (zpool.id = ANY (SELECT existing_zpools.pool_id FROM existing_zpools))
+        AND (crucible_dataset.time_deleted IS NULL)
+        AND crucible_dataset.no_provision = false
     ),
   candidate_datasets
     AS (
@@ -85,7 +89,7 @@ WITH
         crucible_dataset
         INNER JOIN candidate_zpools ON crucible_dataset.pool_id = candidate_zpools.pool_id
       WHERE
-        crucible_dataset.time_deleted IS NULL
+        (crucible_dataset.time_deleted IS NULL) AND crucible_dataset.no_provision = false
       ORDER BY
         crucible_dataset.pool_id, md5(CAST(crucible_dataset.id AS BYTES) || $4)
     ),
@@ -113,21 +117,19 @@ WITH
         $10 AS extent_count,
         NULL AS port,
         $11 AS read_only,
-        false AS deleting
+        false AS deleting,
+        $12 AS reservation_percent
       FROM
         shuffled_candidate_datasets
       LIMIT
-        $12 - (SELECT count(*) FROM old_regions)
+        $13 - (SELECT count(*) FROM old_regions)
     ),
   proposed_dataset_changes
     AS (
       SELECT
         candidate_regions.dataset_id AS id,
         crucible_dataset.pool_id AS pool_id,
-        candidate_regions.block_size
-        * candidate_regions.blocks_per_extent
-        * candidate_regions.extent_count
-          AS size_used_delta
+        $14 AS size_used_delta
       FROM
         candidate_regions
         INNER JOIN crucible_dataset ON crucible_dataset.id = candidate_regions.dataset_id
@@ -137,7 +139,7 @@ WITH
       SELECT
         (
           (
-            (SELECT count(*) FROM old_regions LIMIT 1) < $13
+            (SELECT count(*) FROM old_regions LIMIT 1) < $15
             AND CAST(
                 IF(
                   (
@@ -147,7 +149,7 @@ WITH
                         + (SELECT count(*) FROM existing_zpools LIMIT 1)
                       )
                     )
-                    >= $14
+                    >= $16
                   ),
                   'TRUE',
                   'Not enough space'
@@ -164,7 +166,7 @@ WITH
                       + (SELECT count(*) FROM old_regions LIMIT 1)
                     )
                   )
-                  >= $15
+                  >= $17
                 ),
                 'TRUE',
                 'Not enough datasets'
@@ -203,7 +205,7 @@ WITH
                       1
                   )
                 )
-                >= $16
+                >= $18
               ),
               'TRUE',
               'Not enough unique zpools selected'
@@ -228,7 +230,8 @@ WITH
             extent_count,
             port,
             read_only,
-            deleting
+            deleting,
+            reservation_percent
           )
       SELECT
         candidate_regions.id,
@@ -241,7 +244,8 @@ WITH
         candidate_regions.extent_count,
         candidate_regions.port,
         candidate_regions.read_only,
-        candidate_regions.deleting
+        candidate_regions.deleting,
+        candidate_regions.reservation_percent
       FROM
         candidate_regions
       WHERE
@@ -257,7 +261,8 @@ WITH
         region.extent_count,
         region.port,
         region.read_only,
-        region.deleting
+        region.deleting,
+        region.reservation_percent
     ),
   updated_datasets
     AS (
@@ -288,7 +293,8 @@ WITH
         crucible_dataset.pool_id,
         crucible_dataset.ip,
         crucible_dataset.port,
-        crucible_dataset.size_used
+        crucible_dataset.size_used,
+        crucible_dataset.no_provision
     )
 (
   SELECT
@@ -301,6 +307,7 @@ WITH
     crucible_dataset.ip,
     crucible_dataset.port,
     crucible_dataset.size_used,
+    crucible_dataset.no_provision,
     old_regions.id,
     old_regions.time_created,
     old_regions.time_modified,
@@ -311,7 +318,8 @@ WITH
     old_regions.extent_count,
     old_regions.port,
     old_regions.read_only,
-    old_regions.deleting
+    old_regions.deleting,
+    old_regions.reservation_percent
   FROM
     old_regions INNER JOIN crucible_dataset ON old_regions.dataset_id = crucible_dataset.id
 )
@@ -327,6 +335,7 @@ UNION
       updated_datasets.ip,
       updated_datasets.port,
       updated_datasets.size_used,
+      updated_datasets.no_provision,
       inserted_regions.id,
       inserted_regions.time_created,
       inserted_regions.time_modified,
@@ -337,7 +346,8 @@ UNION
       inserted_regions.extent_count,
       inserted_regions.port,
       inserted_regions.read_only,
-      inserted_regions.deleting
+      inserted_regions.deleting,
+      inserted_regions.reservation_percent
     FROM
       inserted_regions
       INNER JOIN updated_datasets ON inserted_regions.dataset_id = updated_datasets.id

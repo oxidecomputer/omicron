@@ -10,11 +10,11 @@ use crate::app::sagas::NexusSaga;
 use crate::app::sagas::instance_update;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::Instance;
 use nexus_db_model::VmmState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
@@ -169,7 +169,7 @@ impl InstanceUpdater {
             let instance_id = instance.id();
             let saga = async {
                 let (.., authz_instance) =
-                    LookupPath::new(&opctx, &self.datastore)
+                    LookupPath::new(&opctx, &*self.datastore)
                         .instance_id(instance_id)
                         .lookup_for(authz::Action::Modify)
                         .await?;

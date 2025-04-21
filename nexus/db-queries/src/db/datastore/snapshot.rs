@@ -7,12 +7,9 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::IncompleteOnConflictExt;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::Generation;
 use crate::db::model::Name;
 use crate::db::model::Project;
@@ -22,11 +19,13 @@ use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::OptionalExtension;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
@@ -63,7 +62,7 @@ impl DataStore {
                 let snapshot = snapshot.clone();
                 let snapshot_name = snapshot.name().to_string();
                 async move {
-                    use db::schema::snapshot::dsl;
+                    use nexus_db_schema::schema::snapshot::dsl;
 
                     // If an undeleted snapshot exists in the database with the
                     // same name and project but a different id to the snapshot
@@ -171,7 +170,7 @@ impl DataStore {
     ) -> UpdateResult<Snapshot> {
         opctx.authorize(authz::Action::Modify, authz_snapshot).await?;
 
-        use db::schema::snapshot::dsl;
+        use nexus_db_schema::schema::snapshot::dsl;
 
         let next_gen: Generation = old_gen.next().into();
 
@@ -199,7 +198,7 @@ impl DataStore {
     ) -> ListResultVec<Snapshot> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
-        use db::schema::snapshot::dsl;
+        use nexus_db_schema::schema::snapshot::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::snapshot, dsl::id, &pagparams)
@@ -239,7 +238,7 @@ impl DataStore {
         let snapshot_id = authz_snapshot.id();
         let gen = db_snapshot.gen;
 
-        use db::schema::snapshot::dsl;
+        use nexus_db_schema::schema::snapshot::dsl;
 
         let result = diesel::update(dsl::snapshot)
             .filter(dsl::time_deleted.is_null())
@@ -314,7 +313,7 @@ impl DataStore {
     ) -> LookupResult<Option<Snapshot>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::snapshot::dsl;
+        use nexus_db_schema::schema::snapshot::dsl;
         dsl::snapshot
             .filter(dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
             .select(Snapshot::as_select())
@@ -331,7 +330,7 @@ impl DataStore {
     ) -> LookupResult<Option<Snapshot>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::snapshot::dsl;
+        use nexus_db_schema::schema::snapshot::dsl;
         dsl::snapshot
             .filter(dsl::destination_volume_id.eq(to_db_typed_uuid(volume_id)))
             .select(Snapshot::as_select())
@@ -350,7 +349,7 @@ impl DataStore {
     ) -> LookupResult<Option<Snapshot>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::snapshot::dsl;
+        use nexus_db_schema::schema::snapshot::dsl;
         dsl::snapshot
             .filter(dsl::id.eq(snapshot_id))
             .select(Snapshot::as_select())

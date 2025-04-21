@@ -83,11 +83,11 @@ mod test {
     use nexus_db_model::Region;
     use nexus_db_model::Zpool;
     use nexus_db_queries::context::OpContext;
-    use nexus_db_queries::db;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::DiskFilter;
     use nexus_types::identity::Asset;
+    use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::DataPageParams;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -133,7 +133,12 @@ mod test {
         let zpool = datastore
             .zpool_insert(
                 opctx,
-                Zpool::new(Uuid::new_v4(), sled_id.into_untyped_uuid(), id),
+                Zpool::new(
+                    Uuid::new_v4(),
+                    sled_id.into_untyped_uuid(),
+                    id,
+                    ByteCount::from(0).into(),
+                ),
             )
             .await
             .unwrap();
@@ -167,7 +172,7 @@ mod test {
             )
         };
         let conn = datastore.pool_connection_for_tests().await.unwrap();
-        use nexus_db_model::schema::region::dsl;
+        use nexus_db_schema::schema::region::dsl;
         diesel::insert_into(dsl::region)
             .values(region)
             .execute_async(&*conn)
@@ -181,7 +186,7 @@ mod test {
     ) -> Vec<ZpoolUuid> {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        use db::schema::zpool::dsl;
+        use nexus_db_schema::schema::zpool::dsl;
         dsl::zpool
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::physical_disk_id.eq(id.into_untyped_uuid()))
@@ -202,7 +207,7 @@ mod test {
     ) -> Vec<Uuid> {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        use db::schema::crucible_dataset::dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl;
         dsl::crucible_dataset
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::pool_id.eq(id.into_untyped_uuid()))
@@ -215,7 +220,7 @@ mod test {
     async fn get_regions(datastore: &DataStore, id: Uuid) -> Vec<Uuid> {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        use db::schema::region::dsl;
+        use nexus_db_schema::schema::region::dsl;
         dsl::region
             .filter(dsl::dataset_id.eq(id.into_untyped_uuid()))
             .select(dsl::id)

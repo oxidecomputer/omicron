@@ -99,7 +99,7 @@ impl BackgroundTask for InstanceReincarnation {
                 ));
             }
 
-            if !status.total_errors() > 0 {
+            if status.total_errors() > 0 {
                 warn!(
                     &opctx.log,
                     "instance reincarnation completed with errors";
@@ -307,6 +307,7 @@ mod test {
     use crate::app::sagas::test_helpers;
     use crate::external_api::params;
     use chrono::Utc;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
     use nexus_db_model::InstanceRuntimeState;
     use nexus_db_model::InstanceState;
@@ -314,7 +315,6 @@ mod test {
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_db_queries::authz;
-    use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pool, create_project, object_create,
     };

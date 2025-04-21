@@ -15,9 +15,7 @@ mod config;
 mod cte_utils;
 // This is marked public for use by the integration tests
 pub mod datastore;
-pub(crate) mod error;
 mod explain;
-pub mod lookup;
 mod on_conflict_ext;
 // Public for doctests.
 pub mod pagination;
@@ -43,13 +41,11 @@ pub mod test_utils;
 pub use nexus_db_fixed_data as fixed_data;
 pub use nexus_db_model as model;
 use nexus_db_model::saga_types;
-pub use nexus_db_model::schema;
 
-pub use crate::db::error::TransactionError;
 pub use config::Config;
 pub use datastore::DataStore;
 pub use on_conflict_ext::IncompleteOnConflictExt;
-pub use pool::{DbConnection, Pool};
+pub use pool::Pool;
 pub use saga_types::SecId;
 pub use sec_store::CockroachDbSecStore;
 

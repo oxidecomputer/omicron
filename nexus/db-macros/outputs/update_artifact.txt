@@ -39,7 +39,7 @@ impl<'a> UpdateArtifact<'a> {
     ) -> LookupResult<(authz::UpdateArtifact, nexus_db_model::UpdateArtifact)> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
-        let datastore = &lookup.datastore;
+        let datastore = lookup.datastore;
         match &self {
             UpdateArtifact::Error(_, error) => Err(error.clone()),
             UpdateArtifact::PrimaryKey(_, v0, v1, v2) => {
@@ -97,7 +97,7 @@ impl<'a> UpdateArtifact<'a> {
     async fn lookup(&self) -> LookupResult<(authz::UpdateArtifact,)> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
-        let datastore = &lookup.datastore;
+        let datastore = lookup.datastore;
         match &self {
             UpdateArtifact::Error(_, error) => Err(error.clone()),
             UpdateArtifact::PrimaryKey(_, v0, v1, v2) => {
@@ -143,7 +143,7 @@ impl<'a> UpdateArtifact<'a> {
     /// outside this module.  See `fetch_for(authz::Action)`.
     async fn fetch_by_id_for(
         opctx: &OpContext,
-        datastore: &DataStore,
+        datastore: &dyn LookupDataStore,
         v0: &String,
         v1: &i64,
         v2: &KnownArtifactKind,
@@ -168,12 +168,12 @@ impl<'a> UpdateArtifact<'a> {
     /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
     async fn lookup_by_id_no_authz(
         opctx: &OpContext,
-        datastore: &DataStore,
+        datastore: &dyn LookupDataStore,
         v0: &String,
         v1: &i64,
         v2: &KnownArtifactKind,
     ) -> LookupResult<(authz::UpdateArtifact, nexus_db_model::UpdateArtifact)> {
-        use db::schema::update_artifact::dsl;
+        use ::nexus_db_schema::schema::update_artifact::dsl;
         let db_row = dsl::update_artifact
             .filter(dsl::name.eq(v0.clone()))
             .filter(dsl::version.eq(v1.clone()))

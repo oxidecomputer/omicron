@@ -13,8 +13,6 @@ use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::IncompleteVpc;
@@ -41,7 +39,6 @@ use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc::VniSearchIter;
 use crate::db::queries::vpc_subnet::InsertVpcSubnetError;
 use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -51,10 +48,14 @@ use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use ipnetwork::IpNetwork;
 use nexus_auth::authz::ApiResource;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::DbBpZoneDisposition;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::InternetGateway;
@@ -104,7 +105,7 @@ impl DataStore {
 
         // Create built-in VPC for Oxide Services
 
-        let (_, authz_project) = db::lookup::LookupPath::new(opctx, self)
+        let (_, authz_project) = nexus_db_lookup::LookupPath::new(opctx, self)
             .project_id(*SERVICES_PROJECT_ID)
             .lookup_for(authz::Action::CreateChild)
             .await
@@ -152,7 +153,7 @@ impl DataStore {
 
         // Also add the system router and internet gateway route
 
-        let system_router = db::lookup::LookupPath::new(opctx, self)
+        let system_router = nexus_db_lookup::LookupPath::new(opctx, self)
             .vpc_router_id(SERVICES_VPC.system_router_id)
             .lookup_for(authz::Action::CreateChild)
             .await;
@@ -240,7 +241,7 @@ impl DataStore {
 
         // Create firewall rules for Oxide Services
 
-        let (_, _, authz_vpc) = db::lookup::LookupPath::new(opctx, self)
+        let (_, _, authz_vpc) = nexus_db_lookup::LookupPath::new(opctx, self)
             .vpc_id(*SERVICES_VPC_ID)
             .lookup_for(authz::Action::CreateChild)
             .await
@@ -303,7 +304,7 @@ impl DataStore {
 
         // Create built-in VPC Subnets for Oxide Services
 
-        let (_, _, authz_vpc) = db::lookup::LookupPath::new(opctx, self)
+        let (_, _, authz_vpc) = nexus_db_lookup::LookupPath::new(opctx, self)
             .vpc_id(*SERVICES_VPC_ID)
             .lookup_for(authz::Action::CreateChild)
             .await
@@ -313,7 +314,7 @@ impl DataStore {
             (&*NEXUS_VPC_SUBNET, *NEXUS_VPC_SUBNET_ROUTE_ID),
             (&*NTP_VPC_SUBNET, *NTP_VPC_SUBNET_ROUTE_ID),
         ] {
-            if let Ok(_) = db::lookup::LookupPath::new(opctx, self)
+            if let Ok(_) = nexus_db_lookup::LookupPath::new(opctx, self)
                 .vpc_subnet_id(vpc_subnet.id())
                 .fetch()
                 .await
@@ -360,7 +361,7 @@ impl DataStore {
     ) -> ListResultVec<Vpc> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
-        use db::schema::vpc::dsl;
+        use nexus_db_schema::schema::vpc::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::vpc, dsl::id, &pagparams)
@@ -455,7 +456,7 @@ impl DataStore {
         authz_project: &authz::Project,
         vpc_query: InsertVpcQuery,
     ) -> Result<Option<(authz::Vpc, Vpc)>, Error> {
-        use db::schema::vpc::dsl;
+        use nexus_db_schema::schema::vpc::dsl;
 
         assert_eq!(authz_project.id(), vpc_query.vpc.project_id);
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
@@ -516,7 +517,7 @@ impl DataStore {
     ) -> UpdateResult<Vpc> {
         opctx.authorize(authz::Action::Modify, authz_vpc).await?;
 
-        use db::schema::vpc::dsl;
+        use nexus_db_schema::schema::vpc::dsl;
         diesel::update(dsl::vpc)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_vpc.id()))
@@ -540,8 +541,8 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_vpc).await?;
 
-        use db::schema::vpc::dsl;
-        use db::schema::vpc_subnet;
+        use nexus_db_schema::schema::vpc::dsl;
+        use nexus_db_schema::schema::vpc_subnet;
 
         // Note that we don't ensure the firewall rules are empty here, because
         // we allow deleting VPCs with firewall rules present. Inserting new
@@ -611,7 +612,7 @@ impl DataStore {
         // remove them, or update them.  You can only modify the whole set.  So
         // for authz, we treat them as part of the Vpc itself.
         opctx.authorize(authz::Action::Read, authz_vpc).await?;
-        use db::schema::vpc_firewall_rule::dsl;
+        use nexus_db_schema::schema::vpc_firewall_rule::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         dsl::vpc_firewall_rule
@@ -630,7 +631,7 @@ impl DataStore {
         authz_vpc: &authz::Vpc,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, authz_vpc).await?;
-        use db::schema::vpc_firewall_rule::dsl;
+        use nexus_db_schema::schema::vpc_firewall_rule::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let now = Utc::now();
@@ -668,7 +669,7 @@ impl DataStore {
         // the same order that we would normally list them.
         rules.sort_by_key(|r| r.name().to_string());
 
-        use db::schema::vpc_firewall_rule::dsl;
+        use nexus_db_schema::schema::vpc_firewall_rule::dsl;
 
         let now = Utc::now();
         let delete_old_query = diesel::update(dsl::vpc_firewall_rule)
@@ -748,15 +749,15 @@ impl DataStore {
     ) -> Result<Vec<Sled>, Error> {
         // Resolve each VNIC in the VPC to the Sled it's on, so we know which
         // Sleds to notify when firewall rules change.
-        use db::schema::{
+        use nexus_db_schema::schema::{
             bp_omicron_zone, bp_target, instance, instance_network_interface,
             service_network_interface, sled, vmm,
         };
         // Diesel requires us to use aliases in order to refer to the
         // `bp_target` table twice in the same query.
         let (bp_target1, bp_target2) = diesel::alias!(
-            db::schema::bp_target as bp_target1,
-            db::schema::bp_target as bp_target2
+            nexus_db_schema::schema::bp_target as bp_target1,
+            nexus_db_schema::schema::bp_target as bp_target2
         );
 
         let instance_query = instance_network_interface::table
@@ -834,7 +835,7 @@ impl DataStore {
     ) -> ListResultVec<VpcSubnet> {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
-        use db::schema::vpc_subnet::dsl;
+        use nexus_db_schema::schema::vpc_subnet::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
@@ -918,8 +919,8 @@ impl DataStore {
     ) -> Result<usize, Error> {
         opctx.authorize(authz::Action::Delete, authz_subnet).await?;
 
-        use db::schema::network_interface;
-        use db::schema::vpc_subnet::dsl;
+        use nexus_db_schema::schema::network_interface;
+        use nexus_db_schema::schema::vpc_subnet::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -992,7 +993,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,
     ) -> DeleteResult {
-        use db::schema::router_route::dsl as rr_dsl;
+        use nexus_db_schema::schema::router_route::dsl as rr_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         diesel::update(rr_dsl::router_route)
@@ -1050,7 +1051,7 @@ impl DataStore {
                 let err = err.clone();
                 let updates = updates.clone();
                 async move {
-                    use db::schema::vpc_subnet::dsl;
+                    use nexus_db_schema::schema::vpc_subnet::dsl;
                     let name = updates.name.clone();
 
                     // Update subnet metadata, and unset subnet->custom router attachment
@@ -1074,7 +1075,7 @@ impl DataStore {
 
                     // Fix the presentation of the matching system route.
                     if let Some(new_name) = name {
-                        use db::schema::router_route::dsl as rr_dsl;
+                        use nexus_db_schema::schema::router_route::dsl as rr_dsl;
                         if let Err(e) = diesel::update(rr_dsl::router_route)
                             .filter(rr_dsl::time_deleted.is_null())
                             .filter(rr_dsl::kind.eq(RouterRouteKind(
@@ -1100,8 +1101,8 @@ impl DataStore {
 
                     // Apply subnet->custom router attachment/detachment.
                     if let Some(authz_router) = custom_router {
-                        use db::schema::vpc_router::dsl as router_dsl;
-                        use db::schema::vpc_subnet::dsl as subnet_dsl;
+                        use nexus_db_schema::schema::vpc_router::dsl as router_dsl;
+                        use nexus_db_schema::schema::vpc_subnet::dsl as subnet_dsl;
 
                         let query = VpcRouter::attach_resource(
                             authz_router.id(),
@@ -1224,7 +1225,7 @@ impl DataStore {
     ) -> ListResultVec<InstanceNetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_subnet).await?;
 
-        use db::schema::instance_network_interface::dsl;
+        use nexus_db_schema::schema::instance_network_interface::dsl;
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
@@ -1254,7 +1255,7 @@ impl DataStore {
     ) -> ListResultVec<VpcRouter> {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
-        use db::schema::vpc_router::dsl;
+        use nexus_db_schema::schema::vpc_router::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::vpc_router, dsl::id, pagparams)
@@ -1283,7 +1284,7 @@ impl DataStore {
     ) -> ListResultVec<InternetGateway> {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
-        use db::schema::internet_gateway::dsl;
+        use nexus_db_schema::schema::internet_gateway::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::internet_gateway, dsl::id, pagparams)
@@ -1311,7 +1312,7 @@ impl DataStore {
     ) -> LookupResult<bool> {
         opctx.authorize(authz::Action::ListChildren, authz_igw).await?;
 
-        use db::schema::internet_gateway_ip_pool::dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_pool::dsl;
         let result = dsl::internet_gateway_ip_pool
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::internet_gateway_id.eq(authz_igw.id()))
@@ -1333,7 +1334,7 @@ impl DataStore {
     ) -> LookupResult<bool> {
         opctx.authorize(authz::Action::ListChildren, authz_igw).await?;
 
-        use db::schema::internet_gateway_ip_address::dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_address::dsl;
         let result = dsl::internet_gateway_ip_address
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::internet_gateway_id.eq(authz_igw.id()))
@@ -1356,7 +1357,7 @@ impl DataStore {
     ) -> ListResultVec<InternetGatewayIpPool> {
         opctx.authorize(authz::Action::ListChildren, authz_igw).await?;
 
-        use db::schema::internet_gateway_ip_pool::dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_pool::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::internet_gateway_ip_pool, dsl::id, pagparams)
@@ -1385,7 +1386,7 @@ impl DataStore {
     ) -> ListResultVec<InternetGatewayIpAddress> {
         opctx.authorize(authz::Action::ListChildren, authz_igw).await?;
 
-        use db::schema::internet_gateway_ip_address::dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_address::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::internet_gateway_ip_address, dsl::id, pagparams)
@@ -1414,7 +1415,7 @@ impl DataStore {
     ) -> CreateResult<(authz::VpcRouter, VpcRouter)> {
         opctx.authorize(authz::Action::CreateChild, authz_vpc).await?;
 
-        use db::schema::vpc_router::dsl;
+        use nexus_db_schema::schema::vpc_router::dsl;
         let name = router.name().clone();
         let router = diesel::insert_into(dsl::vpc_router)
             .values(router)
@@ -1450,7 +1451,7 @@ impl DataStore {
     ) -> CreateResult<(authz::InternetGateway, InternetGateway)> {
         opctx.authorize(authz::Action::CreateChild, authz_vpc).await?;
 
-        use db::schema::internet_gateway::dsl;
+        use nexus_db_schema::schema::internet_gateway::dsl;
         let name = igw.name().clone();
         let igw = diesel::insert_into(dsl::internet_gateway)
             .values(igw)
@@ -1488,7 +1489,7 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_router).await?;
 
-        use db::schema::vpc_router::dsl;
+        use nexus_db_schema::schema::vpc_router::dsl;
         let now = Utc::now();
         diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
@@ -1504,7 +1505,7 @@ impl DataStore {
             })?;
 
         // All child routes are deleted.
-        use db::schema::router_route::dsl as rr;
+        use nexus_db_schema::schema::router_route::dsl as rr;
         let now = Utc::now();
         diesel::update(rr::router_route)
             .filter(rr::time_deleted.is_null())
@@ -1519,7 +1520,7 @@ impl DataStore {
         // `vpc_get_active_custom_routers` will join and then filter,
         // so such rows will be treated as though they have no custom router
         // by the RPW.
-        use db::schema::vpc_subnet::dsl as vpc;
+        use nexus_db_schema::schema::vpc_subnet::dsl as vpc;
         diesel::update(vpc::vpc_subnet)
             .filter(vpc::time_deleted.is_null())
             .filter(vpc::custom_router_id.eq(authz_router.id()))
@@ -1573,7 +1574,7 @@ impl DataStore {
                 let err = err.clone();
                 async move {
                     // Delete ip pool associations
-                    use db::schema::internet_gateway_ip_pool::dsl as pool;
+                    use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as pool;
                     let count = pool::internet_gateway_ip_pool
                         .filter(pool::time_deleted.is_null())
                         .filter(pool::internet_gateway_id.eq(authz_igw.id()))
@@ -1585,7 +1586,7 @@ impl DataStore {
                     }
 
                     // Delete ip address associations
-                    use db::schema::internet_gateway_ip_address::dsl as addr;
+                    use nexus_db_schema::schema::internet_gateway_ip_address::dsl as addr;
                     let count = addr::internet_gateway_ip_address
                         .filter(addr::time_deleted.is_null())
                         .filter(addr::internet_gateway_id.eq(authz_igw.id()))
@@ -1596,7 +1597,7 @@ impl DataStore {
                         return Err(err.bail(DeleteError::IpAddressesExist));
                     }
 
-                    use db::schema::internet_gateway::dsl;
+                    use nexus_db_schema::schema::internet_gateway::dsl;
                     let now = Utc::now();
                     diesel::update(dsl::internet_gateway)
                         .filter(dsl::time_deleted.is_null())
@@ -1632,7 +1633,7 @@ impl DataStore {
         self.transaction_retry_wrapper("vpc_delete_internet_gateway_cascade")
             .transaction(&conn, |conn| {
                 async move {
-                    use db::schema::internet_gateway::dsl as igw;
+                    use nexus_db_schema::schema::internet_gateway::dsl as igw;
                     let igw_info = igw::internet_gateway
                         .filter(igw::time_deleted.is_null())
                         .filter(igw::id.eq(authz_igw.id()))
@@ -1640,7 +1641,7 @@ impl DataStore {
                         .first_async(&conn)
                         .await?;
 
-                    use db::schema::internet_gateway::dsl;
+                    use nexus_db_schema::schema::internet_gateway::dsl;
                     let now = Utc::now();
                     diesel::update(dsl::internet_gateway)
                         .filter(dsl::time_deleted.is_null())
@@ -1650,7 +1651,7 @@ impl DataStore {
                         .await?;
 
                     // Delete ip pool associations
-                    use db::schema::internet_gateway_ip_pool::dsl as pool;
+                    use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as pool;
                     let now = Utc::now();
                     diesel::update(pool::internet_gateway_ip_pool)
                         .filter(pool::time_deleted.is_null())
@@ -1660,7 +1661,7 @@ impl DataStore {
                         .await?;
 
                     // Delete ip address associations
-                    use db::schema::internet_gateway_ip_address::dsl as addr;
+                    use nexus_db_schema::schema::internet_gateway_ip_address::dsl as addr;
                     let now = Utc::now();
                     diesel::update(addr::internet_gateway_ip_address)
                         .filter(addr::time_deleted.is_null())
@@ -1670,7 +1671,7 @@ impl DataStore {
                         .await?;
 
                     // Delete routes targeting this igw
-                    use db::schema::vpc_router::dsl as vr;
+                    use nexus_db_schema::schema::vpc_router::dsl as vr;
                     let vpc_routers = vr::vpc_router
                         .filter(vr::time_deleted.is_null())
                         .filter(vr::vpc_id.eq(igw_info.vpc_id))
@@ -1681,7 +1682,7 @@ impl DataStore {
                         .map(|x| x.id())
                         .collect::<Vec<_>>();
 
-                    use db::schema::router_route::dsl as rr;
+                    use nexus_db_schema::schema::router_route::dsl as rr;
                     let now = Utc::now();
                     diesel::update(rr::router_route)
                         .filter(rr::time_deleted.is_null())
@@ -1709,7 +1710,7 @@ impl DataStore {
     ) -> UpdateResult<VpcRouter> {
         opctx.authorize(authz::Action::Modify, authz_router).await?;
 
-        use db::schema::vpc_router::dsl;
+        use nexus_db_schema::schema::vpc_router::dsl;
         diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_router.id()))
@@ -1733,7 +1734,7 @@ impl DataStore {
     ) -> ListResultVec<RouterRoute> {
         opctx.authorize(authz::Action::ListChildren, authz_router).await?;
 
-        use db::schema::router_route::dsl;
+        use nexus_db_schema::schema::router_route::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::router_route, dsl::id, pagparams)
@@ -1772,9 +1773,9 @@ impl DataStore {
 
     pub async fn router_create_route_on_connection(
         route: RouterRoute,
-        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> CreateResult<RouterRoute> {
-        use db::schema::router_route::dsl;
+        use nexus_db_schema::schema::router_route::dsl;
         let router_id = route.vpc_router_id;
         let name = route.name().clone();
 
@@ -1805,7 +1806,7 @@ impl DataStore {
         authz_igw: &authz::InternetGateway,
         igwip: InternetGatewayIpPool,
     ) -> CreateResult<InternetGatewayIpPool> {
-        use db::schema::internet_gateway_ip_pool::dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_pool::dsl;
         opctx.authorize(authz::Action::CreateChild, authz_igw).await?;
 
         let igw_id = igwip.internet_gateway_id;
@@ -1840,7 +1841,7 @@ impl DataStore {
         authz_igw: &authz::InternetGateway,
         igwip: InternetGatewayIpAddress,
     ) -> CreateResult<InternetGatewayIpAddress> {
-        use db::schema::internet_gateway_ip_address::dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_address::dsl;
         opctx.authorize(authz::Action::CreateChild, authz_igw).await?;
 
         let igw_id = igwip.internet_gateway_id;
@@ -1876,7 +1877,7 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_route).await?;
 
-        use db::schema::router_route::dsl;
+        use nexus_db_schema::schema::router_route::dsl;
         let now = Utc::now();
         diesel::update(dsl::router_route)
             .filter(dsl::time_deleted.is_null())
@@ -1940,7 +1941,7 @@ impl DataStore {
                 async move {
                     // determine if there are routes that target this igw
                     let this_target = format!("inetgw:{}", igw_name);
-                    use  db::schema::router_route::dsl as rr;
+                    use  nexus_db_schema::schema::router_route::dsl as rr;
                     let count = rr::router_route
                         .filter(rr::time_deleted.is_null())
                         .filter(rr::target.eq(this_target))
@@ -1954,7 +1955,7 @@ impl DataStore {
                         // determine if there are instances that have IP
                         // addresses in the IP pool being removed.
 
-                        use db::schema::ip_pool_range::dsl as ipr;
+                        use nexus_db_schema::schema::ip_pool_range::dsl as ipr;
                         let pr = ipr::ip_pool_range
                             .filter(ipr::time_deleted.is_null())
                             .filter(ipr::ip_pool_id.eq(ip_pool_id))
@@ -1963,7 +1964,7 @@ impl DataStore {
                             .await?;
                         info!(self.log, "POOL {pr:#?}");
 
-                        use db::schema::instance_network_interface::dsl as ini;
+                        use nexus_db_schema::schema::instance_network_interface::dsl as ini;
                         let vpc_interfaces = ini::instance_network_interface
                             .filter(ini::time_deleted.is_null())
                             .filter(ini::vpc_id.eq(vpc_id))
@@ -1976,7 +1977,7 @@ impl DataStore {
                         for ifx in &vpc_interfaces {
                             info!(self.log, "IFX {ifx:#?}");
 
-                            use db::schema::external_ip::dsl as xip;
+                            use nexus_db_schema::schema::external_ip::dsl as xip;
                             let ext_ips = xip::external_ip
                                 .filter(xip::time_deleted.is_null())
                                 .filter(xip::parent_id.eq(ifx.instance_id))
@@ -1995,7 +1996,7 @@ impl DataStore {
                         }
                     }
 
-                    use db::schema::internet_gateway_ip_pool::dsl;
+                    use nexus_db_schema::schema::internet_gateway_ip_pool::dsl;
                     let now = Utc::now();
                     diesel::update(dsl::internet_gateway_ip_pool)
                         .filter(dsl::time_deleted.is_null())
@@ -2025,7 +2026,7 @@ impl DataStore {
         authz_pool: &authz::InternetGatewayIpPool,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_pool).await?;
-        use db::schema::internet_gateway_ip_pool::dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_pool::dsl;
         let now = Utc::now();
         diesel::update(dsl::internet_gateway_ip_pool)
             .filter(dsl::time_deleted.is_null())
@@ -2065,7 +2066,7 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_addr).await?;
 
-        use db::schema::internet_gateway_ip_address::dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_address::dsl;
         let now = Utc::now();
         diesel::update(dsl::internet_gateway_ip_address)
             .filter(dsl::time_deleted.is_null())
@@ -2104,7 +2105,7 @@ impl DataStore {
                 async move {
                     // determine if there are routes that target this igw
                     let this_target = format!("inetgw:{}", igw_name);
-                    use  db::schema::router_route::dsl as rr;
+                    use  nexus_db_schema::schema::router_route::dsl as rr;
                     let count = rr::router_route
                         .filter(rr::time_deleted.is_null())
                         .filter(rr::target.eq(this_target))
@@ -2113,7 +2114,7 @@ impl DataStore {
                         .await?;
 
                     if count > 0 {
-                        use db::schema::instance_network_interface::dsl as ini;
+                        use nexus_db_schema::schema::instance_network_interface::dsl as ini;
                         let vpc_interfaces = ini::instance_network_interface
                             .filter(ini::time_deleted.is_null())
                             .filter(ini::vpc_id.eq(vpc_id))
@@ -2123,7 +2124,7 @@ impl DataStore {
 
                         for ifx in &vpc_interfaces {
 
-                            use db::schema::external_ip::dsl as xip;
+                            use nexus_db_schema::schema::external_ip::dsl as xip;
                             let ext_ips = xip::external_ip
                                 .filter(xip::time_deleted.is_null())
                                 .filter(xip::parent_id.eq(ifx.instance_id))
@@ -2139,7 +2140,7 @@ impl DataStore {
                         }
                     }
 
-                    use db::schema::internet_gateway_ip_address::dsl;
+                    use nexus_db_schema::schema::internet_gateway_ip_address::dsl;
                     let now = Utc::now();
                     diesel::update(dsl::internet_gateway_ip_address)
                         .filter(dsl::time_deleted.is_null())
@@ -2171,7 +2172,7 @@ impl DataStore {
     ) -> UpdateResult<RouterRoute> {
         opctx.authorize(authz::Action::Modify, authz_route).await?;
 
-        use db::schema::router_route::dsl;
+        use nexus_db_schema::schema::router_route::dsl;
         diesel::update(dsl::router_route)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_route.id()))
@@ -2202,7 +2203,7 @@ impl DataStore {
             ipv6_block: Ipv6Net,
         }
 
-        use db::schema::vpc_subnet;
+        use nexus_db_schema::schema::vpc_subnet;
         let subnets = vpc_subnet::table
             .filter(vpc_subnet::vpc_id.eq(vpc.id()))
             .filter(vpc_subnet::name.eq_any(subnet_names))
@@ -2233,7 +2234,7 @@ impl DataStore {
         opctx: &OpContext,
         vni: Vni,
     ) -> LookupResult<Vpc> {
-        use db::schema::vpc::dsl;
+        use nexus_db_schema::schema::vpc::dsl;
         dsl::vpc
             .filter(dsl::vni.eq(vni))
             .filter(dsl::time_deleted.is_null())
@@ -2257,7 +2258,7 @@ impl DataStore {
         opctx: &OpContext,
         vpc_id: Uuid,
     ) -> LookupResult<Vni> {
-        use db::schema::vpc::dsl;
+        use nexus_db_schema::schema::vpc::dsl;
         dsl::vpc
             .filter(dsl::id.eq(vpc_id))
             .filter(dsl::time_deleted.is_null())
@@ -2281,8 +2282,8 @@ impl DataStore {
         opctx: &OpContext,
         vpc_id: Uuid,
     ) -> LookupResult<VpcRouter> {
-        use db::schema::vpc::dsl as vpc_dsl;
-        use db::schema::vpc_router::dsl as router_dsl;
+        use nexus_db_schema::schema::vpc::dsl as vpc_dsl;
+        use nexus_db_schema::schema::vpc_router::dsl as router_dsl;
 
         vpc_dsl::vpc
             .inner_join(
@@ -2315,8 +2316,8 @@ impl DataStore {
         opctx: &OpContext,
         vpc_id: Uuid,
     ) -> ListResultVec<(VpcSubnet, VpcRouter)> {
-        use db::schema::vpc_router::dsl as router_dsl;
-        use db::schema::vpc_subnet::dsl as subnet_dsl;
+        use nexus_db_schema::schema::vpc_router::dsl as router_dsl;
+        use nexus_db_schema::schema::vpc_subnet::dsl as subnet_dsl;
 
         subnet_dsl::vpc_subnet
             .inner_join(
@@ -2348,7 +2349,7 @@ impl DataStore {
         opctx: &OpContext,
         vpc_id: Uuid,
     ) -> ListResultVec<VpcRouter> {
-        use db::schema::vpc_router::dsl as router_dsl;
+        use nexus_db_schema::schema::vpc_router::dsl as router_dsl;
 
         router_dsl::vpc_router
             .filter(router_dsl::time_deleted.is_null())
@@ -2377,16 +2378,16 @@ impl DataStore {
         sled_id: Uuid,
     ) -> Result<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>, Error> {
         // TODO: give GW-bound addresses preferential treatment.
-        use db::schema::external_ip as eip;
-        use db::schema::external_ip::dsl as eip_dsl;
-        use db::schema::internet_gateway as igw;
-        use db::schema::internet_gateway::dsl as igw_dsl;
-        use db::schema::internet_gateway_ip_address as igw_ip;
-        use db::schema::internet_gateway_ip_address::dsl as igw_ip_dsl;
-        use db::schema::internet_gateway_ip_pool as igw_pool;
-        use db::schema::internet_gateway_ip_pool::dsl as igw_pool_dsl;
-        use db::schema::network_interface as ni;
-        use db::schema::vmm;
+        use nexus_db_schema::schema::external_ip as eip;
+        use nexus_db_schema::schema::external_ip::dsl as eip_dsl;
+        use nexus_db_schema::schema::internet_gateway as igw;
+        use nexus_db_schema::schema::internet_gateway::dsl as igw_dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_address as igw_ip;
+        use nexus_db_schema::schema::internet_gateway_ip_address::dsl as igw_ip_dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_pool as igw_pool;
+        use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as igw_pool_dsl;
+        use nexus_db_schema::schema::network_interface as ni;
+        use nexus_db_schema::schema::vmm;
 
         // We don't know at first glance which VPC ID each IP addr has.
         // VPC info is necessary to map back to the intended gateway.
@@ -2497,7 +2498,7 @@ impl DataStore {
         opctx.check_complex_operations_allowed()?;
 
         let (.., authz_project, authz_vpc, authz_router) =
-            db::lookup::LookupPath::new(opctx, self)
+            nexus_db_lookup::LookupPath::new(opctx, self)
                 .vpc_router_id(vpc_router_id)
                 .lookup_for(authz::Action::Read)
                 .await
@@ -2586,7 +2587,7 @@ impl DataStore {
         //       complete set if we're a system router? We'll need it anyway.
         let mut subnets_by_id = stream::iter(subnet_ids)
             .filter_map(|id| async move {
-                db::lookup::LookupPath::new(opctx, self)
+                nexus_db_lookup::LookupPath::new(opctx, self)
                     .vpc_subnet_id(id)
                     .fetch()
                     .await
@@ -2608,7 +2609,7 @@ impl DataStore {
                 continue;
             }
 
-            let Some(res) = db::lookup::LookupPath::new(opctx, self)
+            let Some(res) = nexus_db_lookup::LookupPath::new(opctx, self)
                 .vpc_id(vpc_id)
                 .vpc_subnet_name(Name::ref_cast(name))
                 .fetch()
@@ -2627,7 +2628,7 @@ impl DataStore {
         // TODO: unused until VPC peering.
         let _vpcs = stream::iter(vpc_names)
             .filter_map(|name| async {
-                db::lookup::LookupPath::new(opctx, self)
+                nexus_db_lookup::LookupPath::new(opctx, self)
                     .project_id(authz_project.id())
                     .vpc_name(Name::ref_cast(&name))
                     .fetch()
@@ -2641,7 +2642,7 @@ impl DataStore {
 
         let inetgws = stream::iter(inetgw_names)
             .filter_map(|name| async {
-                db::lookup::LookupPath::new(opctx, self)
+                nexus_db_lookup::LookupPath::new(opctx, self)
                     .vpc_id(vpc_id)
                     .internet_gateway_name(Name::ref_cast(&name))
                     .fetch()
@@ -2655,7 +2656,7 @@ impl DataStore {
 
         let instances = stream::iter(instance_names)
             .filter_map(|name| async {
-                db::lookup::LookupPath::new(opctx, self)
+                nexus_db_lookup::LookupPath::new(opctx, self)
                     .project_id(authz_project.id())
                     .instance_name(Name::ref_cast(&name))
                     .fetch()
@@ -2827,7 +2828,7 @@ impl DataStore {
         // resources -- the current user may have access to those, but be unable
         // to modify the entire set of VPC routers in a project.
 
-        use db::schema::vpc_router::dsl;
+        use nexus_db_schema::schema::vpc_router::dsl;
         diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(router_id))
@@ -2846,7 +2847,7 @@ impl DataStore {
         opctx: &OpContext,
         vpc_id: Uuid,
     ) -> UpdateResult<()> {
-        use db::schema::vpc_router::dsl;
+        use nexus_db_schema::schema::vpc_router::dsl;
         diesel::update(dsl::vpc_router)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(vpc_id))
@@ -3714,7 +3715,7 @@ mod tests {
     ) -> Vec<RouterRoute> {
         let conn = datastore.pool_connection_authorized(opctx).await.unwrap();
 
-        use db::schema::router_route::dsl;
+        use nexus_db_schema::schema::router_route::dsl;
         let routes = dsl::router_route
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_router_id.eq(router_id))
@@ -3884,7 +3885,7 @@ mod tests {
             .await
             .unwrap();
         let (.., authz_instance) =
-            db::lookup::LookupPath::new(&opctx, &datastore)
+            nexus_db_lookup::LookupPath::new(&opctx, datastore)
                 .instance_id(db_inst.id())
                 .lookup_for(authz::Action::CreateChild)
                 .await

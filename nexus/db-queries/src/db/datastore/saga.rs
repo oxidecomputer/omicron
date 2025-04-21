@@ -7,8 +7,6 @@
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::db;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
@@ -18,6 +16,9 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_model::SagaState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -28,7 +29,7 @@ impl DataStore {
         &self,
         saga: &db::saga_types::Saga,
     ) -> Result<(), Error> {
-        use db::schema::saga::dsl;
+        use nexus_db_schema::schema::saga::dsl;
 
         diesel::insert_into(dsl::saga)
             .values(saga.clone())
@@ -42,7 +43,7 @@ impl DataStore {
         &self,
         event: &db::saga_types::SagaNodeEvent,
     ) -> Result<(), Error> {
-        use db::schema::saga_node_event::dsl;
+        use nexus_db_schema::schema::saga_node_event::dsl;
 
         // TODO-robustness This INSERT ought to be conditional on this SEC still
         // owning this saga.
@@ -88,16 +89,16 @@ impl DataStore {
     pub async fn saga_update_state(
         &self,
         saga_id: steno::SagaId,
-        new_state: steno::SagaCachedState,
+        new_state: SagaState,
         current_sec: db::saga_types::SecId,
     ) -> Result<(), Error> {
-        use db::schema::saga::dsl;
+        use nexus_db_schema::schema::saga::dsl;
 
         let saga_id: db::saga_types::SagaId = saga_id.into();
         let result = diesel::update(dsl::saga)
             .filter(dsl::id.eq(saga_id))
             .filter(dsl::current_sec.eq(current_sec))
-            .set(dsl::saga_state.eq(db::saga_types::SagaCachedState(new_state)))
+            .set(dsl::saga_state.eq(new_state))
             .check_if_exists::<db::saga_types::Saga>(saga_id)
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
@@ -140,15 +141,14 @@ impl DataStore {
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         let conn = self.pool_connection_authorized(opctx).await?;
         while let Some(p) = paginator.next() {
-            use db::schema::saga::dsl;
+            use nexus_db_schema::schema::saga::dsl;
 
             let mut batch =
                 paginated(dsl::saga, dsl::id, &p.current_pagparams())
-                    .filter(dsl::saga_state.ne(
-                        db::saga_types::SagaCachedState(
-                            steno::SagaCachedState::Done,
-                        ),
-                    ))
+                    .filter(
+                        dsl::saga_state
+                            .eq_any(SagaState::RECOVERY_CANDIDATE_STATES),
+                    )
                     .filter(dsl::current_sec.eq(sec_id))
                     .select(db::saga_types::Saga::as_select())
                     .load_async(&*conn)
@@ -174,7 +174,7 @@ impl DataStore {
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         let conn = self.pool_connection_authorized(opctx).await?;
         while let Some(p) = paginator.next() {
-            use db::schema::saga_node_event::dsl;
+            use nexus_db_schema::schema::saga_node_event::dsl;
             let batch = paginated_multicolumn(
                 dsl::saga_node_event,
                 (dsl::node_id, dsl::event_type),
@@ -232,7 +232,7 @@ impl DataStore {
         // not appear to support the UPDATE ... LIMIT syntax using the normal
         // builder.  In practice, it's extremely unlikely we'd have so many
         // in-progress sagas that this would be a problem.
-        use db::schema::saga::dsl;
+        use nexus_db_schema::schema::saga::dsl;
         diesel::update(
             dsl::saga
                 .filter(dsl::current_sec.is_not_null())
@@ -241,9 +241,7 @@ impl DataStore {
                         sec_ids.into_iter().cloned().collect::<Vec<_>>(),
                     ),
                 )
-                .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
-                    steno::SagaCachedState::Done,
-                ))),
+                .filter(dsl::saga_state.ne(db::saga_types::SagaState::Done)),
         )
         .set((
             dsl::current_sec.eq(Some(new_sec_id)),
@@ -263,6 +261,7 @@ mod test {
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncSimpleConnection;
     use db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+    use nexus_db_model::SagaState;
     use nexus_db_model::{SagaNodeEvent, SecId};
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
@@ -270,7 +269,9 @@ mod test {
     use std::collections::BTreeSet;
     use uuid::Uuid;
 
-    // Tests pagination in listing sagas that are candidates for recovery
+    // Tests that the logic for producing candidates for saga recovery only
+    // includes sagas in the correct states and that the recovered sagas are
+    // properly paginated.
     #[tokio::test]
     async fn test_list_candidate_sagas() {
         // Test setup
@@ -282,6 +283,11 @@ mod test {
             .map(|_| SagaTestContext::new(sec_id).new_running_db_saga())
             .collect::<Vec<_>>();
 
+        // Add a saga in the Abandoned state. This shouldn't be returned in the
+        // list of recovery candidates.
+        inserted_sagas
+            .push(SagaTestContext::new(sec_id).new_abandoned_db_saga());
+
         // Shuffle these sagas into a random order to check that the pagination
         // order is working as intended on the read path, which we'll do later
         // in this test.
@@ -292,7 +298,7 @@ mod test {
             .pool_connection_unauthorized()
             .await
             .expect("Failed to access db connection");
-        diesel::insert_into(db::schema::saga::dsl::saga)
+        diesel::insert_into(nexus_db_schema::schema::saga::dsl::saga)
             .values(inserted_sagas.clone())
             .execute_async(&*conn)
             .await
@@ -303,6 +309,20 @@ mod test {
             .saga_list_recovery_candidates_batched(&opctx, sec_id)
             .await
             .expect("Failed to list unfinished sagas");
+
+        // The abandoned saga shouldn't show up in the output list.
+        assert!(
+            !observed_sagas
+                .iter()
+                .any(|s| s.saga_state == SagaState::Abandoned)
+        );
+
+        // Remove the abandoned saga from the inserted set so that it can be
+        // compared to the observed set.
+        inserted_sagas.retain(|s| s.saga_state != SagaState::Abandoned);
+
+        // The observed list is sorted by ID, so sort the inserted list that way
+        // too so that the lists can be tested for equality.
         inserted_sagas.sort_by_key(|a| a.id);
 
         // Timestamps can change slightly when we insert them.
@@ -361,11 +381,13 @@ mod test {
             .pool_connection_unauthorized()
             .await
             .expect("Failed to access db connection");
-        diesel::insert_into(db::schema::saga_node_event::dsl::saga_node_event)
-            .values(inserted_nodes.clone())
-            .execute_async(&*conn)
-            .await
-            .expect("Failed to insert test setup data");
+        diesel::insert_into(
+            nexus_db_schema::schema::saga_node_event::dsl::saga_node_event,
+        )
+        .values(inserted_nodes.clone())
+        .execute_async(&*conn)
+        .await
+        .expect("Failed to insert test setup data");
 
         // List them, expect to see them all in order by ID.
         let observed_nodes = datastore
@@ -489,7 +511,7 @@ mod test {
         datastore
             .saga_update_state(
                 node_cx.saga_id,
-                steno::SagaCachedState::Running,
+                SagaState::Running,
                 node_cx.sec_id,
             )
             .await
@@ -497,22 +519,14 @@ mod test {
 
         // Update the state to Done.
         datastore
-            .saga_update_state(
-                node_cx.saga_id,
-                steno::SagaCachedState::Done,
-                node_cx.sec_id,
-            )
+            .saga_update_state(node_cx.saga_id, SagaState::Done, node_cx.sec_id)
             .await
             .expect("updating state to Done");
 
         // Attempt to update its state to Done again, which is a no-op -- this
         // should be idempotent, so expect success.
         datastore
-            .saga_update_state(
-                node_cx.saga_id,
-                steno::SagaCachedState::Done,
-                node_cx.sec_id,
-            )
+            .saga_update_state(node_cx.saga_id, SagaState::Done, node_cx.sec_id)
             .await
             .expect("updating state to Done again");
 
@@ -541,6 +555,20 @@ mod test {
             };
 
             db::model::saga_types::Saga::new(self.sec_id, params)
+        }
+
+        fn new_abandoned_db_saga(&self) -> db::model::saga_types::Saga {
+            let params = steno::SagaCreateParams {
+                id: self.saga_id,
+                name: steno::SagaName::new("test saga"),
+                dag: serde_json::value::Value::Null,
+                state: steno::SagaCachedState::Running,
+            };
+
+            let mut saga =
+                db::model::saga_types::Saga::new(self.sec_id, params);
+            saga.saga_state = SagaState::Abandoned;
+            saga
         }
 
         fn new_db_event(
@@ -611,9 +639,8 @@ mod test {
             .iter()
             .filter_map(|saga| {
                 ((saga.creator == sec_b || saga.creator == sec_c)
-                    && (saga.saga_state.0 == steno::SagaCachedState::Running
-                        || saga.saga_state.0
-                            == steno::SagaCachedState::Unwinding))
+                    && (saga.saga_state == SagaState::Running
+                        || saga.saga_state == SagaState::Unwinding))
                     .then(|| saga.id)
             })
             .collect();
@@ -622,7 +649,7 @@ mod test {
             .filter_map(|saga| {
                 (saga.creator == sec_a
                     || saga.creator == sec_d
-                    || saga.saga_state.0 == steno::SagaCachedState::Done)
+                    || saga.saga_state == SagaState::Done)
                     .then(|| saga.id)
             })
             .collect();
@@ -636,7 +663,7 @@ mod test {
 
         // Insert the sagas.
         let count = {
-            use db::schema::saga::dsl;
+            use nexus_db_schema::schema::saga::dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             diesel::insert_into(dsl::saga)
                 .values(sagas_to_insert)
@@ -660,7 +687,7 @@ mod test {
             .await
             .unwrap()
             .transaction_async(|conn| async move {
-                use db::schema::saga::dsl;
+                use nexus_db_schema::schema::saga::dsl;
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
                 dsl::saga
                     .select(nexus_db_model::Saga::as_select())
@@ -678,9 +705,8 @@ mod test {
                 assert_eq!(current_sec, sec_a);
                 assert_eq!(*saga.adopt_generation, Generation::from(2));
                 assert!(
-                    saga.saga_state.0 == steno::SagaCachedState::Running
-                        || saga.saga_state.0
-                            == steno::SagaCachedState::Unwinding
+                    saga.saga_state == SagaState::Running
+                        || saga.saga_state == SagaState::Unwinding
                 );
             } else if sagas_unaffected.contains(&saga.id) {
                 assert_eq!(current_sec, saga.creator);
