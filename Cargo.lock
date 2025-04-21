@@ -3685,10 +3685,12 @@ dependencies = [
 name = "gfss"
 version = "0.1.0"
 dependencies = [
+ "digest",
  "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
  "secrecy",
+ "serde",
  "subtle",
  "test-strategy",
  "thiserror 1.0.69",
@@ -13002,6 +13004,36 @@ dependencies = [
  "schemars",
  "serde",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "trust-quorum"
+version = "0.1.0"
+dependencies = [
+ "bcs",
+ "bootstore",
+ "camino",
+ "chacha20poly1305",
+ "derive_more",
+ "gfss",
+ "hex",
+ "hkdf",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "proptest",
+ "rand 0.8.5",
+ "secrecy",
+ "serde",
+ "serde_with",
+ "sha3",
+ "slog",
+ "slog-error-chain",
+ "subtle",
+ "test-strategy",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]
