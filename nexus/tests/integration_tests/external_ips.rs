@@ -1006,6 +1006,7 @@ async fn test_floating_ip_attach_fail_between_projects(
             }],
             disks: vec![],
             boot_disk: None,
+            min_cpu_platform: None,
             start: true,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
