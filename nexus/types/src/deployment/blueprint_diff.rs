@@ -16,7 +16,8 @@ use super::{
     BlueprintMetadata, BlueprintPhysicalDiskConfig,
     BlueprintPhysicalDiskConfigDiff, BlueprintZoneConfigDiff,
     BlueprintZoneImageSource, ClickhouseClusterConfig,
-    CockroachDbPreserveDowngrade, unwrap_or_none, zone_sort_key,
+    CockroachDbPreserveDowngrade, PendingMgsUpdatesDiff, unwrap_or_none,
+    zone_sort_key,
 };
 use daft::Diffable;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -1578,6 +1579,74 @@ impl ClickhouseClusterConfigDiffTables {
     }
 }
 
+/// Differences in pending MGS updates
+#[derive(Debug)]
+pub struct BpDiffPendingMgsUpdates<'a> {
+    pub diff: &'a PendingMgsUpdatesDiff<'a>,
+}
+
+impl<'a> BpDiffPendingMgsUpdates<'a> {
+    /// Convert from our diff summary to our display compatibility layer
+    pub fn from_diff_summary(
+        summary: &'a BlueprintDiffSummary<'a>,
+    ) -> BpDiffPendingMgsUpdates<'a> {
+        BpDiffPendingMgsUpdates { diff: &summary.diff.pending_mgs_updates }
+    }
+
+    /// Return a [`BpTable`] describing the values here.
+    ///
+    /// As elsewhere, we print rows in order of:
+    ///
+    /// 1. Unchanged
+    /// 2. Removed
+    /// 3. Modified
+    /// 4. Added
+    pub fn to_bp_table(&self) -> Option<BpTable> {
+        let mut rows = vec![];
+        let mut has_changed = false;
+        let map = &self.diff.by_baseboard;
+        for update in map.unchanged_values() {
+            rows.push(BpTableRow::from_strings(
+                BpDiffState::Unchanged,
+                update.to_bp_table_values(),
+            ))
+        }
+        for (_, update) in &map.removed {
+            has_changed = true;
+            rows.push(BpTableRow::from_strings(
+                BpDiffState::Removed,
+                update.to_bp_table_values(),
+            ));
+        }
+        for update in map.modified_values() {
+            has_changed = true;
+            let u1 = &update.before;
+            let u2 = &update.after;
+            rows.push(BpTableRow::from_strings(
+                BpDiffState::Removed,
+                u1.to_bp_table_values(),
+            ));
+            rows.push(BpTableRow::from_strings(
+                BpDiffState::Added,
+                u2.to_bp_table_values(),
+            ));
+        }
+        for (_, update) in &map.added {
+            has_changed = true;
+            rows.push(BpTableRow::from_strings(
+                BpDiffState::Added,
+                update.to_bp_table_values(),
+            ))
+        }
+
+        if !has_changed {
+            None
+        } else {
+            Some(BpTable::new(BpPendingMgsUpdates {}, None, rows))
+        }
+    }
+}
+
 /// Wrapper to allow a [`BlueprintDiff`] to be displayed.
 ///
 /// Returned by [`BlueprintDiffSummary::display()`].
@@ -1592,6 +1661,7 @@ pub struct BlueprintDiffDisplay<'diff> {
     zones: BpDiffZones,
     disks: BpDiffPhysicalDisks<'diff>,
     datasets: BpDiffDatasets,
+    pending_mgs_updates: BpDiffPendingMgsUpdates<'diff>,
 }
 
 impl<'diff> BlueprintDiffDisplay<'diff> {
@@ -1602,7 +1672,17 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         let zones = BpDiffZones::from_diff_summary(summary);
         let disks = BpDiffPhysicalDisks::from_diff_summary(summary);
         let datasets = BpDiffDatasets::from_diff_summary(summary);
-        Self { summary, before_meta, after_meta, zones, disks, datasets }
+        let pending_mgs_updates =
+            BpDiffPendingMgsUpdates::from_diff_summary(summary);
+        Self {
+            summary,
+            before_meta,
+            after_meta,
+            zones,
+            disks,
+            datasets,
+            pending_mgs_updates,
+        }
     }
 
     pub fn make_metadata_diff_tables(
@@ -1730,52 +1810,6 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
 
             // No before or after
             (None, None) => None,
-        }
-    }
-
-    fn make_pending_mgs_updates_diff_table(&self) -> Option<BpTable> {
-        let mut rows = vec![];
-        let mut has_changed = false;
-        let map = &self.summary.diff.pending_mgs_updates.by_baseboard;
-        for update in map.unchanged_values() {
-            rows.push(BpTableRow::from_strings(
-                BpDiffState::Unchanged,
-                update.to_bp_table_values(),
-            ))
-        }
-        for (_, update) in &map.removed {
-            has_changed = true;
-            rows.push(BpTableRow::from_strings(
-                BpDiffState::Removed,
-                update.to_bp_table_values(),
-            ));
-        }
-        for update in map.modified_values() {
-            has_changed = true;
-            // XXX-dap for now, treat this as "remove" plus "add"
-            let u1 = &update.before;
-            let u2 = &update.after;
-            rows.push(BpTableRow::from_strings(
-                BpDiffState::Removed,
-                u1.to_bp_table_values(),
-            ));
-            rows.push(BpTableRow::from_strings(
-                BpDiffState::Added,
-                u2.to_bp_table_values(),
-            ));
-        }
-        for (_, update) in &map.added {
-            has_changed = true;
-            rows.push(BpTableRow::from_strings(
-                BpDiffState::Added,
-                update.to_bp_table_values(),
-            ))
-        }
-
-        if !has_changed {
-            None
-        } else {
-            Some(BpTable::new(BpPendingMgsUpdates {}, None, rows))
         }
     }
 
@@ -1967,7 +2001,7 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         }
 
         // Write out a summary of pending MGS updates.
-        if let Some(table) = self.make_pending_mgs_updates_diff_table() {
+        if let Some(table) = self.pending_mgs_updates.to_bp_table() {
             writeln!(f, " PENDING MGS UPDATES:\n")?;
             writeln!(f, "{}", table)?;
         }
