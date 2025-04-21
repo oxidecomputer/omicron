@@ -36,7 +36,6 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{BlueprintZoneImageVersion, PendingMgsUpdate};
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
-use nexus_types::inventory::SpType;
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
@@ -56,11 +55,9 @@ use std::fmt::Write;
 use std::io::IsTerminal;
 use swrite::{SWrite, swriteln};
 use tabled::Tabled;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
-use tufaceous_artifact::{
-    ArtifactHash, ArtifactHashId, ArtifactKind, KnownArtifactKind,
-};
 
 mod log_capture;
 
@@ -918,27 +915,16 @@ fn cmd_blueprint_edit(
                     anyhow!("unknown baseboard serial: {serial:?}")
                 })?;
 
-            let (known_artifact_kind, details) = match component {
+            let details = match component {
                 SpUpdateComponent::Sp {
                     expected_active_version,
                     expected_inactive_version,
-                } => {
-                    let known_artifact_kind = match sp.sp_type {
-                        SpType::Sled => KnownArtifactKind::GimletSp,
-                        SpType::Power => KnownArtifactKind::PscSp,
-                        SpType::Switch => KnownArtifactKind::SwitchSp,
-                    };
-                    let details = PendingMgsUpdateDetails::Sp {
-                        expected_active_version,
-                        expected_inactive_version,
-                    };
-                    (known_artifact_kind, details)
-                }
+                } => PendingMgsUpdateDetails::Sp {
+                    expected_active_version,
+                    expected_inactive_version,
+                },
             };
 
-            let artifact_kind = ArtifactKind::from_known(known_artifact_kind);
-            let artifact_hash_id =
-                ArtifactHashId { kind: artifact_kind, hash: artifact_hash };
             let artifact_version = ArtifactVersion::new(version)
                 .context("parsing artifact version")?;
 
@@ -947,7 +933,7 @@ fn cmd_blueprint_edit(
                 sp_type: sp.sp_type,
                 slot_id: u32::from(sp.sp_slot),
                 details,
-                artifact_hash_id,
+                artifact_hash,
                 artifact_version,
             };
 
