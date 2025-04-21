@@ -683,8 +683,8 @@ Commands:
   add-cockroach     add a CockroachDB instance to a particular sled
   set-zone-image    set the image source for a zone
   expunge-zone      expunge a zone
-  sp-update-set     configure an SP update
-  sp-update-delete  delete a configured SP update
+  set-sp-update     configure an SP update
+  delete-sp-update  delete a configured SP update
   help              Print this message or the help of the given subcommand(s)
 
 Arguments:

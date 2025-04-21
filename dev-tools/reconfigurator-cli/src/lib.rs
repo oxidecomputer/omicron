@@ -375,7 +375,7 @@ enum BlueprintEditCommands {
     /// expunge a zone
     ExpungeZone { zone_id: OmicronZoneUuid },
     /// configure an SP update
-    SpUpdateSet {
+    SetSpUpdate {
         /// serial number to update
         serial: String,
         /// artifact hash id
@@ -387,7 +387,7 @@ enum BlueprintEditCommands {
         component: SpUpdateComponent,
     },
     /// delete a configured SP update
-    SpUpdateDelete {
+    DeleteSpUpdate {
         /// baseboard serial number whose update to delete
         serial: String,
     },
@@ -395,6 +395,7 @@ enum BlueprintEditCommands {
 
 #[derive(Clone, Debug, Subcommand)]
 enum SpUpdateComponent {
+    /// update the SP itself
     Sp {
         expected_active_version: ArtifactVersion,
         expected_inactive_version: ExpectedVersion,
@@ -901,7 +902,7 @@ fn cmd_blueprint_edit(
                 .context("failed to expunge zone")?;
             format!("expunged zone {zone_id} from sled {sled_id}")
         }
-        BlueprintEditCommands::SpUpdateSet {
+        BlueprintEditCommands::SetSpUpdate {
             serial,
             artifact_hash,
             version,
@@ -944,7 +945,7 @@ fn cmd_blueprint_edit(
                  hash or version"
             )
         }
-        BlueprintEditCommands::SpUpdateDelete { serial } => {
+        BlueprintEditCommands::DeleteSpUpdate { serial } => {
             let baseboard_id = latest_collection
                 .baseboards
                 .iter()
