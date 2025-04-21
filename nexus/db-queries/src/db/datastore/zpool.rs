@@ -7,7 +7,6 @@
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
-use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::OpContext;
@@ -26,6 +25,7 @@ use diesel::upsert::excluded;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::PhysicalDiskKind;
 use nexus_db_model::to_db_typed_uuid;
 use omicron_common::api::external::CreateResult;
@@ -55,7 +55,7 @@ impl DataStore {
 
     /// Stores a new zpool in the database.
     pub async fn zpool_insert_on_connection(
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         zpool: Zpool,
     ) -> Result<Zpool, TransactionError<Error>> {
@@ -205,7 +205,7 @@ impl DataStore {
 
     /// See: [Self::zpool_delete_self_and_all_datasets]
     pub(crate) async fn zpool_delete_self_and_all_datasets_on_connection(
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         zpool_id: ZpoolUuid,
     ) -> DeleteResult {

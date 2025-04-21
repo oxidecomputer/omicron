@@ -152,9 +152,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.97"
+version = "1.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcfed56ad506cb2c684a14971b8861fdc3baaaae314b9e5f9bb532cbe3ba7a4f"
+checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 dependencies = [
  "backtrace",
 ]
@@ -3679,6 +3679,20 @@ dependencies = [
  "libc",
  "wasi 0.13.3+wasi-0.2.2",
  "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "gfss"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "proptest",
+ "rand 0.8.5",
+ "secrecy",
+ "subtle",
+ "test-strategy",
+ "thiserror 1.0.69",
+ "zeroize",
 ]
 
 [[package]]

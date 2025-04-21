@@ -5,7 +5,6 @@
 //! Diesel query used for VPC Subnet allocation and insertion
 
 use crate::db;
-use crate::db::DbConnection;
 use crate::db::identity::Resource;
 use crate::db::model::VpcSubnet;
 use diesel::pg::Pg;
@@ -14,6 +13,7 @@ use diesel::query_builder::*;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
+use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::vpc_subnet::dsl;
 use omicron_common::api::external;
 use ref_cast::RefCast;

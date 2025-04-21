@@ -6,7 +6,6 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::DbConnection;
 use crate::db::datastore::OpContext;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use crate::db::datastore::RunnableQuery;
@@ -38,6 +37,7 @@ use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;

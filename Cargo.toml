@@ -131,6 +131,7 @@ members = [
     "sled-storage",
     "sp-sim",
     "test-utils",
+    "trust-quorum/gfss",
     "typed-rng",
     "update-common",
     "update-engine",
@@ -278,6 +279,7 @@ default-members = [
     "sled-hardware/types",
     "sled-storage",
     "sp-sim",
+    "trust-quorum/gfss",
     "test-utils",
     "typed-rng",
     "update-common",
@@ -677,6 +679,7 @@ static_assertions = "1.1.0"
 steno = "0.4.1"
 strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
+subtle = "2.6"
 supports-color = "3.0.2"
 swrite = "0.1.0"
 sync-ptr = "0.1.1"
@@ -886,6 +889,8 @@ opt-level = 3
 [profile.dev.package.inout]
 opt-level = 3
 [profile.dev.package.keccak]
+opt-level = 3
+[profile.dev.package.gfss]
 opt-level = 3
 
 
