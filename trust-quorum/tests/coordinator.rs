@@ -119,10 +119,7 @@ impl Model {
     ///
     /// Return `None` if the SUT is not currently coordinating or waiting on acks.
     pub fn acked_prepares(&self) -> Option<&BTreeSet<PlatformId>> {
-        self.coordinator_state
-            .as_ref()
-            .map(|cs| cs.op.acked_prepares())
-            .flatten()
+        self.coordinator_state.as_ref().and_then(|cs| cs.op.acked_prepares())
     }
 
     /// Return the members of the current reconfiguration being coordinated.
@@ -339,7 +336,7 @@ impl TestState {
                 return Ok(());
             }
 
-            if let Some(acked_members) = self.model.acked_prepares().clone() {
+            if let Some(acked_members) = self.model.acked_prepares() {
                 // We expect retries for all members that the coordinator
                 // has not received acks for.
                 let expected: BTreeSet<_> =
