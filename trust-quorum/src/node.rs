@@ -6,10 +6,10 @@
 
 use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
 use crate::{
-    CoordinatorState, Envelope, PersistentState, PlatformId, messages::*,
+    CoordinatorState, Envelope, Epoch, PersistentState, PlatformId, messages::*,
 };
 
-use slog::{Logger, o};
+use slog::{Logger, o, warn};
 use std::time::Instant;
 
 /// An entity capable of participating in trust quorum
@@ -76,15 +76,72 @@ impl Node {
         Ok(persistent_state)
     }
 
+    /// Process a timer tick
+    ///
+    /// Ticks are issued by the caller in order to move the protocol forward.
+    /// The current time is passed in to make the calls deterministic.
+    pub fn tick(&mut self, now: Instant, outbox: &mut Vec<Envelope>) {
+        self.send_coordinator_msgs(now, outbox);
+    }
+
+    /// Handle a message from another node
+    pub fn handle(
+        &mut self,
+        _now: Instant,
+        _outbox: &mut Vec<Envelope>,
+        from: PlatformId,
+        msg: PeerMsg,
+    ) -> Option<PersistentState> {
+        match msg {
+            PeerMsg::PrepareAck(epoch) => {
+                self.handle_prepare_ack(from, epoch);
+                None
+            }
+            _ => todo!(
+                "cannot handle message variant yet - not implemented: {msg:?}"
+            ),
+        }
+    }
+
+    /// Return the current state of the coordinator
+    pub fn get_coordinator_state(&self) -> Option<&CoordinatorState> {
+        self.coordinator_state.as_ref()
+    }
+
+    fn handle_prepare_ack(&mut self, from: PlatformId, epoch: Epoch) {
+        // Are we coordinating for this epoch?
+        if let Some(cs) = &mut self.coordinator_state {
+            let current_epoch = cs.reconfigure_msg().epoch();
+            if current_epoch == epoch {
+                // Store the ack in the coordinator state
+                cs.ack_prepare(from);
+            } else {
+                // Log and drop message
+                warn!(self.log, "Received prepare ack for wrong epoch";
+                    "from" => %from,
+                    "current_epoch" => %current_epoch,
+                    "acked_epoch" => %epoch
+                );
+            }
+        } else {
+            warn!(
+                self.log,
+                "Received prepare ack when not coordinating";
+                "from" => %from,
+                "acked_epoch" => %epoch
+            );
+        }
+    }
+
     // Send any required messages as a reconfiguration coordinator
     fn send_coordinator_msgs(
         &mut self,
         now: Instant,
         outbox: &mut Vec<Envelope>,
     ) {
-        // This function is going to be called unconditionally in `tick`
-        // callbacks. In this case we may not actually be a coordinator. We just
-        // ignore the call in that case.
+        // This function is called unconditionally in `tick` callbacks. In this
+        // case we may not actually be a coordinator. We ignore the call in
+        // that case.
         if let Some(c) = self.coordinator_state.as_mut() {
             c.send_msgs(now, outbox);
         }
@@ -104,7 +161,11 @@ impl Node {
         // We have no committed configuration or lrtq ledger
         if self.persistent_state.is_uninitialized() {
             let (coordinator_state, my_prepare_msg) =
-                CoordinatorState::new_uninitialized(now, msg)?;
+                CoordinatorState::new_uninitialized(
+                    self.log.clone(),
+                    now,
+                    msg,
+                )?;
             self.coordinator_state = Some(coordinator_state);
             // Add the prepare to our `PersistentState`
             self.persistent_state
@@ -118,8 +179,12 @@ impl Node {
         let config =
             self.persistent_state.last_committed_configuration().unwrap();
 
-        self.coordinator_state =
-            Some(CoordinatorState::new_reconfiguration(now, msg, &config)?);
+        self.coordinator_state = Some(CoordinatorState::new_reconfiguration(
+            self.log.clone(),
+            now,
+            msg,
+            &config,
+        )?);
 
         Ok(None)
     }
@@ -191,7 +256,6 @@ mod tests {
 
         // A PersistentState should always be returned
         // It should include the `PrepareMsg` for this node.
-        assert_eq!(persistent_state.generation, 0);
         assert!(persistent_state.lrtq.is_none());
         assert!(persistent_state.commits.is_empty());
         assert!(persistent_state.decommissioned.is_none());
