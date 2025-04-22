@@ -12086,7 +12086,7 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "List delivery attempts to a webhook receiver",
+        "summary": "List delivery attempts to webhook receiver",
         "description": "Optional query parameters to this endpoint may be used to filter deliveries by state. If none of the `failed`, `pending` or `delivered` query parameters are present, all deliveries are returned. If one or more of these parameters are provided, only those which are set to \"true\" are included in the response.",
         "operationId": "webhook_delivery_list",
         "parameters": [
@@ -12258,8 +12258,7 @@
             "name": "filter",
             "description": "An optional glob pattern for filtering event class names.\n\nIf provided, only event classes which match this glob pattern will be included in the response.",
             "schema": {
-              "nullable": true,
-              "type": "string"
+              "$ref": "#/components/schemas/WebhookSubscription"
             }
           }
         ],
@@ -12291,7 +12290,7 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "List webhook receivers.",
+        "summary": "List webhook receivers",
         "operationId": "webhook_receiver_list",
         "parameters": [
           {
@@ -12348,7 +12347,7 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "Create webhook receiver.",
+        "summary": "Create webhook receiver",
         "operationId": "webhook_receiver_create",
         "requestBody": {
           "content": {
@@ -12461,7 +12460,7 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "Delete webhook receiver.",
+        "summary": "Delete webhook receiver",
         "operationId": "webhook_receiver_delete",
         "parameters": [
           {
@@ -12524,6 +12523,93 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/receivers/{receiver}/subscriptions": {
+      "post": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Add webhook receiver subscription",
+        "operationId": "webhook_receiver_subscription_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookSubscription"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscription"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Remove webhook receiver subscription",
+        "operationId": "webhook_receiver_subscription_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookSubscription"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -25541,7 +25627,7 @@
             "default": [],
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/WebhookSubscription"
             }
           },
           "name": {
@@ -25849,7 +25935,7 @@
             "description": "The list of event classes to which this receiver is subscribed.",
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/WebhookSubscription"
             }
           },
           "id": {
@@ -25928,14 +26014,6 @@
             "type": "string",
             "format": "uri"
           },
-          "events": {
-            "nullable": true,
-            "description": "A list of webhook event classes to subscribe to.\n\nIf this list is empty, the webhook will not be subscribed to any events.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
           "name": {
             "nullable": true,
             "allOf": [
@@ -25985,6 +26063,12 @@
         "required": [
           "secrets"
         ]
+      },
+      "WebhookSubscription": {
+        "title": "A webhook event class subscription",
+        "description": "A webhook event class subscription matches either a single event class exactly, or a glob pattern including wildcards that may match multiple event classes",
+        "type": "string",
+        "pattern": "^([a-zA-Z0-9_]+|\\*|\\*\\*)(\\.([a-zA-Z0-9_]+|\\*|\\*\\*))*$"
       },
       "NameOrIdSortMode": {
         "description": "Supported set of sort modes for scanning by name or id",

@@ -2389,7 +2389,7 @@ pub struct EventClassFilter {
     ///
     /// If provided, only event classes which match this glob pattern will be
     /// included in the response.
-    pub filter: Option<String>,
+    pub filter: Option<shared::WebhookSubscription>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -2420,7 +2420,7 @@ pub struct WebhookCreate {
     /// If this list is empty or is not included in the request body, the
     /// webhook will not be subscribed to any events.
     #[serde(default)]
-    pub events: Vec<String>,
+    pub events: Vec<shared::WebhookSubscription>,
 }
 
 /// Parameters to update a webhook configuration.
@@ -2431,11 +2431,6 @@ pub struct WebhookReceiverUpdate {
 
     /// The URL that webhook notification requests should be sent to
     pub endpoint: Option<Url>,
-
-    /// A list of webhook event classes to subscribe to.
-    ///
-    /// If this list is empty, the webhook will not be subscribed to any events.
-    pub events: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

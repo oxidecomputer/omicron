@@ -277,6 +277,8 @@ webhook_receiver_create                  POST     /v1/webhooks/receivers
 webhook_receiver_delete                  DELETE   /v1/webhooks/receivers/{receiver}
 webhook_receiver_list                    GET      /v1/webhooks/receivers
 webhook_receiver_probe                   POST     /v1/webhooks/receivers/{receiver}/probe
+webhook_receiver_subscription_add        POST     /v1/webhooks/receivers/{receiver}/subscriptions
+webhook_receiver_subscription_delete     DELETE   /v1/webhooks/receivers/{receiver}/subscriptions
 webhook_receiver_update                  PUT      /v1/webhooks/receivers/{receiver}
 webhook_receiver_view                    GET      /v1/webhooks/receivers/{receiver}
 webhook_secrets_add                      POST     /v1/webhooks/secrets

@@ -3616,6 +3616,30 @@ pub trait NexusExternalApi {
         path_params: Path<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    /// Add webhook receiver subscription
+    #[endpoint {
+        method = POST,
+        path = "/v1/webhooks/receivers/{receiver}/subscriptions",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_receiver_subscription_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+        typed_body: TypedBody<shared::WebhookSubscription>,
+    ) -> Result<HttpResponseCreated<shared::WebhookSubscription>, HttpError>;
+
+    /// Remove webhook receiver subscription
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/webhooks/receivers/{receiver}/subscriptions",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_receiver_subscription_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+        typed_body: TypedBody<shared::WebhookSubscription>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
     /// Send liveness probe to webhook receiver
     ///
     /// This endpoint synchronously sends a liveness probe request to the

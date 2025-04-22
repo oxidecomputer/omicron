@@ -6593,6 +6593,7 @@ dependencies = [
  "oxql-types",
  "parse-display",
  "proptest",
+ "regex",
  "schemars",
  "semver 1.0.25",
  "serde",

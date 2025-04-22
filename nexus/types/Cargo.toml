@@ -31,6 +31,7 @@ openssl.workspace = true
 oxql-types.workspace = true
 oxnet.workspace = true
 parse-display.workspace = true
+regex.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1", "url"] }
 serde.workspace = true
 serde_json.workspace = true

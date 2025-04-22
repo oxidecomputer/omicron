@@ -1080,7 +1080,7 @@ pub struct WebhookReceiver {
     // to this receiver.
     pub secrets: Vec<WebhookSecretId>,
     /// The list of event classes to which this receiver is subscribed.
-    pub events: Vec<String>,
+    pub events: Vec<shared::WebhookSubscription>,
 }
 
 /// A list of the IDs of secrets associated with a webhook.
