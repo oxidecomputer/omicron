@@ -10,6 +10,24 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/cluster/init": {
+      "post": {
+        "summary": "Initialize the CockroachDB cluster.",
+        "description": "This performs both the base-level `cockroach init` and installs the Omicron schema. It should be idempotent, but we haven't heavily tested that; in practice, only RSS calls this endpoint and does so serially.",
+        "operationId": "cluster_init",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/node/decommission": {
       "post": {
         "summary": "Decommission a node from the CRDB cluster.",
