@@ -260,6 +260,7 @@ pub struct Caboose {
     pub git_commit: String,
     pub name: String,
     pub version: String,
+    pub sign: Option<String>,
 }
 
 impl From<gateway_client::types::SpComponentCaboose> for Caboose {
@@ -269,6 +270,7 @@ impl From<gateway_client::types::SpComponentCaboose> for Caboose {
             git_commit: c.git_commit,
             name: c.name,
             version: c.version,
+            sign: c.sign,
         }
     }
 }

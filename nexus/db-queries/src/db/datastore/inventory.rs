@@ -596,7 +596,8 @@ impl DataStore {
             //         AND sw_caboose.board = ...
             //         AND sw_caboose.git_commit = ...
             //         AND sw_caboose.name = ...
-            //         AND sw_caboose.version = ...;
+            //         AND sw_caboose.version = ...
+            //         AND sw_caboose.sign = ...;
             //
             // Again, the whole point is to avoid back-and-forth between the
             // client and the database.  Those back-and-forth interactions can
@@ -642,6 +643,9 @@ impl DataStore {
                                     )
                                     .and(dsl_sw_caboose::version.eq(
                                         found_caboose.caboose.version.clone(),
+                                    ))
+                                    .and(dsl_sw_caboose::sign.eq(
+                                        found_caboose.caboose.sign.clone(),
                                     )),
                             ),
                         )

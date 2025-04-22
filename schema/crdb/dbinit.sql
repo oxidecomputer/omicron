@@ -3347,7 +3347,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.sw_caboose (
     board TEXT NOT NULL,
     git_commit TEXT NOT NULL,
     name TEXT NOT NULL,
-    version TEXT NOT NULL
+    version TEXT NOT NULL,
+    sign TEXT -- nullable
 );
 CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
     on omicron.public.sw_caboose (board, git_commit, name, version);
@@ -5098,7 +5099,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '138.0.0', NULL)
+    (TRUE, NOW(), NOW(), '139.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
