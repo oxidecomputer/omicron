@@ -7673,6 +7673,7 @@ dependencies = [
  "chrono",
  "clap",
  "clickhouse-admin-types",
+ "cockroach-admin-client",
  "crucible-agent-client",
  "derive_more",
  "display-error-chain",
