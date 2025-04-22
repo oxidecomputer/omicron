@@ -1018,8 +1018,10 @@ mod test {
     async fn test_blueprint_external_dns_basic() {
         static TEST_NAME: &str = "test_blueprint_external_dns_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, mut blueprint) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(5).build();
+        let system_builder = ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(5);
+        let internal_dns_count = system_builder.get_internal_dns_zones();
+        let external_dns_count = system_builder.get_external_dns_zones();
+        let (_, mut blueprint) = system_builder.build();
         blueprint.internal_dns_version = Generation::new();
         blueprint.external_dns_version = Generation::new();
 
@@ -1055,7 +1057,8 @@ mod test {
         );
         assert_eq!(external_dns_zone.zone_name, String::from("oxide.test"));
         let records = &external_dns_zone.records;
-        assert_eq!(records.len(), 1);
+        let expected_dns_names = 1 + internal_dns_count + external_dns_count;
+        assert_eq!(records.len(), expected_dns_names);
         let silo_records = records
             .get(&silo_dns_name(my_silo.name()))
             .expect("missing silo DNS records");
@@ -1067,7 +1070,7 @@ mod test {
                 .map(|record| match record {
                     DnsRecord::A(v) => IpAddr::V4(*v),
                     DnsRecord::Aaaa(v) => IpAddr::V6(*v),
-                    DnsRecord::Srv(_) => panic!("unexpected SRV record"),
+                    other => panic!("unexpected DNS record for silo: {other:?}"),
                 })
                 .collect();
             ips.sort();

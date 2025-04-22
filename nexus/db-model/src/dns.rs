@@ -124,6 +124,8 @@ pub enum DnsRecord {
     A(Ipv4Addr),
     AAAA(Ipv6Addr),
     SRV(SRV),
+    NS(String),
+    SOA(SOA),
 }
 
 impl From<params::DnsRecord> for DnsRecord {
@@ -132,6 +134,8 @@ impl From<params::DnsRecord> for DnsRecord {
             params::DnsRecord::A(addr) => DnsRecord::A(addr),
             params::DnsRecord::Aaaa(addr) => DnsRecord::AAAA(addr),
             params::DnsRecord::Srv(srv) => DnsRecord::SRV(SRV::from(srv)),
+            params::DnsRecord::Ns(ns) => DnsRecord::NS(ns),
+            params::DnsRecord::Soa(soa) => DnsRecord::SOA(SOA::from(soa)),
         }
     }
 }
@@ -143,6 +147,10 @@ impl From<DnsRecord> for params::DnsRecord {
             DnsRecord::AAAA(addr) => params::DnsRecord::Aaaa(addr),
             DnsRecord::SRV(srv) => {
                 params::DnsRecord::Srv(params::Srv::from(srv))
+            },
+            DnsRecord::NS(ns) => params::DnsRecord::Ns(ns),
+            DnsRecord::SOA(soa) => {
+                params::DnsRecord::Soa(params::Soa::from(soa))
             }
         }
     }
@@ -181,6 +189,52 @@ impl From<SRV> for params::Srv {
             weight: srv.weight,
             port: srv.port,
             target: srv.target,
+        }
+    }
+}
+
+/// This type is identical to `dns_service_client::SOA`.  It's defined
+/// separately for the same reason as SOA: this is serialized to JSON and stored
+/// in the database.  The same desire to avoid linking database state to the DNS
+/// server API applies.
+///
+/// BE CAREFUL MODIFYING THIS STRUCT.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename = "Srv")]
+pub struct SOA {
+    pub mname: String,
+    pub rname: String,
+    pub serial: u32,
+    pub refresh: i32,
+    pub retry: i32,
+    pub expire: i32,
+    pub minimum: u32,
+}
+
+impl From<params::Soa> for SOA {
+    fn from(soa: params::Soa) -> Self {
+        SOA {
+            mname: soa.mname,
+            rname: soa.rname,
+            serial: soa.serial,
+            refresh: soa.refresh,
+            retry: soa.retry,
+            expire: soa.expire,
+            minimum: soa.minimum,
+        }
+    }
+}
+
+impl From<SOA> for params::Soa {
+    fn from(soa: SOA) -> Self {
+        params::Soa {
+            mname: soa.mname,
+            rname: soa.rname,
+            serial: soa.serial,
+            refresh: soa.refresh,
+            retry: soa.retry,
+            expire: soa.expire,
+            minimum: soa.minimum,
         }
     }
 }

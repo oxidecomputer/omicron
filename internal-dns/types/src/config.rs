@@ -142,6 +142,12 @@ pub struct DnsConfigBuilder {
     /// network
     zones: BTreeMap<Zone, Ipv6Addr>,
 
+    /// set of addresses for the DNS servers that will be updated with the DNS
+    /// configuration described by this builder.  The ordering is arbitrary
+    /// here; we'll number these `ns1, ns2, ... nsN` but it shouldn't matter
+    /// which one is first or last.
+    nameservers: Vec<Ipv6Addr>,
+
     /// set of services (see module-level comment) that have been configured so
     /// far, mapping the name of the service (encapsulated in a [`ServiceName`])
     /// to the backends configured for that service.  The set of backends is
@@ -197,6 +203,7 @@ impl DnsConfigBuilder {
         DnsConfigBuilder {
             sleds: BTreeMap::new(),
             zones: BTreeMap::new(),
+            nameservers: Vec::new(),
             service_instances_zones: BTreeMap::new(),
             service_instances_sleds: BTreeMap::new(),
         }
@@ -533,8 +540,8 @@ impl DnsConfigBuilder {
         )
     }
 
-    /// Construct a `DnsConfigZone` describing the control plane zone described
-    /// up to this point
+    /// Construct a `DnsConfigZone` describing the control plane DNS zone
+    /// described up to this point
     pub fn build_zone(self) -> DnsConfigZone {
         // Assemble the set of "AAAA" records for sleds.
         let sled_records = self.sleds.into_iter().map(|(sled, sled_ip)| {
@@ -615,7 +622,10 @@ impl DnsConfigBuilder {
             .chain(srv_records_zones)
             .collect();
 
-        DnsConfigZone { zone_name: DNS_ZONE.to_owned(), records: all_records }
+        DnsConfigZone {
+            zone_name: DNS_ZONE.to_owned(),
+            records: all_records,
+        }
     }
 
     /// Construct a complete [`DnsConfigParams`] (suitable for propagating to
@@ -664,6 +674,15 @@ pub struct DnsConfig {
     pub zones: Vec<DnsConfigZone>,
 }
 
+/// Configuration for a specific DNS zone, as opposed to illumos zones in which
+/// the services described by these records run.
+///
+/// The name `@` is special: it describes records that should be provided for
+/// queries about `zone_name`. This is used in favor of the empty string as `@`
+/// is the name used for this purpose in zone files for most DNS configurations.
+/// It also avoids potentially-confusing debug output from naively printing out
+/// records and their names - if you've seen an `@` record and tools are unclear
+/// about what that means, hopefully you've arrived here!
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct DnsConfigZone {
     pub zone_name: String,
@@ -691,6 +710,10 @@ pub enum DnsRecord {
     Aaaa(Ipv6Addr),
     #[serde(rename = "SRV")]
     Srv(Srv),
+    #[serde(rename = "NS")]
+    Ns(String),
+    #[serde(rename = "SOA")]
+    Soa(Soa),
 }
 
 // The `From<Ipv4Addr>` and `From<Ipv6Addr>` implementations are very slightly
@@ -734,6 +757,53 @@ pub struct Srv {
     pub weight: u16,
     pub port: u16,
     pub target: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+pub struct Soa {
+    pub mname: String,
+    pub rname: String,
+    pub serial: u32,
+    pub refresh: i32,
+    pub retry: i32,
+    pub expire: i32,
+    pub minimum: u32,
+}
+
+const HOUR_IN_SECONDS: i32 = 60 * 60;
+
+impl Soa {
+    /// Create a struct describing the internal fields of an SOA record. This
+    /// takes only an `mname`, filling in defaults other fields.
+    pub fn new(mname: String) -> Self {
+        Self {
+            mname,
+            rname: "invalid".to_string(),
+            // A serial of zero here is intentional, though it should not end up
+            // in an actual DNS server; seeing it is an indicator of an error.
+            // The serial on the SOA record for a zone should be the same across
+            // all DNS servers for that zone. Only the caller knows if they've
+            // derived an appropriate serial number to include in this record.
+            serial: 0,
+            // We pick a relatively short REFRESH period because we don't
+            // support sending NOTIFY messages. We don't support zone transfers
+            // though, so this is a moot point for the time being.
+            refresh: 1 * HOUR_IN_SECONDS,
+            retry: HOUR_IN_SECONDS / 10,
+            expire: 24 * HOUR_IN_SECONDS,
+            minimum: 60,
+        }
+    }
 }
 
 #[cfg(test)]

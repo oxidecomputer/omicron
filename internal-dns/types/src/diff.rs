@@ -152,6 +152,8 @@ impl std::fmt::Display for DnsDiff<'_> {
                         DnsRecord::Srv(Srv { port, target, .. }) => {
                             format!("SRV  port {:5} {}", port, target)
                         }
+                        DnsRecord::Ns(name) => format!("NS     {}", name),
+                        DnsRecord::Soa(soa) => format!("SOA    {:?}", soa),
                     }
                 )?;
             }
@@ -226,6 +228,7 @@ mod test {
                     vec![DnsRecord::A("192.168.1.3".parse().unwrap())],
                 ),
             ]),
+            version: 3,
         }
     }
 
@@ -235,6 +238,7 @@ mod test {
         let example_different_zone = DnsConfigZone {
             zone_name: format!("{}-other", ZONE_NAME),
             records: HashMap::new(),
+            version: 2,
         };
         let error = DnsDiff::new(&example_different_zone, &example())
             .expect_err(

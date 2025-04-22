@@ -206,20 +206,44 @@ impl super::Nexus {
         );
 
         let silo_name = &request.recovery_silo.silo_name;
-        let dns_records = request
+        // Records that should be present at the rack-internal zone apex -
+        // `oxide.internal`.
+        let mut int_zone_records = Vec::new();
+        // Internal DNS serves the `control-plane.oxide.internal` zone, where
+        // internal records for rack-internal services are served. The
+        // name servers themselves will be given
+        // `ns$N.control-plane.oxide.internal` name, with NS and A records.
+        //
+        // Again, the choice of which server is which `ns$N` is arbitrary.
+        let mut internal_dns_records = Vec::new();
+
+        for (_, zc) in request
             .blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .filter_map(|(_, zc)| match zc.zone_type {
-                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                    external_ip,
-                    ..
-                }) => Some(match external_ip.ip {
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service) {
+
+            // For convenience; we'll translate IPs to A/AAAA in a few places.
+            let sockaddr_to_dns = |addr: std::net::IpAddr| {
+                match addr {
                     IpAddr::V4(addr) => DnsRecord::A(addr),
                     IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
-                }),
-                _ => None,
-            })
-            .collect();
+                }
+            };
+
+            match zc.zone_type {
+                BlueprintZoneType::InternalDns(blueprint_zone_type::InternalDns {
+                    dns_address,
+                    ..
+                }) => {
+                    internal_dns_records.push(DnsRecord::Aaaa(*dns_address.ip()));
+                    let seen_intdns = internal_dns_records.len();
+                    int_zone_records.push(DnsRecord::Ns(
+                        format!("ns{}.{}", seen_intdns, internal_dns_types::names::DNS_ZONE)
+                    ));
+                },
+                _ => {},
+            }
+        }
+
         let mut dns_update = DnsVersionUpdateBuilder::new(
             DnsGroup::External,
             format!("create silo: {:?}", silo_name.as_str()),
@@ -228,7 +252,27 @@ impl super::Nexus {
         let silo_dns_name = silo_dns_name(silo_name);
         let recovery_silo_fq_dns_name =
             format!("{silo_dns_name}.{}", request.external_dns_zone_name);
-        dns_update.add_name(silo_dns_name, dns_records)?;
+
+        let external_dns_config = nexus_types::deployment::execution::blueprint_external_dns_config(
+            &request.blueprint,
+            vec![silo_name],
+            request.external_dns_zone_name,
+        );
+        for (name, records) in external_dns_config.records.into_iter() {
+            dns_update.add_name(name, records)?;
+        }
+
+        for (idx, rec) in internal_dns_records.into_iter().enumerate() {
+            dns_update.add_name(
+                format!("ns{}.{}", idx, internal_dns_types::names::DNS_ZONE),
+                vec![rec],
+            )?;
+        }
+
+        dns_update.add_name(
+            internal_dns_types::names::DNS_ZONE.to_string(),
+            int_zone_records,
+        )?;
 
         // We're providing an update to the initial `external_dns` group we
         // defined above; also bump RSS's blueprint's `external_dns_version` to

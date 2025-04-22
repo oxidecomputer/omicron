@@ -26,6 +26,7 @@ use hickory_server::authority::MessageRequest;
 use hickory_server::authority::MessageResponse;
 use hickory_server::authority::MessageResponseBuilder;
 use internal_dns_types::config::DnsRecord;
+use internal_dns_types::config::Soa;
 use internal_dns_types::config::Srv;
 use pretty_hex::*;
 use serde::Deserialize;
@@ -253,6 +254,56 @@ fn dns_record_to_record(
                 .set_rr_type(RecordType::SRV)
                 .set_data(Some(RData::SRV(SRV::new(prio, weight, port, tgt))));
             Ok(srv)
+        }
+
+        DnsRecord::Ns(nsdname) => {
+            let nsdname = Name::from_str(&nsdname).map_err(|error| {
+                RequestError::ServFail(anyhow!(
+                    "serialization failed due to bad NS dname {:?}: {:#}",
+                    &nsdname,
+                    error
+                ))
+            })?;
+            let mut ns = Record::new();
+            use hickory_proto::rr::rdata::NS;
+            ns.set_name(name.clone())
+                .set_rr_type(RecordType::NS)
+                .set_data(Some(RData::NS(NS(nsdname))));
+            Ok(ns)
+        }
+
+        DnsRecord::Soa(Soa {
+            mname,
+            rname,
+            serial,
+            refresh,
+            retry,
+            expire,
+            minimum,
+        }) => {
+            let mname = Name::from_str(&mname).map_err(|error| {
+                RequestError::ServFail(anyhow!(
+                    "serialization failed due to bad SOA mname {:?}: {:#}",
+                    &mname,
+                    error
+                ))
+            })?;
+            let rname = Name::from_str(&rname).map_err(|error| {
+                RequestError::ServFail(anyhow!(
+                    "serialization failed due to bad SOA rname {:?}: {:#}",
+                    &rname,
+                    error
+                ))
+            })?;
+            let mut record = Record::new();
+            use hickory_proto::rr::rdata::SOA;
+            record
+                .set_name(name.clone())
+                .set_rr_type(RecordType::SOA)
+                .set_data(Some(RData::SOA(SOA::new(
+                    mname, rname, serial, refresh, retry, expire, minimum,
+                ))));
+            Ok(record)
         }
     }
 }
