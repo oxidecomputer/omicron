@@ -10,6 +10,7 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
+camino-tempfile.workspace = true
 chrono.workspace = true
 clap.workspace = true
 cockroach-admin-api.workspace = true
@@ -36,6 +37,7 @@ toml.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
 expectorate.workspace = true
 nexus-test-utils.workspace = true
 omicron-test-utils.workspace = true
