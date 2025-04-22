@@ -164,7 +164,6 @@ pub fn blueprint_external_dns_config<'a>(
     external_dns_zone_name: String,
 ) -> DnsConfigZone {
     let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
-    eprintln!("nexus ips: {:?}", nexus_external_ips);
     let dns_external_ips = blueprint_external_dns_resolver_ips(blueprint);
 
     let nexus_dns_records: Vec<DnsRecord> = nexus_external_ips

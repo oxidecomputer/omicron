@@ -152,8 +152,8 @@ impl std::fmt::Display for DnsDiff<'_> {
                         DnsRecord::Srv(Srv { port, target, .. }) => {
                             format!("SRV  port {:5} {}", port, target)
                         }
-                        DnsRecord::Ns(name) => format!("NS     {}", name),
-                        DnsRecord::Soa(soa) => format!("SOA    {:?}", soa),
+                        DnsRecord::Ns(name) => format!("NS   {}", name),
+                        DnsRecord::Soa(soa) => format!("SOA  {:?}", soa),
                     }
                 )?;
             }
