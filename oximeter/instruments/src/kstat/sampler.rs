@@ -1138,6 +1138,11 @@ pub struct KstatSampler {
     log: Logger,
     samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
     outbox: mpsc::Sender<Request>,
+    // NOTE: We're using a broadcast MPMC channel here intentionally, even
+    // though there is only one receiver. That's to make use of its ring-buffer
+    // properties, where old samples are evicted if `oximeter` can't collect
+    // from us quickly enough. See the discussion in
+    // https://github.com/oxidecomputer/omicron/issues/7983 for more.
     self_stat_rx: Arc<Mutex<broadcast::Receiver<Sample>>>,
     _worker_task: Arc<tokio::task::JoinHandle<()>>,
     #[cfg(all(test, target_os = "illumos"))]
