@@ -705,15 +705,27 @@
     },
     "/support/logs/download/{zone}": {
       "get": {
+        "summary": "This endpoint returns a zip file of a zone's logs organized by service.",
         "operationId": "support_logs_download",
         "parameters": [
           {
             "in": "path",
             "name": "zone",
-            "description": "The path of the file to be included in the support bundle",
+            "description": "The zone for which one would like to collect logs for",
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_rotated",
+            "description": "The max number of rotated logs to include in the final support bundle",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
             }
           }
         ],
@@ -731,6 +743,8 @@
     },
     "/support/logs/zones": {
       "get": {
+        "summary": "This endpoint returns a list of known zones on a sled that have service",
+        "description": "logs that can be collected into a support bundle.",
         "operationId": "support_logs",
         "responses": {
           "200": {

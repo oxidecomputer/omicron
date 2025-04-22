@@ -816,14 +816,20 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
     Ok(ArtifactHash(digest.as_slice().try_into()?))
 }
 
-/// For a given zone, save a zip of its log files into a support bundle path.
+/// For a given zone, save its service's logs into the provided destination
+/// path. This path should be the location to a per-sled directory that will end
+/// up in the final support bundle zip file.
 async fn save_zone_log_zip_or_error(
     logger: &slog::Logger,
     client: &sled_agent_client::Client,
     zone: &str,
     path: &Utf8Path,
 ) -> anyhow::Result<()> {
-    match client.support_logs_download(zone).await {
+    // In the future when support bundle collection exposes tuning parameters
+    // this can turn into a collection parameter.
+    const DEFAULT_MAX_ROTATED_LOGS: u32 = 5;
+
+    match client.support_logs_download(zone, DEFAULT_MAX_ROTATED_LOGS).await {
         Ok(res) => {
             let bytestream = res.into_inner();
             let output_dir = path.join(format!("logs/{zone}"));

@@ -1315,8 +1315,13 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Return the full path to the snapshot directory within the filesystem.
-    /// Note that if this is called on the root dataset such as
-    /// `rpool/ROOT/<BE>` it will return "legacy/.zfs/snapshot/<SNAP_NAME>".
+    ///
+    /// NB: Be careful when calling this method as it may return a `Utf8PathBuf`
+    /// that does not actually map to a real filesystem path. On helios systems
+    /// `rpool/ROOT/<BE>` for example will will return
+    /// "legacy/.zfs/snapshot/<SNAP_NAME>" because the mountpoint of the dataset
+    /// is a "legacy" mount. Additionally a fileystem with no mountpoint will
+    /// have a zfs mountpoint property of "-".
     pub fn full_path(&self) -> Result<Utf8PathBuf, GetValueError> {
         // TODO:
         // When a mountpoint is returned as "legacy" we could go fish around in

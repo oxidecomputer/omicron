@@ -1070,14 +1070,17 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_logs_download(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<SledDiagnosticsLogsZonePathParam>,
+        path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
+        query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = request_context.context();
-        let SledDiagnosticsLogsZonePathParam { zone } =
+        let SledDiagnosticsLogsDownloadPathParm { zone } =
             path_params.into_inner();
+        let SledDiagnosticsLogsDownloadQueryParam { max_rotated } =
+            query_params.into_inner();
 
         sa.as_support_bundle_logs()
-            .get_logs_for_zone(zone)
+            .get_logs_for_zone(zone, max_rotated)
             .await
             .map_err(HttpError::from)
     }

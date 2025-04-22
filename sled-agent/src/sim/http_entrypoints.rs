@@ -767,7 +767,8 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_logs_download(
         _request_context: RequestContext<Self::Context>,
-        _path_params: Path<SledDiagnosticsLogsZonePathParam>,
+        _path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
+        _query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         method_unimplemented()
     }

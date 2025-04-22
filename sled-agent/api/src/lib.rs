@@ -692,6 +692,8 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
 
+    /// This endpoint returns a list of known zones on a sled that have service
+    /// logs that can be collected into a support bundle.
     #[endpoint {
         method = GET,
         path = "/support/logs/zones",
@@ -700,13 +702,15 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
 
+    /// This endpoint returns a zip file of a zone's logs organized by service.
     #[endpoint {
         method = GET,
         path = "/support/logs/download/{zone}",
     }]
     async fn support_logs_download(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<SledDiagnosticsLogsZonePathParam>,
+        path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
+        query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 }
 
@@ -821,9 +825,15 @@ pub struct SupportBundleMetadata {
 /// Path parameters for sled-diagnostics log requests used by support bundles
 /// (sled agent API)
 #[derive(Deserialize, JsonSchema)]
-pub struct SledDiagnosticsLogsZonePathParam {
-    /// The path of the file to be included in the support bundle
+pub struct SledDiagnosticsLogsDownloadPathParm {
+    /// The zone for which one would like to collect logs for
     pub zone: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SledDiagnosticsLogsDownloadQueryParam {
+    /// The max number of rotated logs to include in the final support bundle
+    pub max_rotated: usize,
 }
 
 /// Path parameters for Disk requests (sled agent API)

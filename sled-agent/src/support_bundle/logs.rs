@@ -70,6 +70,7 @@ impl<'a> SupportBundleLogs<'a> {
     pub async fn get_logs_for_zone<Z>(
         &self,
         zone: Z,
+        max_rotated: usize,
     ) -> Result<http::Response<dropshot::Body>, Error>
     where
         Z: Into<String>,
@@ -89,7 +90,7 @@ impl<'a> SupportBundleLogs<'a> {
 
         let zip_file = tokio::task::spawn_blocking(move || {
             let handle = sled_diagnostics::LogsHandle::new(log);
-            match handle.get_zone_logs(&zone, &mut tempfile) {
+            match handle.get_zone_logs(&zone, max_rotated, &mut tempfile) {
                 Ok(_) => Ok(tempfile),
                 Err(e) => Err(e),
             }
@@ -101,10 +102,11 @@ impl<'a> SupportBundleLogs<'a> {
         // Since we are using a tempfile and the file path has already been
         // unlinked we need to convert our existing handle.
         let mut zip_file_async = tokio::fs::File::from_std(zip_file);
+        // While we are at the end of a file seek by 0 to get its final length.
+        let len = zip_file_async.seek(std::io::SeekFrom::Current(0)).await?;
         // After we have written to the zip file we need to seek back to the
         // start before streaming it out.
         zip_file_async.seek(std::io::SeekFrom::Start(0)).await?;
-        let len = zip_file_async.metadata().await?.len();
 
         const CONTENT_TYPE: http::HeaderValue =
             http::HeaderValue::from_static("application/zip");
