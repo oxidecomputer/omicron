@@ -3556,7 +3556,7 @@ pub trait NexusExternalApi {
         filter: Query<params::EventClassFilter>,
     ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError>;
 
-    /// List webhook receivers.
+    /// List webhook receivers
     #[endpoint {
         method = GET,
         path = "/v1/webhooks/receivers",
@@ -3578,7 +3578,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseOk<views::WebhookReceiver>, HttpError>;
 
-    /// Create webhook receiver.
+    /// Create webhook receiver
     #[endpoint {
         method = POST,
         path = "/v1/webhooks/receivers",
@@ -3605,7 +3605,7 @@ pub trait NexusExternalApi {
         params: TypedBody<params::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Delete webhook receiver.
+    /// Delete webhook receiver
     #[endpoint {
         method = DELETE,
         path = "/v1/webhooks/receivers/{receiver}",
@@ -3678,7 +3678,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::WebhookSecretSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// List delivery attempts to a webhook receiver
+    /// List delivery attempts to webhook receiver
     ///
     /// Optional query parameters to this endpoint may be used to filter
     /// deliveries by state. If none of the `failed`, `pending` or `delivered`
