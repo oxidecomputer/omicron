@@ -1468,9 +1468,20 @@ impl InstanceRunner {
 
         // Ask the sled-agent's metrics task to stop tracking statistics for our
         // control VNIC and any OPTE ports in the zone as well.
-        self.metrics_queue
-            .untrack_zone_links(&running_state.running_zone)
-            .await;
+        match self.metrics_queue.untrack_zone_links(&running_state.running_zone)
+        {
+            Ok(_) => debug!(
+                self.log,
+                "stopped tracking zone datalinks";
+                "zone_name" => &zname,
+            ),
+            Err(errors) => error!(
+                self.log,
+                "failed to stop tracking zone datalinks";
+                "zone_name" => &zname,
+                "errors" => ?errors,
+            ),
+        }
 
         // Take a zone bundle whenever this instance stops.
         if let Err(e) = self
@@ -2331,13 +2342,19 @@ impl InstanceRunner {
         info!(self.log, "Propolis SMF service is online");
 
         // Notify the metrics task about the instance zone's datalinks.
-        if !self.metrics_queue.track_zone_links(&running_zone).await {
-            error!(
+        match self.metrics_queue.track_zone_links(&running_zone) {
+            Ok(_) => debug!(
+                self.log,
+                "Started tracking datalinks";
+                "zone_name" => running_zone.name(),
+            ),
+            Err(errors) => error!(
                 self.log,
                 "Failed to track one or more datalinks in the zone, \
                 some metrics will not be produced";
+                "errors" => ?errors,
                 "zone_name" => running_zone.name(),
-            );
+            ),
         }
 
         // We use a custom client builder here because the default progenitor

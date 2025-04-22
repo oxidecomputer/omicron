@@ -1164,13 +1164,19 @@ impl ServiceManager {
         if let SwitchZoneState::Running { zone, .. } =
             &*self.inner.switch_zone.lock().await
         {
-            if !metrics_queue.track_zone_links(zone).await {
-                error!(
-                    self.inner.log,
-                    "Failed to track one or more data links in \
-                    the switch zone, some metrics will not \
-                    be produced."
-                );
+            match metrics_queue.track_zone_links(zone) {
+                Ok(_) => {
+                    debug!(self.inner.log, "Stopped tracking zone datalinks")
+                }
+                Err(errors) => {
+                    error!(
+                        self.inner.log,
+                        "Failed to track one or more data links in \
+                        the switch zone, some metrics will not \
+                        be produced.";
+                        "errors" => ?errors,
+                    );
+                }
             }
         }
 
@@ -3420,13 +3426,17 @@ impl ServiceManager {
         // but before we've either run RSS or unlocked the rack. In both those
         // cases, we have a `StartSledAgentRequest`, and so a metrics queue.
         if let Some(queue) = self.maybe_metrics_queue() {
-            if !queue.track_zone_links(&running_zone).await {
-                error!(
-                    self.inner.log,
-                    "Failed to track one or more links in the zone, \
-                    some metrics will not be produced";
-                    "zone_name" => running_zone.name(),
-                );
+            match queue.track_zone_links(&running_zone) {
+                Ok(_) => debug!(self.inner.log, "Tracking zone datalinks"),
+                Err(errors) => {
+                    error!(
+                        self.inner.log,
+                        "Failed to track one or more links in the zone, \
+                        some metrics will not be produced";
+                        "zone_name" => running_zone.name(),
+                        "errors" => ?errors,
+                    );
+                }
             }
         }
         Ok(running_zone)
@@ -3789,7 +3799,19 @@ impl ServiceManager {
         // Ensure that the sled agent's metrics task is not tracking the zone's
         // VNICs or OPTE ports.
         if let Some(queue) = self.maybe_metrics_queue() {
-            queue.untrack_zone_links(&zone.runtime).await;
+            match queue.untrack_zone_links(&zone.runtime) {
+                Ok(_) => debug!(
+                    log,
+                    "stopped tracking zone datalinks";
+                    "zone_name" => &expected_zone_name,
+                ),
+                Err(errors) => error!(
+                    log,
+                    "failed to stop tracking zone datalinks";
+                    "errors" => ?errors,
+                    "zone_name" => &expected_zone_name
+                ),
+            }
         }
         debug!(
             log,
@@ -4202,13 +4224,21 @@ impl ServiceManager {
             // We expect to have a metrics queue by this point, so
             // we can safely send a message on it to say the sled has
             // been synchronized.
+            //
+            // We may want to retry or ensure this notification happens. See
+            // https://github.com/oxidecomputer/omicron/issues/8022.
             let queue = self.metrics_queue();
-            if !queue.notify_time_synced_sled(self.sled_id()).await {
-                error!(
+            match queue.notify_time_synced_sled(self.sled_id()) {
+                Ok(_) => debug!(
                     self.inner.log,
-                    "Failed to notify metrics queue of sled \
-                     time synchronization, metrics may not be produced."
-                );
+                    "Notified metrics task that time is now synced",
+                ),
+                Err(e) => error!(
+                    self.inner.log,
+                    "Failed to notify metrics task that \
+                     time is now synced, metrics may not be produced.";
+                     "error" => InlineErrorChain::new(&e),
+                ),
             }
         } else {
             debug!(self.inner.log, "Time was already synchronized");
@@ -4907,7 +4937,17 @@ impl ServiceManager {
                 if let Some(queue) =
                     self.inner.sled_info.get().map(|sa| &sa.metrics_queue)
                 {
-                    queue.untrack_zone_links(zone).await;
+                    match queue.untrack_zone_links(zone) {
+                        Ok(_) => debug!(
+                            log,
+                            "stopped tracking switch zone datalinks"
+                        ),
+                        Err(errors) => error!(
+                            log,
+                            "failed to stop tracking switch zone datalinks";
+                            "errors" => ?errors,
+                        ),
+                    }
                 }
 
                 let _ = zone.stop().await;
@@ -5288,7 +5328,13 @@ mod illumos_tests {
         // deleted.
         let queue = mgr.metrics_queue();
         for zone in mgr.inner.zones.lock().await.values() {
-            queue.untrack_zone_links(&zone.runtime).await;
+            if let Err(e) = queue.untrack_zone_links(&zone.runtime) {
+                error!(
+                    mgr.inner.log,
+                    "failed to stop tracking zone datalinks";
+                    "errors" => ?e,
+                );
+            }
         }
 
         // Explicitly drop the service manager
