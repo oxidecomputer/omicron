@@ -82,7 +82,7 @@ impl CockroachCli {
     }
 
     pub async fn cluster_init(&self) -> Result<(), CockroachCliError> {
-        self.invoke_cli(
+        self.invoke_cli_raw(
             ["init"],
             |command, output| {
                 if output.status.success()
@@ -96,6 +96,29 @@ impl CockroachCli {
                 }
             },
             "init",
+        )
+        .await
+    }
+
+    pub async fn schema_init(&self) -> Result<(), CockroachCliError> {
+        const DBINIT_WITHIN_CRDB_ZONE: &str =
+            "/opt/oxide/cockroachdb/sql/dbinit.sql";
+        self.schema_init_impl(DBINIT_WITHIN_CRDB_ZONE).await
+    }
+
+    async fn schema_init_impl(
+        &self,
+        path_to_dbinit_sql: &str,
+    ) -> Result<(), CockroachCliError> {
+        self.invoke_cli_checking_status(
+            ["sql", "--file", path_to_dbinit_sql],
+            |_output| {
+                // We don't check the output (it echos back all of the base SQL
+                // statements we issue); we only need to check the status code,
+                // which `invoke_cli_checking_status` does for us.
+                Ok(())
+            },
+            "sql dbinit.sql",
         )
         .await
     }
@@ -133,12 +156,9 @@ impl CockroachCli {
         F: FnOnce(&[u8]) -> Result<T, csv::Error>,
         I: IntoIterator<Item = &'a str>,
     {
-        self.invoke_cli(
+        self.invoke_cli_checking_status(
             subcommand_args.into_iter().chain(["--format", "csv"]),
-            |command, output| {
-                if !output.status.success() {
-                    return Err(output_to_exec_error(command, &output).into());
-                }
+            |output| {
                 parse_output(&output.stdout).map_err(|err| {
                     CockroachCliError::ParseOutput {
                         subcommand: subcommand_description,
@@ -155,7 +175,37 @@ impl CockroachCli {
         .await
     }
 
-    async fn invoke_cli<'a, F, I, T>(
+    async fn invoke_cli_checking_status<'a, F, I, T>(
+        &self,
+        subcommand_args: I,
+        parse_output: F,
+        subcommand_description: &'static str,
+    ) -> Result<T, CockroachCliError>
+    where
+        F: FnOnce(&Output) -> Result<T, CockroachCliError>,
+        I: IntoIterator<Item = &'a str>,
+    {
+        let mut command = Command::new(&self.path_to_cockroach_binary);
+        for arg in subcommand_args {
+            command.arg(arg);
+        }
+        command
+            .arg("--host")
+            .arg(&format!("{}", self.cockroach_address))
+            .arg("--insecure");
+        let output = command.output().await.map_err(|err| {
+            CockroachCliError::InvokeCli {
+                subcommand: subcommand_description,
+                err,
+            }
+        })?;
+        if !output.status.success() {
+            return Err(output_to_exec_error(command.as_std(), &output).into());
+        }
+        parse_output(&output)
+    }
+
+    async fn invoke_cli_raw<'a, F, I, T>(
         &self,
         subcommand_args: I,
         parse_output: F,
@@ -477,6 +527,32 @@ mod tests {
             cli.cluster_init().await.expect("cluster still initialized");
         }
 
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_schema_init() {
+        let logctx = dev::test_setup_log("test_schema_init");
+        let db = TestDatabase::new_populate_nothing(&logctx.log).await;
+        let db_url = db.crdb().listen_url().to_string();
+        let url: Url = db_url.parse().expect("valid url");
+        let cockroach_address: SocketAddrV6 = format!(
+            "{}:{}",
+            url.host().expect("url has host"),
+            url.port().expect("url has port")
+        )
+        .parse()
+        .expect("valid SocketAddrV6");
+
+        let cli = CockroachCli::new("cockroach".into(), cockroach_address);
+        cli.schema_init_impl("../schema/crdb/dbinit.sql")
+            .await
+            .expect("initialized schema");
+        cli.schema_init_impl("../schema/crdb/dbinit.sql")
+            .await
+            .expect("initializing schema is idempotent");
+
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }
