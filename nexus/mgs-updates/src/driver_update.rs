@@ -162,8 +162,7 @@ pub(crate) async fn apply_update(
     };
 
     // Obtain the contents of the artifact that we need.
-    let data =
-        artifacts.artifact_contents(&update.artifact_hash_id.hash).await?;
+    let data = artifacts.artifact_contents(&update.artifact_hash).await?;
     debug!(log, "loaded artifact contents");
 
     // Check the live state first to see if:

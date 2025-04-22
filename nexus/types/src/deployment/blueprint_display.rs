@@ -419,7 +419,6 @@ impl BpTableSchema for BpPendingMgsUpdates {
             "slot",
             "part_number",
             "serial_number",
-            "artifact_kind",
             "artifact_hash",
             "artifact_version",
             "details",

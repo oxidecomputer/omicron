@@ -34,10 +34,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactHashId;
-use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -309,7 +306,7 @@ fn cmd_config(
             update.sp_type,
             update.slot_id,
         )?;
-        writeln!(&mut s, "        artifact hash: {}", update.artifact_hash_id,)?;
+        writeln!(&mut s, "        artifact hash: {}", update.artifact_hash)?;
         writeln!(
             &mut s,
             "        user-provided artifact version: {}",
@@ -357,11 +354,7 @@ fn cmd_status(
         )?;
         writeln!(&mut s, "        attempt#: {}", r.nattempts_done)?;
         writeln!(&mut s, "        version:  {}", r.request.artifact_version)?;
-        writeln!(
-            &mut s,
-            "        hash:     {}",
-            r.request.artifact_hash_id.hash
-        )?;
+        writeln!(&mut s, "        hash:     {}", r.request.artifact_hash,)?;
         writeln!(&mut s, "        result:   {:?}", r.result)?;
     }
 
@@ -424,14 +417,6 @@ fn cmd_set(
 ) -> anyhow::Result<Option<String>> {
     let serial = &args.serial;
     let info = updater_state.inventory.info_for_serial(serial)?;
-    let known_artifact_kind = match (&args.component, info.sp_type) {
-        (Component::Sp { .. }, SpType::Sled) => KnownArtifactKind::GimletSp,
-        (Component::Sp { .. }, SpType::Power) => KnownArtifactKind::PscSp,
-        (Component::Sp { .. }, SpType::Switch) => KnownArtifactKind::SwitchSp,
-    };
-    let artifact_kind = ArtifactKind::from_known(known_artifact_kind);
-    let artifact_hash_id =
-        ArtifactHashId { kind: artifact_kind, hash: args.artifact_hash };
     let request = PendingMgsUpdate {
         baseboard_id: info.baseboard_id.clone(),
         sp_type: info.sp_type,
@@ -445,7 +430,7 @@ fn cmd_set(
                 expected_inactive_version,
             },
         },
-        artifact_hash_id,
+        artifact_hash: args.artifact_hash,
         artifact_version: ArtifactVersion::new(args.version)
             .context("parsing artifact version")?,
     };

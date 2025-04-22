@@ -1633,14 +1633,8 @@ impl<'a> BpDiffPendingMgsUpdates<'a> {
                 &u1.baseboard_id.serial_number,
                 &u2.baseboard_id.serial_number,
             );
-            let artifact_kind = BpTableColumn::new(
-                &u1.artifact_hash_id.kind,
-                &u2.artifact_hash_id.kind,
-            );
-            let artifact_hash = BpTableColumn::new(
-                &u1.artifact_hash_id.hash,
-                &u2.artifact_hash_id.hash,
-            );
+            let artifact_hash =
+                BpTableColumn::new(&u1.artifact_hash, &u2.artifact_hash);
             let artifact_version =
                 BpTableColumn::new(&u1.artifact_version, &u2.artifact_version);
             let details = if u1.details != u2.details {
@@ -1658,7 +1652,6 @@ impl<'a> BpDiffPendingMgsUpdates<'a> {
                     slot_id,
                     part_number,
                     serial_number,
-                    artifact_kind,
                     artifact_hash,
                     artifact_version,
                     details,
