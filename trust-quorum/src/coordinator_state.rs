@@ -9,7 +9,7 @@ use crate::messages::{PeerMsg, PrepareMsg};
 use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
 use crate::{Configuration, Envelope, Epoch, PlatformId};
 use gfss::shamir::Share;
-use slog::{Logger, warn};
+use slog::{Logger, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
@@ -29,7 +29,7 @@ pub struct CoordinatorState {
     log: Logger,
 
     /// When the reconfiguration started
-    #[allow(unused)]
+    #[expect(unused)]
     start_time: Instant,
 
     /// A copy of the message used to start this reconfiguration
@@ -109,7 +109,10 @@ impl CoordinatorState {
         Ok(CoordinatorState::new(log, now, msg, config, op))
     }
 
-    // Intentionallly private!
+    // Intentionally private!
+    //
+    // The public constructors `new_uninitialized` and `new_reconfiguration` are
+    // more specific, and perform validation of arguments.
     fn new(
         log: Logger,
         now: Instant,
@@ -120,7 +123,7 @@ impl CoordinatorState {
         // We want to send any pending messages immediately
         let retry_deadline = now;
         CoordinatorState {
-            log,
+            log: log.new(o!("component" => "tq-coordinator-state")),
             start_time: now,
             reconfigure_msg,
             configuration,
@@ -143,32 +146,34 @@ impl CoordinatorState {
     // will return a copy of it.
     //
     // This method is "in progress" - allow unused parameters for now
-    #[allow(unused)]
+    #[expect(unused)]
     pub fn send_msgs(&mut self, now: Instant, outbox: &mut Vec<Envelope>) {
-        if now >= self.retry_deadline {
-            self.retry_deadline = now + self.reconfigure_msg.retry_timeout();
-            match &self.op {
-                CoordinatorOperation::CollectShares {
-                    epoch,
-                    members,
-                    collected_shares,
-                    ..
-                } => {}
-                CoordinatorOperation::CollectLrtqShares { members, shares } => {
-                }
-                CoordinatorOperation::Prepare { prepares, prepare_acks } => {
-                    for (platform_id, prepare) in prepares.clone().into_iter() {
-                        outbox.push(Envelope {
-                            to: platform_id,
-                            from: self.reconfigure_msg.coordinator_id().clone(),
-                            msg: PeerMsg::Prepare(prepare),
-                        });
-                    }
+        if now < self.retry_deadline {
+            return;
+        }
+        self.retry_deadline = now + self.reconfigure_msg.retry_timeout();
+        match &self.op {
+            CoordinatorOperation::CollectShares {
+                epoch,
+                members,
+                collected_shares,
+                ..
+            } => {}
+            CoordinatorOperation::CollectLrtqShares { members, shares } => {}
+            CoordinatorOperation::Prepare { prepares, prepare_acks } => {
+                for (platform_id, prepare) in prepares.clone().into_iter() {
+                    outbox.push(Envelope {
+                        to: platform_id,
+                        from: self.reconfigure_msg.coordinator_id().clone(),
+                        msg: PeerMsg::Prepare(prepare),
+                    });
                 }
             }
         }
     }
 
+    /// Record a `PrepareAck` from another node as part of tracking
+    /// quorum for the prepare phase of the trust quorum protocol.
     pub fn ack_prepare(&mut self, from: PlatformId) {
         match &mut self.op {
             CoordinatorOperation::Prepare {
@@ -184,7 +189,7 @@ impl CoordinatorState {
                     return;
                 }
 
-                // Remove the responder so we don't ask it a gain
+                // Remove the responder so we don't ask it again
                 prepares.remove(&from);
 
                 // Save the ack for quorum purposes
@@ -205,7 +210,7 @@ impl CoordinatorState {
 /// What should the coordinator be doing?
 pub enum CoordinatorOperation {
     // We haven't started implementing this yet
-    #[allow(unused)]
+    #[expect(unused)]
     CollectShares {
         epoch: Epoch,
         members: BTreeMap<PlatformId, Sha3_256Digest>,

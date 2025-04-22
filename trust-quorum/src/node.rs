@@ -84,7 +84,7 @@ impl Node {
         self.send_coordinator_msgs(now, outbox);
     }
 
-    /// Handle a message from a another node
+    /// Handle a message from another node
     pub fn handle(
         &mut self,
         _now: Instant,
@@ -97,7 +97,9 @@ impl Node {
                 self.handle_prepare_ack(from, epoch);
                 None
             }
-            _ => todo!(),
+            _ => todo!(
+                "cannot handle message variant yet - not implemented: {msg:?}"
+            ),
         }
     }
 

@@ -536,8 +536,8 @@ pub enum Action {
     #[weight(50)]
     Tick(
         #[strategy(
-            (RETRY_TIMEOUT_MS/4..RETRY_TIMEOUT_MS)
-            .prop_map(|ms| Duration::from_millis(ms))
+            (RETRY_TIMEOUT_MS/4..RETRY_TIMEOUT_MS*5/4)
+            .prop_map(Duration::from_millis)
          )]
         Duration,
     ),
@@ -550,7 +550,7 @@ pub struct GeneratedConfiguration {
     ///
     /// We don't use an `Index` here because we know we have a fixed size
     /// universe to select from, and we want to guarantee uniqueness. If we
-    /// derived `Ord` on `Index` and stored them in a BTreeSet, we'd get a
+    /// derived `Ord` on `Index` and stored them in a `BTreeSet`, we'd get a
     /// unique set of `Index` values. But when used, the output indexes can
     /// still be duplicated due to the shift implementation used. Therefore we
     /// instead just choose from a constrained set of usize values that we can
