@@ -1055,7 +1055,7 @@ mod test {
         for i in 1..=external_dns_count {
             let ns_name = format!("ns{}", i);
             assert!(external_dns_zone.records.get(&ns_name).is_some());
-            assert_eq!(apex_records[i], DnsRecord::NS(format!("{ns_name}.{}", external_dns_zone.zome_name)));
+            assert_eq!(apex_records[i], DnsRecord::Ns(format!("{ns_name}.{}", external_dns_zone.zone_name)));
         }
 
         // Now check a more typical case.
