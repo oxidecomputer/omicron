@@ -205,7 +205,7 @@ pub fn blueprint_external_dns_config<'a>(
             (silo_name != default_silo_name())
                 .then(|| (silo_dns_name(&silo_name), nexus_dns_records.clone()))
         })
-        // .chain(external_dns_records)
+        .chain(external_dns_records)
         .collect::<HashMap<String, Vec<DnsRecord>>>();
 
     if zone_records.len() > 0 {

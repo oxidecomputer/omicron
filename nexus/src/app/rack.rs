@@ -257,18 +257,6 @@ impl super::Nexus {
             dns_update.add_name(name, records)?;
         }
 
-        for (idx, rec) in internal_dns_records.into_iter().enumerate() {
-            dns_update.add_name(
-                format!("ns{}.{}", idx, internal_dns_types::names::DNS_ZONE),
-                vec![rec],
-            )?;
-        }
-
-        dns_update.add_name(
-            internal_dns_types::names::DNS_ZONE.to_string(),
-            int_zone_records,
-        )?;
-
         // We're providing an update to the initial `external_dns` group we
         // defined above; also bump RSS's blueprint's `external_dns_version` to
         // match this update.
