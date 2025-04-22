@@ -429,6 +429,12 @@ mod tests {
     }
 
     impl UninitializedCockroach {
+        // Clippy believes that the `child` process we spawn might be left as a
+        // zombie inside the early returns in `poll::wait_for_condition()`.
+        // However, this isn't true: we explicitly kill the child process in the
+        // case where `wait_for_condition()` fails (and also when we're dropped,
+        // in the success case!), so we shouldn't leave behind any zombies.
+        #[allow(clippy::zombie_processes)]
         async fn start() -> Self {
             let tempdir = Utf8TempDir::new().expect("created temp dir");
             let mut command = std::process::Command::new("cockroach");
@@ -439,7 +445,7 @@ mod tests {
                 .arg("--join")
                 .arg("[::1]:0");
 
-            let child =
+            let mut child =
                 command.spawn().expect("spawned cockroach child process");
 
             let listen_addr_path = tempdir
@@ -477,10 +483,13 @@ mod tests {
 
             let listen_addr = match listen_addr_fut.await {
                 Ok(addr) => addr,
-                Err(err) => panic!(
-                    "failed to wait for listen addr at \
-                     {listen_addr_path}: {err:?}",
-                ),
+                Err(err) => {
+                    child.kill().expect("killed child cockroach");
+                    panic!(
+                        "failed to wait for listen addr at \
+                         {listen_addr_path}: {err:?}",
+                    );
+                }
             };
 
             Self {
