@@ -136,6 +136,7 @@ mod tests {
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::ZpoolName;
+    use omicron_common::api::external::ByteCount;
     use omicron_common::disk::CompressionAlgorithm;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
@@ -213,6 +214,7 @@ mod tests {
                         zpool_id.into_untyped_uuid(),
                         sled_id.into_untyped_uuid(),
                         disk_id,
+                        ByteCount::from(0).into(),
                     ),
                 )
                 .await

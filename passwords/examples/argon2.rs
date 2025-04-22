@@ -57,6 +57,7 @@ fn main() -> anyhow::Result<()> {
     println!("  'm' cost: {} KiB", cli.m_cost);
     println!("  'p' cost: {} (degree of parallelism)", cli.p_cost);
     println!("  't' cost: {} (number of iterations)", cli.t_cost);
+    println!("password hash: {}", password_hash);
     println!(
         "output size override: {}",
         OUTPUT_SIZE_OVERRIDE

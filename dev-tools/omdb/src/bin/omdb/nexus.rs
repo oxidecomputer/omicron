@@ -35,13 +35,15 @@ use nexus_client::types::PhysicalDiskPath;
 use nexus_client::types::SagaState;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_inventory::now_db_precision;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
+use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
@@ -116,6 +118,8 @@ enum NexusCommands {
     Blueprints(BlueprintsArgs),
     /// Interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
+    /// Interact with oximeter read policy
+    OximeterReadPolicy(OximeterReadPolicyArgs),
     /// view sagas, create and complete demo sagas
     Sagas(SagasArgs),
     /// interact with sleds
@@ -363,6 +367,33 @@ enum ClickhousePolicyMode {
 }
 
 #[derive(Debug, Args)]
+struct OximeterReadPolicyArgs {
+    #[command(subcommand)]
+    command: OximeterReadPolicyCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum OximeterReadPolicyCommands {
+    /// Get the current policy
+    Get,
+    /// Set the new policy
+    Set(OximeterReadPolicySetArgs),
+}
+
+#[derive(Debug, Args)]
+struct OximeterReadPolicySetArgs {
+    mode: OximeterReadPolicyMode,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum OximeterReadPolicyMode {
+    /// Read from the clickhouse single node
+    SingleNode,
+    /// Read from the clickhouse cluster
+    Cluster,
+}
+
+#[derive(Debug, Args)]
 struct SagasArgs {
     #[command(subcommand)]
     command: SagasCommands,
@@ -566,6 +597,19 @@ impl NexusArgs {
                 ClickhousePolicyCommands::Set(args) => {
                     let token = omdb.check_allow_destructive()?;
                     cmd_nexus_clickhouse_policy_set(&client, args, token).await
+                }
+            },
+
+            NexusCommands::OximeterReadPolicy(OximeterReadPolicyArgs {
+                command,
+            }) => match command {
+                OximeterReadPolicyCommands::Get => {
+                    cmd_nexus_oximeter_read_policy_get(&client).await
+                }
+                OximeterReadPolicyCommands::Set(args) => {
+                    let token = omdb.check_allow_destructive()?;
+                    cmd_nexus_oximeter_read_policy_set(&client, args, token)
+                        .await
                 }
             },
 
@@ -2858,6 +2902,83 @@ async fn cmd_nexus_clickhouse_policy_set(
     Ok(())
 }
 
+async fn cmd_nexus_oximeter_read_policy_get(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let res = client.oximeter_read_policy_get().await;
+
+    match res {
+        Err(err) => {
+            if err.status() == Some(StatusCode::NOT_FOUND) {
+                println!(
+                    "No oximeter read policy: \
+                    Defaulting to reading from a single-node"
+                );
+            } else {
+                eprintln!("error: {:#}", err);
+            }
+        }
+        Ok(policy) => {
+            println!("Oximeter Read Policy: ");
+            println!("    version: {}", policy.version);
+            println!("    creation time: {}", policy.time_created);
+            match policy.mode {
+                OximeterReadMode::SingleNode => {
+                    println!("    mode: single-node");
+                }
+                OximeterReadMode::Cluster => {
+                    println!("    mode: cluster");
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn cmd_nexus_oximeter_read_policy_set(
+    client: &nexus_client::Client,
+    args: &OximeterReadPolicySetArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let mode = match args.mode {
+        OximeterReadPolicyMode::SingleNode => OximeterReadMode::SingleNode,
+        OximeterReadPolicyMode::Cluster => OximeterReadMode::Cluster,
+    };
+
+    let res = client.oximeter_read_policy_get().await;
+    let new_policy = match res {
+        Err(err) => {
+            if err.status() == Some(StatusCode::NOT_FOUND) {
+                OximeterReadPolicy {
+                    version: 1,
+                    mode,
+                    time_created: now_db_precision(),
+                }
+            } else {
+                eprintln!("error: {:#}", err);
+                return Err(err).context("retrieving oximeter read policy");
+            }
+        }
+        Ok(policy) => OximeterReadPolicy {
+            version: policy.version + 1,
+            mode,
+            time_created: now_db_precision(),
+        },
+    };
+
+    client.oximeter_read_policy_set(&new_policy).await.with_context(|| {
+        format!("inserting new context at version {}", new_policy.version)
+    })?;
+
+    println!(
+        "Successfully inserted new policy at version {}",
+        new_policy.version
+    );
+
+    Ok(())
+}
+
 /// Runs `omdb nexus sagas list`
 async fn cmd_nexus_sagas_list(
     client: &nexus_client::Client,
@@ -3046,7 +3167,7 @@ async fn cmd_nexus_sled_expunge_with_datastore(
     let opctx = &opctx;
 
     // First, we need to look up the sled so we know its serial number.
-    let (_authz_sled, sled) = LookupPath::new(opctx, &datastore)
+    let (_authz_sled, sled) = LookupPath::new(opctx, datastore)
         .sled_id(args.sled_id.into_untyped_uuid())
         .fetch()
         .await
@@ -3150,7 +3271,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 
     // First, we need to look up the disk so we can lookup identity information.
     let (_authz_physical_disk, physical_disk) =
-        LookupPath::new(opctx, &datastore)
+        LookupPath::new(opctx, datastore)
             .physical_disk(args.physical_disk_id)
             .fetch()
             .await

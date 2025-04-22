@@ -1559,12 +1559,12 @@ impl ServiceManager {
         // not creating a new property group, nor are we configuring a property
         // group on the instance.
         //
-        // Callers may decide to provide specific addresses to set as
+        // Callers may decide to provide specific addresses to set as additional
         // nameservers; e.g., boundary NTP zones need to specify upstream DNS
         // servers to resolve customer-provided NTP server names.
-        let nameservers = ip_addrs.unwrap_or_else(|| {
-            get_internal_dns_server_addresses(info.underlay_address)
-        });
+        let mut nameservers =
+            get_internal_dns_server_addresses(info.underlay_address);
+        nameservers.extend(ip_addrs.into_iter().flatten());
 
         let mut dns_config_builder = PropertyGroupBuilder::new("install_props");
         for ns_addr in &nameservers {

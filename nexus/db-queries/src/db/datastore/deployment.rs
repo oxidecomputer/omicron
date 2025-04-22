@@ -6,14 +6,9 @@ use super::DataStore;
 use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
-use crate::db::DbConnection;
-use crate::db::TransactionError;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use crate::transaction_retry::OptionalError;
 use anyhow::Context;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
@@ -41,6 +36,11 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use futures::FutureExt;
 use id_map::IdMap;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::Blueprint as DbBlueprint;
 use nexus_db_model::BpClickhouseClusterConfig;
 use nexus_db_model::BpClickhouseKeeperZoneIdToNodeId;
@@ -49,6 +49,7 @@ use nexus_db_model::BpOmicronDataset;
 use nexus_db_model::BpOmicronPhysicalDisk;
 use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
+use nexus_db_model::BpOximeterReadPolicy;
 use nexus_db_model::BpSledMetadata;
 use nexus_db_model::BpTarget;
 use nexus_db_model::TufArtifact;
@@ -59,8 +60,11 @@ use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PendingMgsUpdates;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -286,6 +290,12 @@ impl DataStore {
             None
         };
 
+        let oximeter_read_policy = BpOximeterReadPolicy::new(
+            blueprint_id,
+            nexus_db_model::Generation(blueprint.oximeter_read_version),
+            &blueprint.oximeter_read_mode,
+        );
+
         // This implementation inserts all records associated with the
         // blueprint in one transaction.  This is required: we don't want
         // any planner or executor to see a half-inserted blueprint, nor do we
@@ -385,6 +395,16 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
                 }
+            }
+
+            // Insert oximeter read policy for this blueprint
+            {
+                use nexus_db_schema::schema::bp_oximeter_read_policy::dsl;
+                let _ =
+                    diesel::insert_into(dsl::bp_oximeter_read_policy)
+                        .values(oximeter_read_policy)
+                        .execute_async(&conn)
+                        .await?;
             }
 
             Ok(())
@@ -890,8 +910,35 @@ impl DataStore {
             }
         };
 
+        let (oximeter_read_version, oximeter_read_mode) = {
+            use nexus_db_schema::schema::bp_oximeter_read_policy::dsl;
+
+            let res = dsl::bp_oximeter_read_policy
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpOximeterReadPolicy::as_select())
+                .get_result_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            match res {
+                // If policy is empty, we can safely assume we are at version 1 which defaults
+                // to reading from a single node installation
+                None => (Generation::new(), OximeterReadMode::SingleNode),
+                Some(p) => (
+                    Generation::from(p.version),
+                    OximeterReadMode::from(p.oximeter_read_mode),
+                ),
+            }
+        };
+
         Ok(Blueprint {
             id: blueprint_id,
+            // TODO these need to be serialized to the database.
+            // See oxidecomputer/omicron#7981.
+            pending_mgs_updates: PendingMgsUpdates::new(),
             sleds: sled_configs,
             parent_blueprint_id,
             internal_dns_version,
@@ -899,6 +946,8 @@ impl DataStore {
             cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade,
             clickhouse_cluster_config,
+            oximeter_read_mode,
+            oximeter_read_version,
             time_created,
             creator,
             comment,

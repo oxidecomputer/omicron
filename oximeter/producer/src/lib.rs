@@ -310,34 +310,79 @@ async fn registration_task(
     log: Logger,
     endpoint: ApiProducerEndpoint,
 ) {
+    let mut count: u64 = 0;
     loop {
         debug!(
             log,
-            "registering / renewing oximeter producer lease with Nexus"
+            "registering as oximeter producer with Nexus";
+            "registration_count" => %count,
         );
-        let address = match &find_nexus {
-            FindNexus::ByAddr(addr) => *addr,
-            FindNexus::WithResolver(resolver) => {
-                resolve_nexus_with_backoff(&log, resolver).await
-            }
-        };
-        debug!(log, "using nexus address for registration"; "addr" => ?address);
+        count += 1;
         let lease_duration =
-            register_with_backoff(address, &log, &endpoint).await;
-        debug!(log, "registered with nexus successfully");
-
+            resolve_nexus_and_register(&log, &find_nexus, &endpoint).await;
         // Wait for a reasonable fraction of the renewal period, and then hit
         // 'em again.
         let wait =
             lease_duration.checked_div(RENEWAL_RATE).unwrap_or(lease_duration);
         debug!(
             log,
-            "pausing until time to renew lease";
+            "successfully registered with Nexus, pausing until time to renew lease";
             "lease_duration" => ?lease_duration,
             "wait_period" => ?wait,
         );
         tokio::time::sleep(wait).await;
     }
+}
+
+/// Resolve Nexus via DNS and register with it as a metric producer.
+///
+/// This runs both operations inside a loop, backing off on each iteration of
+/// the loop, meaning we always resolve _and_ attempt to register once, doing
+/// both operations again if that fails.
+async fn resolve_nexus_and_register(
+    log: &Logger,
+    find_nexus: &FindNexus,
+    endpoint: &ApiProducerEndpoint,
+) -> Duration {
+    let resolve_nexus_and_register_once = || async {
+        // Resolve Nexus, or use the provided address directly.
+        let address = match find_nexus {
+            FindNexus::ByAddr(addr) => *addr,
+            FindNexus::WithResolver(resolver) => resolver
+                .lookup_socket_v6(ServiceName::Nexus)
+                .await
+                .map_err(|e| BackoffError::transient(e.to_string()))
+                .map(Into::into)?,
+        };
+        debug!(log, "will register with Nexus at {}", address);
+
+        // Register as a metric producer.
+        let client = nexus_client::Client::new(
+            &format!("http://{}", address),
+            log.clone(),
+        );
+        client
+            .cpapi_producers_post(&endpoint.into())
+            .await
+            .map(|response| response.into_inner().lease_duration.into())
+            .map_err(|e| BackoffError::transient(e.to_string()))
+    };
+    let log_failure = |error, count, delay| {
+        warn!(
+            log,
+            "failed to register with Nexus, will retry";
+            "count" => %count,
+            "delay" => ?delay,
+            "error" => ?error,
+        );
+    };
+    backoff::retry_notify_ext(
+        backoff::retry_policy_internal_service(),
+        resolve_nexus_and_register_once,
+        log_failure,
+    )
+    .await
+    .expect("Expected infinite retry registering with Nexus")
 }
 
 // Register API endpoints of the `Server`.
@@ -376,76 +421,6 @@ async fn collect(
             ),
         ))
     }
-}
-
-/// Resolve Nexus's address using the provided resolver.
-async fn resolve_nexus_with_backoff(
-    log: &Logger,
-    resolver: &Resolver,
-) -> SocketAddr {
-    let log_failure = |error, delay| {
-        warn!(
-            log,
-            "failed to lookup Nexus IP, will retry";
-            "delay" => ?delay,
-            "error" => ?error,
-        );
-    };
-    let do_lookup = || async {
-        resolver
-            .lookup_socket_v6(ServiceName::Nexus)
-            .await
-            .map_err(|e| BackoffError::transient(e.to_string()))
-            .map(Into::into)
-    };
-    backoff::retry_notify(
-        backoff::retry_policy_internal_service(),
-        do_lookup,
-        log_failure,
-    )
-    .await
-    .expect("Expected infinite retry loop resolving Nexus address")
-}
-
-/// Register as a metric producer with Nexus, retrying endlessly with backoff.
-///
-/// This returns the lease renewal period that we're required to re-register
-/// within.
-async fn register_with_backoff(
-    addr: SocketAddr,
-    log: &Logger,
-    endpoint: &ApiProducerEndpoint,
-) -> Duration {
-    let log_failure = |error, delay| {
-        warn!(
-            log,
-            "failed to register as a producer with Nexus, will retry";
-            "delay" => ?delay,
-            "error" => ?error,
-        );
-    };
-    // For the purposes of oximeter registration, all errors are retryable. The
-    // main reason for this is that there's just not much better we can do.
-    // Panicking seems bad, but stopping the retry loop is also not great
-    // without a way to kick it to start trying again. We may want to add
-    // better reporting, such as a counter or way to fetch the last registration
-    // result.
-    let do_register = || async {
-        let client =
-            nexus_client::Client::new(&format!("http://{}", addr), log.clone());
-        client
-            .cpapi_producers_post(&endpoint.into())
-            .await
-            .map(|response| response.into_inner().lease_duration.into())
-            .map_err(|e| BackoffError::transient(e.to_string()))
-    };
-    backoff::retry_notify(
-        backoff::retry_policy_internal_service(),
-        do_register,
-        log_failure,
-    )
-    .await
-    .expect("Expected infinite retry loop registering as a producer with")
 }
 
 #[cfg(test)]

@@ -50,13 +50,14 @@ internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
-lldpd-client.workspace = true
+lldpd_client.workspace = true
 macaddr.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
 nexus-config.workspace = true
 nexus-external-api.workspace = true
 nexus-internal-api.workspace = true
+nexus-mgs-updates.workspace = true
 nexus-networking.workspace = true
 nexus-saga-recovery.workspace = true
 nexus-test-interface.workspace = true
@@ -105,6 +106,7 @@ uuid.workspace = true
 
 nexus-auth.workspace = true
 nexus-defaults.workspace = true
+nexus-db-lookup.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-db-schema.workspace = true

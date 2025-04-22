@@ -7,13 +7,9 @@
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
-use crate::db;
-use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::OpContext;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Asset;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::PhysicalDiskPolicy;
@@ -26,7 +22,12 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::PhysicalDiskKind;
+use nexus_db_model::to_db_typed_uuid;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -54,7 +55,7 @@ impl DataStore {
 
     /// Stores a new zpool in the database.
     pub async fn zpool_insert_on_connection(
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         zpool: Zpool,
     ) -> Result<Zpool, TransactionError<Error>> {
@@ -204,7 +205,7 @@ impl DataStore {
 
     /// See: [Self::zpool_delete_self_and_all_datasets]
     pub(crate) async fn zpool_delete_self_and_all_datasets_on_connection(
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         zpool_id: ZpoolUuid,
     ) -> DeleteResult {
@@ -309,5 +310,34 @@ impl DataStore {
             })?;
 
         Ok(SledUuid::from_untyped_uuid(id))
+    }
+
+    pub async fn zpool_set_control_plane_storage_buffer(
+        &self,
+        opctx: &OpContext,
+        id: ZpoolUuid,
+        control_plane_storage_buffer: i64,
+    ) -> Result<(), Error> {
+        use nexus_db_schema::schema::zpool::dsl;
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        info!(
+            opctx.log,
+            "changing {id} control plane storage buffer to \
+            {control_plane_storage_buffer}",
+        );
+
+        diesel::update(dsl::zpool)
+            .filter(dsl::id.eq(to_db_typed_uuid(id)))
+            .set(
+                dsl::control_plane_storage_buffer
+                    .eq(control_plane_storage_buffer),
+            )
+            .execute_async(&*conn)
+            .await
+            .map(|_| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

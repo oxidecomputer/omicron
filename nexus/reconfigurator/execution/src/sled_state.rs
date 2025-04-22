@@ -5,12 +5,12 @@
 //! Updates sled states required by a given blueprint
 
 use anyhow::Context;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::SledState as DbSledState;
 use nexus_db_queries::authz::Action;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::TransitionError;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::views::SledState;
 use omicron_uuid_kinds::GenericUuid;

@@ -30,6 +30,7 @@ members = [
     "dev-tools/clickana",
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
+    "dev-tools/common",
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
     "dev-tools/downloader",
@@ -44,7 +45,9 @@ members = [
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
     "dev-tools/reconfigurator-exec-unsafe",
+    "dev-tools/reconfigurator-sp-updater",
     "dev-tools/releng",
+    "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
     "dev-tools/xtask",
     "dns-server",
@@ -74,7 +77,9 @@ members = [
     "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
+    "nexus/db-errors",
     "nexus/db-fixed-data",
+    "nexus/db-lookup",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -88,6 +93,7 @@ members = [
     "nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
+    "nexus/reconfigurator/cli-integration-tests",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -125,6 +131,8 @@ members = [
     "sled-storage",
     "sp-sim",
     "test-utils",
+    "trust-quorum",
+    "trust-quorum/gfss",
     "typed-rng",
     "update-common",
     "update-engine",
@@ -170,6 +178,7 @@ default-members = [
     "dev-tools/clickana",
     "dev-tools/clickhouse-cluster-dev",
     "dev-tools/ch-dev",
+    "dev-tools/common",
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
     "dev-tools/downloader",
@@ -184,7 +193,9 @@ default-members = [
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
     "dev-tools/reconfigurator-exec-unsafe",
+    "dev-tools/reconfigurator-sp-updater",
     "dev-tools/releng",
+    "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
@@ -216,7 +227,9 @@ default-members = [
     "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
+    "nexus/db-errors",
     "nexus/db-fixed-data",
+    "nexus/db-lookup",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -230,6 +243,7 @@ default-members = [
     "nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
+    "nexus/reconfigurator/cli-integration-tests",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -266,6 +280,8 @@ default-members = [
     "sled-hardware/types",
     "sled-storage",
     "sp-sim",
+    "trust-quorum",
+    "trust-quorum/gfss",
     "test-utils",
     "typed-rng",
     "update-common",
@@ -324,7 +340,7 @@ anstyle = "1.0.10"
 api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
-assert_cmd = "2.0.16"
+assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
 async-trait = "0.1.88"
 atomicwrites = "0.4.4"
@@ -376,16 +392,18 @@ crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "da
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
-daft = { version = "0.1.2", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
+daft = { version = "0.1.3", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.19"
 derive-where = "1.2.7"
+dev-tools-common = { path = "dev-tools/common" }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.8", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.2.9", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
+digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
@@ -399,7 +417,7 @@ ereport-types = { path = "ereport/types" }
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
-flate2 = "1.1.0"
+flate2 = "1.1.1"
 float-ord = "0.3.2"
 flume = "0.11.1"
 foreign-types = "0.3.2"
@@ -415,11 +433,12 @@ gateway-client = { path = "clients/gateway-client" }
 # is "fine", because SP/MGS communication maintains forwards and backwards
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "9bbac475dcaac88286c07a20b6bd3e94fc81d7f0", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "9bbac475dcaac88286c07a20b6bd3e94fc81d7f0" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "f9566e68e0a0ccb7c3eeea081ae1cea279c11b2a", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "f9566e68e0a0ccb7c3eeea081ae1cea279c11b2a" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
+gfss = { path = "trust-quorum/gfss" }
 glob = "0.3.2"
 guppy = "0.17.17"
 headers = "0.4.0"
@@ -441,12 +460,12 @@ httptest = "0.16.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "1.6.0"
-hyper-util = "0.1.10"
+hyper-util = "0.1.11"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.10.1"
 id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
-iana-time-zone = "0.1.61"
+iana-time-zone = "0.1.63"
 indent_write = "2.2.0"
 indexmap = "2.7.1"
 indicatif = { version = "0.17.11", features = ["rayon"] }
@@ -463,6 +482,7 @@ itertools = "0.14.0"
 internet-checksum = "0.2"
 ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
+jiff = "0.2.6"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
 libc = "0.2.170"
@@ -471,7 +491,8 @@ libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
-lldpd-client = { git = "https://github.com/oxidecomputer/lldp" }
+lldpd_client = { git = "https://github.com/oxidecomputer/lldp", package = "lldpd-client" }
+lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "protocol" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
@@ -481,7 +502,9 @@ multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
+nexus-db-errors = { path = "nexus/db-errors" }
 nexus-db-fixed-data = { path = "nexus/db-fixed-data" }
+nexus-db-lookup = { path = "nexus/db-lookup" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-db-schema = { path = "nexus/db-schema" }
@@ -520,6 +543,7 @@ omicron-omdb = { path = "dev-tools/omdb" }
 omicron-package = { path = "package" }
 omicron-passwords = { path = "passwords" }
 omicron-pins = { path = "dev-tools/pins" }
+omicron-repl-utils = { path = "dev-tools/repl-utils" }
 omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
@@ -582,7 +606,7 @@ propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e5
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
 # NOTE: see above!
 proptest = "1.6.0"
-qorb = "0.2.1"
+qorb = "0.3.1"
 quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
@@ -592,6 +616,7 @@ range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
 rayon = "1.10"
 rcgen = "0.12.1"
+reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.38.0"
 ref-cast = "1.0"
 regex = "1.11.1"
@@ -658,6 +683,7 @@ static_assertions = "1.1.0"
 steno = "0.4.1"
 strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
+subtle = "2.6.1"
 supports-color = "3.0.2"
 swrite = "0.1.0"
 sync-ptr = "0.1.1"
@@ -677,7 +703,7 @@ tokio = "1.43.0"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.17"
 tokio-tungstenite = "0.23.1"
-tokio-util = { version = "0.7.13", features = ["io", "io-util"] }
+tokio-util = { version = "0.7.13", features = ["io", "io-util", "time"] }
 toml = "0.8.20"
 toml_edit = "0.22.24"
 tough = { version = "0.20.0", features = [ "http" ] }
@@ -705,8 +731,7 @@ wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
 xshell = "0.2.7"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
-# NOTE: Avoid upgrading zip until https://github.com/zip-rs/zip2/issues/231 is resolved
-zip = { version = "=2.1.3", default-features = false, features = ["deflate","bzip2"] }
+zip = { version = "2.6.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
 
 # newtype-uuid is set to default-features = false because we don't want to
@@ -868,6 +893,8 @@ opt-level = 3
 [profile.dev.package.inout]
 opt-level = 3
 [profile.dev.package.keccak]
+opt-level = 3
+[profile.dev.package.gfss]
 opt-level = 3
 
 

@@ -82,6 +82,43 @@ CREATE TABLE IF NOT EXISTS omicron.public.clickhouse_policy (
     time_created TIMESTAMPTZ NOT NULL
 );
 
+
+/*
+ * The ClickHouse installation Oximeter should read from 
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.oximeter_read_mode AS ENUM (
+   -- Read from the single node ClickHouse installation 
+   'single_node',
+
+   -- Read from the replicated ClickHouse cluster 
+   'cluster'
+);
+
+/*
+ * A planning policy for oximeter_read for a single multirack setup
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.oximeter_read_policy (
+    -- Monotonically increasing version for all policies
+    version INT8 PRIMARY KEY,
+
+    oximeter_read_mode omicron.public.oximeter_read_mode NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL
+);
+
+/*
+* Oximeter read policy defaults to reading from a single node ClickHouse server.
+*/
+INSERT INTO omicron.public.oximeter_read_policy (
+    version,
+    oximeter_read_mode,
+    time_created
+) VALUES (
+    1,
+    'single_node',
+    NOW()
+) ON CONFLICT DO NOTHING;
+
 /*
  * Racks
  */
@@ -541,7 +578,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.zpool (
     sled_id UUID NOT NULL,
 
     /* FK into the Physical Disk table */
-    physical_disk_id UUID NOT NULL
+    physical_disk_id UUID NOT NULL,
+
+    /*
+     * How many bytes to reserve for non-Crucible control plane storage
+     */
+    control_plane_storage_buffer INT NOT NULL
 );
 
 /* Create an index on the physical disk id */
@@ -604,7 +646,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.crucible_dataset (
      * dataset that contains the regions (which is larger than the the actual
      * region size).
      */
-    size_used INT NOT NULL
+    size_used INT NOT NULL,
+
+    /* Do not consider this dataset during region allocation */
+    no_provision BOOL NOT NULL
 );
 
 /* Create an index on the size usage for any Crucible dataset */
@@ -2250,7 +2295,8 @@ WHERE
 CREATE TYPE IF NOT EXISTS omicron.public.saga_state AS ENUM (
     'running',
     'unwinding',
-    'done'
+    'done',
+    'abandoned'
 );
 
 
@@ -4125,6 +4171,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_clickhouse_server_zone_id_to_node_i
     PRIMARY KEY (blueprint_id, omicron_zone_id, server_id)
 );
 
+-- Blueprint information related to which ClickHouse installation
+-- oximeter is reading from.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_oximeter_read_policy (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID PRIMARY KEY,
+
+    -- Generation number.
+    version INT8 NOT NULL,
+
+    -- Which clickhouse installation should oximeter read from.
+    oximeter_read_mode omicron.public.oximeter_read_mode NOT NULL
+);
 
 -- Mapping of Omicron zone ID to CockroachDB node ID. This isn't directly used
 -- by the blueprint tables above, but is used by the more general Reconfigurator
@@ -5040,7 +5098,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '135.0.0', NULL)
+    (TRUE, NOW(), NOW(), '138.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

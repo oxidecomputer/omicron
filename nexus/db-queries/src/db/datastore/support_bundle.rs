@@ -7,18 +7,18 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
-use crate::db::lookup::LookupPath;
 use crate::db::model::RendezvousDebugDataset;
 use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use futures::FutureExt;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::LookupPath;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::api::external;
@@ -478,6 +478,7 @@ mod test {
     use nexus_reconfigurator_planning::example::SimRngState;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintZoneType;
+    use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
     use omicron_test_utils::dev;
@@ -584,6 +585,7 @@ mod test {
                     *pool.pool.as_untyped_uuid(),
                     *self.sled.as_untyped_uuid(),
                     PhysicalDiskUuid::new_v4(),
+                    ByteCount::from(0).into(),
                 );
                 datastore
                     .zpool_insert(opctx, zpool)

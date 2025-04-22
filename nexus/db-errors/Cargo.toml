@@ -1,0 +1,15 @@
+[package]
+name = "nexus-db-errors"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+diesel.workspace = true
+nexus-auth.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+thiserror.workspace = true

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 progenitor::generate_api!(
     spec = "../../openapi/nexus-internal.json",
+    interface = Positional,
     derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
@@ -48,6 +49,8 @@ progenitor::generate_api!(
         NewPasswordHash = omicron_passwords::NewPasswordHash,
         OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
         OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
+        OximeterReadMode = nexus_types::deployment::OximeterReadMode,
+        OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
         RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         Srv = nexus_types::internal_api::params::Srv,
         TypedUuidForBlueprintKind = omicron_uuid_kinds::BlueprintUuid,

@@ -5,10 +5,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::TransactionError;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::DnsGroup;
 use crate::db::model::DnsName;
 use crate::db::model::DnsVersion;
@@ -17,12 +14,15 @@ use crate::db::model::Generation;
 use crate::db::model::InitialDnsGroup;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use crate::db::pool::DbConnection;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
 use nexus_types::internal_api::params::DnsRecord;
@@ -745,7 +745,6 @@ impl DataStoreDnsTest for DataStore {
 #[cfg(test)]
 mod test {
     use crate::db::DataStore;
-    use crate::db::TransactionError;
     use crate::db::datastore::DnsVersionUpdateBuilder;
     use crate::db::pub_test_utils::TestDatabase;
     use assert_matches::assert_matches;
@@ -753,6 +752,7 @@ mod test {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
     use futures::FutureExt;
+    use nexus_db_errors::TransactionError;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::DnsName;
     use nexus_db_model::DnsVersion;
