@@ -1620,25 +1620,6 @@
           }
         ]
       },
-      "ArtifactHashId": {
-        "description": "A hash-based identifier for an artifact or deployment unit: the kind and hash.",
-        "type": "object",
-        "properties": {
-          "hash": {
-            "description": "The hash of the artifact.",
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          },
-          "kind": {
-            "description": "The kind of artifact this is.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "hash",
-          "kind"
-        ]
-      },
       "ArtifactVersion": {
         "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
         "type": "string",
@@ -4880,13 +4861,10 @@
       "PendingMgsUpdate": {
         "type": "object",
         "properties": {
-          "artifact_hash_id": {
+          "artifact_hash": {
             "description": "which artifact to apply to this device (implies which component is being updated)",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ArtifactHashId"
-              }
-            ]
+            "type": "string",
+            "format": "hex string (32 bytes)"
           },
           "artifact_version": {
             "$ref": "#/components/schemas/ArtifactVersion"
@@ -4923,7 +4901,7 @@
           }
         },
         "required": [
-          "artifact_hash_id",
+          "artifact_hash",
           "artifact_version",
           "baseboard_id",
           "details",
