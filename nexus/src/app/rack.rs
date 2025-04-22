@@ -221,14 +221,6 @@ impl super::Nexus {
             .blueprint
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service) {
 
-            // For convenience; we'll translate IPs to A/AAAA in a few places.
-            let sockaddr_to_dns = |addr: std::net::IpAddr| {
-                match addr {
-                    IpAddr::V4(addr) => DnsRecord::A(addr),
-                    IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
-                }
-            };
-
             match zc.zone_type {
                 BlueprintZoneType::InternalDns(blueprint_zone_type::InternalDns {
                     dns_address,
@@ -253,6 +245,9 @@ impl super::Nexus {
         let recovery_silo_fq_dns_name =
             format!("{silo_dns_name}.{}", request.external_dns_zone_name);
 
+        // sled-agent, in service of RSS, has configured internal DNS. We got its DNS configuration
+        // in `request.internal_dns_zone_config`
+        // and are appending to it before committing the initial RSS state to the database
         let external_dns_config = nexus_types::deployment::execution::blueprint_external_dns_config(
             &request.blueprint,
             vec![silo_name],

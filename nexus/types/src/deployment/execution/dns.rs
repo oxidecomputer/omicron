@@ -164,6 +164,7 @@ pub fn blueprint_external_dns_config<'a>(
     external_dns_zone_name: String,
 ) -> DnsConfigZone {
     let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
+    eprintln!("nexus ips: {:?}", nexus_external_ips);
     let dns_external_ips = blueprint_external_dns_resolver_ips(blueprint);
 
     let nexus_dns_records: Vec<DnsRecord> = nexus_external_ips
@@ -190,7 +191,7 @@ pub fn blueprint_external_dns_config<'a>(
         })
         .collect();
 
-    let records = silos
+    let mut records = silos
         .into_iter()
         // We do not generate a DNS name for the "default" Silo.
         //
@@ -204,9 +205,13 @@ pub fn blueprint_external_dns_config<'a>(
             (silo_name != default_silo_name())
                 .then(|| (silo_dns_name(&silo_name), nexus_dns_records.clone()))
         })
-        .chain(external_dns_records)
-        .chain(std::iter::once(("@".to_string(), zone_records)))
+        // .chain(external_dns_records)
         .collect::<HashMap<String, Vec<DnsRecord>>>();
+
+    if zone_records.len() > 0 {
+        let prior_records = records.insert("@".to_string(), zone_records);
+        assert!(prior_records.is_none());
+    }
 
     DnsConfigZone {
         zone_name: external_dns_zone_name,

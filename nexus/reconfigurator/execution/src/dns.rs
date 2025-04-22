@@ -1058,6 +1058,7 @@ mod test {
         assert_eq!(external_dns_zone.zone_name, String::from("oxide.test"));
         let records = &external_dns_zone.records;
         let expected_dns_names = 1 + internal_dns_count + external_dns_count;
+        panic!("{:?}", records);
         assert_eq!(records.len(), expected_dns_names);
         let silo_records = records
             .get(&silo_dns_name(my_silo.name()))
