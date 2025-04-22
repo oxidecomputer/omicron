@@ -4224,6 +4224,9 @@ impl ServiceManager {
             // We expect to have a metrics queue by this point, so
             // we can safely send a message on it to say the sled has
             // been synchronized.
+            //
+            // We may want to retry or ensure this notification happens. See
+            // https://github.com/oxidecomputer/omicron/issues/8022.
             let queue = self.metrics_queue();
             match queue.notify_time_synced_sled(self.sled_id()) {
                 Ok(_) => debug!(

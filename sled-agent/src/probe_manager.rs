@@ -421,7 +421,7 @@ impl ProbeManagerInner {
                     Err(errors) => error!(
                         self.log,
                         "Failed to stop tracking one or more datalinks in the \
-                        zone, some metrics will not be produced";
+                        zone, some metrics may still be produced";
                         "zone_name" => running_zone.name(),
                         "errors" => ?errors,
                     ),
