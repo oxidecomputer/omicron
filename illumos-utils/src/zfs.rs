@@ -1323,7 +1323,7 @@ impl Snapshot {
     /// is a "legacy" mount. Additionally a fileystem with no mountpoint will
     /// have a zfs mountpoint property of "-".
     pub fn full_path(&self) -> Result<Utf8PathBuf, GetValueError> {
-        // TODO:
+        // TODO (omicron#8023):
         // When a mountpoint is returned as "legacy" we could go fish around in
         // "/etc/mnttab". That would probably mean making this function return a
         // result of an option.

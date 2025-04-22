@@ -702,7 +702,7 @@ impl BundleCollection<'_> {
                     // We log any errors saving the zip file to disk and
                     // continue on.
                     if let Err(e) = log_collection_result {
-                        error!(&self.log, "failed to write logs outut: {e}");
+                        error!(&self.log, "failed to write logs output: {e}");
                     }
                 }
             }
@@ -875,8 +875,11 @@ async fn save_zone_log_zip_or_error(
             }
         }
         Err(err) => {
-            tokio::fs::write(path.join("{zone}.logs.err"), err.to_string())
-                .await?;
+            tokio::fs::write(
+                path.join(format!("{zone}.logs.err")),
+                err.to_string(),
+            )
+            .await?;
         }
     };
 

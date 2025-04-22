@@ -612,7 +612,7 @@ fn write_log_to_zip<W: Write + Seek>(
     snapshot_logfile: &Utf8Path,
 ) -> Result<(), LogError> {
     let Some(log_name) = snapshot_logfile.file_name() else {
-        debug!(
+        warn!(
             logger,
             "sled-diagnostics unable to determine filename for logfile";
             "logfile" => %snapshot_logfile,
