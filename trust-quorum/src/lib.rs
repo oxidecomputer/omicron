@@ -38,7 +38,7 @@ pub use persistent_state::{PersistentState, PersistentStateSummary};
     Deserialize,
     Display,
 )]
-pub struct Epoch(u64);
+pub struct Epoch(pub u64);
 
 /// The number of shares required to reconstruct the rack secret
 ///
@@ -72,6 +72,12 @@ pub struct PlatformId {
     serial_number: String,
 }
 
+impl std::fmt::Display for PlatformId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.part_number, self.serial_number)
+    }
+}
+
 impl PlatformId {
     pub fn new(part_number: String, serial_number: String) -> PlatformId {
         PlatformId { part_number, serial_number }
@@ -89,7 +95,7 @@ impl PlatformId {
 /// A container to make messages between trust quorum nodes routable
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Envelope {
-    to: PlatformId,
-    from: PlatformId,
-    msg: PeerMsg,
+    pub to: PlatformId,
+    pub from: PlatformId,
+    pub msg: PeerMsg,
 }

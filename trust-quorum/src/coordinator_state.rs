@@ -9,6 +9,7 @@ use crate::messages::{PeerMsg, PrepareMsg};
 use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
 use crate::{Configuration, Envelope, Epoch, PlatformId};
 use gfss::shamir::Share;
+use slog::{Logger, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
@@ -24,9 +25,11 @@ use std::time::Instant;
 /// allows progress to always be made with a full linearization of epochs.
 ///
 /// We allow some unused fields before we complete the coordination code
-#[allow(unused)]
 pub struct CoordinatorState {
+    log: Logger,
+
     /// When the reconfiguration started
+    #[expect(unused)]
     start_time: Instant,
 
     /// A copy of the message used to start this reconfiguration
@@ -49,6 +52,7 @@ impl CoordinatorState {
     /// Return the newly constructed `CoordinatorState` along with this node's
     /// `PrepareMsg` so that it can be persisted.
     pub fn new_uninitialized(
+        log: Logger,
         now: Instant,
         msg: ValidatedReconfigureMsg,
     ) -> Result<(CoordinatorState, PrepareMsg), ReconfigurationError> {
@@ -76,7 +80,7 @@ impl CoordinatorState {
             prepare_acks: BTreeSet::new(),
         };
 
-        let state = CoordinatorState::new(now, msg, config, op);
+        let state = CoordinatorState::new(log, now, msg, config, op);
 
         // Safety: Construction of a `ValidatedReconfigureMsg` ensures that
         // `my_platform_id` is part of the new configuration and has a share.
@@ -86,6 +90,7 @@ impl CoordinatorState {
 
     /// A reconfiguration from one group to another
     pub fn new_reconfiguration(
+        log: Logger,
         now: Instant,
         msg: ValidatedReconfigureMsg,
         last_committed_config: &Configuration,
@@ -101,18 +106,24 @@ impl CoordinatorState {
             new_shares,
         };
 
-        Ok(CoordinatorState::new(now, msg, config, op))
+        Ok(CoordinatorState::new(log, now, msg, config, op))
     }
 
-    // Intentionallly private!
+    // Intentionally private!
+    //
+    // The public constructors `new_uninitialized` and `new_reconfiguration` are
+    // more specific, and perform validation of arguments.
     fn new(
+        log: Logger,
         now: Instant,
         reconfigure_msg: ValidatedReconfigureMsg,
         configuration: Configuration,
         op: CoordinatorOperation,
     ) -> CoordinatorState {
-        let retry_deadline = now + reconfigure_msg.retry_timeout();
+        // We want to send any pending messages immediately
+        let retry_deadline = now;
         CoordinatorState {
+            log: log.new(o!("component" => "tq-coordinator-state")),
             start_time: now,
             reconfigure_msg,
             configuration,
@@ -135,8 +146,12 @@ impl CoordinatorState {
     // will return a copy of it.
     //
     // This method is "in progress" - allow unused parameters for now
-    #[allow(unused)]
+    #[expect(unused)]
     pub fn send_msgs(&mut self, now: Instant, outbox: &mut Vec<Envelope>) {
+        if now < self.retry_deadline {
+            return;
+        }
+        self.retry_deadline = now + self.reconfigure_msg.retry_timeout();
         match &self.op {
             CoordinatorOperation::CollectShares {
                 epoch,
@@ -156,20 +171,55 @@ impl CoordinatorState {
             }
         }
     }
+
+    /// Record a `PrepareAck` from another node as part of tracking
+    /// quorum for the prepare phase of the trust quorum protocol.
+    pub fn ack_prepare(&mut self, from: PlatformId) {
+        match &mut self.op {
+            CoordinatorOperation::Prepare {
+                prepares, prepare_acks, ..
+            } => {
+                if !self.configuration.members.contains_key(&from) {
+                    warn!(
+                        self.log,
+                        "PrepareAck from node that is not a cluster member";
+                        "epoch" => %self.configuration.epoch,
+                        "from" => %from
+                    );
+                    return;
+                }
+
+                // Remove the responder so we don't ask it again
+                prepares.remove(&from);
+
+                // Save the ack for quorum purposes
+                prepare_acks.insert(from);
+            }
+            op => {
+                warn!(
+                    self.log,
+                    "Ack received when coordinator is not preparing";
+                    "op" => op.name(),
+                    "from" => %from
+                );
+            }
+        }
+    }
 }
 
 /// What should the coordinator be doing?
-///
-/// We haven't started implementing upgrade from LRTQ yet
-#[allow(unused)]
 pub enum CoordinatorOperation {
+    // We haven't started implementing this yet
+    #[expect(unused)]
     CollectShares {
         epoch: Epoch,
         members: BTreeMap<PlatformId, Sha3_256Digest>,
         collected_shares: BTreeMap<PlatformId, Share>,
         new_shares: BTreeMap<PlatformId, Share>,
     },
+    // We haven't started implementing this yet
     // Epoch is always 0
+    #[allow(unused)]
     CollectLrtqShares {
         members: BTreeMap<PlatformId, ShareDigestLrtq>,
         shares: BTreeMap<PlatformId, LrtqShare>,
@@ -181,4 +231,16 @@ pub enum CoordinatorOperation {
         /// Acknowledgements that the prepare has been received
         prepare_acks: BTreeSet<PlatformId>,
     },
+}
+
+impl CoordinatorOperation {
+    pub fn name(&self) -> &'static str {
+        match self {
+            CoordinatorOperation::CollectShares { .. } => "collect shares",
+            CoordinatorOperation::CollectLrtqShares { .. } => {
+                "collect lrtq shares"
+            }
+            CoordinatorOperation::Prepare { .. } => "prepare",
+        }
+    }
 }
