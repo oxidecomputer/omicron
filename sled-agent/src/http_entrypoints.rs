@@ -471,14 +471,6 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseOk(sa.get_role()))
     }
 
-    async fn cockroachdb_init(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = rqctx.context();
-        sa.cockroachdb_initialize().await?;
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,

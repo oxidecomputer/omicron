@@ -1038,11 +1038,6 @@ impl SledAgent {
         Ok(())
     }
 
-    pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
-        self.inner.services.cockroachdb_initialize().await?;
-        Ok(())
-    }
-
     /// Gets the sled's current list of all zpools.
     pub async fn zpools_get(&self) -> Vec<Zpool> {
         self.inner
