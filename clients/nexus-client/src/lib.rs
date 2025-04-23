@@ -43,6 +43,7 @@ progenitor::generate_api!(
         Generation = omicron_common::api::external::Generation,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
+        MgsUpdateDriverStatus = nexus_types::internal_api::views::MgsUpdateDriverStatus,
         Name = omicron_common::api::external::Name,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
