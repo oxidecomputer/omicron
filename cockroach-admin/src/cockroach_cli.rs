@@ -427,6 +427,8 @@ mod tests {
         // However, this isn't true: we explicitly kill the child process in the
         // case where `wait_for_condition()` fails (and also when we're dropped,
         // in the success case!), so we shouldn't leave behind any zombies.
+        //
+        // Filed as https://github.com/rust-lang/rust-clippy/issues/14677
         #[allow(clippy::zombie_processes)]
         async fn start() -> Self {
             let tempdir = Utf8TempDir::new().expect("created temp dir");
