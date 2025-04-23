@@ -4,8 +4,9 @@
 
 //! Utilities to help insepct support bundles
 
-use anyhow::bail;
+use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 use camino::Utf8Path;
 use futures::StreamExt;
 use std::pin::Pin;
@@ -19,13 +20,17 @@ pub use bundle_accessor::InternalApiAccess;
 pub use bundle_accessor::SupportBundleAccessor;
 pub use index::SupportBundleIndex;
 
+enum FileState<'a> {
+    Open { access: Option<Pin<Box<dyn FileAccessor + 'a>>>, buffered: String },
+    Closed,
+}
+
 /// A dashboard for inspecting a support bundle contents
 pub struct SupportBundleDashboard<'a, S> {
     access: &'a S,
     index: SupportBundleIndex,
     selected: usize,
-    opened: Option<Pin<Box<dyn FileAccessor+ 'a>>>,
-    buffered: String,
+    file: FileState<'a>,
 }
 
 impl<'a, S: SupportBundleAccessor> SupportBundleDashboard<'a, S> {
@@ -34,29 +39,28 @@ impl<'a, S: SupportBundleAccessor> SupportBundleDashboard<'a, S> {
         if index.files().is_empty() {
             bail!("No files found in support bundle");
         }
-        Ok(Self {
-            access,
-            index,
-            selected: 0,
-            opened: None,
-            buffered: String::new(),
-        })
+        Ok(Self { access, index, selected: 0, file: FileState::Closed })
     }
 
     pub fn index(&self) -> &SupportBundleIndex {
         &self.index
     }
 
-    pub fn select_up(&mut self) {
-        if self.buffered_file_contents().is_none() {
-            self.selected = self.selected.saturating_sub(1);
+    pub async fn select_up(&mut self, count: usize) -> Result<()> {
+        self.selected = self.selected.saturating_sub(count);
+        if matches!(self.file, FileState::Open { .. }) {
+            self.open_and_buffer().await?;
         }
+        Ok(())
     }
 
-    pub fn select_down(&mut self) {
-        if self.buffered_file_contents().is_none() {
-            self.selected = std::cmp::min(self.selected + 1, self.index.files().len() - 1);
+    pub async fn select_down(&mut self, count: usize) -> Result<()> {
+        self.selected =
+            std::cmp::min(self.selected + count, self.index.files().len() - 1);
+        if matches!(self.file, FileState::Open { .. }) {
+            self.open_and_buffer().await?;
         }
+        Ok(())
     }
 
     pub async fn toggle_file_open(&mut self) -> Result<()> {
@@ -69,7 +73,6 @@ impl<'a, S: SupportBundleAccessor> SupportBundleDashboard<'a, S> {
     }
 
     pub async fn open_and_buffer(&mut self) -> Result<()> {
-        self.close_file();
         self.open_file().await?;
         self.read_to_buffer().await?;
         Ok(())
@@ -77,30 +80,45 @@ impl<'a, S: SupportBundleAccessor> SupportBundleDashboard<'a, S> {
 
     async fn open_file(&mut self) -> Result<()> {
         let path = &self.index.files()[self.selected];
-        let file = self.access.get_file(&path).await?;
-        self.opened = Some(Box::pin(file));
-        self.buffered = String::new();
+        if path.as_str().ends_with("/") {
+            self.file =
+                FileState::Open { access: None, buffered: String::new() };
+            return Ok(());
+        }
+
+        let file = self
+            .access
+            .get_file(&path)
+            .await
+            .with_context(|| format!("Failed to access {path}"))?;
+        self.file = FileState::Open {
+            access: Some(Box::pin(file)),
+            buffered: String::new(),
+        };
         Ok(())
     }
 
     fn close_file(&mut self) {
-        self.opened = None;
-        self.buffered = String::new();
+        self.file = FileState::Closed;
     }
 
     async fn read_to_buffer(&mut self) -> Result<()> {
-        let Some(file) = self.opened.as_mut() else {
+        let FileState::Open { access, ref mut buffered } = &mut self.file
+        else {
+            bail!("File cannot be buffered while closed");
+        };
+        let Some(file) = access.as_mut() else {
             return Ok(());
         };
-        file.read_to_string(&mut self.buffered).await?;
+        file.read_to_string(buffered).await?;
         Ok(())
     }
 
     pub fn buffered_file_contents(&self) -> Option<&str> {
-        if self.opened.is_some() {
-            return Some(&self.buffered);
-        }
-        None
+        let FileState::Open { ref buffered, .. } = &self.file else {
+            return None;
+        };
+        return Some(buffered);
     }
 
     pub fn selected_file_index(&self) -> usize {

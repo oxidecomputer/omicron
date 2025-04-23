@@ -34,13 +34,16 @@ impl<T: AsyncRead + ?Sized> FileAccessor for T {}
 /// Describes how the support bundle's data and metadata are accessed.
 #[async_trait]
 pub trait SupportBundleAccessor {
-    type FileAccessor<'a>: FileAccessor where Self: 'a;
+    type FileAccessor<'a>: FileAccessor
+    where
+        Self: 'a;
 
     /// Access the index of a support bundle
     async fn get_index(&self) -> Result<SupportBundleIndex>;
 
     /// Access a file within the support bundle
-    async fn get_file(&self, path: &Utf8Path) -> Result<Self::FileAccessor<'_>>;
+    async fn get_file(&self, path: &Utf8Path)
+    -> Result<Self::FileAccessor<'_>>;
 }
 
 pub struct StreamedFile<'a> {
@@ -52,25 +55,28 @@ pub struct StreamedFile<'a> {
 }
 
 impl<'a> StreamedFile<'a> {
-    fn new(client: &'a nexus_client::Client, id: SupportBundleUuid, path: Utf8PathBuf) -> Self {
-        Self {
-            client,
-            id,
-            path,
-            stream: None,
-            buffer: Bytes::new(),
-        }
+    fn new(
+        client: &'a nexus_client::Client,
+        id: SupportBundleUuid,
+        path: Utf8PathBuf,
+    ) -> Self {
+        Self { client, id, path, stream: None, buffer: Bytes::new() }
     }
 
     async fn start_stream(&mut self) -> Result<()> {
         // TODO: Add range headers?
-        let stream = self.client.support_bundle_download_file(
+        let stream = self
+            .client
+            .support_bundle_download_file(
                 self.id.as_untyped_uuid(),
-                self.path.as_str()
+                self.path.as_str(),
             )
             .await
             .with_context(|| {
-                format!("downloading support bundle file {}: {}", self.id, self.path)
+                format!(
+                    "downloading support bundle file {}: {}",
+                    self.id, self.path
+                )
             })?
             .into_inner_stream();
 
@@ -87,22 +93,33 @@ impl AsyncRead for StreamedFile<'_> {
     ) -> Poll<io::Result<()>> {
         while self.buffer.is_empty() {
             if self.stream.is_none() {
-
                 // NOTE: this is broken?
                 let fut = self.start_stream();
                 let mut fut = Box::pin(fut);
 
                 match futures::ready!(fut.as_mut().poll(cx)) {
                     Ok(()) => {}
-                    Err(e) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
+                    Err(e) => {
+                        return Poll::Ready(Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            e,
+                        )));
+                    }
                 }
             }
 
-            match futures::ready!(self.stream.as_mut().unwrap().as_mut().poll_next(cx)) {
+            match futures::ready!(
+                self.stream.as_mut().unwrap().as_mut().poll_next(cx)
+            ) {
                 Some(Ok(bytes)) => {
                     self.buffer = bytes;
                 }
-                Some(Err(e)) => return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
+                Some(Err(e)) => {
+                    return Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        e,
+                    )));
+                }
                 None => return Poll::Ready(Ok(())), // EOF
             }
         }
@@ -122,18 +139,21 @@ pub struct InternalApiAccess<'a> {
 }
 
 impl<'a> InternalApiAccess<'a> {
-    pub fn new(client: &'a nexus_client::Client, id: SupportBundleUuid) -> Self {
-        Self {
-            client,
-            id,
-        }
+    pub fn new(
+        client: &'a nexus_client::Client,
+        id: SupportBundleUuid,
+    ) -> Self {
+        Self { client, id }
     }
 }
 
 // Access for: The nexus internal API
 #[async_trait]
 impl<'c> SupportBundleAccessor for InternalApiAccess<'c> {
-    type FileAccessor<'a> = StreamedFile<'a> where Self: 'a;
+    type FileAccessor<'a>
+        = StreamedFile<'a>
+    where
+        Self: 'a;
 
     async fn get_index(&self) -> Result<SupportBundleIndex> {
         let stream = self
@@ -149,9 +169,15 @@ impl<'c> SupportBundleAccessor for InternalApiAccess<'c> {
         Ok(SupportBundleIndex::new(&s))
     }
 
-    async fn get_file(&self, path: &Utf8Path) -> Result<Self::FileAccessor<'_>> {
-        let mut file = StreamedFile::new(self.client, self.id, path.to_path_buf());
-        file.start_stream().await?;
+    async fn get_file(
+        &self,
+        path: &Utf8Path,
+    ) -> Result<Self::FileAccessor<'_>> {
+        let mut file =
+            StreamedFile::new(self.client, self.id, path.to_path_buf());
+        file.start_stream()
+            .await
+            .with_context(|| "failed to start stream in get_file")?;
         Ok(file)
     }
 }
@@ -167,8 +193,10 @@ impl SupportBundleAccessor for tokio::fs::File {
         todo!();
     }
 
-    async fn get_file(&self, _path: &Utf8Path) -> Result<Self::FileAccessor<'_>> {
+    async fn get_file(
+        &self,
+        _path: &Utf8Path,
+    ) -> Result<Self::FileAccessor<'_>> {
         todo!();
     }
 }
-
