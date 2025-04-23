@@ -243,6 +243,8 @@ mod tests {
     use std::time::Duration;
     use url::Url;
 
+    const DBINIT_RELATIVE_PATH: &str = "../schema/crdb/dbinit.sql";
+
     struct StringifiedOutput {
         stdout: String,
         stderr: String,
@@ -520,7 +522,7 @@ mod tests {
             assert!(output.status.success());
             assert_eq!(output.stdout, "Cluster successfully initialized\n");
 
-            // Run it again to confirm the "already initizlied" string.
+            // Run it again to confirm the "already initialized" string.
             let stderr = exec_command_logging_output(&mut command).await.stderr;
             assert!(
                 stderr.starts_with(CLUSTER_ALREADY_INIT),
@@ -555,14 +557,35 @@ mod tests {
         .expect("valid SocketAddrV6");
 
         let cli = CockroachCli::new("cockroach".into(), cockroach_address);
-        cli.schema_init_impl("../schema/crdb/dbinit.sql")
+        cli.schema_init_impl(DBINIT_RELATIVE_PATH)
             .await
             .expect("initialized schema");
-        cli.schema_init_impl("../schema/crdb/dbinit.sql")
+        cli.schema_init_impl(DBINIT_RELATIVE_PATH)
             .await
             .expect("initializing schema is idempotent");
 
         db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_cluster_schema_init_interleaved() {
+        let logctx =
+            dev::test_setup_log("test_cluster_schema_init_interleaved");
+        let db = UninitializedCockroach::start().await;
+        let cli = CockroachCli::new("cockroach".into(), db.listen_addr);
+
+        // We should be able to initialize the cluster, then install the schema,
+        // then do both of those things again.
+        cli.cluster_init().await.expect("cluster initialized");
+        cli.schema_init_impl(DBINIT_RELATIVE_PATH)
+            .await
+            .expect("schema initialized");
+        cli.cluster_init().await.expect("cluster still initialized");
+        cli.schema_init_impl(DBINIT_RELATIVE_PATH)
+            .await
+            .expect("schema still initialized");
+
         logctx.cleanup_successful();
     }
 }
