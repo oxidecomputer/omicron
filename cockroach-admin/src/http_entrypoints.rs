@@ -32,7 +32,7 @@ impl CockroachAdminApi for CockroachAdminImpl {
         let cli = ctx.cockroach_cli();
         let log = ctx.log();
 
-        info!(log, "Intializing CRDB cluster");
+        info!(log, "Initializing CRDB cluster");
         cli.cluster_init().await?;
         info!(log, "CRDB cluster initialized - initializing Omicron schema");
         cli.schema_init().await?;
