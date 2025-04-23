@@ -37,6 +37,7 @@ use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::BackgroundTask;
 use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::Ipv4NatEntryView;
+use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::to_list;
 use omicron_common::api::external::Instance;
@@ -502,7 +503,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    // Sagas
+    // Debug interfaces for Sagas
 
     async fn saga_list(
         rqctx: RequestContext<Self::Context>,
@@ -582,7 +583,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    // Background Tasks
+    // Debug interfaces for Background Tasks
 
     async fn bgtask_list(
         rqctx: RequestContext<Self::Context>,
@@ -633,6 +634,24 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let body = body.into_inner();
             nexus.bgtask_activate(&opctx, body.bgtask_names).await?;
             Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    // Debug interfaces for MGS updates
+
+    async fn mgs_updates(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MgsUpdateDriverStatus>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let nexus = &apictx.nexus;
+            Ok(HttpResponseOk(nexus.mgs_updates(&opctx).await?))
         };
         apictx
             .internal_latencies

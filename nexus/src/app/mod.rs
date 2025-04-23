@@ -108,6 +108,7 @@ pub(crate) mod sagas;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
+use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use sagas::demo::CompletingDemoSagas;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
@@ -238,9 +239,7 @@ pub struct Nexus {
     tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
 
     /// reports status of pending MGS-managed updates
-    // This will be used in the future to expose driver state via the internal
-    // API.
-    _mgs_update_status_rx: watch::Receiver<nexus_mgs_updates::DriverStatus>,
+    mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
 }
 
 impl Nexus {
@@ -398,7 +397,7 @@ impl Nexus {
             mgs_resolver.monitor(),
             DEFAULT_RETRY_TIMEOUT,
         );
-        let _mgs_update_status_rx = mgs_update_driver.status_rx();
+        let mgs_update_status_rx = mgs_update_driver.status_rx();
         let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
         let nexus = Nexus {
@@ -449,7 +448,7 @@ impl Nexus {
                 CompletingDemoSagas::new(),
             )),
             tuf_artifact_replication_tx,
-            _mgs_update_status_rx,
+            mgs_update_status_rx,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -1000,6 +999,18 @@ impl Nexus {
                 return Err(Error::internal_error(&format!("{err}")));
             }
         }
+    }
+
+    pub(crate) async fn mgs_updates(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<MgsUpdateDriverStatus, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        // Borrowing from a watch receiver locks the channel until the borrow is
+        // dropped.  Return a cloned copy so that the caller doesn't have to
+        // think about this internal detail.
+        Ok(self.mgs_update_status_rx.borrow().clone())
     }
 }
 
