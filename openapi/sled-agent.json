@@ -2024,39 +2024,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "post": {
-        "summary": "Ask the sled agent to create a zone bundle.",
-        "operationId": "zone_bundle_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "zone_name",
-            "description": "The name of the zone.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ZoneBundleMetadata"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/zones/bundles/{zone_name}/{bundle_id}": {

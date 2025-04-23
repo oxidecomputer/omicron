@@ -583,13 +583,6 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn zone_bundle_create(
-        _rqctx: RequestContext<Self::Context>,
-        _params: Path<ZonePathParam>,
-    ) -> Result<HttpResponseCreated<ZoneBundleMetadata>, HttpError> {
-        method_unimplemented()
-    }
-
     async fn zone_bundle_get(
         _rqctx: RequestContext<Self::Context>,
         _params: Path<ZoneBundleId>,

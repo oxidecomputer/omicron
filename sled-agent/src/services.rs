@@ -34,7 +34,6 @@ use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
 use crate::profile::*;
-use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -99,9 +98,8 @@ use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use rand::prelude::SliceRandom;
 use sled_agent_types::{
-    sled::SWITCH_ZONE_BASEBOARD_FILE,
-    time_sync::TimeSync,
-    zone_bundle::{ZoneBundleCause, ZoneBundleMetadata},
+    sled::SWITCH_ZONE_BASEBOARD_FILE, time_sync::TimeSync,
+    zone_bundle::ZoneBundleCause,
 };
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
@@ -3556,33 +3554,6 @@ impl ServiceManager {
         Ok(StartZonesResult { new_zones, errors })
     }
 
-    /// Create a zone bundle for the provided zone.
-    pub async fn create_zone_bundle(
-        &self,
-        name: &str,
-    ) -> Result<ZoneBundleMetadata, BundleError> {
-        // Search for the named zone.
-        if let SwitchZoneState::Running { zone, .. } =
-            &*self.inner.switch_zone.lock().await
-        {
-            if zone.name() == name {
-                return self
-                    .inner
-                    .zone_bundler
-                    .create(zone, ZoneBundleCause::ExplicitRequest)
-                    .await;
-            }
-        }
-        if let Some(zone) = self.inner.zones.lock().await.get(name) {
-            return self
-                .inner
-                .zone_bundler
-                .create(&zone.runtime, ZoneBundleCause::ExplicitRequest)
-                .await;
-        }
-        Err(BundleError::NoSuchZone { name: name.to_string() })
-    }
-
     /// Returns the current Omicron zone configuration
     pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
         let log = &self.inner.log;
@@ -5973,10 +5944,10 @@ mod illumos_tests {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::ZpoolUuid;
-
-    use super::*;
+    use sled_agent_types::zone_bundle::ZoneBundleMetadata;
 
     #[test]
     fn test_bootstrap_addr_to_techport_prefixes() {
