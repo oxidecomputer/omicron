@@ -31,6 +31,8 @@ pub mod constants {
     pub const CLICKHOUSE_CLUSTER_SECRET: &str = "cluster secret";
     pub const CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX: &str =
         "highest seen keeper leader committed log index";
+    pub const OXIMETER_HEADING: &str = "OXIMETER SETTINGS";
+    pub const OXIMETER_READ_FROM: &str = "read from";
     pub const CREATED_BY: &str = "created by";
     pub const CREATED_AT: &str = "created at";
     pub const INTERNAL_DNS_VERSION: &str = "internal DNS version";
@@ -45,6 +47,7 @@ pub mod constants {
     pub const GENERATION: &str = "generation";
 }
 use constants::*;
+use std::fmt::Display;
 
 /// The state of a sled or resource (e.g. zone or physical disk) in this
 /// blueprint, with regards to the parent blueprint
@@ -129,11 +132,14 @@ pub enum BpTableColumn {
 }
 
 impl BpTableColumn {
-    pub fn new(before: String, after: String) -> BpTableColumn {
+    pub fn new<T: Display + Eq>(before: T, after: T) -> BpTableColumn {
         if before != after {
-            BpTableColumn::Diff { before, after }
+            BpTableColumn::Diff {
+                before: before.to_string(),
+                after: after.to_string(),
+            }
         } else {
-            BpTableColumn::Value(before)
+            BpTableColumn::Value(before.to_string())
         }
     }
 
@@ -397,6 +403,26 @@ impl BpTableSchema for BpClickhouseServersTableSchema {
 
     fn column_names(&self) -> &'static [&'static str] {
         &["zone id", "server id"]
+    }
+}
+
+/// The [`BpTable`] schema for pending MGS updates
+pub struct BpPendingMgsUpdates {}
+impl BpTableSchema for BpPendingMgsUpdates {
+    fn table_name(&self) -> &'static str {
+        "Pending MGS-managed updates (all baseboards)"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &[
+            "sp_type",
+            "slot",
+            "part_number",
+            "serial_number",
+            "artifact_hash",
+            "artifact_version",
+            "details",
+        ]
     }
 }
 

@@ -966,6 +966,55 @@
         }
       }
     },
+    "/oximeter/read-policy": {
+      "get": {
+        "summary": "Get the current oximeter read policy",
+        "operationId": "oximeter_read_policy_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OximeterReadPolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set the new oximeter read policy",
+        "operationId": "oximeter_read_policy_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OximeterReadPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/physical-disk/expunge": {
       "post": {
         "summary": "Mark a physical disk as expunged",
@@ -1659,6 +1708,24 @@
           "serial"
         ]
       },
+      "BaseboardId": {
+        "description": "A unique baseboard id found during a collection\n\nBaseboard ids are the keys used to link up information from disparate sources (like a service processor and a sled agent).\n\nThese are normalized in the database.  Each distinct baseboard id is assigned a uuid and shared across the many possible collections that reference it.\n\nUsually, the part number and serial number are combined with a revision number.  We do not include that here.  If we ever did find a baseboard with the same part number and serial number but a new revision number, we'd want to treat that as the same baseboard as one with a different revision number.",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
+        ]
+      },
       "BfdMode": {
         "description": "BFD connection mode.",
         "type": "string",
@@ -1938,12 +2005,36 @@
               }
             ]
           },
+          "oximeter_read_mode": {
+            "description": "Whether oximeter should read from a single node or a cluster",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OximeterReadMode"
+              }
+            ]
+          },
+          "oximeter_read_version": {
+            "description": "Oximeter read policy version when this blueprint was created",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "parent_blueprint_id": {
             "nullable": true,
             "description": "which blueprint this blueprint is based on",
             "allOf": [
               {
                 "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
+          },
+          "pending_mgs_updates": {
+            "description": "List of pending MGS-mediated updates",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingMgsUpdates"
               }
             ]
           },
@@ -1968,6 +2059,9 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
+          "oximeter_read_mode",
+          "oximeter_read_version",
+          "pending_mgs_updates",
           "sleds",
           "time_created"
         ]
@@ -3747,6 +3841,45 @@
           "request_id"
         ]
       },
+      "ExpectedVersion": {
+        "description": "Describes the version that we expect to find in some firmware slot",
+        "oneOf": [
+          {
+            "description": "We expect to find _no_ valid caboose in this slot",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "no_valid_version"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "We expect to find the specified version in this slot",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "version"
+                ]
+              },
+              "version": {
+                "$ref": "#/components/schemas/ArtifactVersion"
+              }
+            },
+            "required": [
+              "kind",
+              "version"
+            ]
+          }
+        ]
+      },
       "ExternalPortDiscovery": {
         "oneOf": [
           {
@@ -3812,6 +3945,12 @@
         "type": "object",
         "additionalProperties": {
           "$ref": "#/components/schemas/BlueprintZoneConfig"
+        }
+      },
+      "IdMapPendingMgsUpdate": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/PendingMgsUpdate"
         }
       },
       "ImportExportPolicy": {
@@ -4662,6 +4801,161 @@
         "required": [
           "address",
           "collector_id"
+        ]
+      },
+      "OximeterReadMode": {
+        "description": "Where oximeter should read from",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "single_node"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cluster"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "OximeterReadPolicy": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/OximeterReadMode"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "mode",
+          "time_created",
+          "version"
+        ]
+      },
+      "PendingMgsUpdate": {
+        "type": "object",
+        "properties": {
+          "artifact_hash": {
+            "description": "which artifact to apply to this device (implies which component is being updated)",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "artifact_version": {
+            "$ref": "#/components/schemas/ArtifactVersion"
+          },
+          "baseboard_id": {
+            "description": "id of the baseboard that we're going to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "details": {
+            "description": "component-specific details of the pending update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingMgsUpdateDetails"
+              }
+            ]
+          },
+          "slot_id": {
+            "description": "last known MGS slot (cubby number) of the baseboard",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "sp_type": {
+            "description": "what type of baseboard this is",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpType"
+              }
+            ]
+          }
+        },
+        "required": [
+          "artifact_hash",
+          "artifact_version",
+          "baseboard_id",
+          "details",
+          "slot_id",
+          "sp_type"
+        ]
+      },
+      "PendingMgsUpdateDetails": {
+        "description": "Describes the component-specific details of a PendingMgsUpdate",
+        "oneOf": [
+          {
+            "description": "the SP itself is being updated",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "sp"
+                ]
+              },
+              "expected_active_version": {
+                "description": "expected contents of the active slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ArtifactVersion"
+                  }
+                ]
+              },
+              "expected_inactive_version": {
+                "description": "expected contents of the inactive slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExpectedVersion"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "expected_active_version",
+              "expected_inactive_version"
+            ]
+          }
+        ]
+      },
+      "PendingMgsUpdates": {
+        "type": "object",
+        "properties": {
+          "by_baseboard": {
+            "$ref": "#/components/schemas/IdMapPendingMgsUpdate"
+          }
+        },
+        "required": [
+          "by_baseboard"
         ]
       },
       "PhysicalDiskKind": {
@@ -5805,6 +6099,15 @@
           "first_port",
           "ip",
           "last_port"
+        ]
+      },
+      "SpType": {
+        "description": "SpType\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
+        "type": "string",
+        "enum": [
+          "sled",
+          "power",
+          "switch"
         ]
       },
       "Srv": {

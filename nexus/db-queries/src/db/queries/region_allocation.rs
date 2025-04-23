@@ -31,8 +31,6 @@ const NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL: &'static str =
 /// Translates a generic pool error to an external error based
 /// on messages which may be emitted during region provisioning.
 pub fn from_diesel(e: DieselError) -> external::Error {
-    use crate::db::error;
-
     let sentinels = [
         NOT_ENOUGH_DATASETS_SENTINEL,
         NOT_ENOUGH_ZPOOL_SPACE_SENTINEL,
@@ -68,7 +66,10 @@ pub fn from_diesel(e: DieselError) -> external::Error {
         }
     }
 
-    error::public_error_from_diesel(e, error::ErrorHandler::Server)
+    nexus_db_errors::public_error_from_diesel(
+        e,
+        nexus_db_errors::ErrorHandler::Server,
+    )
 }
 
 type SelectableSql<T> = <
@@ -165,6 +166,9 @@ impl From<AllocationQueryError> for external::Error {
 /// for the region set that is in the top level of the Volume (not the deeper
 /// layers of the hierarchy). If that volume has region snapshots in the region
 /// set, a `snapshot_id` should be supplied matching those entries.
+///
+/// Depending on the call site, it may not safe for multiple callers to call
+/// this function concurrently for the same volume id. Care is required!
 pub fn allocation_query(
     volume_id: VolumeUuid,
     snapshot_id: Option<uuid::Uuid>,
