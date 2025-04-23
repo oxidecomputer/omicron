@@ -9,13 +9,13 @@
 // tests.
 #![cfg_attr(not(test), allow(dead_code))]
 
-use super::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_trait::async_trait;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
 use diesel::result::Error as DieselError;
+use nexus_db_lookup::DbConnection;
 
 /// A wrapper around a runnable Diesel query, which EXPLAINs what it is doing.
 ///

@@ -19,10 +19,8 @@
 // complicated to do safely and generally compared to what we have now.
 
 use super::Pool;
-use super::pool::DbConnection;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use ::oximeter::types::ProducerRegistry;
 use anyhow::{Context, bail};
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -31,6 +29,8 @@ use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::{ExpressionMethods, QueryDsl};
+use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
+use nexus_db_lookup::{DataStoreConnection, DbConnection};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
@@ -70,9 +70,11 @@ mod inventory;
 mod ip_pool;
 mod ipv4_nat_entry;
 mod lldp;
+mod lookup_interface;
 mod migration;
 mod network_interface;
 mod oximeter;
+mod oximeter_read_policy;
 mod physical_disk;
 mod probe;
 mod project;
@@ -171,9 +173,6 @@ impl<U, T> RunnableQuery<U> for T where
     T: RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
 }
-
-pub type DataStoreConnection =
-    qorb::claim::Handle<async_bb8_diesel::Connection<DbConnection>>;
 
 pub struct DataStore {
     log: Logger,
@@ -455,7 +454,6 @@ mod test {
     };
     use crate::db::explain::ExplainableAsync;
     use crate::db::identity::Asset;
-    use crate::db::lookup::LookupPath;
     use crate::db::model::{
         BlockSize, ConsoleSession, CrucibleDataset, ExternalIp, PhysicalDisk,
         PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState, Project, Rack,
@@ -469,6 +467,7 @@ mod test {
     use futures::stream;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::to_db_typed_uuid;
     use nexus_types::deployment::Blueprint;
@@ -528,7 +527,7 @@ mod test {
 
         let authz_silo = opctx.authn.silo_required().unwrap();
 
-        let (.., silo) = LookupPath::new(&opctx, &datastore)
+        let (.., silo) = LookupPath::new(&opctx, datastore)
             .silo_id(authz_silo.id())
             .fetch()
             .await
@@ -546,7 +545,7 @@ mod test {
         datastore.project_create(&opctx, project).await.unwrap();
 
         let (.., silo_after_project_create) =
-            LookupPath::new(&opctx, &datastore)
+            LookupPath::new(&opctx, datastore)
                 .silo_id(authz_silo.id())
                 .fetch()
                 .await
@@ -602,7 +601,7 @@ mod test {
             .await
             .unwrap();
 
-        let (.., db_silo_user) = LookupPath::new(&opctx, &datastore)
+        let (.., db_silo_user) = LookupPath::new(&opctx, datastore)
             .silo_user_id(session.silo_user_id)
             .fetch()
             .await
@@ -610,7 +609,7 @@ mod test {
         assert_eq!(DEFAULT_SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
-        let (.., fetched) = LookupPath::new(&opctx, &datastore)
+        let (.., fetched) = LookupPath::new(&opctx, datastore)
             .console_session_token(&token)
             .fetch()
             .await
@@ -640,7 +639,7 @@ mod test {
         );
 
         // time_last_used change persists in DB
-        let (.., fetched) = LookupPath::new(&opctx, &datastore)
+        let (.., fetched) = LookupPath::new(&opctx, datastore)
             .console_session_token(&token)
             .fetch()
             .await
@@ -653,7 +652,7 @@ mod test {
         let delete =
             datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete, Ok(()));
-        let fetched = LookupPath::new(&opctx, &datastore)
+        let fetched = LookupPath::new(&opctx, datastore)
             .console_session_token(&token)
             .fetch()
             .await;
@@ -674,7 +673,7 @@ mod test {
             .session_hard_delete(&silo_user_opctx, &authz_session)
             .await;
         assert_eq!(delete, Ok(()));
-        let fetched = LookupPath::new(&opctx, &datastore)
+        let fetched = LookupPath::new(&opctx, datastore)
             .console_session_token(&token)
             .fetch()
             .await;
@@ -1742,7 +1741,7 @@ mod test {
             .await
             .unwrap();
 
-        let (.., authz_user) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_user) = LookupPath::new(&opctx, datastore)
             .silo_user_id(silo_user_id)
             .lookup_for(authz::Action::CreateChild)
             .await
@@ -1771,7 +1770,7 @@ mod test {
 
         // Lookup the key we just created.
         let (authz_silo, authz_silo_user, authz_ssh_key, found) =
-            LookupPath::new(&opctx, &datastore)
+            LookupPath::new(&opctx, datastore)
                 .silo_user_id(silo_user_id)
                 .ssh_key_name(&key_name.into())
                 .fetch()

@@ -655,4 +655,87 @@ mod tests {
         let times = sampler.creation_times().await;
         assert!(times.contains_key(&path));
     }
+
+    #[tokio::test]
+    async fn overflowing_self_stat_queue_does_not_block_sampler() {
+        let log = test_logger();
+        let mut sampler = KstatSampler::with_sample_limit(&log, 1).unwrap();
+
+        // We'll create an actual link, so that we can generate valid samples
+        // and overflow the per-target queue. This will ensure we continually
+        // push "overflow" samples onto the self-stat queue.
+        let link = TestEtherstub::new();
+        info!(log, "created test etherstub"; "name" => &link.name);
+        let target = SledDataLinkTarget {
+            rack_id: RACK_ID,
+            sled_id: SLED_ID,
+            sled_serial: SLED_SERIAL.into(),
+            link_name: link.name.clone().into(),
+            kind: KIND.into(),
+            sled_model: SLED_MODEL.into(),
+            sled_revision: SLED_REVISION,
+            zone_name: ZONE_NAME.into(),
+        };
+        let dl = SledDataLink::new(target, true);
+        let collection_interval = Duration::from_millis(10);
+        let details = CollectionDetails::never(collection_interval);
+        let _id = sampler.add_target(dl, details).await.unwrap();
+
+        // Pause time long enough for the sampler to have produced a bunch of
+        // self-stats.
+        tokio::time::pause();
+        const MAX_DURATION: Duration = Duration::from_millis(5000 * 10);
+        const STEP_DURATION: Duration = Duration::from_millis(1);
+        let now = Instant::now();
+        while now.elapsed() < MAX_DURATION {
+            tokio::time::advance(STEP_DURATION).await;
+        }
+
+        // Collect and sum all the sample counters.
+        let mut sample_counts = sampler.sample_counts().unwrap();
+        let first_overflow_sample_count = sample_counts;
+        while let Some(counts) = sampler.sample_counts() {
+            sample_counts += counts;
+        }
+        println!("{sample_counts:?}");
+        assert_eq!(sample_counts.total, sample_counts.overflow + 1);
+
+        // We should have one real sample, and then the entire self-stat queue
+        // filled with "overflow" samples. Collect the samples first, which
+        // we'll verify below.
+        let samples: Vec<_> = sampler.produce().unwrap().collect();
+        assert_eq!(samples.len(), 4096 + 1);
+
+        // The _first_ overflow sample in the collected samples should not be
+        // the same as the first sample count we got on our test queue. In other
+        // words, we should have dropped the first few overflow sample counts as
+        // we started to lag behind on the broadcast queue.
+        //
+        // In the previous implementation, which used an mpsc queue, that queue
+        // would block the worker when full. That means the first overflow
+        // sample on the actual producer queue would be the same as the sample
+        // count, i.e., the queue still holds the first chunk of overflow
+        // samples, rather than evicting the older ones as the current
+        // implementation does.
+        let oximeter::Datum::CumulativeU64(count) =
+            &samples[1].measurement.datum()
+        else {
+            unreachable!();
+        };
+        assert!(count.value() > first_overflow_sample_count.overflow as u64);
+
+        // The final sample on the queue should report the cumulative number of
+        // overflow samples too.
+        let oximeter::Datum::CumulativeU64(count) =
+            samples.last().unwrap().measurement.datum()
+        else {
+            unreachable!();
+        };
+        assert_eq!(count.value(), sample_counts.overflow as u64);
+
+        // And we should have recorded many more than the queue size, proving
+        // that we dropped some counts as we lagged the broadcast queue, but we
+        // kept the final samples.
+        assert!(count.value() > 4096);
+    }
 }

@@ -24,6 +24,9 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_mgs_updates::ArtifactCache;
+use nexus_mgs_updates::MgsUpdateDriver;
+use nexus_types::deployment::PendingMgsUpdates;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
@@ -41,6 +44,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use update_common::artifacts::ArtifactsWithPlan;
 use uuid::Uuid;
 
@@ -103,6 +107,7 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
+use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
 use sagas::demo::CompletingDemoSagas;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
@@ -165,7 +170,7 @@ pub struct Nexus {
     internal_server: std::sync::Mutex<Option<DropshotServer>>,
 
     /// Status of background task to populate database
-    populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
+    populate_status: watch::Receiver<PopulateStatus>,
 
     /// The metric producer server from which oximeter collects metric data.
     producer_server: std::sync::Mutex<Option<ProducerServer>>,
@@ -231,6 +236,11 @@ pub struct Nexus {
     /// Sender for TUF repository artifacts temporarily stored in this zone to
     /// be replicated out to sleds in the background
     tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
+
+    /// reports status of pending MGS-managed updates
+    // This will be used in the future to expose driver state via the internal
+    // API.
+    _mgs_update_status_rx: watch::Receiver<nexus_mgs_updates::DriverStatus>,
 }
 
 impl Nexus {
@@ -330,7 +340,7 @@ impl Nexus {
         let timeseries_client = match &config.pkg.timeseries_db.address {
             None => {
                 let native_resolver =
-                    qorb_resolver.for_service(ServiceName::ClickhouseNative);
+                    qorb_resolver.for_service(ServiceName::OximeterReader);
                 oximeter_db::Client::new_with_resolver(native_resolver, &log)
             }
             Some(address) => oximeter_db::Client::new(*address, &log),
@@ -370,6 +380,26 @@ impl Nexus {
                 &config.deployment.external_dns_servers,
             ))
         };
+
+        let mut mgs_resolver =
+            qorb_resolver.for_service(ServiceName::ManagementGatewayService);
+        let mut repo_depot_resolver =
+            qorb_resolver.for_service(ServiceName::RepoDepot);
+        let (mgs_updates_tx, mgs_updates_rx) =
+            watch::channel(PendingMgsUpdates::new());
+        let artifact_cache = Arc::new(ArtifactCache::new(
+            log.new(o!("component" => "ArtifactCache")),
+            repo_depot_resolver.monitor(),
+        ));
+        let mgs_update_driver = MgsUpdateDriver::new(
+            log.new(o!("component" => "MgsUpdateDriver")),
+            artifact_cache,
+            mgs_updates_rx,
+            mgs_resolver.monitor(),
+            DEFAULT_RETRY_TIMEOUT,
+        );
+        let _mgs_update_status_rx = mgs_update_driver.status_rx();
+        let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
         let nexus = Nexus {
             id: config.deployment.id,
@@ -419,6 +449,7 @@ impl Nexus {
                 CompletingDemoSagas::new(),
             )),
             tuf_artifact_replication_tx,
+            _mgs_update_status_rx,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -474,6 +505,7 @@ impl Nexus {
                         sagas_started_rx: saga_recovery_rx,
                     },
                     tuf_artifact_replication_rx,
+                    mgs_updates_tx,
                 },
             );
 
@@ -787,9 +819,9 @@ impl Nexus {
     /// underneath Organizations:
     ///
     /// ```
+    /// use nexus_db_lookup::LookupPath;
     /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
-    /// use nexus_db_queries::db::lookup::LookupPath;
     /// use nexus_db_queries::db::model::Name;
     /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
@@ -817,9 +849,9 @@ impl Nexus {
     /// example stub for the "get" endpoint for that same resource:
     ///
     /// ```
+    /// use nexus_db_lookup::LookupPath;
     /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
-    /// use nexus_db_queries::db::lookup::LookupPath;
     /// use nexus_db_queries::db::model::Name;
     /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;

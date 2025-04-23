@@ -7,11 +7,11 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use crate::db::model::{SemverVersion, TargetRelease, TargetReleaseSource};
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
 use diesel::prelude::*;
+use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_schema::schema::target_release::dsl;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error, LookupResult};

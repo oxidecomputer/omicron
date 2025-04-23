@@ -7,15 +7,15 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::ByteCount;
 use crate::db::model::VirtualProvisioningCollection;
-use crate::db::pool::DbConnection;
 use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use omicron_common::api::external::{DeleteResult, Error};
 use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
@@ -326,8 +326,8 @@ impl DataStore {
 mod test {
     use super::*;
 
-    use crate::db::lookup::LookupPath;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::Instance;
     use nexus_db_model::Project;
     use nexus_db_model::SiloQuotasUpdate;
@@ -411,7 +411,7 @@ mod test {
             storage: Some(1 << 50),
             time_modified: chrono::Utc::now(),
         };
-        let authz_silo = LookupPath::new(&opctx, &datastore)
+        let authz_silo = LookupPath::new(&opctx, datastore)
             .silo_id(silo_id)
             .lookup_for(crate::authz::Action::Modify)
             .await

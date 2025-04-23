@@ -7,10 +7,10 @@
 
 use crate::context::OpContext;
 use crate::db::DataStore;
-use crate::db::DbConnection;
 use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::IpPool;
 use nexus_sled_agent_shared::inventory::ZoneKind;
