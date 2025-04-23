@@ -21,6 +21,16 @@ use clap::Args;
 use clap::ColorChoice;
 use clap::Subcommand;
 use clap::ValueEnum;
+use crossterm::{
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode,
+    },
+    execute,
+    terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode,
+    },
+};
 use futures::StreamExt;
 use futures::TryStreamExt;
 use futures::future::try_join;
@@ -69,12 +79,28 @@ use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use ratatui::Frame;
+use ratatui::Terminal;
+use ratatui::backend::Backend;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Constraint;
+use ratatui::layout::Layout;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::List;
+use ratatui::widgets::ListState;
+use ratatui::widgets::Paragraph;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
+use support_bundle_reader_lib::SupportBundleAccessor;
+use support_bundle_reader_lib::SupportBundleDashboard;
 use tabled::Tabled;
 use tabled::settings::Padding;
 use tabled::settings::object::Columns;
@@ -466,6 +492,8 @@ enum SupportBundleCommands {
     GetIndex(SupportBundleIndexArgs),
     /// View a file within a support bundle
     GetFile(SupportBundleFileArgs),
+    /// Creates dashboard for viewing the contents of a support bundle
+    Inspect(SupportBundleInspectArgs),
 }
 
 #[derive(Debug, Args)]
@@ -482,6 +510,15 @@ struct SupportBundleIndexArgs {
 struct SupportBundleFileArgs {
     id: SupportBundleUuid,
     path: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleInspectArgs {
+    /// A specific bundle to inspect. If none is supplied, the latest active
+    /// bundle is used.
+    id: Option<SupportBundleUuid>,
+
+    // TODO: Option to view a local file?
 }
 
 impl NexusArgs {
@@ -683,6 +720,10 @@ impl NexusArgs {
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::GetFile(args),
             }) => cmd_nexus_support_bundles_get_file(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Inspect(args),
+            }) => cmd_nexus_support_bundles_inspect(&client, args).await,
+
         }
     }
 }
@@ -3443,4 +3484,197 @@ async fn cmd_nexus_support_bundles_get_file(
         format!("streaming support bundle file {}: {}", args.id, args.path)
     })?;
     Ok(())
+}
+
+enum InspectRunStep {
+    // Keep running the dashboard
+    Continue,
+    // Exit the dashboard
+    Exit,
+    // Exit the dashboard GUI, but pipe a selected file to an output stream
+    PipeFile,
+}
+
+/// Runs `omdb nexus support-bundles inspect`
+async fn cmd_nexus_support_bundles_inspect(
+    client: &nexus_client::Client,
+    args: &SupportBundleInspectArgs,
+) -> Result<(), anyhow::Error> {
+    let id = match args.id {
+        Some(id) => id,
+        None => {
+            // Grab the latest if one isn't supplied
+            let support_bundle_stream = client.support_bundle_list_stream(None, None);
+            let mut support_bundles = support_bundle_stream
+                .try_collect::<Vec<_>>()
+                .await
+                .context("listing support bundles")?;
+            support_bundles.sort_by_key(|k| k.time_created);
+
+            let sb = support_bundles.into_iter().find(|sb| {
+                matches!(sb.state, nexus_client::types::SupportBundleState::Active)
+            }).ok_or(anyhow::anyhow!("Cannot find active support bundle. Try creating one"))?;
+
+            eprintln!("Inspecting bundle {} from {}", sb.id, sb.time_created);
+
+            SupportBundleUuid::from_untyped_uuid(sb.id.into_untyped_uuid())
+        }
+    };
+
+    let accessor = support_bundle_reader_lib::InternalApiAccess::new(
+        client,
+        id,
+    );
+    let mut dashboard = SupportBundleDashboard::new(
+        &accessor,
+    ).await?;
+
+    enable_raw_mode()?;
+
+    // TODO: It should probably be a flag whether or not this is stderr or
+    // stdout.
+    let mut stderr = std::io::stderr();
+    execute!(stderr, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stderr);
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut force_update = true;
+    let pipe_selected_file = loop {
+        match run_support_bundle_dashboard(
+            &mut terminal,
+            &mut dashboard,
+            force_update,
+        ).await {
+            Err(err) => break Err(err),
+            Ok(InspectRunStep::Exit) => break Ok(false),
+            Ok(InspectRunStep::Continue) => (),
+            Ok(InspectRunStep::PipeFile) => break Ok(true),
+        };
+
+        force_update = false;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+
+    // restore terminal
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    match pipe_selected_file {
+        Ok(true) => {
+            if let Some(contents) = dashboard.buffered_file_contents() {
+                std::io::copy(&mut std::io::Cursor::new(contents.as_bytes()), &mut std::io::stdout())?;
+            }
+        },
+        Ok(false) => (),
+        Err(err) => eprintln!("{err:?}"),
+    }
+    Ok(())
+}
+
+async fn run_support_bundle_dashboard<'a, B: Backend, S: SupportBundleAccessor>(
+    terminal: &mut Terminal<B>,
+    dashboard: &mut SupportBundleDashboard<'a, S>,
+    force_update: bool,
+) -> anyhow::Result<InspectRunStep> {
+    let update = if crossterm::event::poll(Duration::from_secs(0))? {
+        if let Event::Key(key) = event::read()? {
+            match key.code {
+                KeyCode::Char('q') => return Ok(InspectRunStep::Exit),
+                KeyCode::Up | KeyCode::Char('k') => dashboard.select_up(),
+                KeyCode::Down | KeyCode::Char('j') => dashboard.select_down(),
+                KeyCode::Char(' ') => {
+                    dashboard.open_and_buffer().await?;
+                    return Ok(InspectRunStep::PipeFile);
+                }
+                // TODO: file text seems to not wrap around; it probably should?
+                KeyCode::Enter => dashboard.toggle_file_open().await?,
+                _ => {}
+            }
+        }
+        true
+    } else {
+        force_update
+    };
+
+    if force_update {
+        terminal.clear()?;
+    }
+
+    if update {
+        terminal.draw(|f| draw(f, dashboard))?;
+    }
+
+    Ok(InspectRunStep::Continue)
+}
+
+fn create_file_list<'a, S: SupportBundleAccessor>(dashboard: &'a SupportBundleDashboard<'_, S>) -> List<'a> {
+   let files = dashboard.index()
+        .files()
+        .iter()
+        .map(|f| f.as_str());
+    List::new(files)
+        .highlight_symbol("> ")
+        .highlight_style(Style::new().add_modifier(Modifier::BOLD))
+        .block(
+            Block::new().title("Files").borders(Borders::ALL)
+        )
+}
+
+fn create_file_contents<'a, S: SupportBundleAccessor>(dashboard: &'a SupportBundleDashboard<'_, S>) -> Option<Paragraph<'a>> {
+    dashboard.buffered_file_contents().map(|c| {
+        Paragraph::new(c)
+            .block(
+                Block::new().title(dashboard.selected_file_name().as_str())
+                    .borders(Borders::ALL)
+            )
+    })
+}
+
+const FILE_PICKER_USAGE: [&'static str; 3] = [
+    "Press UP or DOWN to select a file",
+    "Press ENTER to view a file, or SPACE to exit the terminal and dump the file to stdout",
+    "Press 'q' to quit",
+];
+
+const FILE_VIEWER_USAGE: [&'static str; 3] = [
+    "Press ENTER to stop viewing file",
+    "",
+    "Press 'q' to quit",
+];
+
+fn draw<'a, S: SupportBundleAccessor>(
+    f: &mut Frame, dashboard: &mut SupportBundleDashboard<'a, S>
+) {
+    let file_list = create_file_list(dashboard);
+    let file_contents = create_file_contents(dashboard);
+
+    let mut file_state = ListState::default()
+        .with_offset(0)
+        .with_selected(Some(dashboard.selected_file_index()));
+
+    let layout = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(5),
+    ]);
+
+
+    let [main_display_rect, usage_rect] = layout.areas(f.area());
+
+    if let Some(file_contents) = file_contents {
+        let usage_list = List::new(FILE_VIEWER_USAGE)
+            .block(Block::new().title("Usage").borders(Borders::ALL));
+
+        f.render_widget(file_contents, main_display_rect);
+        f.render_widget(usage_list, usage_rect);
+    } else {
+        let usage_list = List::new(FILE_PICKER_USAGE)
+            .block(Block::new().title("Usage").borders(Borders::ALL));
+        f.render_stateful_widget(file_list, main_display_rect, &mut file_state);
+        f.render_widget(usage_list, usage_rect);
+    }
 }
