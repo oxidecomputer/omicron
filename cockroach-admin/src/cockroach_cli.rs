@@ -185,24 +185,17 @@ impl CockroachCli {
         F: FnOnce(&Output) -> Result<T, CockroachCliError>,
         I: IntoIterator<Item = &'a str>,
     {
-        let mut command = Command::new(&self.path_to_cockroach_binary);
-        for arg in subcommand_args {
-            command.arg(arg);
-        }
-        command
-            .arg("--host")
-            .arg(&format!("{}", self.cockroach_address))
-            .arg("--insecure");
-        let output = command.output().await.map_err(|err| {
-            CockroachCliError::InvokeCli {
-                subcommand: subcommand_description,
-                err,
-            }
-        })?;
-        if !output.status.success() {
-            return Err(output_to_exec_error(command.as_std(), &output).into());
-        }
-        parse_output(&output)
+        self.invoke_cli_raw(
+            subcommand_args,
+            |command, output| {
+                if !output.status.success() {
+                    return Err(output_to_exec_error(command, output).into());
+                }
+                parse_output(&output)
+            },
+            subcommand_description,
+        )
+        .await
     }
 
     async fn invoke_cli_raw<'a, F, I, T>(
@@ -442,6 +435,10 @@ mod tests {
                 .current_dir(&tempdir)
                 .arg("start")
                 .arg("--insecure")
+                .arg("--listen-addr")
+                .arg("[::1]:0")
+                .arg("--http-addr")
+                .arg("[::1]:0")
                 .arg("--join")
                 .arg("[::1]:0");
 

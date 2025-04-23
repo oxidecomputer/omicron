@@ -37,7 +37,6 @@ toml.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
-anyhow.workspace = true
 expectorate.workspace = true
 nexus-test-utils.workspace = true
 omicron-test-utils.workspace = true
