@@ -98,6 +98,7 @@ pub struct SystemDescription {
     clickhouse_policy: Option<ClickhousePolicy>,
     oximeter_read_policy: OximeterReadPolicy,
     tuf_repo: Option<TufRepoDescription>,
+    old_repo: Option<TufRepoDescription>,
 }
 
 impl SystemDescription {
@@ -178,6 +179,7 @@ impl SystemDescription {
             clickhouse_policy: None,
             oximeter_read_policy: OximeterReadPolicy::new(1),
             tuf_repo: None,
+            old_repo: None,
         }
     }
 
@@ -431,6 +433,7 @@ impl SystemDescription {
             clickhouse_policy: self.clickhouse_policy.clone(),
             oximeter_read_policy: self.oximeter_read_policy.clone(),
             tuf_repo: self.tuf_repo.clone(),
+            old_repo: self.old_repo.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,

@@ -27,6 +27,7 @@ use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
@@ -997,6 +998,17 @@ pub enum BlueprintZoneImageSource {
     /// replicated out to all sleds.
     #[serde(rename_all = "snake_case")]
     Artifact { version: BlueprintZoneImageVersion, hash: ArtifactHash },
+}
+
+impl BlueprintZoneImageSource {
+    pub fn from_available_artifact(artifact: &TufArtifactMeta) -> Self {
+        BlueprintZoneImageSource::Artifact {
+            version: BlueprintZoneImageVersion::Available {
+                version: artifact.id.version.clone(),
+            },
+            hash: artifact.hash,
+        }
+    }
 }
 
 impl From<BlueprintZoneImageSource> for OmicronZoneImageSource {

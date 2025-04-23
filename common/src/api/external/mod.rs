@@ -748,6 +748,10 @@ impl Generation {
         );
         Generation(next_gen)
     }
+
+    pub const fn prev(&self) -> Option<Generation> {
+        if self.0 > 1 { Some(Generation(self.0 - 1)) } else { None }
+    }
 }
 
 impl<'de> Deserialize<'de> for Generation {

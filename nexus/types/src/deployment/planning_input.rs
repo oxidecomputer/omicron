@@ -157,6 +157,10 @@ impl PlanningInput {
         self.policy.tuf_repo.as_ref()
     }
 
+    pub fn old_repo(&self) -> Option<&TufRepoDescription> {
+        self.policy.old_repo.as_ref()
+    }
+
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
         &self.policy.service_ip_pool_ranges
     }
@@ -926,10 +930,16 @@ pub struct Policy {
 
     /// Desired system software release repository.
     ///
-    /// New zones will use artifacts in this repo as their image sources,
+    /// New zones may use artifacts in this repo as their image sources,
     /// and at most one extant zone may be modified to use it or replaced
     /// with one that does.
     pub tuf_repo: Option<TufRepoDescription>,
+
+    /// Previous system software release repository.
+    ///
+    /// New zones deployed mid-update may use artifacts in this repo as
+    /// their image sources. See RFD 565 §9.
+    pub old_repo: Option<TufRepoDescription>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1100,6 +1110,7 @@ impl PlanningInputBuilder {
                 clickhouse_policy: None,
                 oximeter_read_policy: OximeterReadPolicy::new(1),
                 tuf_repo: None,
+                old_repo: None,
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

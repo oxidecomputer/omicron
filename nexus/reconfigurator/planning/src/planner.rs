@@ -37,7 +37,6 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
 use slog::{Logger, info, warn};
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
@@ -47,9 +46,11 @@ use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 pub use self::rng::PlannerRng;
 pub use self::rng::SledPlannerRng;
+pub(crate) use self::update_sequence::OrderedComponent;
 
 mod omicron_zone_placement;
 pub(crate) mod rng;
+mod update_sequence;
 
 pub struct Planner<'a> {
     log: Logger,
@@ -116,7 +117,7 @@ impl<'a> Planner<'a> {
         self.do_plan_expunge()?;
         self.do_plan_add()?;
         self.do_plan_decommission()?;
-        self.do_plan_zone_image_source()?;
+        self.do_plan_zone_updates()?;
         self.do_plan_cockroachdb_settings();
         Ok(())
     }
@@ -878,7 +879,7 @@ impl<'a> Planner<'a> {
     }
 
     /// Update at most one existing zone to use a new image source.
-    fn do_plan_zone_image_source(&mut self) -> Result<(), Error> {
+    fn do_plan_zone_updates(&mut self) -> Result<(), Error> {
         // We are only interested in non-decommissioned sleds.
         let sleds = self
             .input
@@ -938,7 +939,7 @@ impl<'a> Planner<'a> {
 
         sort_zones_by_deps(&mut out_of_date_zones);
         if let Some((sled_id, zone)) = out_of_date_zones.first() {
-            return self.update_zone_image_source(*sled_id, zone);
+            return self.update_or_expunge_zone(*sled_id, zone);
         }
 
         info!(self.log, "all zones up-to-date");
@@ -946,8 +947,8 @@ impl<'a> Planner<'a> {
     }
 
     /// Update a zone to use a new image source, either in-place or by
-    /// expunging & replacing it (depending on the kind of zone).
-    fn update_zone_image_source(
+    /// expunging it and letting it be replaced in a future iteration.
+    fn update_or_expunge_zone(
         &mut self,
         sled_id: SledUuid,
         zone: &BlueprintZoneConfig,
@@ -962,6 +963,7 @@ impl<'a> Planner<'a> {
                     self.log, "updating zone image source in-place";
                     "sled_id" => %sled_id,
                     "zone_id" => %zone.id,
+                    "kind" => ?zone.zone_type.kind(),
                     "image_source" => %image_source,
                 );
                 self.blueprint.sled_set_zone_source(
@@ -970,87 +972,14 @@ impl<'a> Planner<'a> {
                     image_source,
                 )?;
             }
-            ZoneKind::BoundaryNtp => {
+            _ => {
                 info!(
-                    self.log, "replacing out-of-date BoundaryNtp zone";
+                    self.log, "expunging out-of-date zone";
                     "sled_id" => %sled_id,
                     "zone_id" => %zone.id,
+                    "kind" => ?zone.zone_type.kind(),
                 );
                 self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
-                self.blueprint
-                    .sled_promote_internal_ntp_to_boundary_ntp(sled_id)?;
-            }
-            ZoneKind::ClickhouseKeeper => {
-                info!(
-                    self.log, "replacing out-of-date ClickhouseKeeper zone";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone.id,
-                );
-                self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
-                self.blueprint.sled_add_zone_clickhouse_keeper(sled_id)?;
-            }
-            ZoneKind::ClickhouseServer => {
-                info!(
-                    self.log, "replacing out-of-date ClickhouseServer zone";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone.id,
-                );
-                self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
-                self.blueprint.sled_add_zone_clickhouse_server(sled_id)?;
-            }
-            ZoneKind::CruciblePantry => {
-                info!(
-                    self.log, "replacing out-of-date CruciblePantry zone";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone.id,
-                );
-                self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
-                self.blueprint.sled_add_zone_crucible_pantry(sled_id)?;
-            }
-            ZoneKind::ExternalDns => {
-                info!(
-                    self.log, "replacing out-of-date ExternalDns zone";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone.id,
-                );
-                self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
-                self.blueprint.sled_add_zone_external_dns(sled_id)?;
-            }
-            ZoneKind::InternalDns => {
-                info!(
-                    self.log, "replacing out-of-date InternalDns zone";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone.id,
-                );
-                self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
-                self.blueprint.sled_add_zone_internal_dns(sled_id)?;
-            }
-            ZoneKind::InternalNtp => {
-                info!(
-                    self.log, "replacing out-of-date InternalNtp zone";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone.id,
-                );
-                self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
-                self.blueprint.sled_ensure_zone_ntp(sled_id)?;
-            }
-            ZoneKind::Nexus => {
-                info!(
-                    self.log, "replacing out-of-date Nexus zone";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone.id,
-                );
-                self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
-                self.blueprint.sled_add_zone_nexus(sled_id)?;
-            }
-            ZoneKind::Oximeter => {
-                info!(
-                    self.log, "replacing out-of-date Oximeter zone";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone.id,
-                );
-                self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
-                self.blueprint.sled_add_zone_oximeter(sled_id)?;
             }
         }
         Ok(())
@@ -1151,17 +1080,12 @@ impl<'a> Planner<'a> {
     }
 }
 
-/// Sort in place a vector of zone configurations by API dependencies
-/// (RFD 565 §6). For now, we encode a simplified dependency graph manually;
-/// down the road, we should programmatically import it from `ls-apis`.
+/// Sort in place a vector of sled-specific zone configurations by API
+/// dependencies (RFD 565 §6).
 fn sort_zones_by_deps(zones: &mut Vec<(SledUuid, BlueprintZoneConfig)>) {
-    zones.sort_by(|a, b| match (a.1.zone_type.kind(), b.1.zone_type.kind()) {
-        (s, t) if s == t => Ordering::Equal,
-        (ZoneKind::CruciblePantry, _) => Ordering::Less,
-        (_, ZoneKind::CruciblePantry) => Ordering::Greater,
-        (_, ZoneKind::Nexus) => Ordering::Less,
-        (ZoneKind::Nexus, _) => Ordering::Greater,
-        (_, _) => Ordering::Equal,
+    zones.sort_by(|a, b| {
+        OrderedComponent::from(a.1.zone_type.kind())
+            .cmp(&OrderedComponent::from(b.1.zone_type.kind()))
     })
 }
 
@@ -1179,6 +1103,7 @@ pub(crate) enum ZoneExpungeReason {
 pub(crate) mod test {
     use super::*;
     use crate::blueprint_builder::test::verify_blueprint;
+    use crate::example::ExampleSystem;
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
     use crate::example::example;
@@ -1211,6 +1136,7 @@ pub(crate) mod test {
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
+    use omicron_common::policy::NEXUS_REDUNDANCY;
     use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -4557,31 +4483,44 @@ pub(crate) mod test {
 
         // Sort them and verify the ordering constraints.
         sort_zones_by_deps(&mut zones);
-        let mut pantry = false;
         let mut nexus = false;
         for kind in zones.iter().map(|(_, z)| z.zone_type.kind()) {
             match kind {
-                ZoneKind::CruciblePantry => {
-                    assert!(!nexus);
-                    pantry = true;
-                }
                 ZoneKind::Nexus => {
-                    assert!(pantry);
                     nexus = true;
                 }
                 _ => {
-                    assert!(pantry);
                     assert!(!nexus);
                 }
             }
         }
+        assert!(nexus);
 
         logctx.cleanup_successful();
     }
 
+    /// Manually update the example system's inventory collection's zones
+    /// from a blueprint.
+    fn update_collection_from_blueprint(
+        example: &mut ExampleSystem,
+        blueprint: &Blueprint,
+    ) {
+        for (&sled_id, config) in blueprint.sleds.iter() {
+            example
+                .system
+                .sled_set_omicron_zones(
+                    sled_id,
+                    config.clone().into_in_service_sled_config().zones_config,
+                )
+                .expect("can't set omicron zones for sled");
+        }
+        example.collection =
+            example.system.to_collection_builder().unwrap().build();
+    }
+
     #[test]
-    fn test_plan_tuf_repo() {
-        static TEST_NAME: &str = "plan_tuf_repo";
+    fn test_update_crucible_pantry() {
+        static TEST_NAME: &str = "update_crucible_pantry";
         let logctx = test_setup_log(TEST_NAME);
         let log = logctx.log.clone();
 
@@ -4592,36 +4531,15 @@ pub(crate) mod test {
             rng.next_system_rng(),
         )
         .build();
-        let input = example.input;
-        let collection = example.collection;
         verify_blueprint(&blueprint1);
 
-        // We'll be manually updating our inventory collection's zones
-        // from blueprints.
-        let mut update_collection_from_blueprint =
-            |blueprint: &Blueprint| -> Collection {
-                for (&sled_id, config) in blueprint.sleds.iter() {
-                    example
-                        .system
-                        .sled_set_omicron_zones(
-                            sled_id,
-                            config
-                                .clone()
-                                .into_in_service_sled_config()
-                                .zones_config,
-                        )
-                        .expect("can't set omicron zones for sled");
-                }
-                example.system.to_collection_builder().unwrap().build()
-            };
-
         // We should start with no specified TUF repo and nothing to do.
-        assert!(input.tuf_repo().is_none());
+        assert!(example.input.tuf_repo().is_none());
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint1,
-            &input,
-            &collection,
+            &example.input,
+            &example.collection,
             TEST_NAME,
         );
 
@@ -4636,7 +4554,7 @@ pub(crate) mod test {
         );
 
         // Manually specify a trivial TUF repo.
-        let mut input_builder = input.into_builder();
+        let mut input_builder = example.input.clone().into_builder();
         input_builder.policy_mut().tuf_repo = Some(TufRepoDescription {
             repo: TufRepoMeta {
                 hash: ArtifactHash([0; 32]),
@@ -4653,7 +4571,7 @@ pub(crate) mod test {
             &blueprint1,
             &input,
             "test_blueprint2",
-            &collection,
+            &example.collection,
         )
         .expect("can't create planner")
         .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
@@ -4662,7 +4580,7 @@ pub(crate) mod test {
 
         // All zones should still be sourced from the install dataset.
         assert!(
-            blueprint1
+            blueprint2
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .all(|(_, z)| matches!(
                     z.image_source,
@@ -4670,8 +4588,9 @@ pub(crate) mod test {
                 ))
         );
 
-        // Manually specify a TUF repo with some fake zone images.
-        // Only the name and kind of the artifacts matter.
+        // Manually specify a TUF repo with fake zone images for Crucible Pantry
+        // and Nexus. Only the name and kind of the artifacts matter. The Nexus
+        // artifact is only there to make sure the planner *doesn't* use it.
         let mut input_builder = input.into_builder();
         let version = ArtifactVersion::new_static("1.0.0-freeform")
             .expect("can't parse artifact version");
@@ -4714,181 +4633,259 @@ pub(crate) mod test {
         });
 
         // Some helper predicates for the assertions below.
-        let is_up_to_date = |zone: &BlueprintZoneConfig| -> bool {
-            zone.image_source == image_source
+        let is_old_nexus = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_nexus()
+                && matches!(
+                    zone.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                )
         };
-        let is_up_to_date_nexus = |zone: &BlueprintZoneConfig| -> bool {
-            zone.zone_type.is_nexus() && is_up_to_date(zone)
+        let is_old_pantry = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_crucible_pantry()
+                && matches!(
+                    zone.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                )
         };
         let is_up_to_date_pantry = |zone: &BlueprintZoneConfig| -> bool {
-            zone.zone_type.is_crucible_pantry() && is_up_to_date(zone)
+            zone.zone_type.is_crucible_pantry()
+                && zone.image_source == image_source
         };
 
-        // Add a new Nexus zone.
+        // Request another Nexus zone. This should *not* use the new artifact,
+        // since not all of its dependencies can be updated.
         input_builder.policy_mut().target_nexus_zone_count =
             input_builder.policy_mut().target_nexus_zone_count + 1;
-
         let input = input_builder.build();
-        let blueprint3 = Planner::new_based_on(
-            log.clone(),
-            &blueprint1,
-            &input,
-            "test_blueprint3",
-            &collection,
-        )
-        .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
-        .plan()
-        .expect("plan for non-trivial TUF repo");
 
-        // There should be new Nexus & Crucible Pantry zones that use the new artifact.
-        let summary = blueprint3.diff_since_blueprint(&blueprint2);
-        let mut added_count = 0;
-        for sled_cfg in summary.diff.sleds.modified_values_diff() {
-            added_count += sled_cfg.zones.added.len();
-            for z in sled_cfg.zones.added.values() {
-                assert!(is_up_to_date_nexus(z) || is_up_to_date_pantry(z));
-            }
+        // We should now have three sets of expunge/add iterations for the
+        // Crucible Pantry zones.
+        let mut parent = blueprint2;
+        for i in 3..=8 {
+            let blueprint_name = format!("blueprint_{i}");
+            update_collection_from_blueprint(&mut example, &parent);
+            let blueprint = Planner::new_based_on(
+                log.clone(),
+                &parent,
+                &input,
+                &blueprint_name,
+                &example.collection,
+            )
+            .expect("can't create planner")
+            .with_rng(PlannerRng::from_seed((TEST_NAME, &blueprint_name)))
+            .plan()
+            .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
+            parent = blueprint;
         }
-        assert_eq!(added_count, 2);
 
-        // Mutate the inventory to include the updated Nexus & Pantry zones.
-        let collection = update_collection_from_blueprint(&blueprint3);
-
-        // Replan with the new inventory.
-        let blueprint4 = Planner::new_based_on(
-            log.clone(),
-            &blueprint3,
-            &input,
-            "test_blueprint4",
-            &collection,
-        )
-        .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
-        .plan()
-        .expect("replan with updated inventory");
-
-        // Now two Crucible Pantry zones should use the new artifact.
+        // All Crucible Pantries should now be updated.
         assert_eq!(
-            blueprint4
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-                .filter(|(_, z)| is_up_to_date_pantry(z))
-                .count(),
-            2
-        );
-
-        // One more cycle for the third Crucible Pantry to update.
-        let collection = update_collection_from_blueprint(&blueprint4);
-        let blueprint5 = Planner::new_based_on(
-            log.clone(),
-            &blueprint4,
-            &input,
-            "test_blueprint5",
-            &collection,
-        )
-        .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp5")))
-        .plan()
-        .expect("replan with updated inventory");
-
-        assert_eq!(
-            blueprint5
+            parent
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, z)| is_up_to_date_pantry(z))
                 .count(),
             CRUCIBLE_PANTRY_REDUNDANCY
         );
 
-        // The next few planning cycles should get us up-to-date Nexus zones.
-        let collection = update_collection_from_blueprint(&blueprint5);
-        let blueprint6 = Planner::new_based_on(
+        // One more iteration for the last old zone to be expunged.
+        update_collection_from_blueprint(&mut example, &parent);
+        let blueprint = Planner::new_based_on(
             log.clone(),
-            &blueprint5,
+            &parent,
             &input,
-            "test_blueprint6",
-            &collection,
+            "last_blueprint",
+            &example.collection,
         )
         .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp6")))
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "last_bp")))
         .plan()
-        .expect("replan with updated inventory");
+        .expect("replan for last blueprint");
+
         assert_eq!(
-            blueprint6
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-                .filter(|(_, z)| is_up_to_date_nexus(z))
+            blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_expunged)
+                .filter(|(_, z)| is_old_pantry(z))
                 .count(),
-            2,
+            CRUCIBLE_PANTRY_REDUNDANCY
         );
 
-        let collection = update_collection_from_blueprint(&blueprint6);
-        let blueprint7 = Planner::new_based_on(
-            log.clone(),
-            &blueprint6,
-            &input,
-            "test_blueprint7",
-            &collection,
-        )
-        .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp7")))
-        .plan()
-        .expect("replan with updated inventory");
+        // We won't be able to update Nexus until *all* of its dependent zones
+        // are updated. Stay tuned for the next test!
         assert_eq!(
-            blueprint7
+            parent
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-                .filter(|(_, z)| is_up_to_date_nexus(z))
+                .filter(|(_, z)| is_old_nexus(z))
                 .count(),
-            3,
+            NEXUS_REDUNDANCY + 1,
         );
-
-        let collection = update_collection_from_blueprint(&blueprint7);
-        let blueprint8 = Planner::new_based_on(
-            log.clone(),
-            &blueprint7,
-            &input,
-            "test_blueprint8",
-            &collection,
-        )
-        .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp8")))
-        .plan()
-        .expect("replan with updated inventory");
-        assert_eq!(
-            blueprint8
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-                .filter(|(_, z)| is_up_to_date_nexus(z))
-                .count(),
-            4,
-        );
-
-        // And the last pass is just to expunge an old Nexus zone.
-        let collection = update_collection_from_blueprint(&blueprint8);
-        let blueprint9 = Planner::new_based_on(
-            log.clone(),
-            &blueprint8,
-            &input,
-            "test_blueprint9",
-            &collection,
-        )
-        .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp9")))
-        .plan()
-        .expect("replan with updated inventory");
-
-        let summary = blueprint9.diff_since_blueprint(&blueprint8);
-        assert_eq!(summary.diff.sleds.added.len(), 0);
-        assert_eq!(summary.diff.sleds.removed.len(), 0);
-        assert_eq!(summary.diff.sleds.modified().count(), 1);
 
         // Everything's up-to-date in Kansas City!
-        let collection = update_collection_from_blueprint(&blueprint9);
+        update_collection_from_blueprint(&mut example, &blueprint);
         assert_planning_makes_no_changes(
             &logctx.log,
-            &blueprint9,
+            &blueprint,
             &input,
-            &collection,
+            &example.collection,
             TEST_NAME,
         );
 
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_update_all_zones() {
+        static TEST_NAME: &str = "update_all_zones";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (mut example, blueprint1) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+        verify_blueprint(&blueprint1);
+
+        // All zones should be sourced from the install dataset by default.
+        assert!(
+            blueprint1
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .all(|(_, z)| matches!(
+                    z.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                ))
+        );
+
+        // Manually specify a TUF repo with fake images for all zones.
+        // Only the name and kind of the artifacts matter.
+        let mut input_builder = example.input.clone().into_builder();
+        let version = ArtifactVersion::new_static("2.0.0-freeform")
+            .expect("can't parse artifact version");
+        let fake_hash = ArtifactHash([0; 32]);
+        let image_source = BlueprintZoneImageSource::Artifact {
+            version: BlueprintZoneImageVersion::Available {
+                version: version.clone(),
+            },
+            hash: fake_hash,
+        };
+        macro_rules! zone_artifact {
+            ($name:expr) => {
+                TufArtifactMeta {
+                    id: ArtifactId {
+                        name: String::from($name),
+                        version: version.clone(),
+                        kind: ArtifactKind::from_known(KnownArtifactKind::Zone),
+                    },
+                    hash: fake_hash,
+                    size: 0,
+                }
+            };
+        }
+        let tuf_repo = TufRepoDescription {
+            repo: TufRepoMeta {
+                hash: fake_hash,
+                targets_role_version: 0,
+                valid_until: Utc::now(),
+                system_version: Version::new(1, 0, 0),
+                file_name: String::from(""),
+            },
+            artifacts: vec![
+                zone_artifact!("ntp"),
+                zone_artifact!("clickhouse"),
+                zone_artifact!("clickhouse_keeper"),
+                zone_artifact!("cockroachdb"),
+                zone_artifact!("crucible-zone"),
+                zone_artifact!("crucible-pantry-zone"),
+                zone_artifact!("external-dns"),
+                zone_artifact!("internal-dns"),
+                zone_artifact!("ntp"),
+                zone_artifact!("nexus"),
+                zone_artifact!("oximeter"),
+            ],
+        };
+        input_builder.policy_mut().tuf_repo = Some(tuf_repo);
+        let input = input_builder.build();
+
+        let mut comp = OrderedComponent::ControlPlaneZone;
+        let mut parent = blueprint1;
+        const MAX_PLANNING_ITERATIONS: usize = 100;
+        for i in 2..=MAX_PLANNING_ITERATIONS {
+            let blueprint_name = format!("blueprint_{i}");
+            update_collection_from_blueprint(&mut example, &parent);
+            let blueprint = Planner::new_based_on(
+                log.clone(),
+                &parent,
+                &input,
+                &blueprint_name,
+                &example.collection,
+            )
+            .expect("can't create planner")
+            .with_rng(PlannerRng::from_seed((TEST_NAME, &blueprint_name)))
+            .plan()
+            .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
+
+            let summary = blueprint.diff_since_blueprint(&parent);
+            if summary.total_zones_added() == 0
+                && summary.total_zones_removed() == 0
+                && summary.total_zones_modified() == 0
+            {
+                println!("planning converged after {i} iterations");
+                assert!(
+                    blueprint
+                        .all_omicron_zones(
+                            BlueprintZoneDisposition::is_in_service
+                        )
+                        .all(|(_, zone)| zone.image_source == image_source)
+                );
+                logctx.cleanup_successful();
+                return;
+            }
+
+            match comp {
+                OrderedComponent::HostOs | OrderedComponent::SpRot => {
+                    unreachable!("can only update zones")
+                }
+                OrderedComponent::ControlPlaneZone => {
+                    assert!(
+                        blueprint
+                            .all_omicron_zones(
+                                BlueprintZoneDisposition::is_in_service
+                            )
+                            .all(|(_, zone)| match zone.zone_type.kind() {
+                                ZoneKind::Nexus => {
+                                    if zone.image_source == image_source {
+                                        comp = comp.next().unwrap();
+                                        true
+                                    } else {
+                                        zone.image_source
+                                            == BlueprintZoneImageSource::InstallDataset
+                                    }
+                                }
+                                _ => zone.image_source
+                                    == BlueprintZoneImageSource::InstallDataset
+                                    || zone.image_source == image_source,
+                            })
+                    );
+                }
+                OrderedComponent::NexusZone => {
+                    assert!(
+                        blueprint
+                            .all_omicron_zones(
+                                BlueprintZoneDisposition::is_in_service
+                            )
+                            .all(|(_, zone)| match zone.zone_type.kind() {
+                                ZoneKind::Nexus => zone.image_source
+                                    == BlueprintZoneImageSource::InstallDataset
+                                    || zone.image_source == image_source,
+                                _ => zone.image_source == image_source,
+                            })
+                    );
+                }
+            }
+
+            parent = blueprint;
+        }
+        panic!("did not converge after {MAX_PLANNING_ITERATIONS} iterations");
     }
 }

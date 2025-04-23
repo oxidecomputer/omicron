@@ -7,6 +7,7 @@
 use anyhow::Context;
 use futures::StreamExt;
 use nexus_db_model::DnsGroup;
+use nexus_db_model::Generation;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::DataStoreDnsTest;
@@ -80,6 +81,7 @@ pub struct PlanningInputFromDb<'a> {
     pub clickhouse_policy: Option<ClickhousePolicy>,
     pub oximeter_read_policy: OximeterReadPolicy,
     pub tuf_repo: Option<TufRepoDescription>,
+    pub old_repo: Option<TufRepoDescription>,
     pub log: &'a Logger,
 }
 
@@ -160,6 +162,25 @@ impl PlanningInputFromDb<'_> {
                     .into_external(),
             ),
         };
+        let prev_release = if let Some(prev) = target_release.generation.prev()
+        {
+            datastore
+                .target_release_get_generation(opctx, Generation(prev))
+                .await
+                .internal_context("fetching current target release")?
+        } else {
+            None
+        };
+        let old_repo = match prev_release.and_then(|r| r.tuf_repo_id) {
+            None => None,
+            Some(repo_id) => Some(
+                datastore
+                    .update_tuf_repo_get_by_id(opctx, repo_id.into())
+                    .await
+                    .internal_context("fetching target release repo")?
+                    .into_external(),
+            ),
+        };
 
         let oximeter_read_policy = datastore
             .oximeter_read_policy_get_latest(opctx)
@@ -187,6 +208,7 @@ impl PlanningInputFromDb<'_> {
             clickhouse_policy,
             oximeter_read_policy,
             tuf_repo,
+            old_repo,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -211,6 +233,7 @@ impl PlanningInputFromDb<'_> {
             clickhouse_policy: self.clickhouse_policy.clone(),
             oximeter_read_policy: self.oximeter_read_policy.clone(),
             tuf_repo: self.tuf_repo.clone(),
+            old_repo: self.old_repo.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,

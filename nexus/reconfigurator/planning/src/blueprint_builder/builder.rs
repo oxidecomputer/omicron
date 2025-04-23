@@ -14,6 +14,7 @@ use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
+use crate::planner::OrderedComponent;
 use crate::planner::ZoneExpungeReason;
 use crate::planner::rng::PlannerRng;
 use anyhow::Context as _;
@@ -33,7 +34,6 @@ use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
-use nexus_types::deployment::BlueprintZoneImageVersion;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -57,6 +57,7 @@ use omicron_common::address::DNS_PORT;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
@@ -83,7 +84,6 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
-use tufaceous_artifact::KnownArtifactKind;
 
 use super::ClickhouseZonesThatShouldBeRunning;
 use super::clickhouse::ClickhouseAllocator;
@@ -1903,34 +1903,55 @@ impl<'a> BlueprintBuilder<'a> {
         self.pending_mgs_updates.remove(baseboard_id);
     }
 
-    /// Try to find an artifact in the release repo that contains an image
-    /// for a zone of the given kind. Defaults to the install dataset.
+    fn zone_image_artifact(
+        repo: Option<&TufRepoDescription>,
+        zone_kind: ZoneKind,
+    ) -> BlueprintZoneImageSource {
+        repo.and_then(|repo| {
+            repo.artifacts
+                .iter()
+                .find(|artifact| {
+                    zone_kind.is_control_plane_zone_artifact(&artifact.id)
+                })
+                .map(BlueprintZoneImageSource::from_available_artifact)
+        })
+        .unwrap_or(BlueprintZoneImageSource::InstallDataset)
+    }
+
+    /// Try to find an artifact in either the current or previous release repo
+    /// that contains an image for a zone of the given kind; see RFD 565 §9.
+    /// Defaults to the install dataset.
     pub(crate) fn zone_image_source(
         &self,
         zone_kind: ZoneKind,
     ) -> BlueprintZoneImageSource {
-        self.input
-            .tuf_repo()
-            .and_then(|repo| {
-                repo.artifacts
-                    .iter()
-                    .find(|artifact| {
-                        artifact
-                            .id
-                            .kind
-                            .to_known()
-                            .map(|kind| matches!(kind, KnownArtifactKind::Zone))
-                            .unwrap_or(false)
-                            && artifact.id.name == zone_kind.artifact_name()
+        let new_repo = self.input.tuf_repo();
+        let old_repo = self.input.old_repo();
+        let new_artifact = Self::zone_image_artifact(new_repo, zone_kind);
+        let old_artifact = Self::zone_image_artifact(old_repo, zone_kind);
+        if let Some(prev) = OrderedComponent::from(zone_kind).prev() {
+            if prev >= OrderedComponent::ControlPlaneZone
+                && self.sled_ids_with_zones().any(|sled_id| {
+                    self.current_sled_zones(
+                        sled_id,
+                        BlueprintZoneDisposition::is_in_service,
+                    )
+                    .any(|z| {
+                        let kind = z.zone_type.kind();
+                        let old_artifact =
+                            Self::zone_image_artifact(old_repo, kind);
+                        OrderedComponent::from(kind) == prev
+                            && z.image_source == old_artifact
                     })
-                    .map(|artifact| BlueprintZoneImageSource::Artifact {
-                        version: BlueprintZoneImageVersion::Available {
-                            version: artifact.id.version.clone(),
-                        },
-                        hash: artifact.hash,
-                    })
-            })
-            .unwrap_or(BlueprintZoneImageSource::InstallDataset)
+                })
+            {
+                old_artifact
+            } else {
+                new_artifact
+            }
+        } else {
+            new_artifact
+        }
     }
 }
 

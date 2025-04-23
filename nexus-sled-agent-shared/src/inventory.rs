@@ -16,6 +16,7 @@ use omicron_common::{
         DatasetManagementStatus, DatasetsConfig, DiskManagementStatus,
         DiskVariant, OmicronPhysicalDisksConfig,
     },
+    update::ArtifactId,
     zpool_name::ZpoolName,
 };
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
@@ -26,7 +27,7 @@ use serde::{Deserialize, Serialize};
 // depend on sled-hardware-types.
 pub use sled_hardware_types::Baseboard;
 use strum::EnumIter;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -492,13 +493,14 @@ impl OmicronZoneType {
 ///
 /// # String representations of this type
 ///
-/// There are no fewer than four string representations for this type, all
+/// There are no fewer than five string representations for this type, all
 /// slightly different from each other.
 ///
 /// 1. [`Self::zone_prefix`]: Used to construct zone names.
 /// 2. [`Self::service_prefix`]: Used to construct SMF service names.
 /// 3. [`Self::name_prefix`]: Used to construct `Name` instances.
 /// 4. [`Self::report_str`]: Used for reporting and testing.
+/// 5. [`Self::artifact_name`]: Used to match TUF artifact names.
 ///
 /// There is no `Display` impl to ensure that users explicitly choose the
 /// representation they want. (Please play close attention to this! The
@@ -635,6 +637,20 @@ impl ZoneKind {
             ZoneKind::Nexus => "nexus",
             ZoneKind::Oximeter => "oximeter",
         }
+    }
+
+    /// Return true if an artifact represents a control plane zone image
+    /// of this kind.
+    pub fn is_control_plane_zone_artifact(
+        self,
+        artifact_id: &ArtifactId,
+    ) -> bool {
+        artifact_id
+            .kind
+            .to_known()
+            .map(|kind| matches!(kind, KnownArtifactKind::Zone))
+            .unwrap_or(false)
+            && artifact_id.name == self.artifact_name()
     }
 }
 
