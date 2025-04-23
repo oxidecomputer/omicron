@@ -17,7 +17,7 @@
 //! Operations that list or modify artifacts or the configuration are called by
 //! Nexus and handled by the Sled Agent API.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::io::{ErrorKind, Write};
 use std::net::SocketAddrV6;
@@ -253,14 +253,26 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         &self,
         sha256: ArtifactHash,
     ) -> Result<File, Error> {
+        Self::get_from_storage(&self.storage, &self.log, sha256).await
+    }
+
+    /// Open an artifact file by hash from a storage handle.
+    ///
+    /// This is the same as [ArtifactStore::get], but can be called with only
+    /// a [StorageHandle].
+    pub(crate) async fn get_from_storage(
+        storage: &T,
+        log: &Logger,
+        sha256: ArtifactHash,
+    ) -> Result<File, Error> {
         let sha256_str = sha256.to_string();
         let mut last_error = None;
-        for mountpoint in self.storage.artifact_storage_paths().await {
+        for mountpoint in storage.artifact_storage_paths().await {
             let path = mountpoint.join(&sha256_str);
             match File::open(&path).await {
                 Ok(file) => {
                     info!(
-                        &self.log,
+                        &log,
                         "Retrieved artifact";
                         "sha256" => &sha256_str,
                         "path" => path.as_str(),
@@ -269,7 +281,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                 }
                 Err(err) if err.kind() == ErrorKind::NotFound => {}
                 Err(err) => {
-                    log_and_store!(last_error, &self.log, "open", path, err);
+                    log_and_store!(last_error, &log, "open", path, err);
                 }
             }
         }
@@ -451,35 +463,22 @@ async fn ledger_manager(
             Ledger::<ArtifactConfig>::new(&log, ledger_paths.clone()).await
         {
             if new_config.generation > ledger.data().generation {
-                // New config generation. First check that it's not asking
-                // us to delete any artifact that is part of the current zone
-                // configuration.
+                // New config generation. First check that the configuration
+                // contains all artifacts that are presently in use.
+                let mut missing = BTreeMap::new();
+                // Check artifacts from the current zone configuration.
                 if let Some(services) = services {
-                    let mut difference = ledger
-                        .data()
-                        .artifacts
-                        .difference(&new_config.artifacts)
-                        .copied()
-                        .peekable();
-                    if difference.peek().is_some() {
-                        let in_use = services
-                            .omicron_zones_list()
-                            .await
-                            .zones
-                            .into_iter()
-                            .filter_map(|zone| {
-                                zone.image_source.artifact_hash()
-                            })
-                            .collect::<BTreeSet<_>>();
-                        for sha256 in difference {
-                            if in_use.contains(&sha256) {
-                                return Err(Error::ArtifactInUse {
-                                    sha256,
-                                    thing: "current zone configuration",
-                                });
+                    for zone in services.omicron_zones_list().await.zones {
+                        if let Some(hash) = zone.image_source.artifact_hash() {
+                            if !new_config.artifacts.contains(&hash) {
+                                missing
+                                    .insert(hash, "current zone configuration");
                             }
                         }
                     }
+                }
+                if !missing.is_empty() {
+                    return Err(Error::InUseArtifactsMissing(missing));
                 }
 
                 // Everything looks okay; update the ledger.
@@ -782,12 +781,6 @@ impl RepoDepotApi for RepoDepotImpl {
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
 pub enum Error {
-    #[error(
-        "Artifact {sha256} is in use by {thing} \
-        but would be deleted by new artifact config"
-    )]
-    ArtifactInUse { sha256: ArtifactHash, thing: &'static str },
-
     #[error("Error while reading request body")]
     Body(dropshot::HttpError),
 
@@ -831,6 +824,9 @@ pub enum Error {
     #[error("Digest mismatch: expected {expected}, actual {actual}")]
     HashMismatch { expected: ArtifactHash, actual: ArtifactHash },
 
+    #[error("Artifacts in use are not present in new config: {0:?}")]
+    InUseArtifactsMissing(BTreeMap<ArtifactHash, &'static str>),
+
     #[error("Blocking task failed")]
     Join(#[source] tokio::task::JoinError),
 
@@ -859,8 +855,8 @@ impl From<Error> for HttpError {
     fn from(err: Error) -> HttpError {
         match err {
             // 4xx errors
-            Error::ArtifactInUse { .. }
-            | Error::HashMismatch { .. }
+            Error::HashMismatch { .. }
+            | Error::InUseArtifactsMissing { .. }
             | Error::NoConfig
             | Error::NotInConfig { .. } => {
                 HttpError::for_bad_request(None, err.to_string())

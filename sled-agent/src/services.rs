@@ -25,6 +25,7 @@
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //!   or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
+use crate::artifact_store::ArtifactStore;
 use crate::bootstrap::BootstrapNetworking;
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
@@ -125,6 +126,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio::sync::{MutexGuard, oneshot};
 use tokio::task::JoinHandle;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use illumos_utils::zone::Zones;
@@ -315,6 +317,18 @@ pub enum Error {
 
     #[error("Unexpected zone config: zone {zone_id} is running on ramdisk ?!")]
     ZoneIsRunningOnRamdisk { zone_id: OmicronZoneUuid },
+
+    #[error(
+        "Couldn't find requested zone image ({hash}) for \
+        {zone_kind:?} {id} in artifact store: {err}"
+    )]
+    ZoneArtifactNotFound {
+        hash: ArtifactHash,
+        zone_kind: &'static str,
+        id: OmicronZoneUuid,
+        #[source]
+        err: crate::artifact_store::Error,
+    },
 }
 
 impl Error {
@@ -3656,6 +3670,26 @@ impl ServiceManager {
         let log = &self.inner.log;
 
         let mut existing_zones = self.inner.zones.lock().await;
+
+        // Ensure that any zone images from the artifact store are present.
+        for zone in &request.zones {
+            if let Some(hash) = zone.image_source.artifact_hash() {
+                if let Err(err) = ArtifactStore::get_from_storage(
+                    &self.inner.storage,
+                    &self.inner.log,
+                    hash,
+                )
+                .await
+                {
+                    return Err(Error::ZoneArtifactNotFound {
+                        hash,
+                        zone_kind: zone.zone_type.kind().report_str(),
+                        id: zone.id,
+                        err,
+                    });
+                }
+            }
+        }
 
         // Read the existing set of services from the ledger.
         let zone_ledger_paths = self.all_omicron_zone_ledgers().await;
