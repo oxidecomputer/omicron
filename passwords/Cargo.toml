@@ -12,6 +12,7 @@ argon2 = { version = "0.5.3", features = ["alloc", "password-hash", "rand", "std
 rand.workspace = true
 thiserror.workspace = true
 schemars.workspace = true
+secrecy.workspace = true
 serde.workspace = true
 serde_with.workspace = true
 omicron-workspace-hack.workspace = true
