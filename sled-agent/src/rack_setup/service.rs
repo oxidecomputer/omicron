@@ -91,10 +91,12 @@ use nexus_client::{
 use nexus_sled_agent_shared::inventory::{
     OmicronSledConfig, OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
-use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintZoneType, CockroachDbPreserveDowngrade, blueprint_zone_type,
+};
+use nexus_types::deployment::{
+    BlueprintSledConfig, OximeterReadMode, PendingMgsUpdates,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -1540,6 +1542,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     Ok(Blueprint {
         id: BlueprintUuid::new_v4(),
         sleds: blueprint_sleds,
+        pending_mgs_updates: PendingMgsUpdates::new(),
         parent_blueprint_id: None,
         internal_dns_version,
         // We don't configure external DNS during RSS, so set it to an initial
@@ -1553,6 +1556,10 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         // We do not create clickhouse clusters in RSS. We create them via
         // reconfigurator only.
         clickhouse_cluster_config: None,
+        // The oximeter read policy always defaults to single node. The
+        // initial generation of this policy in the DB is 1
+        oximeter_read_mode: OximeterReadMode::SingleNode,
+        oximeter_read_version: Generation::new(),
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),

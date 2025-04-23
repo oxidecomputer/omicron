@@ -26,7 +26,7 @@ pub use messages::{
 pub use peer::{Config, Node, NodeHandle, NodeRequestError, Status};
 pub use request_manager::{RequestManager, TrackableRequest};
 pub use share_pkg::{LearnedSharePkg, SharePkg, SharePkgCommon, create_pkgs};
-pub use storage::NetworkConfig;
+pub use storage::{NetworkConfig, PersistentFsmState};
 
 /// The current version of supported messages within the v0 scheme
 ///

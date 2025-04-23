@@ -488,10 +488,19 @@ impl SledAgent {
 
         // Start tracking the underlay physical links.
         for link in underlay::find_chelsio_links(&config.data_links)? {
-            metrics_manager
+            match metrics_manager
                 .request_queue()
                 .track_physical("global", &link.0)
-                .await;
+            {
+                Ok(_) => {
+                    debug!(log, "started tracking global zone underlay links")
+                }
+                Err(e) => error!(
+                    log,
+                    "failed to track global zone underlay link";
+                    "error" => slog_error_chain::InlineErrorChain::new(&e),
+                ),
+            }
         }
 
         // Create the PortManager to manage all the OPTE ports on the sled.

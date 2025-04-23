@@ -6,6 +6,7 @@
 
 use crate::app::switch_port;
 use ipnetwork::IpNetwork;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::Ipv4NatEntry;
@@ -14,7 +15,6 @@ use nexus_db_model::Vni as DbVni;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::SwitchLocation;

@@ -19,6 +19,8 @@ use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use nexus_db_lookup::LookupPath;
+use nexus_db_lookup::lookup;
 use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
@@ -33,8 +35,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
-use nexus_db_queries::db::lookup;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -273,7 +273,7 @@ async fn normalize_ssh_keys(
         .authn
         .actor_required()
         .internal_context("loading current user's ssh keys for new Instance")?;
-    let (.., authz_user) = LookupPath::new(opctx, &datastore)
+    let (.., authz_user) = LookupPath::new(opctx, datastore)
         .silo_user_id(actor.actor_id())
         .lookup_for(authz::Action::ListChildren)
         .await?;

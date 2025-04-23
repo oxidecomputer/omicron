@@ -14,7 +14,7 @@ use nexus_reconfigurator_execution::{
     RealizeBlueprintOutput, RequiredRealizeArgs,
 };
 use nexus_types::deployment::{
-    Blueprint, BlueprintTarget, execution::EventBuffer,
+    Blueprint, BlueprintTarget, PendingMgsUpdates, execution::EventBuffer,
 };
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
@@ -31,6 +31,7 @@ pub struct BlueprintExecutor {
     nexus_id: OmicronZoneUuid,
     tx: watch::Sender<usize>,
     saga_recovery: Activator,
+    mgs_update_tx: watch::Sender<PendingMgsUpdates>,
 }
 
 impl BlueprintExecutor {
@@ -42,6 +43,7 @@ impl BlueprintExecutor {
         >,
         nexus_id: OmicronZoneUuid,
         saga_recovery: Activator,
+        mgs_update_tx: watch::Sender<PendingMgsUpdates>,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
         BlueprintExecutor {
@@ -51,6 +53,7 @@ impl BlueprintExecutor {
             nexus_id,
             tx,
             saga_recovery,
+            mgs_update_tx,
         }
     }
 
@@ -109,6 +112,7 @@ impl BlueprintExecutor {
                 creator: self.nexus_id,
                 blueprint,
                 sender,
+                mgs_updates: self.mgs_update_tx.clone(),
             }
             .as_nexus(self.nexus_id),
         )
@@ -190,7 +194,8 @@ mod test {
     use nexus_types::deployment::{
         Blueprint, BlueprintSledConfig, BlueprintTarget, BlueprintZoneConfig,
         BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
-        CockroachDbPreserveDowngrade, blueprint_zone_type,
+        CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
+        blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external;
@@ -253,6 +258,7 @@ mod test {
         let blueprint = Blueprint {
             id,
             sleds: blueprint_sleds,
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: Some(current_target.target_id),
@@ -260,6 +266,8 @@ mod test {
             external_dns_version: dns_version,
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: chrono::Utc::now(),
             creator: "test".to_string(),
             comment: "test blueprint".to_string(),
@@ -357,12 +365,14 @@ mod test {
         }
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
+        let (dummy_tx, _dummy_rx) = watch::channel(PendingMgsUpdates::new());
         let mut task = BlueprintExecutor::new(
             datastore.clone(),
             resolver.clone(),
             blueprint_rx,
             OmicronZoneUuid::new_v4(),
             Activator::new(),
+            dummy_tx,
         );
 
         // Now we're ready.

@@ -46,6 +46,7 @@ pub use gateway_messages::SpComponent;
 // calls into Nexus, the current scheme is okay.)
 progenitor::generate_api!(
     spec = "../../openapi/gateway.json",
+    interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -69,6 +70,9 @@ progenitor::generate_api!(
         SpIgnition = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpIgnitionSystemType = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },
         SpState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
+        SpType = { derives = [daft::Diffable] },
+        SpUpdateStatus = { derives = [PartialEq, Hash, Eq] },
+        UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
 );
 

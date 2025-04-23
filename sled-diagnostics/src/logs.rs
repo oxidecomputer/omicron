@@ -65,7 +65,7 @@ pub enum LogError {
     Zip(#[from] ZipError),
 }
 
-///A ZFS snapshot that is taken by the `sled-diagnostics` crate and handles
+/// A ZFS snapshot that is taken by the `sled-diagnostics` crate and handles
 /// snapshot deletion on `Drop`.
 #[derive(Debug)]
 struct DiagnosticsSnapshot {

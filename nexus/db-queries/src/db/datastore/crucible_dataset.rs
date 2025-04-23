@@ -8,13 +8,8 @@ use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
-use crate::db::error::retryable;
 use crate::db::identity::Asset;
 use crate::db::model::CrucibleDataset;
 use crate::db::model::PhysicalDisk;
@@ -27,6 +22,11 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_errors::retryable;
+use nexus_db_lookup::DbConnection;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -72,7 +72,7 @@ impl DataStore {
     }
 
     async fn crucible_dataset_upsert_on_connection(
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         dataset: CrucibleDataset,
     ) -> Result<CrucibleDataset, TransactionError<Error>> {
         use nexus_db_schema::schema::crucible_dataset::dsl;

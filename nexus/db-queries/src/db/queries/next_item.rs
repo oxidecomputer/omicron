@@ -4,7 +4,6 @@
 
 //! A generic query for selecting a unique next item from a table.
 
-use crate::db::DbConnection;
 use diesel::RunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::pg::Pg;
@@ -17,6 +16,7 @@ use diesel::query_builder::QueryId;
 use diesel::serialize::ToSql;
 use diesel::sql_types;
 use diesel::sql_types::HasSqlType;
+use nexus_db_lookup::DbConnection;
 use std::marker::PhantomData;
 use uuid::Uuid;
 

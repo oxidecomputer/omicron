@@ -7,14 +7,15 @@
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
+use nexus_db_lookup::LookupPath;
+use nexus_db_lookup::lookup;
 use nexus_db_model::{DnsGroup, UserProvisionType};
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::identity::{Asset, Resource};
-use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::{self, lookup};
 use nexus_db_queries::{authn, authz};
 use nexus_types::deployment::execution::blueprint_nexus_external_ips;
 use nexus_types::internal_api::params::DnsRecord;
@@ -900,7 +901,7 @@ impl super::Nexus {
         &'a self,
         opctx: &'a OpContext,
         group_id: &'a Uuid,
-    ) -> db::lookup::SiloGroup<'a> {
+    ) -> lookup::SiloGroup<'a> {
         LookupPath::new(opctx, &self.db_datastore).silo_group_id(*group_id)
     }
 }

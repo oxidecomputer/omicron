@@ -8,12 +8,12 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::DataStore;
 use crate::db::datastore::ValidateTransition;
-use crate::db::lookup::LookupPath;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
 use anyhow::ensure;
 use futures::future::try_join_all;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::SledState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
@@ -252,7 +252,7 @@ pub(super) async fn sled_set_policy(
     check: ValidateTransition,
     expected_old_policy: Expected<SledPolicy>,
 ) -> Result<()> {
-    let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
+    let (authz_sled, _) = LookupPath::new(&opctx, datastore)
         .sled_id(sled_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
@@ -300,7 +300,7 @@ pub(super) async fn sled_set_state(
     check: ValidateTransition,
     expected_old_state: Expected<SledState>,
 ) -> Result<()> {
-    let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
+    let (authz_sled, _) = LookupPath::new(&opctx, datastore)
         .sled_id(sled_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
