@@ -140,7 +140,6 @@ use http::HeaderName;
 use http::HeaderValue;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::SqlU8;
@@ -155,6 +154,7 @@ use nexus_db_queries::db::model::WebhookReceiver;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::model::WebhookSecret;
 use nexus_types::external_api::params;
+use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -286,14 +286,20 @@ impl Nexus {
         params::EventClassFilter { filter }: params::EventClassFilter,
         pagparams: DataPageParams<'_, params::EventClassPage>,
     ) -> ListResultVec<views::EventClass> {
-        let regex = if let Some(glob) = filter {
-            let glob = db::model::WebhookGlob::try_from(glob)?;
-            let re = regex::Regex::new(&glob.regex).map_err(|e| {
+        use nexus_db_model::WebhookSubscriptionKind;
+
+        let regex = if let Some(filter) = filter {
+            let sub = WebhookSubscriptionKind::try_from(filter)?;
+            let regex_string = match sub {
+                WebhookSubscriptionKind::Exact(class) => class.as_str(),
+                WebhookSubscriptionKind::Glob(ref glob) => glob.regex.as_str(),
+            };
+            let re = regex::Regex::new(regex_string).map_err(|e| {
                 // This oughtn't happen, provided the code for producing the
                 // regex for a glob is correct.
                 Error::InternalError {
                     internal_message: format!(
-                        "valid event class globs ({glob:?}) should always \
+                        "valid event class globs ({sub:?}) should always \
                          produce a valid regex, and yet: {e:?}"
                     ),
                 }
@@ -385,10 +391,10 @@ impl Nexus {
         rx: lookup::WebhookReceiver<'_>,
         params: params::WebhookReceiverUpdate,
     ) -> UpdateResult<()> {
-        let (authz_rx, rx) = rx.fetch_for(authz::Action::Modify).await?;
+        let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
         let _ = self
             .datastore()
-            .webhook_rx_update(opctx, &authz_rx, &rx, params)
+            .webhook_rx_update(opctx, &authz_rx, params)
             .await?;
         Ok(())
     }
@@ -400,6 +406,44 @@ impl Nexus {
     ) -> DeleteResult {
         let (authz_rx, db_rx) = rx.fetch_for(authz::Action::Delete).await?;
         self.datastore().webhook_rx_delete(&opctx, &authz_rx, &db_rx).await
+    }
+
+    //
+    // Receiver subscription API methods
+    //
+
+    pub async fn webhook_receiver_subscription_add(
+        &self,
+        opctx: &OpContext,
+        rx: lookup::WebhookReceiver<'_>,
+        subscription: shared::WebhookSubscription,
+    ) -> CreateResult<shared::WebhookSubscription> {
+        let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
+        let db_subscription =
+            nexus_db_model::WebhookSubscriptionKind::try_from(
+                subscription.clone(),
+            )?;
+        let _ = self
+            .datastore()
+            .webhook_rx_subscription_add(opctx, &authz_rx, db_subscription)
+            .await?;
+        Ok(subscription)
+    }
+
+    pub async fn webhook_receiver_subscription_delete(
+        &self,
+        opctx: &OpContext,
+        rx: lookup::WebhookReceiver<'_>,
+        subscription: shared::WebhookSubscription,
+    ) -> DeleteResult {
+        let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
+        let db_subscription =
+            nexus_db_model::WebhookSubscriptionKind::try_from(subscription)?;
+        let _ = self
+            .datastore()
+            .webhook_rx_subscription_delete(opctx, &authz_rx, db_subscription)
+            .await?;
+        Ok(())
     }
 
     //
@@ -1006,7 +1050,7 @@ mod tests {
             limit: u32,
         ) -> Vec<String> {
             let filter = params::EventClassFilter {
-                filter: dbg!(filter).map(ToString::to_string),
+                filter: dbg!(filter).map(|f| f.parse().unwrap()),
             };
             let marker = dbg!(last_seen).map(|last_seen| {
                 params::EventClassPage { last_seen: last_seen.to_string() }

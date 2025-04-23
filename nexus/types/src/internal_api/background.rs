@@ -480,7 +480,7 @@ pub enum WebhookGlobStatus {
     Reprocessed {
         created: usize,
         deleted: usize,
-        prev_version: semver::Version,
+        prev_version: Option<semver::Version>,
     },
 }
 

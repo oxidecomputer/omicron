@@ -74,7 +74,7 @@ impl DataStore {
 
         let subscriptions = events
             .into_iter()
-            .map(WebhookSubscriptionKind::new)
+            .map(WebhookSubscriptionKind::try_from)
             .collect::<Result<Vec<_>, _>>()?;
         let err = OptionalError::new();
         let (rx, secrets) = self
@@ -115,18 +115,24 @@ impl DataStore {
                                 )
                             })
                         })?;
+                    let rx_id = rx.identity.id.into();
 
-                    self.rx_add_subscriptions_on_conn(
-                        opctx,
-                        rx.identity.id.into(),
-                        &subscriptions,
-                        &conn,
-                    )
-                    .await
-                    .map_err(|e| match e {
-                        TransactionError::CustomError(e) => err.bail(e),
-                        TransactionError::Database(e) => e,
-                    })?;
+                    let mut events = Vec::new();
+                    for subscription in subscriptions {
+                        let sub = self
+                            .rx_add_subscription_on_conn(
+                                opctx,
+                                rx_id,
+                                subscription,
+                                &conn,
+                            )
+                            .await
+                            .map_err(|e| match e {
+                                TransactionError::CustomError(e) => err.bail(e),
+                                TransactionError::Database(e) => e,
+                            })?;
+                        events.push(sub);
+                    }
 
                     let mut secrets = Vec::with_capacity(secret_keys.len());
                     for secret in secret_keys {
@@ -333,15 +339,12 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_rx: &authz::WebhookReceiver,
-        db_rx: &WebhookReceiver,
         params: params::WebhookReceiverUpdate,
     ) -> UpdateResult<WebhookReceiver> {
-        use std::collections::HashSet;
-
         opctx.authorize(authz::Action::Modify, authz_rx).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let rx_id = authz_rx.id();
+        let rx_id = authz_rx.id().into_untyped_uuid();
         let update = db::model::WebhookReceiverUpdate {
             subscription_gen: None,
             name: params.identity.name.map(db::model::Name),
@@ -349,114 +352,9 @@ impl DataStore {
             endpoint: params.endpoint.as_ref().map(ToString::to_string),
             time_modified: chrono::Utc::now(),
         };
-
-        // If the update changes event class subscriptions, query to get the
-        // current subscriptions so we can determine the difference in order to
-        // apply the update.
-        //
-        // If we are changing subscriptions, we must perform the changes to the
-        // subscription table in a transaction with the changes to the receiver
-        // table, so that we can undo those changes should the receiver update fail.
-        let rx = if let Some(new_subscriptions) = params.events {
-            let new_subscriptions = new_subscriptions
-                .into_iter()
-                .map(WebhookSubscriptionKind::new)
-                .collect::<Result<HashSet<_>, _>>()?;
-            let curr_subscriptions = self
-                .rx_subscription_list_on_conn(rx_id, &conn)
-                .await?
-                .into_iter()
-                .collect::<HashSet<_>>();
-            let err = OptionalError::new();
-            self.transaction_retry_wrapper("webhook_rx_update")
-                .transaction(&conn, |conn| {
-                    let mut update = update.clone();
-                    let new_subscriptions = new_subscriptions.clone();
-                    let curr_subscriptions = curr_subscriptions.clone();
-                    let db_rx = db_rx.clone();
-                    let err = err.clone();
-                    async move {
-                        let subs_added = self
-                            .rx_add_subscriptions_on_conn(
-                                opctx,
-                                rx_id,
-                                new_subscriptions
-                                    .difference(&curr_subscriptions),
-                                &conn,
-                            )
-                            .await
-                            .map_err(|e| match e {
-                                TransactionError::CustomError(e) => err.bail(e),
-                                TransactionError::Database(e) => e,
-                            })?;
-                        let subs_deleted = self
-                            .rx_delete_subscriptions_on_conn(
-                                opctx,
-                                rx_id,
-                                curr_subscriptions
-                                    .difference(&new_subscriptions)
-                                    .cloned()
-                                    .collect::<Vec<_>>(),
-                                &conn,
-                            )
-                            .await?;
-                        if subs_added + subs_deleted > 0 {
-                            update.subscription_gen =
-                                Some(db_rx.subscription_gen.next().into());
-                        }
-                        self.rx_record_update_on_conn(&db_rx, update, &conn)
-                            .await
-                            .map_err(|e| match e {
-                                TransactionError::CustomError(e) => err.bail(e),
-                                TransactionError::Database(e) => e,
-                            })
-                    }
-                })
-                .await
-                .map_err(|e| {
-                    if let Some(err) = err.take() {
-                        return err;
-                    }
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByResource(authz_rx),
-                    )
-                })?
-        } else {
-            // If we are *not* changing subscriptions, we can just update the
-            // receiver record, eliding the transaction. This will still fail if
-            // the subscription generation has changed since we snapshotted the
-            // receiver.
-            self.rx_record_update_on_conn(db_rx, update, &conn).await.map_err(
-                |e| match e {
-                    TransactionError::CustomError(e) => e,
-                    TransactionError::Database(e) => public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByResource(authz_rx),
-                    ),
-                },
-            )?
-        };
-
-        Ok(rx)
-    }
-
-    /// Update the `webhook_receiver` record for the provided webhook receiver
-    /// and update.
-    ///
-    /// This is factored out as it may or may not be run in a transaction,
-    /// depending on whether or not event subscriptions have changed.
-    async fn rx_record_update_on_conn(
-        &self,
-        curr: &WebhookReceiver,
-        update: db::model::WebhookReceiverUpdate,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<WebhookReceiver, TransactionError<Error>> {
-        let rx_id = curr.identity.id.into_untyped_uuid();
         let result = diesel::update(rx_dsl::webhook_receiver)
             .filter(rx_dsl::id.eq(rx_id))
             .filter(rx_dsl::time_deleted.is_null())
-            .filter(rx_dsl::subscription_gen.eq(curr.subscription_gen))
             .set(update)
             .check_if_exists::<WebhookReceiver>(rx_id)
             .execute_and_check(&conn)
@@ -550,6 +448,65 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Don't forget to like and subscribe!
+    pub async fn webhook_rx_subscription_add(
+        &self,
+        opctx: &OpContext,
+        authz_rx: &authz::WebhookReceiver,
+        subscription: WebhookSubscriptionKind,
+    ) -> CreateResult<()> {
+        opctx.authorize(authz::Action::Modify, authz_rx).await?;
+        self.rx_add_subscription_on_conn(
+            opctx,
+            authz_rx.id(),
+            subscription,
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| match e {
+            TransactionError::CustomError(e) => e,
+            TransactionError::Database(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::NotFoundByResource(authz_rx),
+            ),
+        })
+    }
+
+    pub async fn webhook_rx_subscription_delete(
+        &self,
+        opctx: &OpContext,
+        authz_rx: &authz::WebhookReceiver,
+        subscription: WebhookSubscriptionKind,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Modify, authz_rx).await?;
+        match subscription {
+            WebhookSubscriptionKind::Glob(glob) => {
+                todo!("this part probably has to be a transaction")
+            }
+            WebhookSubscriptionKind::Exact(class) => {
+                diesel::delete(subscription_dsl::webhook_rx_subscription)
+                    .filter(
+                        subscription_dsl::rx_id
+                            .eq(authz_rx.id().into_untyped_uuid()),
+                    )
+                    .filter(subscription_dsl::event_class.eq(class))
+                    .execute_async(
+                        &*self.pool_connection_authorized(&opctx).await?,
+                    )
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(
+                            e,
+                            ErrorHandler::NotFoundByResource(authz_rx),
+                        )
+                    })?;
+            }
+        }
+
+        Ok(())
+    }
+
     async fn rx_subscription_list_on_conn(
         &self,
         rx_id: WebhookReceiverUuid,
@@ -589,117 +546,75 @@ impl DataStore {
         Ok(subscriptions)
     }
 
-    async fn rx_add_subscriptions_on_conn(
+    async fn rx_add_subscription_on_conn(
         &self,
         opctx: &OpContext,
         rx_id: WebhookReceiverUuid,
-        subscriptions: impl IntoIterator<Item = &WebhookSubscriptionKind>,
+        subscription: WebhookSubscriptionKind,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<usize, TransactionError<Error>> {
-        let now = chrono::Utc::now();
-        let mut exact = Vec::new();
-        let mut n_globs = 0;
-        let mut n_glob_subscriptions = 0;
-        for subscription in subscriptions {
-            match subscription {
-                WebhookSubscriptionKind::Glob(glob) => {
-                    let glob = WebhookRxEventGlob::new(rx_id, glob.clone());
-                    n_glob_subscriptions += self
-                        .glob_generate_exact_subs(opctx, &glob, conn)
-                        .await?;
-
-                    let created =
+    ) -> Result<(), TransactionError<Error>> {
+        match subscription {
+            WebhookSubscriptionKind::Glob(glob) => {
+                let glob = WebhookRxEventGlob::new(rx_id, glob);
+                let result: WebhookRxEventGlob =
+                    WebhookReceiver::insert_resource(
+                        rx_id.into_untyped_uuid(),
                         diesel::insert_into(glob_dsl::webhook_rx_event_glob)
-                            .values(glob)
-                            .on_conflict_do_nothing()
-                            .execute_async(conn)
-                            .await?;
-                    n_globs += created;
-                }
-                WebhookSubscriptionKind::Exact(event_class) => {
-                    exact.push(WebhookRxSubscription {
-                        rx_id: rx_id.into(),
-                        event_class: *event_class,
-                        glob: None,
-                        time_created: now,
-                    });
-                }
+                            .values(glob),
+                    )
+                    .insert_and_get_result_async(conn)
+                    .await
+                    .map_err(async_insert_error_to_txn(rx_id.into()))?;
+                slog::debug!(
+                    &opctx.log,
+                    "added glob subscription to webhook receiver";
+                    "rx_id" => ?rx_id,
+                    "subscription" => ?result,
+                );
+            }
+            WebhookSubscriptionKind::Exact(event_class) => {
+                let subscription = WebhookRxSubscription {
+                    rx_id: rx_id.into(),
+                    event_class,
+                    glob: None,
+                    time_created: chrono::Utc::now(),
+                };
+                let result: WebhookRxSubscription =
+                    WebhookReceiver::insert_resource(
+                        rx_id.into_untyped_uuid(),
+                        diesel::insert_into(
+                            subscription_dsl::webhook_rx_subscription,
+                        )
+                        .values(subscription),
+                    )
+                    .insert_and_get_result_async(conn)
+                    .await
+                    .map_err(async_insert_error_to_txn(rx_id.into()))?;
+                slog::debug!(
+                    &opctx.log,
+                    "added exact subscription to webhook receiver";
+                    "rx_id" => ?rx_id,
+                    "subscription" => ?result,
+                );
             }
         }
-
-        let n_exact =
-            self.add_exact_subscription_batch_on_conn(exact, conn).await?;
-        slog::info!(
-            opctx.log,
-            "inserted new subscriptions for webhook receiver";
-            "rx_id" => ?rx_id,
-            "globs" => ?n_globs,
-            "glob_subscriptions" => ?n_glob_subscriptions,
-            "exact_subscriptions" => ?n_exact,
-        );
-        Ok(n_exact + n_globs)
-    }
-
-    async fn rx_delete_subscriptions_on_conn(
-        &self,
-        opctx: &OpContext,
-        rx_id: WebhookReceiverUuid,
-        subscriptions: impl IntoIterator<Item = WebhookSubscriptionKind>,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<usize, diesel::result::Error> {
-        let mut n_exact = 0;
-        let mut n_glob_subscriptions = 0;
-        let mut n_globs = 0;
-        let rx_id = rx_id.into_untyped_uuid();
-        for subscription in subscriptions {
-            match subscription {
-                WebhookSubscriptionKind::Glob(glob) => {
-                    n_glob_subscriptions += diesel::delete(
-                        subscription_dsl::webhook_rx_subscription,
-                    )
-                    .filter(subscription_dsl::rx_id.eq(rx_id))
-                    .filter(subscription_dsl::glob.eq(glob.glob.clone()))
-                    .execute_async(conn)
-                    .await?;
-                    n_globs += diesel::delete(glob_dsl::webhook_rx_event_glob)
-                        .filter(glob_dsl::rx_id.eq(rx_id))
-                        .filter(glob_dsl::glob.eq(glob.glob))
-                        .execute_async(conn)
-                        .await?;
-                }
-                WebhookSubscriptionKind::Exact(event_class) => {
-                    n_exact += diesel::delete(
-                        subscription_dsl::webhook_rx_subscription,
-                    )
-                    .filter(subscription_dsl::rx_id.eq(rx_id))
-                    .filter(subscription_dsl::event_class.eq(event_class))
-                    .execute_async(conn)
-                    .await?;
-                }
-            }
-        }
-
-        slog::info!(
-            opctx.log,
-            "deleted subscriptions for webhook receiver";
-            "rx_id" => ?rx_id,
-            "globs" => ?n_globs,
-            "glob_subscriptions" => ?n_glob_subscriptions,
-            "exact_subscriptions" => ?n_exact,
-        );
-        Ok(n_exact + n_globs)
+        Ok(())
     }
 
     async fn add_exact_subscription_batch_on_conn(
         &self,
+        rx_id: WebhookReceiverUuid,
         subscriptions: Vec<WebhookRxSubscription>,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<usize, diesel::result::Error> {
+    ) -> Result<Vec<WebhookRxSubscription>, TransactionError<Error>> {
+        <WebhookReceiver as DatastoreCollection<WebhookRxSubscription>>::insert_resource(
+            rx_id.into_untyped_uuid(),
         diesel::insert_into(subscription_dsl::webhook_rx_subscription)
             .values(subscriptions)
             .on_conflict_do_nothing()
-            .execute_async(conn)
+        ).insert_and_get_results_async(conn)
             .await
+            .map_err(async_insert_error_to_txn(rx_id.into()))
     }
 
     async fn glob_generate_exact_subs(
@@ -752,13 +667,17 @@ impl DataStore {
             })
             .collect::<Vec<_>>();
         let created = self
-            .add_exact_subscription_batch_on_conn(subscriptions, conn)
-            .await
-            .map_err(TransactionError::Database)?;
+            .add_exact_subscription_batch_on_conn(
+                glob.rx_id.into(),
+                subscriptions,
+                conn,
+            )
+            .await?
+            .len();
         slog::info!(
             &opctx.log,
             "created {created} webhook subscriptions for glob";
-            "webhook_id" => ?glob.rx_id,
+            "rx_id" => ?glob.rx_id,
             "glob" => ?glob.glob.glob,
             "regex" => ?regex,
         );
@@ -801,13 +720,17 @@ impl DataStore {
     // Glob reprocessing
     //
 
-    /// List webhook glob subscriptions which were last processed with a
-    /// database schema version earlier than the current one.
+    /// List webhook glob subscriptions for which new exact subscriptions have
+    /// to be generated.
+    ///
+    /// This includes glob subscriptions that were just created and have no
+    /// exact subscriptions, and globs that were last processed with a previous
+    /// schema version.
     ///
     /// Such subscriptions will need to be reprocessed (by the
     /// [`DataStore::webhook_glob_reprocess`] function), as event classes
     /// matching those globs may have been added in a later schema version.
-    pub async fn webhook_glob_list_outdated(
+    pub async fn webhook_glob_list_reprocessable(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (Uuid, String)>,
@@ -861,9 +784,13 @@ impl DataStore {
             (glob_dsl::rx_id, glob_dsl::glob),
             pagparams,
         )
-        .filter(
+        // Select all globs where either:
+        // - The schema version is NULL (the glob was freshly created and
+        //    has not yet had exact subscriptions generated)
+        // - The schema version is not equal to the current one.
+        .filter(glob_dsl::schema_version.is_null().or(
             glob_dsl::schema_version.ne(SemverVersion::from(SCHEMA_VERSION)),
-        )
+        ))
         .select(WebhookRxEventGlob::as_select())
         .load_async(&*self.pool_connection_authorized(&opctx).await?)
         .await
@@ -888,7 +815,7 @@ impl DataStore {
             "reprocessing outdated webhook glob";
             "rx_id" => ?glob.rx_id,
             "glob" => ?glob.glob.glob,
-            "prior_version" => %glob.schema_version.0,
+            "prior_version" => ?glob.schema_version,
             "current_version" => %SCHEMA_VERSION,
         );
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -915,23 +842,35 @@ impl DataStore {
                             }
                             TransactionError::Database(e) => e,
                         })?;
-                    let did_update =
+                    let update =
                         diesel::update(glob_dsl::webhook_rx_event_glob)
                             .filter(
                                 glob_dsl::rx_id
                                     .eq(glob.rx_id.into_untyped_uuid()),
                             )
                             .filter(glob_dsl::glob.eq(glob.glob.glob.clone()))
-                            .filter(
-                                glob_dsl::schema_version
-                                    .eq(glob.schema_version.clone()),
-                            )
                             .set(
                                 glob_dsl::schema_version
                                     .eq(SemverVersion::from(SCHEMA_VERSION)),
-                            )
-                            .execute_async(&conn)
-                            .await;
+                            );
+                    let did_update = match glob.schema_version {
+                        Some(ref version) => {
+                            update
+                                .filter(
+                                    glob_dsl::schema_version
+                                        .eq(version.clone()),
+                                )
+                                .execute_async(&conn)
+                                .await
+                        }
+                        None => {
+                            update
+                                .filter(glob_dsl::schema_version.is_null())
+                                .execute_async(&conn)
+                                .await
+                        }
+                    };
+
                     match did_update {
                         // Either the glob has been reprocessed by someone else, or
                         // it has been deleted.
@@ -949,7 +888,10 @@ impl DataStore {
                     Ok(WebhookGlobStatus::Reprocessed {
                         created,
                         deleted,
-                        prev_version: glob.schema_version.clone().into(),
+                        prev_version: glob
+                            .schema_version
+                            .clone()
+                            .map(Into::into),
                     })
                 }
             })
@@ -973,7 +915,7 @@ impl DataStore {
                     "reprocessed outdated webhook glob";
                     "rx_id" => ?glob.rx_id,
                     "glob" => ?glob.glob.glob,
-                    "prev_version" => %prev_version,
+                    "prev_version" => ?prev_version,
                     "current_version" => %SCHEMA_VERSION,
                     "subscriptions_created" => ?created,
                     "subscriptions_deleted" => ?deleted,
@@ -985,7 +927,7 @@ impl DataStore {
                     "outdated webhook glob was either already reprocessed or deleted";
                     "rx_id" => ?glob.rx_id,
                     "glob" => ?glob.glob.glob,
-                    "prev_version" => %glob.schema_version.0,
+                    "prev_version" => ?glob.schema_version,
                     "current_version" => %SCHEMA_VERSION,
                 );
             }
@@ -1124,7 +1066,11 @@ mod test {
                     },
                     endpoint: format!("http://{name}").parse().unwrap(),
                     secrets: vec![name.to_string()],
-                    events,
+                    events: events
+                        .into_iter()
+                        .map(TryFrom::try_from)
+                        .collect::<Result<Vec<_>, _>>()
+                        .expect("test event globs shouldn't be malformed"),
                 },
             )
             .await

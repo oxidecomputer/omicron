@@ -2241,7 +2241,7 @@ table! {
         glob -> Text,
         regex -> Text,
         time_created -> Timestamptz,
-        schema_version -> Text,
+        schema_version -> Nullable<Text>,
     }
 }
 

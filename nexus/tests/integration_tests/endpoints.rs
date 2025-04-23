@@ -1175,7 +1175,10 @@ pub static DEMO_WEBHOOK_RECEIVER_CREATE: LazyLock<params::WebhookCreate> =
         },
         endpoint: "https://example.com/my-great-webhook".parse().unwrap(),
         secrets: vec!["my cool secret".to_string()],
-        events: vec!["test.foo.bar".to_string(), "test.*".to_string()],
+        events: vec![
+            "test.foo.bar".parse().unwrap(),
+            "test.*".parse().unwrap(),
+        ],
     });
 
 pub static DEMO_WEBHOOK_RECEIVER_UPDATE: LazyLock<
@@ -1186,11 +1189,6 @@ pub static DEMO_WEBHOOK_RECEIVER_UPDATE: LazyLock<
         description: Some("webhooked on phonics".to_string()),
     },
     endpoint: Some("https://example.com/my-cool-webhook".parse().unwrap()),
-    events: Some(vec![
-        "test.foo.bar".to_string(),
-        "test.*".to_string(),
-        "test.**.baz".to_string(),
-    ]),
 });
 
 pub static DEMO_WEBHOOK_RECEIVER_URL: LazyLock<String> = LazyLock::new(|| {

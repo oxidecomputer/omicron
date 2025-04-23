@@ -11,7 +11,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_event_glob (
     --
     -- This is used to detect when a glob must be re-processed to generate exact
     -- subscriptions on schema changes.
-    schema_version STRING(64) NOT NULL,
+    --
+    -- If this is NULL, no exact subscriptions have been generated for this glob
+    -- yet (i.e. it was just created)
+    schema_version STRING(64),
 
     PRIMARY KEY (rx_id, glob)
 );

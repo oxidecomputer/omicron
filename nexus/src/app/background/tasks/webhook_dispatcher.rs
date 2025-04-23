@@ -136,7 +136,7 @@ impl WebhookDispatcher {
         while let Some(p) = paginator.next() {
             let batch = self
                 .datastore
-                .webhook_glob_list_outdated(opctx, &p.current_pagparams())
+                .webhook_glob_list_reprocessable(opctx, &p.current_pagparams())
                 .await
                 .map_err(|e| {
                     e.internal_context("failed to list outdated webhook globs")
@@ -163,7 +163,7 @@ impl WebhookDispatcher {
                             "failed to reprocess webhook glob";
                             "rx_id" => ?glob.rx_id,
                             "glob" => ?glob.glob.glob,
-                            "glob_version" => %glob.schema_version.0,
+                            "glob_version" => ?glob.schema_version,
                             "error" => %e,
                         );
                         e.to_string()
@@ -407,7 +407,7 @@ mod test {
             .expect("'test.*.bar should be an acceptable glob");
         let mut glob = db::model::WebhookRxEventGlob::new(rx_id, glob);
         // Just make something up that's obviously outdated...
-        glob.schema_version = db::model::SemverVersion::new(100, 0, 0);
+        glob.schema_version = Some(db::model::SemverVersion::new(100, 0, 0));
         diesel::insert_into(glob_dsl::webhook_rx_event_glob)
             .values(glob.clone())
             .execute_async(&*conn)

@@ -174,7 +174,7 @@ fn my_great_webhook_params(
             .parse()
             .expect("this should be a valid URL"),
         secrets: vec![MY_COOL_SECRET.to_string()],
-        events: vec!["test.foo".to_string()],
+        events: vec!["test.foo".parse().unwrap()],
     }
 }
 
@@ -331,7 +331,7 @@ async fn test_webhook_receiver_get(cptestctx: &ControlPlaneTestContext) {
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![MY_COOL_SECRET.to_string()],
-            events: vec!["test.foo".to_string()],
+            events: vec!["test.foo".parse().unwrap()],
         },
     )
     .await;
@@ -363,7 +363,7 @@ async fn test_webhook_receiver_create_delete(
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![MY_COOL_SECRET.to_string()],
-            events: vec!["test.foo".to_string()],
+            events: vec!["test.foo".parse().unwrap()],
         },
     )
     .await;
@@ -399,7 +399,7 @@ async fn test_webhook_receiver_names_are_unique(
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![MY_COOL_SECRET.to_string()],
-            events: vec!["test.foo".to_string()],
+            events: vec!["test.foo".parse().unwrap()],
         },
     )
     .await;
@@ -414,7 +414,7 @@ async fn test_webhook_receiver_names_are_unique(
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![MY_COOL_SECRET.to_string()],
-            events: vec!["test.foo.bar".to_string()],
+            events: vec!["test.foo.bar".parse().unwrap()],
         },
         http::StatusCode::BAD_REQUEST,
     )
@@ -438,7 +438,7 @@ async fn test_cannot_subscribe_to_probes(cptestctx: &ControlPlaneTestContext) {
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![MY_COOL_SECRET.to_string()],
-            events: vec!["probe".to_string(), "test.foo".to_string()],
+            events: vec!["probe".parse().unwrap(), "test.foo".parse().unwrap()],
         },
         http::StatusCode::BAD_REQUEST,
     )
@@ -543,7 +543,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
             },
             endpoint,
             secrets: vec![SECRET1.to_string()],
-            events: vec!["test.foo".to_string()],
+            events: vec!["test.foo".parse().unwrap()],
         },
     )
     .await;
@@ -672,7 +672,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![BAR_SECRET.to_string()],
-            events: vec!["test.foo.bar".to_string()],
+            events: vec!["test.foo.bar".parse().unwrap()],
         },
     )
     .await;
@@ -709,7 +709,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![BAZ_SECRET.to_string()],
-            events: vec!["test.foo.baz".to_string()],
+            events: vec!["test.foo.baz".parse().unwrap()],
         },
     )
     .await;
@@ -746,7 +746,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![STAR_SECRET.to_string()],
-            events: vec!["test.foo.*".to_string()],
+            events: vec!["test.foo.*".parse().unwrap()],
         },
     )
     .await;

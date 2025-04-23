@@ -8,7 +8,6 @@ use crate::Name;
 use crate::SemverVersion;
 use crate::WebhookEventClass;
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema_versions;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -16,6 +15,7 @@ use nexus_db_schema::schema::{
     webhook_receiver, webhook_rx_event_glob, webhook_rx_subscription,
     webhook_secret,
 };
+use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
@@ -48,8 +48,8 @@ impl TryFrom<WebhookReceiverConfig> for views::WebhookReceiver {
             .collect();
         let events = events
             .into_iter()
-            .map(WebhookSubscriptionKind::into_event_class_string)
-            .collect();
+            .map(shared::WebhookSubscription::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
         let endpoint =
             rx.endpoint.parse().map_err(|e| Error::InternalError {
                 // This is an internal error, as we should not have ever allowed
@@ -92,15 +92,25 @@ pub struct WebhookReceiver {
     pub subscription_gen: Generation,
 }
 
-// Note that while we have both a `secret_gen` and a `subscription_gen`, we only
-// implement `DatastoreCollection` for secrets, not subscriptions. This is
-// because subscriptions are updated in a batch, using a transaction, rather
-// than via add and delete operations for individual IDs, like secrets.
 impl DatastoreCollectionConfig<WebhookSecret> for WebhookReceiver {
     type CollectionId = Uuid;
     type GenerationNumberColumn = webhook_receiver::dsl::secret_gen;
     type CollectionTimeDeletedColumn = webhook_receiver::dsl::time_deleted;
     type CollectionIdColumn = webhook_secret::dsl::rx_id;
+}
+
+impl DatastoreCollectionConfig<WebhookRxSubscription> for WebhookReceiver {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = webhook_receiver::dsl::subscription_gen;
+    type CollectionTimeDeletedColumn = webhook_receiver::dsl::time_deleted;
+    type CollectionIdColumn = webhook_rx_subscription::dsl::rx_id;
+}
+
+impl DatastoreCollectionConfig<WebhookRxEventGlob> for WebhookReceiver {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = webhook_receiver::dsl::subscription_gen;
+    type CollectionTimeDeletedColumn = webhook_receiver::dsl::time_deleted;
+    type CollectionIdColumn = webhook_rx_event_glob::dsl::rx_id;
 }
 
 /// Describes a set of updates for the [`WebhookReceiver`] model.
@@ -172,7 +182,7 @@ pub struct WebhookRxEventGlob {
     #[diesel(embed)]
     pub glob: WebhookGlob,
     pub time_created: DateTime<Utc>,
-    pub schema_version: SemverVersion,
+    pub schema_version: Option<SemverVersion>,
 }
 
 impl WebhookRxEventGlob {
@@ -181,7 +191,10 @@ impl WebhookRxEventGlob {
             rx_id: DbTypedUuid(rx_id),
             glob,
             time_created: Utc::now(),
-            schema_version: schema_versions::SCHEMA_VERSION.into(),
+            // When inserting a new glob, set the schema version to NULL,
+            // indicating that the glob will need to be processed before events
+            // can be dispatched.
+            schema_version: None,
         }
     }
 }
@@ -227,12 +240,31 @@ impl WebhookSubscriptionKind {
 
         Ok(Self::Exact(class))
     }
+}
 
-    fn into_event_class_string(self) -> String {
-        match self {
-            Self::Exact(class) => class.to_string(),
-            Self::Glob(WebhookGlob { glob, .. }) => glob,
+impl TryFrom<WebhookSubscriptionKind> for shared::WebhookSubscription {
+    type Error = Error;
+    fn try_from(kind: WebhookSubscriptionKind) -> Result<Self, Self::Error> {
+        match kind {
+            WebhookSubscriptionKind::Exact(class) => class.as_str().parse(),
+            WebhookSubscriptionKind::Glob(WebhookGlob { glob, .. }) => {
+                glob.try_into()
+            }
         }
+        .map_err(|e: anyhow::Error| {
+            // This is an internal error because any subscription string stored
+            // in the database should already have been validated.
+            Error::InternalError { internal_message: e.to_string() }
+        })
+    }
+}
+
+impl TryFrom<shared::WebhookSubscription> for WebhookSubscriptionKind {
+    type Error = Error;
+    fn try_from(
+        subscription: shared::WebhookSubscription,
+    ) -> Result<Self, Self::Error> {
+        Self::new(String::from(subscription))
     }
 }
 

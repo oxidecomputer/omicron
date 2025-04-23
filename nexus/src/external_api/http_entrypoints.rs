@@ -7971,6 +7971,65 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn webhook_receiver_subscription_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+        typed_body: TypedBody<shared::WebhookSubscription>,
+    ) -> Result<HttpResponseCreated<shared::WebhookSubscription>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let webhook_selector = path_params.into_inner();
+            let subscription = typed_body.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+
+            let subscription = nexus
+                .webhook_receiver_subscription_add(&opctx, rx, subscription)
+                .await?;
+
+            Ok(HttpResponseCreated(subscription))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_receiver_subscription_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+        typed_body: TypedBody<shared::WebhookSubscription>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let webhook_selector = path_params.into_inner();
+            let subscription = typed_body.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+
+            nexus
+                .webhook_receiver_subscription_delete(&opctx, rx, subscription)
+                .await?;
+
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn webhook_receiver_probe(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookReceiverSelector>,

@@ -2425,7 +2425,7 @@ fn print_task_webhook_dispatcher(details: &serde_json::Value) {
                     }) => {
                         println!(
                             "      > {glob:?}: previously at \
-                             {prev_version}\n        \
+                             {prev_version:?}\n        \
                              exact subscriptions: {created:>NUM_WIDTH$} \
                              created, {deleted:>NUM_WIDTH$} deleted",
                         );
