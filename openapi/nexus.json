@@ -15985,7 +15985,7 @@
         "properties": {
           "pool": {
             "nullable": true,
-            "description": "Name or ID of the IP pool used to allocate an address",
+            "description": "Name or ID of the IP pool used to allocate an address. If unspecified, the default IP pool will be used.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/NameOrId"
@@ -16111,7 +16111,7 @@
         "description": "Parameters for creating an external IP address for instances.",
         "oneOf": [
           {
-            "description": "An IP address providing both inbound and outbound access. The address is automatically-assigned from the provided IP Pool, or the current silo's default pool if not specified.",
+            "description": "An IP address providing both inbound and outbound access. The address is automatically assigned from the provided IP pool or the default IP pool if not specified.",
             "type": "object",
             "properties": {
               "pool": {
