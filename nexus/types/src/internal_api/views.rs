@@ -14,6 +14,7 @@ use omicron_common::api::external::ObjectStream;
 use omicron_common::api::external::Vni;
 use omicron_uuid_kinds::DemoSagaUuid;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
@@ -26,7 +27,6 @@ use std::time::Instant;
 use steno::SagaResultErr;
 use steno::UndoActionError;
 use uuid::Uuid;
-use serde::Deserialize;
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
 where
@@ -351,7 +351,7 @@ pub struct MgsUpdateDriverStatusDisplay<'a> {
     status: &'a MgsUpdateDriverStatus,
 }
 
-impl<'a> Display for MgsUpdateDriverStatusDisplay<'a> {
+impl Display for MgsUpdateDriverStatusDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let status = self.status;
         writeln!(f, "recent completed attempts:")?;
