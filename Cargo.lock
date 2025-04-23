@@ -920,7 +920,7 @@ dependencies = [
  "pq-sys",
  "proptest",
  "rand 0.8.5",
- "secrecy",
+ "secrecy 0.10.3",
  "serde",
  "serde_with",
  "sha3",
@@ -3689,7 +3689,7 @@ dependencies = [
  "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
- "secrecy",
+ "secrecy 0.10.3",
  "serde",
  "subtle",
  "test-strategy",
@@ -5149,7 +5149,7 @@ dependencies = [
  "hkdf",
  "omicron-common",
  "omicron-workspace-hack",
- "secrecy",
+ "secrecy 0.10.3",
  "sha3",
  "slog",
  "thiserror 1.0.69",
@@ -10999,6 +10999,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "secrecy"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e891af845473308773346dc847b2c23ee78fe442e0472ac50e22a18a93d3ae5a"
+dependencies = [
+ "zeroize",
+]
+
+[[package]]
 name = "security-framework"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11836,7 +11845,7 @@ dependencies = [
  "libipcc",
  "pem-rfc7468",
  "rustls 0.23.19",
- "secrecy",
+ "secrecy 0.8.0",
  "serde",
  "sha2",
  "sha3",
@@ -13024,7 +13033,7 @@ dependencies = [
  "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
- "secrecy",
+ "secrecy 0.10.3",
  "serde",
  "serde_with",
  "sha3",
