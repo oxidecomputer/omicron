@@ -6501,13 +6501,6 @@
             "enum": [
               "terminated_instance"
             ]
-          },
-          {
-            "description": "Generated in response to an explicit request to the sled agent.",
-            "type": "string",
-            "enum": [
-              "explicit_request"
-            ]
           }
         ]
       },
