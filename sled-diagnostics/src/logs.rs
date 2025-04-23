@@ -268,11 +268,27 @@ impl LogsHandle {
 
     /// Cleanup snapshots that may have been left around due to unknown
     /// circumstances such as a crash.
+    ///
+    /// NB: This is a best-effort attempt, any failure to list or delete
+    /// snapshots will be logged.
     pub fn cleanup_snapshots(&self) {
-        let diagnostic_snapshots = Zfs::list_snapshots().unwrap().into_iter().filter (|snap| {
-           if !snap.snap_name.starts_with(SLED_DIAGNOSTICS_SNAPSHOT_PREFIX) {
-               return false
-           }
+        let snapshot_list = match Zfs::list_snapshots() {
+            Ok(snapshots) => snapshots,
+            Err(e) => {
+                error!(
+                    self.log,
+                    "Failed to list ZFS snapshots when attempting to cleanup \
+                    old sled-diagnostics snapshots: {e}";
+                );
+
+                return;
+            }
+        };
+
+        let diagnostic_snapshots = snapshot_list.into_iter().filter(|snap| {
+            if !snap.snap_name.starts_with(SLED_DIAGNOSTICS_SNAPSHOT_PREFIX) {
+                return false;
+            }
 
             // Additionally check for the sled-diagnostics property.
             //
@@ -284,21 +300,21 @@ impl LogsHandle {
                 &name,
                 &[SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME],
                 Some(illumos_utils::zfs::PropertySource::Local),
-                ) {
-                    Ok([value]) => value,
-                    Err(e) => {
-                        error!(
-                            self.log,
-                            "Found a ZFS snapshot with a name reserved for
-                            sled diagnostics, but which does not have the \
-                            sled-diagnostics-specific property. Bailing out, \
-                            rather than risking deletion of user data: {e}";
-                            "snap_name" => &name,
-                            "property" => SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE
-                        );
-                        return false;
-                    },
-                };
+            ) {
+                Ok([value]) => value,
+                Err(e) => {
+                    error!(
+                        self.log,
+                        "Found a ZFS snapshot with a name reserved for
+                        sled diagnostics, but which does not have the \
+                        sled-diagnostics-specific property. Bailing out, \
+                        rather than risking deletion of user data: {e}";
+                        "snap_name" => &name,
+                        "property" => SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE
+                    );
+                    return false;
+                }
+            };
 
             if value != SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE {
                 warn!(
@@ -316,13 +332,21 @@ impl LogsHandle {
         });
 
         for snapshot in diagnostic_snapshots {
-            Zfs::destroy_snapshot(&snapshot.filesystem, &snapshot.snap_name)
-                .unwrap();
-            debug!(
-                self.log,
-                "destroyed pre-existing sled-diagnostics snapshot";
-                "snapshot" => %snapshot,
-            );
+            match Zfs::destroy_snapshot(
+                &snapshot.filesystem,
+                &snapshot.snap_name,
+            ) {
+                Ok(_) => debug!(
+                    self.log,
+                    "destroyed pre-existing sled-diagnostics snapshot";
+                    "snapshot" => %snapshot,
+                ),
+                Err(e) => error!(
+                    self.log,
+                    "failed to destroy pre-existing snapshot on cleanup: {e}";
+                    "snapshot" => %snapshot,
+                ),
+            }
         }
     }
 
