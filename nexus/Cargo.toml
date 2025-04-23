@@ -57,6 +57,7 @@ macaddr.workspace = true
 nexus-config.workspace = true
 nexus-external-api.workspace = true
 nexus-internal-api.workspace = true
+nexus-mgs-updates.workspace = true
 nexus-networking.workspace = true
 nexus-saga-recovery.workspace = true
 nexus-test-interface.workspace = true
@@ -105,6 +106,7 @@ uuid.workspace = true
 
 nexus-auth.workspace = true
 nexus-defaults.workspace = true
+nexus-db-lookup.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-db-schema.workspace = true

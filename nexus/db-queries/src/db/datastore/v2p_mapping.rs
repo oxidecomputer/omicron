@@ -5,7 +5,6 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::V2PMappingView;
 use crate::db::pagination::Paginator;
@@ -13,6 +12,7 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use diesel::{JoinOnDsl, NullableExpressionMethods};
+use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_model::{NetworkInterface, NetworkInterfaceKind, Sled, Vpc};
 use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::ListResultVec;

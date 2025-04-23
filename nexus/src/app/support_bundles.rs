@@ -7,11 +7,11 @@
 use dropshot::Body;
 use futures::TryStreamExt;
 use http::Response;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;

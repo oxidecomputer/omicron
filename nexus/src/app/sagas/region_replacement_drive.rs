@@ -141,12 +141,12 @@ use super::{
     SagaInitError,
 };
 use crate::app::db::datastore::InstanceAndActiveVmm;
-use crate::app::db::lookup::LookupPath;
 use crate::app::sagas::common_storage::get_pantry_address;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use chrono::DateTime;
 use chrono::Utc;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::VmmState;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeUuid;
@@ -375,7 +375,7 @@ async fn srrd_drive_region_replacement_check(
             };
 
             let (.., authz_instance) =
-                LookupPath::new(&opctx, &osagactx.datastore())
+                LookupPath::new(&opctx, osagactx.datastore())
                     .instance_id(step_instance_id)
                     .lookup_for(authz::Action::Read)
                     .await
@@ -874,7 +874,7 @@ async fn srrd_drive_region_replacement_prepare(
             Some(instance_id) => {
                 // The region's volume is attached to an instance
                 let (.., authz_instance) =
-                    LookupPath::new(&opctx, &osagactx.datastore())
+                    LookupPath::new(&opctx, osagactx.datastore())
                         .instance_id(*instance_id)
                         .lookup_for(authz::Action::Read)
                         .await
@@ -1187,7 +1187,7 @@ async fn srrd_drive_region_replacement_execute(
             };
 
             let (.., authz_instance) =
-                LookupPath::new(&opctx, &osagactx.datastore())
+                LookupPath::new(&opctx, osagactx.datastore())
                     .instance_id(instance_id)
                     .lookup_for(authz::Action::Read)
                     .await
@@ -1245,9 +1245,8 @@ async fn srrd_drive_region_replacement_execute(
                 }
             };
 
-            let instance_lookup =
-                LookupPath::new(&opctx, &osagactx.datastore())
-                    .instance_id(instance_id);
+            let instance_lookup = LookupPath::new(&opctx, osagactx.datastore())
+                .instance_id(instance_id);
 
             let (vmm, client) = osagactx
                 .nexus()

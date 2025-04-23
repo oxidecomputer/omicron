@@ -6,8 +6,6 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::LldpLinkConfig;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -15,6 +13,8 @@ use diesel::ExpressionMethods;
 use diesel::QueryDsl;
 use diesel::SelectableHelper;
 use ipnetwork::IpNetwork;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;

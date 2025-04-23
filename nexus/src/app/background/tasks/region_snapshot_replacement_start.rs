@@ -310,6 +310,7 @@ mod test {
     use crate::app::MIN_DISK_SIZE_BYTES;
     use crate::app::background::init::test::NoopStartSaga;
     use chrono::Utc;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::BlockSize;
     use nexus_db_model::Generation;
     use nexus_db_model::PhysicalDiskPolicy;
@@ -321,7 +322,6 @@ mod test {
     use nexus_db_model::SnapshotState;
     use nexus_db_model::VolumeResourceUsage;
     use nexus_db_queries::authz;
-    use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external;
@@ -386,19 +386,6 @@ mod test {
         let request_id = request.id;
 
         let volume_id = VolumeUuid::new_v4();
-
-        datastore
-            .volume_create(
-                volume_id,
-                VolumeConstructionRequest::Volume {
-                    id: Uuid::new_v4(), // not required to match!
-                    block_size: 512,
-                    sub_volumes: vec![], // nothing needed here
-                    read_only_parent: None,
-                },
-            )
-            .await
-            .unwrap();
 
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
@@ -487,7 +474,7 @@ mod test {
 
         // Create the fake snapshot
 
-        let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_project) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .lookup_for(authz::Action::CreateChild)
             .await

@@ -4,10 +4,10 @@
 
 //! Functionality for constructing sled-agent clients.
 
+use nexus_db_lookup::LookupPath;
+use nexus_db_lookup::lookup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::lookup;
-use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use sled_agent_client::Client as SledAgentClient;

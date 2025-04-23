@@ -103,3 +103,20 @@ fn test_set_zone_images() {
     assert_contents("tests/output/cmd-set-zone-images-stdout", &stdout_text);
     assert_contents("tests/output/cmd-set-zone-images-stderr", &stderr_text);
 }
+
+// Run tests that exercise the ability to configured MGS-managed updates.
+#[test]
+fn test_set_mgs_updates() {
+    let (exit_status, stdout_text, stderr_text) = run_cli(
+        "tests/input/cmds-set-mgs-updates.txt",
+        &["--seed", "test_set_mgs_updates"],
+    );
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    // The example system uses a fixed seed, which means that UUIDs are
+    // deterministic. Some of the test commands also use those UUIDs, and it's
+    // convenient for everyone if they aren't redacted.
+    let stdout_text = Redactor::default().uuids(false).do_redact(&stdout_text);
+    assert_contents("tests/output/cmd-set-mgs-updates-stdout", &stdout_text);
+    assert_contents("tests/output/cmd-set-mgs-updates-stderr", &stderr_text);
+}
