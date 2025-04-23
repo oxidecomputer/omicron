@@ -73,7 +73,7 @@ impl OxqlArgs {
             omdb,
             log,
             self.clickhouse_url.as_deref(),
-            ServiceName::ClickhouseNative,
+            ServiceName::OximeterReader,
         )
         .await
     }

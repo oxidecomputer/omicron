@@ -5,7 +5,6 @@
 //! Diesel query used for VPC Subnet allocation and insertion
 
 use crate::db;
-use crate::db::DbConnection;
 use crate::db::identity::Resource;
 use crate::db::model::VpcSubnet;
 use diesel::pg::Pg;
@@ -14,6 +13,7 @@ use diesel::query_builder::*;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
+use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::vpc_subnet::dsl;
 use omicron_common::api::external;
 use ref_cast::RefCast;
@@ -217,7 +217,6 @@ impl InsertVpcSubnetError {
     /// Construct an `InsertError` from a Diesel error, catching the desired
     /// cases and building useful errors.
     pub fn from_diesel(e: DieselError, subnet: &VpcSubnet) -> Self {
-        use crate::db::error;
         use diesel::result::DatabaseErrorKind;
         match e {
             // Attempt to insert an overlapping IPv4 subnet
@@ -251,18 +250,23 @@ impl InsertVpcSubnetError {
             ) if info.constraint_name()
                 == Some(Self::NAME_CONFLICT_CONSTRAINT) =>
             {
-                InsertVpcSubnetError::External(error::public_error_from_diesel(
-                    e,
-                    error::ErrorHandler::Conflict(
-                        external::ResourceType::VpcSubnet,
-                        subnet.identity().name.as_str(),
+                InsertVpcSubnetError::External(
+                    nexus_db_errors::public_error_from_diesel(
+                        e,
+                        nexus_db_errors::ErrorHandler::Conflict(
+                            external::ResourceType::VpcSubnet,
+                            subnet.identity().name.as_str(),
+                        ),
                     ),
-                ))
+                )
             }
 
             // Any other error at all is a bug
             _ => InsertVpcSubnetError::External(
-                error::public_error_from_diesel(e, error::ErrorHandler::Server),
+                nexus_db_errors::public_error_from_diesel(
+                    e,
+                    nexus_db_errors::ErrorHandler::Server,
+                ),
             ),
         }
     }

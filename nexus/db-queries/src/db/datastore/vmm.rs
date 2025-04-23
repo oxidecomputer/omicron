@@ -6,9 +6,6 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::Vmm;
 use crate::db::model::VmmRuntimeState;
 use crate::db::model::VmmState as DbVmmState;
@@ -16,10 +13,13 @@ use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::vmm::dsl;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -159,7 +159,7 @@ impl DataStore {
 
     async fn vmm_update_runtime_on_connection(
         &self,
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         vmm_id: &PropolisUuid,
         new_runtime: &VmmRuntimeState,
     ) -> Result<UpdateAndQueryResult<Vmm>, diesel::result::Error> {

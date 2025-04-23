@@ -2,11 +2,11 @@ use super::DataStore;
 
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::SledInstance;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;

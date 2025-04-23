@@ -12,10 +12,10 @@ use http::StatusCode;
 use http::method::Method;
 use itertools::Itertools;
 use nexus_auth::authz::Action;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -657,7 +657,7 @@ async fn test_instance_start_creates_networking_state(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance.identity.id)
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
@@ -807,7 +807,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
             cptestctx.logctx.log.new(o!()),
             datastore.clone(),
         );
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance.identity.id)
             .lookup_for(nexus_db_queries::authz::Action::Read)
             .await
@@ -947,7 +947,7 @@ async fn test_instance_migrate_v2p_and_routes(
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
     // Ensure that all of the V2P information is correct.
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
@@ -1000,7 +1000,7 @@ async fn test_instance_migrate_v2p_and_routes(
             cptestctx.logctx.log.new(o!()),
             datastore.clone(),
         );
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance.identity.id)
             .lookup_for(nexus_db_queries::authz::Action::Read)
             .await
@@ -1797,7 +1797,7 @@ async fn test_instance_metrics_with_migration(
             cptestctx.logctx.log.new(o!()),
             datastore.clone(),
         );
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance.identity.id)
             .lookup_for(nexus_db_queries::authz::Action::Read)
             .await
@@ -5922,7 +5922,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
-    let (.., db_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., db_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance.identity.id)
         .fetch()
         .await
@@ -6637,7 +6637,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance.identity.id)
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
@@ -6811,7 +6811,7 @@ pub async fn instance_wait_for_vmm_registration(
     let datastore = cptestctx.server.server_context().nexus.datastore();
     let log = &cptestctx.logctx.log;
     let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await

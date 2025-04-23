@@ -7,12 +7,12 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::raw_query_builder::QueryBuilder;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::deserialize::Queryable;
 use diesel::sql_types;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_types::deployment::CockroachDbSettings;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;

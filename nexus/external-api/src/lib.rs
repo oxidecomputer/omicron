@@ -2470,7 +2470,7 @@ pub trait NexusExternalApi {
     async fn vpc_router_route_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RoutePath>,
-        query_params: Query<params::RouterSelector>,
+        query_params: Query<params::OptionalRouterSelector>,
     ) -> Result<HttpResponseOk<RouterRoute>, HttpError>;
 
     /// Create route

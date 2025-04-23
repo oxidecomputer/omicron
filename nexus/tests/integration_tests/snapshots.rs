@@ -10,6 +10,7 @@ use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -18,7 +19,6 @@ use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::identity::Resource;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -553,7 +553,7 @@ async fn test_reject_creating_disk_from_snapshot(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_project) = LookupPath::new(&opctx, datastore)
         .project_id(project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -706,7 +706,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_project) = LookupPath::new(&opctx, datastore)
         .project_id(project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -802,7 +802,7 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_project) = LookupPath::new(&opctx, datastore)
         .project_id(project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -1061,7 +1061,7 @@ async fn test_create_snapshot_record_idempotent(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_project) = LookupPath::new(&opctx, datastore)
         .project_id(project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -1120,7 +1120,7 @@ async fn test_create_snapshot_record_idempotent(
 
     // Move snapshot from Creating to Ready
 
-    let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot_created_1.id())
         .fetch_for(authz::Action::Modify)
         .await
@@ -1138,7 +1138,7 @@ async fn test_create_snapshot_record_idempotent(
 
     // Grab the new snapshot (so generation number is updated)
 
-    let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_snapshot, db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot_created_1.id())
         .fetch_for(authz::Action::Delete)
         .await
@@ -1163,7 +1163,7 @@ async fn test_create_snapshot_record_idempotent(
 
     {
         // Ensure the snapshot is gone
-        let r = LookupPath::new(&opctx, &datastore)
+        let r = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot_created_1.id())
             .fetch_for(authz::Action::Read)
             .await;
@@ -1329,7 +1329,7 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     let (.., authz_snapshot_1, db_snapshot_1) =
-        LookupPath::new(&opctx, &datastore)
+        LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot_1.identity.id)
             .fetch_for(authz::Action::Delete)
             .await
@@ -1351,7 +1351,7 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     let (.., authz_snapshot_2, db_snapshot_2) =
-        LookupPath::new(&opctx, &datastore)
+        LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot_2.identity.id)
             .fetch_for(authz::Action::Delete)
             .await
@@ -1373,7 +1373,7 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     let (.., authz_snapshot_3, db_snapshot_3) =
-        LookupPath::new(&opctx, &datastore)
+        LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot_3.identity.id)
             .fetch_for(authz::Action::Delete)
             .await
@@ -1485,7 +1485,7 @@ async fn test_region_allocation_for_snapshot(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .fetch()
         .await
@@ -1518,7 +1518,7 @@ async fn test_region_allocation_for_snapshot(
     // There shouldn't be any regions for the snapshot volume
 
     let snapshot_id = snapshot.identity.id;
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot_id)
         .fetch()
         .await

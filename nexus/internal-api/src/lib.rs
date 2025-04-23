@@ -13,7 +13,7 @@ use http::Response;
 use nexus_types::{
     deployment::{
         Blueprint, BlueprintMetadata, BlueprintTarget, BlueprintTargetSet,
-        ClickhousePolicy,
+        ClickhousePolicy, OximeterReadPolicy,
     },
     external_api::{
         params::{self, PhysicalDiskPath, SledSelector, UninitializedSledId},
@@ -648,6 +648,25 @@ pub trait NexusInternalApi {
     async fn clickhouse_policy_set(
         rqctx: RequestContext<Self::Context>,
         policy: TypedBody<ClickhousePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the current oximeter read policy
+    #[endpoint {
+            method = GET,
+            path = "/oximeter/read-policy"
+            }]
+    async fn oximeter_read_policy_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OximeterReadPolicy>, HttpError>;
+
+    /// Set the new oximeter read policy
+    #[endpoint {
+               method = POST,
+               path = "/oximeter/read-policy"
+           }]
+    async fn oximeter_read_policy_set(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<OximeterReadPolicy>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 

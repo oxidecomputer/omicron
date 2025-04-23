@@ -6,16 +6,18 @@
 
 use super::blueprint_display::{
     BpClickhouseServersTableSchema, BpDatasetsTableSchema, BpDiffState,
-    BpGeneration, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
-    BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
-    constants::*, linear_table_modified, linear_table_unchanged,
+    BpGeneration, BpOmicronZonesTableSchema, BpPendingMgsUpdates,
+    BpPhysicalDisksTableSchema, BpTable, BpTableColumn, BpTableData,
+    BpTableRow, KvListWithHeading, KvPair, constants::*, linear_table_modified,
+    linear_table_unchanged,
 };
 use super::{
     BlueprintDatasetConfigDiff, BlueprintDatasetDisposition, BlueprintDiff,
     BlueprintMetadata, BlueprintPhysicalDiskConfig,
     BlueprintPhysicalDiskConfigDiff, BlueprintZoneConfigDiff,
     BlueprintZoneImageSource, ClickhouseClusterConfig,
-    CockroachDbPreserveDowngrade, unwrap_or_none, zone_sort_key,
+    CockroachDbPreserveDowngrade, PendingMgsUpdatesDiff, unwrap_or_none,
+    zone_sort_key,
 };
 use daft::Diffable;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -58,6 +60,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         let BlueprintDiff {
             // Fields in which changes are meaningful.
             sleds,
+            pending_mgs_updates,
             clickhouse_cluster_config,
             // Metadata fields for which changes don't reflect semantic
             // changes from one blueprint to the next.
@@ -67,6 +70,8 @@ impl<'a> BlueprintDiffSummary<'a> {
             external_dns_version: _,
             cockroachdb_fingerprint: _,
             cockroachdb_setting_preserve_downgrade: _,
+            oximeter_read_version: _,
+            oximeter_read_mode,
             creator: _,
             comment: _,
         } = &self.diff;
@@ -79,8 +84,21 @@ impl<'a> BlueprintDiffSummary<'a> {
             return true;
         }
 
+        // Did we modify, add, or remove any pending MGS updates?
+        if pending_mgs_updates.by_baseboard.modified().next().is_some()
+            || !pending_mgs_updates.by_baseboard.added.is_empty()
+            || !pending_mgs_updates.by_baseboard.removed.is_empty()
+        {
+            return true;
+        }
+
         // Did the clickhouse config change?
         if clickhouse_cluster_config.before != clickhouse_cluster_config.after {
+            return true;
+        }
+
+        // Did oximeter read policy change?
+        if oximeter_read_mode.before != oximeter_read_mode.after {
             return true;
         }
 
@@ -1561,6 +1579,101 @@ impl ClickhouseClusterConfigDiffTables {
     }
 }
 
+/// Differences in pending MGS updates
+#[derive(Debug)]
+pub struct BpDiffPendingMgsUpdates<'a> {
+    pub diff: &'a PendingMgsUpdatesDiff<'a>,
+}
+
+impl<'a> BpDiffPendingMgsUpdates<'a> {
+    /// Convert from our diff summary to our display compatibility layer
+    pub fn from_diff_summary(
+        summary: &'a BlueprintDiffSummary<'a>,
+    ) -> BpDiffPendingMgsUpdates<'a> {
+        BpDiffPendingMgsUpdates { diff: &summary.diff.pending_mgs_updates }
+    }
+
+    /// Return a [`BpTable`] describing the values here.
+    ///
+    /// As elsewhere, we print rows in order of:
+    ///
+    /// 1. Unchanged
+    /// 2. Removed
+    /// 3. Modified
+    /// 4. Added
+    pub fn to_bp_table(&self) -> Option<BpTable> {
+        let mut rows = vec![];
+        let mut has_changed = false;
+        let map = &self.diff.by_baseboard;
+        for update in map.unchanged_values() {
+            rows.push(BpTableRow::from_strings(
+                BpDiffState::Unchanged,
+                update.to_bp_table_values(),
+            ))
+        }
+        for (_, update) in &map.removed {
+            has_changed = true;
+            rows.push(BpTableRow::from_strings(
+                BpDiffState::Removed,
+                update.to_bp_table_values(),
+            ));
+        }
+        for update in map.modified_values() {
+            has_changed = true;
+            let u1 = &update.before;
+            let u2 = &update.after;
+
+            let sp_type = BpTableColumn::new(&u1.sp_type, &u2.sp_type);
+            let slot_id = BpTableColumn::new(&u1.slot_id, &u2.slot_id);
+            let part_number = BpTableColumn::new(
+                &u1.baseboard_id.part_number,
+                &u2.baseboard_id.part_number,
+            );
+            let serial_number = BpTableColumn::new(
+                &u1.baseboard_id.serial_number,
+                &u2.baseboard_id.serial_number,
+            );
+            let artifact_hash =
+                BpTableColumn::new(&u1.artifact_hash, &u2.artifact_hash);
+            let artifact_version =
+                BpTableColumn::new(&u1.artifact_version, &u2.artifact_version);
+            let details = if u1.details != u2.details {
+                BpTableColumn::diff(
+                    format!("{:?}", &u1.details),
+                    format!("{:?}", &u2.details),
+                )
+            } else {
+                BpTableColumn::value(format!("{:?}", &u1.details))
+            };
+            rows.push(BpTableRow::new(
+                BpDiffState::Modified,
+                vec![
+                    sp_type,
+                    slot_id,
+                    part_number,
+                    serial_number,
+                    artifact_hash,
+                    artifact_version,
+                    details,
+                ],
+            ));
+        }
+        for (_, update) in &map.added {
+            has_changed = true;
+            rows.push(BpTableRow::from_strings(
+                BpDiffState::Added,
+                update.to_bp_table_values(),
+            ))
+        }
+
+        if !has_changed {
+            None
+        } else {
+            Some(BpTable::new(BpPendingMgsUpdates {}, None, rows))
+        }
+    }
+}
+
 /// Wrapper to allow a [`BlueprintDiff`] to be displayed.
 ///
 /// Returned by [`BlueprintDiffSummary::display()`].
@@ -1575,6 +1688,7 @@ pub struct BlueprintDiffDisplay<'diff> {
     zones: BpDiffZones,
     disks: BpDiffPhysicalDisks<'diff>,
     datasets: BpDiffDatasets,
+    pending_mgs_updates: BpDiffPendingMgsUpdates<'diff>,
 }
 
 impl<'diff> BlueprintDiffDisplay<'diff> {
@@ -1585,7 +1699,17 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         let zones = BpDiffZones::from_diff_summary(summary);
         let disks = BpDiffPhysicalDisks::from_diff_summary(summary);
         let datasets = BpDiffDatasets::from_diff_summary(summary);
-        Self { summary, before_meta, after_meta, zones, disks, datasets }
+        let pending_mgs_updates =
+            BpDiffPendingMgsUpdates::from_diff_summary(summary);
+        Self {
+            summary,
+            before_meta,
+            after_meta,
+            zones,
+            disks,
+            datasets,
+            pending_mgs_updates,
+        }
     }
 
     pub fn make_metadata_diff_tables(
@@ -1642,6 +1766,47 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
                 ],
             ),
         ]
+    }
+
+    pub fn make_oximeter_read_diff_tables(
+        &self,
+    ) -> impl IntoIterator<Item = KvListWithHeading> {
+        macro_rules! diff_row {
+            ($member:ident, $label:expr) => {
+                diff_row!($member, $label, std::convert::identity)
+            };
+
+            ($member:ident, $label:expr, $display:expr) => {
+                if self.summary.diff.$member.before
+                    == self.summary.diff.$member.after
+                {
+                    KvPair::new(
+                        BpDiffState::Unchanged,
+                        $label,
+                        linear_table_unchanged(&$display(
+                            &self.summary.diff.$member.after,
+                        )),
+                    )
+                } else {
+                    KvPair::new(
+                        BpDiffState::Modified,
+                        $label,
+                        linear_table_modified(
+                            &$display(&self.summary.diff.$member.before),
+                            &$display(&self.summary.diff.$member.after),
+                        ),
+                    )
+                }
+            };
+        }
+
+        [KvListWithHeading::new(
+            OXIMETER_HEADING,
+            vec![
+                diff_row!(oximeter_read_version, GENERATION),
+                diff_row!(oximeter_read_mode, OXIMETER_READ_FROM),
+            ],
+        )]
     }
 
     pub fn make_clickhouse_cluster_config_diff_tables(
@@ -1847,6 +2012,11 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             writeln!(f, "{}", table)?;
         }
 
+        // Write out oximeter read policy diff table
+        for table in self.make_oximeter_read_diff_tables() {
+            writeln!(f, "{}", table)?;
+        }
+
         // Write out clickhouse cluster diff tables
         if let Some(tables) = self.make_clickhouse_cluster_config_diff_tables()
         {
@@ -1855,6 +2025,12 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             if let Some(servers) = &tables.servers {
                 writeln!(f, "{}", servers)?;
             }
+        }
+
+        // Write out a summary of pending MGS updates.
+        if let Some(table) = self.pending_mgs_updates.to_bp_table() {
+            writeln!(f, " PENDING MGS UPDATES:\n")?;
+            writeln!(f, "{}", table)?;
         }
 
         Ok(())

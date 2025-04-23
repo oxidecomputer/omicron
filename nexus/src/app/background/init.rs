@@ -133,6 +133,7 @@ use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::PendingMgsUpdates;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
@@ -481,6 +482,7 @@ impl BackgroundTasksInitializer {
             rx_blueprint.clone(),
             nexus_id,
             task_saga_recovery.clone(),
+            args.mgs_updates_tx,
         );
         let rx_blueprint_exec = blueprint_executor.watcher();
         driver.register(TaskDefinition {
@@ -942,6 +944,8 @@ pub struct BackgroundTasksData {
     pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
     /// Channel for TUF repository artifacts to be replicated out to sleds
     pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
+    /// Channel for configuring pending MGS updates
+    pub mgs_updates_tx: watch::Sender<PendingMgsUpdates>,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either

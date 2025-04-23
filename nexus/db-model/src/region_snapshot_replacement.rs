@@ -116,7 +116,7 @@ impl slog::KV for ReadOnlyTargetReplacement {
             }
 
             ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
-                serializer.emit_str("type".into(), "region_snapshot")?;
+                serializer.emit_str("type".into(), "read_only_region")?;
                 serializer
                     .emit_str("region_id".into(), &region_id.to_string())?;
             }
