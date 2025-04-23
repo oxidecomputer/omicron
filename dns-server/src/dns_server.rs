@@ -335,6 +335,8 @@ async fn handle_dns_message(
                 (RecordType::A, DnsRecord::A(_)) => true,
                 (RecordType::AAAA, DnsRecord::Aaaa(_)) => true,
                 (RecordType::SRV, DnsRecord::Srv(_)) => true,
+                (RecordType::NS, DnsRecord::Ns(_)) => true,
+                (RecordType::SOA, DnsRecord::Soa(_)) => true,
                 _ => false,
             }
         })
@@ -387,6 +389,7 @@ async fn handle_dns_message(
                     }
                 }
             }
+            // TODO: return NS A/AAAA records as additionals for an NS query to the apex.
             Ok(record)
         })
         .collect::<Result<Vec<_>, RequestError>>()?;
