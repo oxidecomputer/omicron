@@ -418,6 +418,7 @@ mod tests {
     impl Drop for UninitializedCockroach {
         fn drop(&mut self) {
             self.child.kill().expect("killed cockroach child process");
+            self.child.wait().expect("waited for cockroach child process");
         }
     }
 
@@ -484,6 +485,7 @@ mod tests {
                 Ok(addr) => addr,
                 Err(err) => {
                     child.kill().expect("killed child cockroach");
+                    child.wait().expect("waited for child cockroach");
                     panic!(
                         "failed to wait for listen addr at \
                          {listen_addr_path}: {err:?}",
