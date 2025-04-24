@@ -53,14 +53,16 @@ impl DiscoveryMechanism {
                     .map_err(|err| {
                         DiscoverPeersError::Retry(anyhow::anyhow!(err))
                     })?;
-                PeerAddresses::new(addrs.map(|addr| {
-                    PeerAddress::new(SocketAddr::new(
-                        IpAddr::V6(addr),
-                        BOOTSTRAP_ARTIFACT_PORT,
-                    ))
-                }))
+                addrs
+                    .map(|addr| {
+                        PeerAddress::new(SocketAddr::new(
+                            IpAddr::V6(addr),
+                            BOOTSTRAP_ARTIFACT_PORT,
+                        ))
+                    })
+                    .collect()
             }
-            Self::List(peers) => PeerAddresses::new(peers.iter().copied()),
+            Self::List(peers) => peers.iter().copied().collect(),
         };
 
         Ok(peers)
@@ -105,13 +107,6 @@ pub(crate) struct PeerAddresses {
 }
 
 impl PeerAddresses {
-    pub(crate) fn new<I>(peers: I) -> Self
-    where
-        I: IntoIterator<Item = PeerAddress>,
-    {
-        Self { peers: peers.into_iter().collect() }
-    }
-
     pub(crate) fn peers(&self) -> &BTreeSet<PeerAddress> {
         &self.peers
     }
@@ -122,6 +117,13 @@ impl PeerAddresses {
 
     pub(crate) fn display(&self) -> impl fmt::Display {
         self.peers().iter().join(", ")
+    }
+}
+
+impl FromIterator<PeerAddress> for PeerAddresses {
+    fn from_iter<I: IntoIterator<Item = PeerAddress>>(iter: I) -> Self {
+        let peers = iter.into_iter().collect::<BTreeSet<_>>();
+        Self { peers }
     }
 }
 

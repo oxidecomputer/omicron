@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use cockroach_admin_types::{NodeDecommission, NodeStatus};
-use dropshot::{HttpError, HttpResponseOk, RequestContext, TypedBody};
+use dropshot::{
+    HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, RequestContext,
+    TypedBody,
+};
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -11,6 +14,25 @@ use serde::{Deserialize, Serialize};
 #[dropshot::api_description]
 pub trait CockroachAdminApi {
     type Context;
+
+    /// Initialize the CockroachDB cluster.
+    ///
+    /// This performs both the base-level `cockroach init` and installs the
+    /// Omicron schema. It should be idempotent, but we haven't heavily tested
+    /// that. We test that this endpoint can safely be called multiple times,
+    /// but haven't tested calling it concurrently (either multiple simultaneous
+    /// requests to the same cockroach node, or sending simultaneous requests to
+    /// different cockroach nodes, both of which would rely on `cockroach init`
+    /// itself being safe to call concurrently). In practice, only RSS calls
+    /// this endpoint and it does so serially; as long as we don't change that,
+    /// the existing testing should be sufficient.
+    #[endpoint {
+        method = POST,
+        path = "/cluster/init",
+    }]
+    async fn cluster_init(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Get the status of all nodes in the CRDB cluster.
     #[endpoint {

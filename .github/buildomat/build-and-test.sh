@@ -45,7 +45,7 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 # Write a machine-readable file with information about our build environment for
 # later analysis of test results.
 #
-jq --null-input >/work/environment.json \
+jq --null-input > "$OUTPUT_DIR/environment.json" \
     --arg bmat_factory_name "$(bmat factory name)" \
     --arg bmat_factory_private "$(bmat factory private)" \
     '{
