@@ -321,7 +321,9 @@ pub(crate) trait FetchArtifactImpl: fmt::Debug + Send + Sync {
 /// The send side of the channel over which data is sent.
 pub(crate) type FetchReceiver = mpsc::Receiver<Result<Bytes, ClientError>>;
 
-/// A [`PeersImpl`] that uses HTTP to fetch artifacts from peers. This is the real implementation.
+/// A [`FetchArtifactImpl`] that uses HTTP to fetch artifacts from peers.
+///
+/// This is the real implementation.
 #[derive(Clone, Debug)]
 pub(crate) struct HttpFetchBackend {
     log: slog::Logger,
