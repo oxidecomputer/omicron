@@ -665,10 +665,21 @@ internal DNS:
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.2
         A    192.0.2.3
         A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
+
 
 
 
@@ -965,10 +976,20 @@ internal DNS:
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.2
         A    192.0.2.3
         A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -1457,10 +1478,20 @@ internal DNS:
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.2
         A    192.0.2.3
         A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -1758,10 +1789,20 @@ internal DNS:
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.2
         A    192.0.2.3
         A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -2253,10 +2294,20 @@ internal DNS:
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.2
         A    192.0.2.3
         A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -2742,10 +2793,20 @@ internal DNS:
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.2
         A    192.0.2.3
         A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 

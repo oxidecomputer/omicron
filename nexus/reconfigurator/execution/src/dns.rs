@@ -6,7 +6,6 @@
 
 use crate::Sled;
 use internal_dns_types::diff::DnsDiff;
-use internal_dns_types::names::ZONE_APEX_NAME;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -1057,13 +1056,17 @@ mod test {
             external_dns_zone.records.len(),
             baseline_external_dns_names
         );
+
+        use internal_dns_types::names::ZONE_APEX_NAME;
         let apex_records = external_dns_zone
             .records
             .get(ZONE_APEX_NAME)
             .expect("records are present for zone apex");
         assert_eq!(apex_records.len(), external_dns_count);
-        for i in 1..=external_dns_count {
-            let ns_name = format!("ns{}", i);
+        for i in 0..external_dns_count {
+            // The nameserver records have 1-indexed numbering, but we iterate
+            // from 0. Add one to line up expectations for the test.
+            let ns_name = format!("ns{}", i + 1);
             assert!(external_dns_zone.records.contains_key(&ns_name));
             assert_eq!(
                 apex_records[i],
