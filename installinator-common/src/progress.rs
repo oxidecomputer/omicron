@@ -293,7 +293,7 @@ pub enum ControlPlaneZonesStepId {
 
     /// Writing a zone.
     Zone { name: String },
-    
+
     /// Writing the MUPdate override file.
     MupdateOverride,
 
