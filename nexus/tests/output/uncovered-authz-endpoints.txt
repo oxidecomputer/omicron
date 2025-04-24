@@ -1,5 +1,6 @@
 API endpoints with no coverage in authz tests:
 probe_delete                             (delete "/experimental/v1/probes/{probe}")
+webhook_receiver_subscription_delete     (delete "/v1/webhooks/receivers/{receiver}/subscriptions")
 probe_list                               (get    "/experimental/v1/probes")
 probe_view                               (get    "/experimental/v1/probes/{probe}")
 support_bundle_download                  (get    "/experimental/v1/system/support-bundles/{support_bundle}/download")
@@ -20,3 +21,4 @@ login_local                              (post   "/v1/login/{silo_name}/local")
 logout                                   (post   "/v1/logout")
 networking_switch_port_lldp_config_update (post   "/v1/system/hardware/switch-port/{port}/lldp/config")
 webhook_delivery_resend                  (post   "/v1/webhooks/deliveries/{event_id}/resend")
+webhook_receiver_subscription_add        (post   "/v1/webhooks/receivers/{receiver}/subscriptions")

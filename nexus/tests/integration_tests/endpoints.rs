@@ -1194,6 +1194,8 @@ pub static DEMO_WEBHOOK_RECEIVER_UPDATE: LazyLock<
 pub static DEMO_WEBHOOK_RECEIVER_URL: LazyLock<String> = LazyLock::new(|| {
     format!("{WEBHOOK_RECEIVERS_URL}/{}", *DEMO_WEBHOOK_RECEIVER_NAME)
 });
+// pub static DEMO_WEBHOOK_SUBSCRIPTIONS_URL: LazyLock<String> =
+//     LazyLock::new(|| format!("{}/subscriptions", *DEMO_WEBHOOK_RECEIVER_URL));
 pub static DEMO_WEBHOOK_RECEIVER_PROBE_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!("{WEBHOOK_RECEIVERS_URL}/{}/probe", *DEMO_WEBHOOK_RECEIVER_NAME)
@@ -1218,6 +1220,9 @@ pub static DEMO_WEBHOOK_SECRET_CREATE: LazyLock<params::WebhookSecretCreate> =
     LazyLock::new(|| params::WebhookSecretCreate {
         secret: "TRUSTNO1".to_string(),
     });
+
+// pub static DEMO_WEBHOOK_SUBSCRIPTION: LazyLock<shared::WebhookSubscription> =
+//     LazyLock::new(|| "test.foo.baz".parse().unwrap());
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
@@ -2846,6 +2851,22 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                     ),
                 ],
             },
+            // TODO(eliza): deletes will 404 if there's no body, which
+            // `VerifyEndpoint` doesn't currently support.
+            /*
+            VerifyEndpoint {
+                url: &DEMO_WEBHOOK_SUBSCRIPTIONS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_WEBHOOK_SUBSCRIPTION)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            */
             VerifyEndpoint {
                 url: &DEMO_WEBHOOK_SECRET_DELETE_URL,
                 visibility: Visibility::Protected,
