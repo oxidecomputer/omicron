@@ -26,13 +26,14 @@ use tufaceous_artifact::ArtifactHashId;
 use uuid::Uuid;
 
 use crate::{
-    errors::HttpError,
-    peers::{FetchReceiver, PeersImpl},
+    errors::{DiscoverPeersError, HttpError},
+    peers::{FetchArtifactImpl, FetchReceiver, PeerAddress},
+    reporter::ReportProgressImpl,
 };
 
 struct MockPeersUniverse {
     artifact: Bytes,
-    peers: BTreeMap<SocketAddr, MockPeer>,
+    peers: BTreeMap<PeerAddress, MockPeer>,
     attempt_bitmaps: Vec<AttemptBitmap>,
 }
 
@@ -49,7 +50,7 @@ impl fmt::Debug for MockPeersUniverse {
 impl MockPeersUniverse {
     fn new(
         artifact: Bytes,
-        peers: BTreeMap<SocketAddr, MockPeer>,
+        peers: BTreeMap<PeerAddress, MockPeer>,
         attempt_bitmaps: Vec<AttemptBitmap>,
     ) -> Self {
         assert!(peers.len() <= 32, "this test only supports up to 32 peers");
@@ -70,7 +71,7 @@ impl MockPeersUniverse {
         // being unique identifiers. This means that this code can use a BTreeMap rather than a
         // fancier structure like an IndexMap.
         let peers_strategy = prop::collection::btree_map(
-            any::<SocketAddr>(),
+            any::<PeerAddress>(),
             any::<MockResponse_>(),
             0..max_peer_count,
         );
@@ -82,7 +83,7 @@ impl MockPeersUniverse {
         (artifact_strategy, peers_strategy, attempt_bitmaps_strategy).prop_map(
             |(artifact, peers, attempt_bitmaps): (
                 Vec<u8>,
-                BTreeMap<SocketAddr, MockResponse_>,
+                BTreeMap<PeerAddress, MockResponse_>,
                 Vec<AttemptBitmap>,
             )| {
                 let artifact = Bytes::from(artifact);
@@ -107,7 +108,7 @@ impl MockPeersUniverse {
     fn expected_result(
         &self,
         timeout: Duration,
-    ) -> Result<(usize, SocketAddr), usize> {
+    ) -> Result<(usize, PeerAddress), usize> {
         self.attempts()
             .enumerate()
             .filter_map(|(attempt, peers)| {
@@ -126,7 +127,7 @@ impl MockPeersUniverse {
             })
     }
 
-    fn attempts(&self) -> impl Iterator<Item = Result<MockPeers>> + '_ {
+    fn attempts(&self) -> impl Iterator<Item = Result<MockFetchBackend>> + '_ {
         self.attempt_bitmaps.iter().enumerate().map(
             move |(i, &attempt_bitmap)| {
                 match attempt_bitmap {
@@ -141,7 +142,7 @@ impl MockPeersUniverse {
                                     .then(|| (*addr, peer.clone()))
                             })
                             .collect();
-                        Ok(MockPeers {
+                        Ok(MockFetchBackend {
                             artifact: self.artifact.clone(),
                             selected_peers,
                         })
@@ -171,23 +172,23 @@ enum AttemptBitmap {
 }
 
 #[derive(Debug)]
-struct MockPeers {
+struct MockFetchBackend {
     artifact: Bytes,
     // Peers within the universe that have been selected
-    selected_peers: BTreeMap<SocketAddr, MockPeer>,
+    selected_peers: BTreeMap<PeerAddress, MockPeer>,
 }
 
-impl MockPeers {
-    fn get(&self, addr: SocketAddr) -> Option<&MockPeer> {
-        self.selected_peers.get(&addr)
+impl MockFetchBackend {
+    fn get(&self, peer: PeerAddress) -> Option<&MockPeer> {
+        self.selected_peers.get(&peer)
     }
 
-    fn peers(&self) -> impl Iterator<Item = (&SocketAddr, &MockPeer)> + '_ {
+    fn peers(&self) -> impl Iterator<Item = (&PeerAddress, &MockPeer)> + '_ {
         self.selected_peers.iter()
     }
 
     /// Returns the peer that can return the entire dataset within the timeout.
-    fn successful_peer(&self, timeout: Duration) -> Option<SocketAddr> {
+    fn successful_peer(&self, timeout: Duration) -> Option<PeerAddress> {
         self.peers()
             .filter_map(|(addr, peer)| {
                 if peer.artifact != self.artifact {
@@ -232,8 +233,8 @@ impl MockPeers {
 }
 
 #[async_trait]
-impl PeersImpl for MockPeers {
-    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddr> + Send + '_> {
+impl FetchArtifactImpl for MockFetchBackend {
+    fn peers(&self) -> Box<dyn Iterator<Item = PeerAddress> + Send + '_> {
         Box::new(self.selected_peers.keys().copied())
     }
 
@@ -243,7 +244,7 @@ impl PeersImpl for MockPeers {
 
     async fn fetch_from_peer_impl(
         &self,
-        peer: SocketAddr,
+        peer: PeerAddress,
         // We don't (yet) use the artifact ID in MockPeers
         _artifact_hash_id: ArtifactHashId,
     ) -> Result<(u64, FetchReceiver), HttpError> {
@@ -257,18 +258,6 @@ impl PeersImpl for MockPeers {
         tokio::spawn(async move { peer_data.send_response(sender).await });
         // TODO: add tests to ensure an invalid artifact size is correctly detected
         Ok((artifact_size, receiver))
-    }
-
-    async fn report_progress_impl(
-        &self,
-        _peer: SocketAddr,
-        _update_id: Uuid,
-        _report: EventReport,
-    ) -> Result<(), ClientError> {
-        panic!(
-            "this is currently unused -- at some point we'll want to \
-             unify this with MockReportPeers"
-        )
     }
 }
 
@@ -462,69 +451,47 @@ impl ResponseAction_ {
 ///
 /// In the future, this will be combined with `MockPeers` so we can model.
 #[derive(Debug)]
-struct MockReportPeers {
+struct MockProgressBackend {
     update_id: Uuid,
     report_sender: mpsc::Sender<EventReport>,
 }
 
-impl MockReportPeers {
-    // SocketAddr::new is not a const fn in stable Rust as of this writing
-    fn valid_peer() -> SocketAddr {
-        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 2000)
-    }
+impl MockProgressBackend {
+    const VALID_PEER: PeerAddress = PeerAddress::new(SocketAddr::new(
+        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
+        2000,
+    ));
 
-    fn invalid_peer() -> SocketAddr {
-        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 2)), 2000)
-    }
+    const INVALID_PEER: PeerAddress = PeerAddress::new(SocketAddr::new(
+        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 2)),
+        2000,
+    ));
 
-    fn unresponsive_peer() -> SocketAddr {
-        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3)), 2000)
-    }
-
-    fn new(update_id: Uuid, report_sender: mpsc::Sender<EventReport>) -> Self {
-        Self { update_id, report_sender }
-    }
+    const UNRESPONSIVE_PEER: PeerAddress = PeerAddress::new(SocketAddr::new(
+        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3)),
+        2000,
+    ));
 }
 
 #[async_trait]
-impl PeersImpl for MockReportPeers {
-    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddr> + Send + '_> {
-        Box::new(
-            [
-                Self::valid_peer(),
-                Self::invalid_peer(),
-                Self::unresponsive_peer(),
-            ]
-            .into_iter(),
-        )
-    }
-
-    fn peer_count(&self) -> usize {
-        3
-    }
-
-    async fn fetch_from_peer_impl(
+impl ReportProgressImpl for MockProgressBackend {
+    async fn discover_peers(
         &self,
-        _peer: SocketAddr,
-        _artifact_hash_id: ArtifactHashId,
-    ) -> Result<(u64, FetchReceiver), HttpError> {
-        unimplemented!(
-            "this should never be called -- \
-            eventually we'll want to unify this with MockPeers",
-        )
+    ) -> Result<Vec<PeerAddress>, DiscoverPeersError> {
+        Ok(vec![Self::VALID_PEER, Self::INVALID_PEER, Self::UNRESPONSIVE_PEER])
     }
 
     async fn report_progress_impl(
         &self,
-        peer: SocketAddr,
+        peer: PeerAddress,
         update_id: Uuid,
         report: EventReport,
     ) -> Result<(), ClientError> {
         assert_eq!(update_id, self.update_id, "update ID matches");
-        if peer == Self::valid_peer() {
+        if peer == Self::VALID_PEER {
             _ = self.report_sender.send(report).await;
             Ok(())
-        } else if peer == Self::invalid_peer() {
+        } else if peer == Self::INVALID_PEER {
             Err(ClientError::ErrorResponse(ResponseValue::new(
                 installinator_client::types::Error {
                     error_code: None,
@@ -534,7 +501,7 @@ impl PeersImpl for MockReportPeers {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Default::default(),
             )))
-        } else if peer == Self::unresponsive_peer() {
+        } else if peer == Self::UNRESPONSIVE_PEER {
             // The real implementation generates a reqwest::Error, which can't be
             // created outside of the reqwest library. Generate a different error.
             Err(ClientError::InvalidRequest("unresponsive peer".to_owned()))
@@ -548,8 +515,8 @@ mod tests {
     use super::*;
     use crate::{
         errors::DiscoverPeersError,
-        peers::{FetchedArtifact, Peers},
-        reporter::ProgressReporter,
+        peers::{FetchArtifactBackend, FetchedArtifact},
+        reporter::{ProgressReporter, ReportProgressBackend},
         test_helpers::{dummy_artifact_hash_id, with_test_runtime},
     };
 
@@ -588,25 +555,14 @@ mod tests {
                 ReceiverStream::new(report_receiver).collect::<Vec<_>>().await
             });
 
-            let reporter_log = logctx.log.clone();
-
-            let (progress_reporter, event_sender) =
-                ProgressReporter::new(&logctx.log, update_id, move || {
-                    let reporter_log = reporter_log.clone();
-                    let report_sender = report_sender.clone();
-
-                    async move {
-                        Ok(Peers::new(
-                            &reporter_log,
-                            Box::new(MockReportPeers::new(
-                                update_id,
-                                report_sender,
-                            )),
-                            // The timeout is currently unused by broadcast_report.
-                            Duration::from_secs(10),
-                        ))
-                    }
-                });
+            let (progress_reporter, event_sender) = ProgressReporter::new(
+                &logctx.log,
+                update_id,
+                ReportProgressBackend::new(
+                    &logctx.log,
+                    MockProgressBackend { update_id, report_sender },
+                ),
+            );
             let progress_handle = progress_reporter.start();
 
             let engine = UpdateEngine::new(&logctx.log, event_sender);
@@ -620,7 +576,7 @@ mod tests {
                         let artifact =
                             fetch_artifact(&cx, &log, attempts, timeout)
                                 .await?;
-                        let address = artifact.addr;
+                        let address = artifact.peer.address();
                         StepSuccess::new(artifact)
                             .with_metadata(
                                 InstallinatorCompletionMetadata::Download {
@@ -652,21 +608,21 @@ mod tests {
             match (expected_result, fetched_artifact) {
                 (
                     Ok((expected_attempt, expected_addr)),
-                    Ok(FetchedArtifact { attempt, addr, mut artifact }),
+                    Ok(FetchedArtifact { attempt, peer, mut artifact }),
                 ) => {
                     assert_eq!(
                         expected_attempt, attempt,
                         "expected successful attempt is the same as actual attempt"
                     );
                     assert_eq!(
-                        expected_addr, addr,
+                        expected_addr, peer,
                         "expected successful peer is the same as actual peer"
                     );
                     let artifact = artifact.copy_to_bytes(artifact.num_bytes());
                     assert_eq!(
                         expected_artifact, artifact,
                         "correct artifact fetched from peer {}",
-                        addr,
+                        peer,
                     );
                 }
                 (Err(_), Err(_)) => {}
@@ -691,7 +647,7 @@ mod tests {
     async fn fetch_artifact(
         cx: &StepContext,
         log: &slog::Logger,
-        attempts: impl IntoIterator<Item = Result<MockPeers>>,
+        attempts: impl IntoIterator<Item = Result<MockFetchBackend>>,
         timeout: Duration,
     ) -> Result<FetchedArtifact> {
         let mut attempts = attempts.into_iter();
@@ -699,9 +655,11 @@ mod tests {
             cx,
             log,
             || match attempts.next() {
-                Some(Ok(peers)) => {
-                    future::ok(Peers::new(&log, Box::new(peers), timeout))
-                }
+                Some(Ok(peers)) => future::ok(FetchArtifactBackend::new(
+                    &log,
+                    Box::new(peers),
+                    timeout,
+                )),
                 Some(Err(error)) => {
                     future::err(DiscoverPeersError::Retry(error))
                 }
@@ -716,7 +674,7 @@ mod tests {
 
     fn assert_reports(
         reports: &[EventReport],
-        expected_result: Result<(usize, SocketAddr), usize>,
+        expected_result: Result<(usize, PeerAddress), usize>,
     ) {
         let all_step_events: Vec<_> =
             reports.iter().flat_map(|report| &report.step_events).collect();
@@ -740,7 +698,7 @@ mod tests {
     fn assert_success_events(
         all_step_events: Vec<&StepEvent>,
         expected_attempt: usize,
-        expected_addr: SocketAddr,
+        expected_peer: PeerAddress,
     ) {
         let mut saw_success = false;
 
@@ -753,7 +711,8 @@ mod tests {
                                 peer,
                             } => {
                                 assert_ne!(
-                                    *peer, expected_addr,
+                                    *peer,
+                                    expected_peer.address(),
                                     "peer cannot match since this is the last attempt"
                                 );
                             }
@@ -795,7 +754,8 @@ mod tests {
                             ..
                         } => {
                             assert_eq!(
-                                *address, expected_addr,
+                                *address,
+                                expected_peer.address(),
                                 "address matches expected"
                             );
                         }
