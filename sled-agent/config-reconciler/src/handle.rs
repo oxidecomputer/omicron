@@ -1,0 +1,417 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use camino::Utf8PathBuf;
+use illumos_utils::dladm::EtherstubVnic;
+use illumos_utils::zpool::PathInPool;
+use key_manager::StorageKeyRequester;
+use nexus_sled_agent_shared::inventory::InventoryDataset;
+use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use omicron_common::disk::DiskIdentity;
+use sled_agent_api::ArtifactConfig;
+use sled_storage::config::MountConfig;
+use sled_storage::manager::NestedDatasetConfig;
+use sled_storage::manager::NestedDatasetListOptions;
+use sled_storage::manager::NestedDatasetLocation;
+use slog::Logger;
+use slog::warn;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+use tokio::sync::watch;
+
+#[cfg(feature = "testing")]
+use camino_tempfile::Utf8TempDir;
+#[cfg(feature = "testing")]
+use illumos_utils::zpool::ZpoolName;
+#[cfg(feature = "testing")]
+use illumos_utils::zpool::ZpoolOrRamdisk;
+#[cfg(feature = "testing")]
+use sled_storage::dataset::U2_DEBUG_DATASET;
+#[cfg(feature = "testing")]
+use sled_storage::dataset::ZONE_DATASET;
+
+use crate::DatasetTaskError;
+use crate::LedgerArtifactConfigError;
+use crate::LedgerNewConfigError;
+use crate::LedgerTaskError;
+use crate::SledAgentArtifactStore;
+use crate::SledAgentFacilities;
+use crate::TimeSyncStatus;
+use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::internal_disks::InternalDisksReceiver;
+use crate::ledger::LedgerTaskHandle;
+use crate::raw_disks;
+use crate::raw_disks::RawDisksSender;
+use crate::reconciler_task;
+use crate::reconciler_task::CurrentlyManagedZpools;
+use crate::reconciler_task::CurrentlyManagedZpoolsReceiver;
+use crate::reconciler_task::ReconcilerResult;
+
+#[derive(Debug, Clone, Copy)]
+pub enum TimeSyncConfig {
+    // Waits for NTP to confirm that time has been synchronized.
+    Normal,
+    // Skips timesync unconditionally.
+    Skip,
+}
+
+#[derive(Debug)]
+pub struct ConfigReconcilerHandle {
+    raw_disks_tx: RawDisksSender,
+    internal_disks_rx: InternalDisksReceiver,
+    dataset_task: DatasetTaskHandle,
+    reconciler_result_rx: watch::Receiver<ReconcilerResult>,
+    currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+
+    // `None` until `spawn_reconciliation_task()` is called.
+    ledger_task: OnceLock<LedgerTaskHandle>,
+
+    // We have a two-phase initialization: we get some of our dependencies when
+    // `Self::new()` is called and the rest when
+    // `Self::spawn_reconciliation_task()` is called. We hold the dependencies
+    // that are available in `new` but not needed until
+    // `spawn_reconciliation_task` in this field.
+    reconciler_task_dependencies: Mutex<Option<ReconcilerTaskDependencies>>,
+}
+
+impl ConfigReconcilerHandle {
+    /// Create a `ConfigReconcilerHandle` and spawn many of the early-sled-agent
+    /// background tasks (e.g., managing internal disks).
+    ///
+    /// The config reconciler subsystem splits initialization into two phases:
+    /// the main reconcilation task will not be spawned until
+    /// `spawn_reconciliation_task()` is called on the return handle.
+    /// `spawn_reconciliation_task()` cannot be called by sled-agent proper
+    /// until rack setup has occurred (or sled-agent has found its config from a
+    /// prior rack setup, during a cold boot).
+    pub fn new(
+        mount_config: MountConfig,
+        key_requester: StorageKeyRequester,
+        time_sync_config: TimeSyncConfig,
+        base_log: &Logger,
+    ) -> Self {
+        let mount_config = Arc::new(mount_config);
+
+        // Spawn the task that monitors our internal disks (M.2s).
+        let (raw_disks_tx, raw_disks_rx) = raw_disks::new();
+        let internal_disks_rx =
+            InternalDisksReceiver::spawn_internal_disks_task(
+                Arc::clone(&mount_config),
+                raw_disks_rx,
+                base_log,
+            );
+
+        // Spawn the task that serializes dataset operations.
+        let dataset_task = DatasetTaskHandle::spawn_dataset_task(
+            Arc::clone(&mount_config),
+            base_log,
+        );
+
+        // Stash the dependencies the reconciler task will need in
+        // `spawn_reconciliation_task()`.
+        let (reconciler_result_tx, reconciler_result_rx) =
+            watch::channel(ReconcilerResult::default());
+        let (currently_managed_zpools_tx, currently_managed_zpools_rx) =
+            watch::channel(Arc::default());
+        let reconciler_task_dependencies =
+            Mutex::new(Some(ReconcilerTaskDependencies {
+                key_requester,
+                time_sync_config,
+                reconciler_result_tx,
+                currently_managed_zpools_tx,
+                ledger_task_log: base_log
+                    .new(slog::o!("component" => "SledConfigLedgerTask")),
+                reconciler_task_log: base_log
+                    .new(slog::o!("component" => "ConfigReconcilerTask")),
+            }));
+
+        Self {
+            raw_disks_tx,
+            internal_disks_rx,
+            dataset_task,
+            ledger_task: OnceLock::new(),
+            reconciler_result_rx,
+            currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver::new(
+                currently_managed_zpools_rx,
+            ),
+            reconciler_task_dependencies,
+        }
+    }
+
+    /// Spawn the primary config reconciliation task.
+    ///
+    /// This method can effectively only be called once; any subsequent calls
+    /// will log a warning and do nothing.
+    pub fn spawn_reconciliation_task<
+        T: SledAgentFacilities,
+        U: SledAgentArtifactStore,
+    >(
+        &self,
+        underlay_vnic: EtherstubVnic,
+        sled_agent_facilities: T,
+        sled_agent_artifact_store: U,
+        log: &Logger,
+    ) {
+        let ReconcilerTaskDependencies {
+            key_requester,
+            time_sync_config,
+            reconciler_result_tx,
+            currently_managed_zpools_tx,
+            ledger_task_log,
+            reconciler_task_log,
+        } = match self.reconciler_task_dependencies.lock().unwrap().take() {
+            Some(dependencies) => dependencies,
+            None => {
+                warn!(
+                    log,
+                    "spawn_reconciliation_task() called multiple times \
+                         (ignored after first call)"
+                );
+                return;
+            }
+        };
+
+        // Spawn the task that manages our config ledger.
+        let (ledger_task, current_config_rx) =
+            LedgerTaskHandle::spawn_ledger_task(
+                self.internal_disks_rx.clone(),
+                sled_agent_artifact_store,
+                ledger_task_log,
+            );
+        match self.ledger_task.set(ledger_task) {
+            Ok(()) => (),
+            // We know via the `lock().take()` above that this only executes
+            // once, so `ledger_task` is always set here.
+            Err(_) => {
+                unreachable!("spawn_reconciliation_task() only executes once")
+            }
+        }
+
+        reconciler_task::spawn(
+            key_requester,
+            time_sync_config,
+            underlay_vnic,
+            current_config_rx,
+            reconciler_result_tx,
+            currently_managed_zpools_tx,
+            sled_agent_facilities,
+            reconciler_task_log,
+        );
+    }
+
+    /// Get the current timesync status.
+    pub fn timesync_status(&self) -> TimeSyncStatus {
+        self.reconciler_result_rx.borrow().timesync_status()
+    }
+
+    /// Get a handle to update the set of raw disks visible to sled-agent.
+    pub fn raw_disks_tx(&self) -> RawDisksSender {
+        self.raw_disks_tx.clone()
+    }
+
+    /// Get a watch channel to receive changes to the set of managed internal
+    /// disks.
+    pub fn internal_disks_rx(&self) -> &InternalDisksReceiver {
+        &self.internal_disks_rx
+    }
+
+    /// Get a watch channel to receive changes to the set of available external
+    /// disk datasets.
+    pub fn available_datasets_rx(&self) -> AvailableDatasetsReceiver {
+        AvailableDatasetsReceiver {
+            inner: AvailableDatasetsReceiverInner::Real(
+                self.reconciler_result_rx.clone(),
+            ),
+        }
+    }
+
+    /// Get a watch channel to receive changes to the set of managed zpools.
+    pub fn currently_managed_zpools_rx(
+        &self,
+    ) -> &CurrentlyManagedZpoolsReceiver {
+        &self.currently_managed_zpools_rx
+    }
+
+    /// Wait for the internal disks task to start managing the boot disk.
+    pub async fn wait_for_boot_disk(&mut self) -> DiskIdentity {
+        self.internal_disks_rx.wait_for_boot_disk().await
+    }
+
+    /// Ensure a nested dataset is mounted.
+    pub async fn nested_dataset_ensure_mounted(
+        &self,
+        dataset: NestedDatasetLocation,
+    ) -> Result<Utf8PathBuf, DatasetTaskError> {
+        self.dataset_task.nested_dataset_ensure_mounted(dataset).await
+    }
+
+    /// Ensure the existence of a nested dataset.
+    pub async fn nested_dataset_ensure(
+        &self,
+        config: NestedDatasetConfig,
+    ) -> Result<(), DatasetTaskError> {
+        self.dataset_task.nested_dataset_ensure(config).await
+    }
+
+    /// Destroy a nested dataset.
+    pub async fn nested_dataset_destroy(
+        &self,
+        name: NestedDatasetLocation,
+    ) -> Result<(), DatasetTaskError> {
+        self.dataset_task.nested_dataset_destroy(name).await
+    }
+
+    /// List a set of nested datasets.
+    pub async fn nested_dataset_list(
+        &self,
+        name: NestedDatasetLocation,
+        options: NestedDatasetListOptions,
+    ) -> Result<Vec<NestedDatasetConfig>, DatasetTaskError> {
+        self.dataset_task.nested_dataset_list(name, options).await
+    }
+
+    /// Write a new sled config to the ledger.
+    pub async fn set_sled_config(
+        &self,
+        new_config: OmicronSledConfig,
+    ) -> Result<Result<(), LedgerNewConfigError>, LedgerTaskError> {
+        self.ledger_task
+            .get()
+            .ok_or(LedgerTaskError::NotYetStarted)?
+            .set_new_config(new_config)
+            .await
+    }
+
+    /// Validate that a new artifact config is legal (i.e., it doesn't remove
+    /// any artifact hashes in use by the currently-ledgered sled config).
+    pub async fn validate_artifact_config(
+        &self,
+        new_config: ArtifactConfig,
+    ) -> Result<Result<(), LedgerArtifactConfigError>, LedgerTaskError> {
+        self.ledger_task
+            .get()
+            .ok_or(LedgerTaskError::NotYetStarted)?
+            .validate_artifact_config(new_config)
+            .await
+    }
+
+    /// Collect inventory fields relevant to config reconciliation.
+    pub fn inventory(&self) -> ReconcilerInventory {
+        unimplemented!()
+    }
+}
+
+#[derive(Debug)]
+struct ReconcilerTaskDependencies {
+    key_requester: StorageKeyRequester,
+    time_sync_config: TimeSyncConfig,
+    reconciler_result_tx: watch::Sender<ReconcilerResult>,
+    currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+    ledger_task_log: Logger,
+    reconciler_task_log: Logger,
+}
+
+#[derive(Debug)]
+pub struct ReconcilerInventory {
+    pub disks: Vec<InventoryDisk>,
+    pub zpools: Vec<InventoryZpool>,
+    pub datasets: Vec<InventoryDataset>,
+    pub ledgered_sled_config: Option<OmicronSledConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AvailableDatasetsReceiver {
+    inner: AvailableDatasetsReceiverInner,
+}
+
+impl AvailableDatasetsReceiver {
+    #[cfg(feature = "testing")]
+    pub fn fake_in_tempdir_for_tests(zpool: ZpoolOrRamdisk) -> Self {
+        let tempdir = Arc::new(Utf8TempDir::new().expect("created temp dir"));
+        std::fs::create_dir_all(tempdir.path().join(U2_DEBUG_DATASET))
+            .expect("created test debug dataset directory");
+        std::fs::create_dir_all(tempdir.path().join(ZONE_DATASET))
+            .expect("created test zone root dataset directory");
+        Self {
+            inner: AvailableDatasetsReceiverInner::FakeTempDir {
+                zpool,
+                tempdir,
+            },
+        }
+    }
+
+    #[cfg(feature = "testing")]
+    pub fn fake_static(
+        pools: impl Iterator<Item = (ZpoolName, Utf8PathBuf)>,
+    ) -> Self {
+        Self {
+            inner: AvailableDatasetsReceiverInner::FakeStatic(pools.collect()),
+        }
+    }
+
+    pub fn all_mounted_debug_datasets(&self) -> Vec<PathInPool> {
+        match &self.inner {
+            AvailableDatasetsReceiverInner::Real(receiver) => {
+                receiver.borrow().all_mounted_debug_datasets().collect()
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
+                vec![PathInPool {
+                    pool: zpool.clone(),
+                    path: tempdir.path().join(U2_DEBUG_DATASET),
+                }]
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
+                .iter()
+                .map(|(pool, path)| PathInPool {
+                    pool: ZpoolOrRamdisk::Zpool(pool.clone()),
+                    path: path.join(U2_DEBUG_DATASET),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn all_mounted_zone_root_datasets(&self) -> Vec<PathInPool> {
+        match &self.inner {
+            AvailableDatasetsReceiverInner::Real(receiver) => {
+                receiver.borrow().all_mounted_zone_root_datasets().collect()
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
+                vec![PathInPool {
+                    pool: zpool.clone(),
+                    path: tempdir.path().join(ZONE_DATASET),
+                }]
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
+                .iter()
+                .map(|(pool, path)| PathInPool {
+                    pool: ZpoolOrRamdisk::Zpool(pool.clone()),
+                    path: path.join(ZONE_DATASET),
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum AvailableDatasetsReceiverInner {
+    // The production path: available datasets are based on the results of the
+    // most recent reconciliation result.
+    Real(watch::Receiver<ReconcilerResult>),
+    // Test path: allow tests to place datasets in a temp directory.
+    #[cfg(feature = "testing")]
+    FakeTempDir {
+        zpool: ZpoolOrRamdisk,
+        tempdir: Arc<Utf8TempDir>,
+    },
+    // Test path: allow tests to specify their own directories.
+    #[cfg(feature = "testing")]
+    FakeStatic(Vec<(ZpoolName, Utf8PathBuf)>),
+}

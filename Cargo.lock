@@ -7093,6 +7093,7 @@ dependencies = [
  "futures",
  "hex",
  "http",
+ "id-map",
  "ipnetwork",
  "libc",
  "macaddr",
@@ -7772,6 +7773,7 @@ dependencies = [
  "sha3",
  "sled-agent-api",
  "sled-agent-client",
+ "sled-agent-config-reconciler",
  "sled-agent-types",
  "sled-diagnostics",
  "sled-hardware",
@@ -11471,6 +11473,37 @@ dependencies = [
  "serde_json",
  "slog",
  "uuid",
+]
+
+[[package]]
+name = "sled-agent-config-reconciler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "derive_more",
+ "dropshot 0.16.0",
+ "glob",
+ "id-map",
+ "illumos-utils",
+ "key-manager",
+ "nexus-sled-agent-shared",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "sled-agent-api",
+ "sled-agent-types",
+ "sled-hardware",
+ "sled-storage",
+ "slog",
+ "slog-error-chain",
+ "thiserror 1.0.69",
+ "tokio",
+ "tufaceous-artifact",
+ "zone 0.3.1",
 ]
 
 [[package]]
