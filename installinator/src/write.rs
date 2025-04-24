@@ -20,7 +20,7 @@ use installinator_common::{
     StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
     WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
-use omicron_common::{disk::M2Slot, update::MupdateOverrideJson};
+use omicron_common::{disk::M2Slot, update::MupdateOverrideInfo};
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sha2::{Digest, Sha256};
 use slog::{Logger, info, warn};
@@ -560,6 +560,8 @@ impl ArtifactsToWrite<'_> {
             clean_output_directory: destinations.clean_control_plane_dir,
             output_directory: &destinations.control_plane_dir,
             zones: self.control_plane_zones,
+            host_phase_2_id: self.host_phase_2_id,
+            control_plane_id: self.control_plane_id,
         };
         cx.with_nested_engine(|engine| {
             inner_cx.register_steps(
@@ -593,6 +595,8 @@ struct ControlPlaneZoneWriteContext<'a> {
     clean_output_directory: bool,
     output_directory: &'a Utf8Path,
     zones: &'a ControlPlaneZoneImages,
+    host_phase_2_id: &'a ArtifactHashId,
+    control_plane_id: &'a ArtifactHashId,
 }
 
 impl ControlPlaneZoneWriteContext<'_> {
@@ -652,11 +656,12 @@ impl ControlPlaneZoneWriteContext<'_> {
                 async move |cx| {
                     let transport = transport.into_value(cx.token()).await;
                     let mupdate_uuid = MupdateOverrideUuid::new_v4();
-                    let mupdate_json = mupdate_override_artifact(mupdate_uuid);
+                    let mupdate_json =
+                        self.mupdate_override_artifact(mupdate_uuid);
 
                     let out_path = self
                         .output_directory
-                        .join(MupdateOverrideJson::FILE_NAME);
+                        .join(MupdateOverrideInfo::FILE_NAME);
 
                     write_artifact_impl(
                         WriteComponent::ControlPlane,
@@ -732,13 +737,22 @@ impl ControlPlaneZoneWriteContext<'_> {
             )
             .register();
     }
-}
 
-fn mupdate_override_artifact(mupdate_uuid: MupdateOverrideUuid) -> BufList {
-    let mupdate_override = MupdateOverrideJson { mupdate_uuid };
-    let json_bytes = serde_json::to_vec(&mupdate_override)
-        .expect("this serialization is infallible");
-    BufList::from(json_bytes)
+    fn mupdate_override_artifact(
+        &self,
+        mupdate_uuid: MupdateOverrideUuid,
+    ) -> BufList {
+        // Might be worth writing out individual hash IDs for each zone in the
+        // future.
+        let hash_ids =
+            [self.host_phase_2_id.clone(), self.control_plane_id.clone()]
+                .into_iter()
+                .collect();
+        let mupdate_override = MupdateOverrideInfo { mupdate_uuid, hash_ids };
+        let json_bytes = serde_json::to_vec(&mupdate_override)
+            .expect("this serialization is infallible");
+        BufList::from(json_bytes)
+    }
 }
 
 fn remove_contents_of(path: &Utf8Path) -> io::Result<()> {

@@ -34,7 +34,6 @@ use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
 use crate::profile::*;
-use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -71,7 +70,6 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
 };
 use omicron_common::address::AZ_PREFIX;
-use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MGS_PORT;
@@ -99,9 +97,8 @@ use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use rand::prelude::SliceRandom;
 use sled_agent_types::{
-    sled::SWITCH_ZONE_BASEBOARD_FILE,
-    time_sync::TimeSync,
-    zone_bundle::{ZoneBundleCause, ZoneBundleMetadata},
+    sled::SWITCH_ZONE_BASEBOARD_FILE, time_sync::TimeSync,
+    zone_bundle::ZoneBundleCause,
 };
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
@@ -127,8 +124,6 @@ use uuid::Uuid;
 use illumos_utils::zone::Zones;
 
 const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
-
-const COCKROACH: &str = "/opt/oxide/cockroachdb/bin/cockroach";
 
 // These are all the same binary. They just reside at different paths.
 const CLICKHOUSE_SERVER_BINARY: &str =
@@ -3556,33 +3551,6 @@ impl ServiceManager {
         Ok(StartZonesResult { new_zones, errors })
     }
 
-    /// Create a zone bundle for the provided zone.
-    pub async fn create_zone_bundle(
-        &self,
-        name: &str,
-    ) -> Result<ZoneBundleMetadata, BundleError> {
-        // Search for the named zone.
-        if let SwitchZoneState::Running { zone, .. } =
-            &*self.inner.switch_zone.lock().await
-        {
-            if zone.name() == name {
-                return self
-                    .inner
-                    .zone_bundler
-                    .create(zone, ZoneBundleCause::ExplicitRequest)
-                    .await;
-            }
-        }
-        if let Some(zone) = self.inner.zones.lock().await.get(name) {
-            return self
-                .inner
-                .zone_bundler
-                .create(&zone.runtime, ZoneBundleCause::ExplicitRequest)
-                .await;
-        }
-        Err(BundleError::NoSuchZone { name: name.to_string() })
-    }
-
     /// Returns the current Omicron zone configuration
     pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
         let log = &self.inner.log;
@@ -4025,73 +3993,6 @@ impl ServiceManager {
             .dataset_mountpoint(&mount_config.root, ZONE_DATASET);
         let pool = ZpoolOrRamdisk::Zpool(filesystem_pool);
         Ok(PathInPool { pool, path })
-    }
-
-    pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
-        let log = &self.inner.log;
-        let dataset_zones = self.inner.zones.lock().await;
-        for zone in dataset_zones.values() {
-            // TODO: We could probably store the ZoneKind in the running zone to
-            // make this "comparison to existing zones by name" mechanism a bit
-            // safer.
-            if zone.name().contains(ZoneKind::CockroachDb.zone_prefix()) {
-                let address = Zones::get_address(
-                    Some(zone.name()),
-                    &zone.runtime.control_interface(),
-                )?
-                .ip();
-                let host = &format!("[{address}]:{COCKROACH_PORT}");
-                info!(
-                    log,
-                    "Initializing CRDB Cluster - sending request to {host}"
-                );
-                if let Err(err) = zone.runtime.run_cmd(&[
-                    COCKROACH,
-                    "init",
-                    "--insecure",
-                    "--host",
-                    host,
-                ]) {
-                    if !err
-                        .to_string()
-                        .contains("cluster has already been initialized")
-                    {
-                        return Err(Error::CockroachInit { err });
-                    }
-                };
-                info!(log, "Formatting CRDB");
-                zone.runtime
-                    .run_cmd(&[
-                        COCKROACH,
-                        "sql",
-                        "--insecure",
-                        "--host",
-                        host,
-                        "--file",
-                        "/opt/oxide/cockroachdb/sql/dbwipe.sql",
-                    ])
-                    .map_err(|err| Error::CockroachInit { err })?;
-                zone.runtime
-                    .run_cmd(&[
-                        COCKROACH,
-                        "sql",
-                        "--insecure",
-                        "--host",
-                        host,
-                        "--file",
-                        "/opt/oxide/cockroachdb/sql/dbinit.sql",
-                    ])
-                    .map_err(|err| Error::CockroachInit { err })?;
-                info!(log, "Formatting CRDB - Completed");
-
-                // In the single-sled case, if there are multiple CRDB nodes on
-                // a single device, we'd still only want to send the
-                // initialization requests to a single dataset.
-                return Ok(());
-            }
-        }
-
-        Ok(())
     }
 
     /// Adjust the system boot time to the latest boot time of all zones.
@@ -5973,10 +5874,10 @@ mod illumos_tests {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::ZpoolUuid;
-
-    use super::*;
+    use sled_agent_types::zone_bundle::ZoneBundleMetadata;
 
     #[test]
     fn test_bootstrap_addr_to_techport_prefixes() {
