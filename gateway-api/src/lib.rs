@@ -319,7 +319,7 @@ pub trait GatewayApi {
         method = GET,
         path = "/sp/{type}/{slot}/task-dump",
     }]
-    async fn sp_host_task_dump_count(
+    async fn sp_task_dump_count(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
     ) -> Result<HttpResponseOk<u32>, HttpError>;
@@ -329,7 +329,7 @@ pub trait GatewayApi {
         method = GET,
         path = "/sp/{type}/{slot}/task-dump/{task_dump_index}",
     }]
-    async fn sp_host_task_dump_get(
+    async fn sp_task_dump_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpTaskDumpIndex>,
     ) -> Result<HttpResponseOk<TaskDump>, HttpError>;

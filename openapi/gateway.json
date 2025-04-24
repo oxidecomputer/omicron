@@ -1514,7 +1514,7 @@
     "/sp/{type}/{slot}/task-dump": {
       "get": {
         "summary": "Get the number of task dumps present on an SP",
-        "operationId": "sp_host_task_dump_count",
+        "operationId": "sp_task_dump_count",
         "parameters": [
           {
             "in": "path",
@@ -1561,7 +1561,7 @@
     "/sp/{type}/{slot}/task-dump/{task_dump_index}": {
       "get": {
         "summary": "Read a single task dump from an SP",
-        "operationId": "sp_host_task_dump_get",
+        "operationId": "sp_task_dump_get",
         "parameters": [
           {
             "in": "path",
