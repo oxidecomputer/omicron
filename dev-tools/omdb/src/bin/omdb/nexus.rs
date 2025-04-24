@@ -116,9 +116,11 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
-    /// Interact with clickhouse policy
+    /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
-    /// Interact with oximeter read policy
+    /// print information about pending MGS updates
+    MgsUpdates,
+    /// interact with oximeter read policy
     OximeterReadPolicy(OximeterReadPolicyArgs),
     /// view sagas, create and complete demo sagas
     Sagas(SagasArgs),
@@ -599,6 +601,8 @@ impl NexusArgs {
                     cmd_nexus_clickhouse_policy_set(&client, args, token).await
                 }
             },
+
+            NexusCommands::MgsUpdates => cmd_nexus_mgs_updates(&client).await,
 
             NexusCommands::OximeterReadPolicy(OximeterReadPolicyArgs {
                 command,
@@ -2849,6 +2853,18 @@ async fn cmd_nexus_clickhouse_policy_get(
         }
     }
 
+    Ok(())
+}
+
+async fn cmd_nexus_mgs_updates(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let response = client
+        .mgs_updates()
+        .await
+        .context("fetching update status")?
+        .into_inner();
+    println!("{}", response.detailed_display());
     Ok(())
 }
 

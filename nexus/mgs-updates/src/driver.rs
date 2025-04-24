@@ -7,7 +7,6 @@
 use crate::ArtifactCache;
 use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::SpComponentUpdate;
-use crate::driver_update::UpdateCompletedHow;
 use crate::driver_update::apply_update;
 use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::FutureExt;
@@ -18,6 +17,12 @@ use id_map::IdMap;
 use id_map::IdMappable;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::internal_api::views::CompletedAttempt;
+use nexus_types::internal_api::views::InProgressUpdateStatus;
+use nexus_types::internal_api::views::MgsUpdateDriverStatus;
+use nexus_types::internal_api::views::UpdateAttemptStatus;
+use nexus_types::internal_api::views::UpdateCompletedHow;
+use nexus_types::internal_api::views::WaitingStatus;
 use nexus_types::inventory::BaseboardId;
 use qorb::resolver::AllBackends;
 use slog::{error, info, o, warn};
@@ -84,7 +89,7 @@ pub struct MgsUpdateDriver {
 
     // outputs
     /// status of updates we're working on or recently finished
-    status_tx: watch::Sender<DriverStatus>,
+    status_tx: watch::Sender<MgsUpdateDriverStatus>,
 
     // internal state tracking
     /// holds the futures that are each performing one update attempt
@@ -107,7 +112,7 @@ impl MgsUpdateDriver {
         mgs_rx: watch::Receiver<AllBackends>,
         retry_timeout: Duration,
     ) -> MgsUpdateDriver {
-        let (status_tx, _) = watch::channel(DriverStatus {
+        let (status_tx, _) = watch::channel(MgsUpdateDriverStatus {
             recent: VecDeque::with_capacity(N_RECENT_COMPLETIONS),
             in_progress: BTreeMap::new(),
             waiting: BTreeMap::new(),
@@ -129,7 +134,7 @@ impl MgsUpdateDriver {
 
     /// Returns a `watch::Receiver` that you can use to inspect the state of
     /// in-progress, waiting, and recently completed update attempts.
-    pub fn status_rx(&self) -> watch::Receiver<DriverStatus> {
+    pub fn status_rx(&self) -> watch::Receiver<MgsUpdateDriverStatus> {
         self.status_tx.subscribe()
     }
 
@@ -333,7 +338,6 @@ impl MgsUpdateDriver {
                 baseboard_id.clone(),
                 InProgressUpdateStatus {
                     time_started: in_progress.time_started,
-                    instant_started: in_progress.instant_started,
                     status: UpdateAttemptStatus::NotStarted,
                     nattempts_done,
                 },
@@ -540,9 +544,9 @@ impl IdMappable for WaitingAttempt {
 }
 
 /// Interface used by update attempts to update just their part of the overall
-/// `DriverStatus`
+/// `MgsUpdateDriverStatus`
 pub(crate) struct UpdateAttemptStatusUpdater {
-    tx: watch::Sender<DriverStatus>,
+    tx: watch::Sender<MgsUpdateDriverStatus>,
     baseboard_id: Arc<BaseboardId>,
 }
 
@@ -558,55 +562,4 @@ impl UpdateAttemptStatusUpdater {
             my_status.status = new_status;
         });
     }
-}
-
-// Externally-visible status
-
-/// Status of ongoing update attempts, recently completed attempts, and update
-/// requests that are waiting for retry.
-#[derive(Debug)]
-pub struct DriverStatus {
-    pub recent: VecDeque<CompletedAttempt>,
-    pub in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdateStatus>,
-    pub waiting: BTreeMap<Arc<BaseboardId>, WaitingStatus>,
-}
-
-/// externally-exposed status for a completed attempt
-#[derive(Debug)]
-pub struct CompletedAttempt {
-    pub time_started: chrono::DateTime<chrono::Utc>,
-    pub time_done: chrono::DateTime<chrono::Utc>,
-    pub elapsed: Duration,
-    pub request: PendingMgsUpdate,
-    pub result: Result<UpdateCompletedHow, String>,
-    pub nattempts_done: u32,
-}
-
-/// externally-exposed status for each in-progress update
-#[derive(Debug)]
-pub struct InProgressUpdateStatus {
-    pub time_started: chrono::DateTime<chrono::Utc>,
-    pub instant_started: std::time::Instant,
-    pub status: UpdateAttemptStatus,
-    pub nattempts_done: u32,
-}
-
-/// status of a single update attempt
-#[derive(Clone, Debug)]
-pub enum UpdateAttemptStatus {
-    NotStarted,
-    FetchingArtifact,
-    Precheck,
-    Updating,
-    UpdateWaiting,
-    PostUpdate,
-    PostUpdateWait,
-    Done,
-}
-
-/// externally-exposed status for waiting updates
-#[derive(Debug)]
-pub struct WaitingStatus {
-    pub next_attempt_time: chrono::DateTime<chrono::Utc>,
-    pub nattempts_done: u32,
 }

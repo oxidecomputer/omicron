@@ -47,6 +47,7 @@ pub mod constants {
     pub const GENERATION: &str = "generation";
 }
 use constants::*;
+use std::fmt::Display;
 
 /// The state of a sled or resource (e.g. zone or physical disk) in this
 /// blueprint, with regards to the parent blueprint
@@ -131,11 +132,14 @@ pub enum BpTableColumn {
 }
 
 impl BpTableColumn {
-    pub fn new(before: String, after: String) -> BpTableColumn {
+    pub fn new<T: Display + Eq>(before: T, after: T) -> BpTableColumn {
         if before != after {
-            BpTableColumn::Diff { before, after }
+            BpTableColumn::Diff {
+                before: before.to_string(),
+                after: after.to_string(),
+            }
         } else {
-            BpTableColumn::Value(before)
+            BpTableColumn::Value(before.to_string())
         }
     }
 
@@ -406,7 +410,7 @@ impl BpTableSchema for BpClickhouseServersTableSchema {
 pub struct BpPendingMgsUpdates {}
 impl BpTableSchema for BpPendingMgsUpdates {
     fn table_name(&self) -> &'static str {
-        "Pending MGS-managed updates"
+        "Pending MGS-managed updates (all baseboards)"
     }
 
     fn column_names(&self) -> &'static [&'static str] {
@@ -415,8 +419,9 @@ impl BpTableSchema for BpPendingMgsUpdates {
             "slot",
             "part_number",
             "serial_number",
-            "artifact_kind",
             "artifact_hash",
+            "artifact_version",
+            "details",
         ]
     }
 }
