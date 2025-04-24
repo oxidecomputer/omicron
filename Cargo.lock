@@ -7022,6 +7022,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "camino-tempfile",
  "chrono",
  "clap",
  "cockroach-admin-api",
@@ -7682,6 +7683,7 @@ dependencies = [
  "chrono",
  "clap",
  "clickhouse-admin-types",
+ "cockroach-admin-client",
  "crucible-agent-client",
  "derive_more",
  "display-error-chain",

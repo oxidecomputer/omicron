@@ -652,12 +652,6 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn cockroachdb_init(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        method_unimplemented()
-    }
-
     async fn timesync_get(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<TimeSync>, HttpError> {

@@ -305,15 +305,6 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledRole>, HttpError>;
 
-    /// Initializes a CockroachDB cluster
-    #[endpoint {
-        method = POST,
-        path = "/cockroachdb",
-    }]
-    async fn cockroachdb_init(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
     #[endpoint {
         method = PUT,
         path = "/vmms/{propolis_id}",

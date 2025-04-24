@@ -71,7 +71,6 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
 };
 use omicron_common::address::AZ_PREFIX;
-use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MGS_PORT;
@@ -127,8 +126,6 @@ use uuid::Uuid;
 use illumos_utils::zone::Zones;
 
 const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
-
-const COCKROACH: &str = "/opt/oxide/cockroachdb/bin/cockroach";
 
 // These are all the same binary. They just reside at different paths.
 const CLICKHOUSE_SERVER_BINARY: &str =
@@ -4025,73 +4022,6 @@ impl ServiceManager {
             .dataset_mountpoint(&mount_config.root, ZONE_DATASET);
         let pool = ZpoolOrRamdisk::Zpool(filesystem_pool);
         Ok(PathInPool { pool, path })
-    }
-
-    pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
-        let log = &self.inner.log;
-        let dataset_zones = self.inner.zones.lock().await;
-        for zone in dataset_zones.values() {
-            // TODO: We could probably store the ZoneKind in the running zone to
-            // make this "comparison to existing zones by name" mechanism a bit
-            // safer.
-            if zone.name().contains(ZoneKind::CockroachDb.zone_prefix()) {
-                let address = Zones::get_address(
-                    Some(zone.name()),
-                    &zone.runtime.control_interface(),
-                )?
-                .ip();
-                let host = &format!("[{address}]:{COCKROACH_PORT}");
-                info!(
-                    log,
-                    "Initializing CRDB Cluster - sending request to {host}"
-                );
-                if let Err(err) = zone.runtime.run_cmd(&[
-                    COCKROACH,
-                    "init",
-                    "--insecure",
-                    "--host",
-                    host,
-                ]) {
-                    if !err
-                        .to_string()
-                        .contains("cluster has already been initialized")
-                    {
-                        return Err(Error::CockroachInit { err });
-                    }
-                };
-                info!(log, "Formatting CRDB");
-                zone.runtime
-                    .run_cmd(&[
-                        COCKROACH,
-                        "sql",
-                        "--insecure",
-                        "--host",
-                        host,
-                        "--file",
-                        "/opt/oxide/cockroachdb/sql/dbwipe.sql",
-                    ])
-                    .map_err(|err| Error::CockroachInit { err })?;
-                zone.runtime
-                    .run_cmd(&[
-                        COCKROACH,
-                        "sql",
-                        "--insecure",
-                        "--host",
-                        host,
-                        "--file",
-                        "/opt/oxide/cockroachdb/sql/dbinit.sql",
-                    ])
-                    .map_err(|err| Error::CockroachInit { err })?;
-                info!(log, "Formatting CRDB - Completed");
-
-                // In the single-sled case, if there are multiple CRDB nodes on
-                // a single device, we'd still only want to send the
-                // initialization requests to a single dataset.
-                return Ok(());
-            }
-        }
-
-        Ok(())
     }
 
     /// Adjust the system boot time to the latest boot time of all zones.
