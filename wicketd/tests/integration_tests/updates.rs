@@ -13,6 +13,7 @@ use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
+use omicron_common::update::MupdateOverrideJson;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
 use update_engine::NestedError;
@@ -401,6 +402,23 @@ async fn test_installinator_fetch() {
         let path = dest_path.join(file_name);
         assert!(path.is_file(), "{path} was written out");
     }
+
+    // Ensure that the MUPdate override file was written correctly.
+    //
+    // In the mode where we specify a destination directory to write to,
+    // the install dataset translates to "<dest-path>/zones".
+    let mupdate_override_path =
+        dest_path.join("zones").join(MupdateOverrideJson::FILE_NAME);
+    assert!(
+        mupdate_override_path.is_file(),
+        "{mupdate_override_path} was written out",
+    );
+
+    // Ensure that the MUPdate override file can be parsed.
+    let mupdate_override_bytes = std::fs::read(mupdate_override_path)
+        .expect("mupdate override file successfully read");
+    serde_json::from_slice::<MupdateOverrideJson>(&mupdate_override_bytes)
+        .expect("mupdate override file successfully deserialized");
 
     recv_handle.await.expect("recv_handle succeeded");
 
