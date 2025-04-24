@@ -19,6 +19,7 @@ use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
+use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
@@ -414,6 +415,12 @@ impl SledAgent {
         ));
         info!(&log, "SledAgent::new(..) starting");
 
+        // Cleanup any old sled-diagnostics ZFS snapshots
+        sled_diagnostics::LogsHandle::new(
+            log.new(o!("component" => "sled-diagnostics-cleanup")),
+        )
+        .cleanup_snapshots();
+
         let storage_manager = &long_running_task_handles.storage_manager;
         let boot_disk = storage_manager
             .get_latest_disks()
@@ -718,6 +725,11 @@ impl SledAgent {
     /// Accesses the [SupportBundleManager] API.
     pub(crate) fn as_support_bundle_storage(&self) -> SupportBundleManager<'_> {
         SupportBundleManager::new(&self.log, self.storage())
+    }
+
+    /// Accesses the [SupportBundleLogs] API.
+    pub(crate) fn as_support_bundle_logs(&self) -> SupportBundleLogs<'_> {
+        SupportBundleLogs::new(&self.log, self.storage())
     }
 
     pub(crate) fn switch_zone_underlay_info(

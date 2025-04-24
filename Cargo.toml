@@ -423,7 +423,7 @@ flate2 = "1.1.1"
 float-ord = "0.3.2"
 flume = "0.11.1"
 foreign-types = "0.3.2"
-fs-err = "2.11.0"
+fs-err = "3.1.0"
 futures = "0.3.31"
 gateway-api = { path = "gateway-api" }
 gateway-client = { path = "clients/gateway-client" }
