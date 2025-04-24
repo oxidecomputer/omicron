@@ -23,6 +23,7 @@ use omicron_uuid_kinds::{
     GenericUuid, WebhookReceiverKind, WebhookReceiverUuid, WebhookSecretUuid,
 };
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -265,6 +266,15 @@ impl TryFrom<shared::WebhookSubscription> for WebhookSubscriptionKind {
         subscription: shared::WebhookSubscription,
     ) -> Result<Self, Self::Error> {
         Self::new(String::from(subscription))
+    }
+}
+
+impl fmt::Display for WebhookSubscriptionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Exact(class) => class.fmt(f),
+            Self::Glob(glob) => glob.glob.fmt(f),
+        }
     }
 }
 

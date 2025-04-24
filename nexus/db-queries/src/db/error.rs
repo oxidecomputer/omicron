@@ -113,7 +113,7 @@ impl From<TransactionError<PublicError>> for PublicError {
 }
 
 /// Summarizes details provided with a database error.
-fn format_database_error(
+pub(crate) fn format_database_error(
     kind: DieselErrorKind,
     info: &dyn DatabaseErrorInformation,
 ) -> String {

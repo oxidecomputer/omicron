@@ -12,6 +12,7 @@ use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::RunnableQuery;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::model::Generation;
@@ -27,6 +28,7 @@ use crate::db::model::WebhookRxEventGlob;
 use crate::db::model::WebhookRxSubscription;
 use crate::db::model::WebhookSecret;
 use crate::db::model::WebhookSubscriptionKind;
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::pool::DbConnection;
@@ -35,6 +37,7 @@ use crate::db::update_and_check::UpdateStatus;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use nexus_auth::authz::ApiResource;
 use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as delivery_attempt_dsl;
 use nexus_db_schema::schema::webhook_event::dsl as event_dsl;
@@ -430,15 +433,51 @@ impl DataStore {
         authz_rx: &authz::WebhookReceiver,
         authz_event: &authz::WebhookEvent,
     ) -> Result<bool, Error> {
+        opctx.authorize(authz::Action::Read, authz_rx).await?;
+
         let conn = self.pool_connection_authorized(opctx).await?;
+        let rx_id = authz_rx.id();
+
+        // Before we can check whether the receiver is subscribed to the
+        // provided event, ensure that its glob subscriptions are up to date.
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .rx_list_reprocessable_globs_on_conn(
+                    Some(authz_rx.id()),
+                    &p.current_pagparams(),
+                    &*conn,
+                )
+                .await?;
+            paginator = p.found_batch(&batch, &|glob| {
+                (glob.rx_id.into_untyped_uuid(), glob.glob.glob.clone())
+            });
+            for glob in batch {
+                slog::debug!(
+                    opctx.log,
+                    "reprocessing webhook glob subscription to checking if \
+                     receiver is subscribed to event";
+                    "rx_id" => ?rx_id,
+                    "glob" => ?glob.glob.glob,
+                    "prior_version" => ?glob.schema_version,
+                    "current_version" => %SCHEMA_VERSION,
+                );
+                self.webhook_glob_reprocess(opctx, &glob).await.map_err(
+                    |e| {
+                        e.internal_context(format!(
+                            "failed to reprocess glob {glob:?}"
+                        ))
+                    },
+                )?;
+            }
+        }
+
         let event_class = event_dsl::webhook_event
             .filter(event_dsl::id.eq(authz_event.id().into_untyped_uuid()))
             .select(event_dsl::event_class)
             .single_value();
         subscription_dsl::webhook_rx_subscription
-            .filter(
-                subscription_dsl::rx_id.eq(authz_rx.id().into_untyped_uuid()),
-            )
+            .filter(subscription_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
             .filter(subscription_dsl::event_class.nullable().eq(event_class))
             .select(subscription_dsl::rx_id)
             .first_async::<Uuid>(&*conn)
@@ -480,27 +519,74 @@ impl DataStore {
         subscription: WebhookSubscriptionKind,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, authz_rx).await?;
+        let rx_id = authz_rx.id().into_untyped_uuid();
+        let conn = self.pool_connection_authorized(&opctx).await?;
+
+        let error_handler = |error| match error {
+            diesel::result::Error::NotFound => {
+                Error::non_resourcetype_not_found(format!(
+                    "{:?} is not subscribed to \"{subscription}\"",
+                    authz_rx.lookup_type()
+                ))
+            }
+            diesel::result::Error::DatabaseError(kind, info) => {
+                Error::internal_error(&crate::db::error::format_database_error(
+                    kind, &*info,
+                ))
+            }
+            error => Error::internal_error(&format!(
+                "unexpected database error: {error:#}"
+            )),
+        };
+        const LOG_MSG: &str = "unsubscribed webhook receiver";
         match subscription {
-            WebhookSubscriptionKind::Glob(glob) => {
-                todo!("this part probably has to be a transaction")
+            WebhookSubscriptionKind::Glob(ref glob) => {
+                // Deleting a glob subscription is performed in a transaction in
+                // order to ensure that the glob is only deleted if its exact
+                // subscriptions could also be deleted.
+                let n_exact = self
+                    .transaction_retry_wrapper("webhook_glob_delete")
+                    .transaction(&conn, |conn| {
+                        let glob = glob.glob.clone();
+                        async move {
+                            let n_exact = diesel::delete(
+                                subscription_dsl::webhook_rx_subscription,
+                            )
+                            .filter(subscription_dsl::rx_id.eq(rx_id))
+                            .filter(subscription_dsl::glob.eq(glob.clone()))
+                            .execute_async(&conn)
+                            .await?;
+                            diesel::delete(glob_dsl::webhook_rx_event_glob)
+                                .filter(glob_dsl::rx_id.eq(rx_id))
+                                .filter(glob_dsl::glob.eq(glob))
+                                .execute_async(&conn)
+                                .await?;
+                            Ok(n_exact)
+                        }
+                    })
+                    .await
+                    .map_err(error_handler)?;
+                slog::debug!(
+                    &opctx.log,
+                    "{LOG_MSG}";
+                    "rx_id" => %rx_id,
+                    "subscription_glob" => &glob.glob,
+                    "exact_subscriptions_deleted" => n_exact,
+                );
             }
             WebhookSubscriptionKind::Exact(class) => {
                 diesel::delete(subscription_dsl::webhook_rx_subscription)
-                    .filter(
-                        subscription_dsl::rx_id
-                            .eq(authz_rx.id().into_untyped_uuid()),
-                    )
+                    .filter(subscription_dsl::rx_id.eq(rx_id))
                     .filter(subscription_dsl::event_class.eq(class))
-                    .execute_async(
-                        &*self.pool_connection_authorized(&opctx).await?,
-                    )
+                    .execute_async(&*conn)
                     .await
-                    .map_err(|e| {
-                        public_error_from_diesel(
-                            e,
-                            ErrorHandler::NotFoundByResource(authz_rx),
-                        )
-                    })?;
+                    .map_err(error_handler)?;
+                slog::debug!(
+                    &opctx.log,
+                    "{LOG_MSG}";
+                    "rx_id" => %rx_id,
+                    "subscription_event_class" => %class,
+                );
             }
         }
 
@@ -735,6 +821,16 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (Uuid, String)>,
     ) -> ListResultVec<WebhookRxEventGlob> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.rx_list_reprocessable_globs_on_conn(None, pagparams, &*conn).await
+    }
+
+    async fn rx_list_reprocessable_globs_on_conn(
+        &self,
+        rx_id: Option<WebhookReceiverUuid>,
+        pagparams: &DataPageParams<'_, (Uuid, String)>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> ListResultVec<WebhookRxEventGlob> {
         let (current_version, target_version) =
             self.database_schema_version().await.map_err(|e| {
                 e.internal_context("couldn't load db schema version")
@@ -779,7 +875,7 @@ impl DataStore {
             });
         }
 
-        paginated_multicolumn(
+        let query = paginated_multicolumn(
             glob_dsl::webhook_rx_event_glob,
             (glob_dsl::rx_id, glob_dsl::glob),
             pagparams,
@@ -791,10 +887,24 @@ impl DataStore {
         .filter(glob_dsl::schema_version.is_null().or(
             glob_dsl::schema_version.ne(SemverVersion::from(SCHEMA_VERSION)),
         ))
-        .select(WebhookRxEventGlob::as_select())
-        .load_async(&*self.pool_connection_authorized(&opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        .select(WebhookRxEventGlob::as_select());
+        // If we were asked for globs belonging to a specific receiver, add a
+        // WHERE clause to filter on the receiver's UUID. We just use a match
+        // rather than boxing the query since this is the only dynamically
+        // variable part of the query builder.
+        match rx_id {
+            Some(rx_id) => {
+                query
+                    .filter(glob_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
+                    .load_async(conn)
+                    .await
+            }
+            None => query.load_async(conn).await,
+        }
+        .map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server)
+                .internal_context("failed to list outdated glob subscriptions")
+        })
     }
 
     /// Updates the list of exact subscriptions generated for the provided glob
@@ -810,6 +920,16 @@ impl DataStore {
         opctx: &OpContext,
         glob: &WebhookRxEventGlob,
     ) -> Result<WebhookGlobStatus, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.glob_reprocess_on_conn(opctx, glob, &*conn).await
+    }
+
+    async fn glob_reprocess_on_conn(
+        &self,
+        opctx: &OpContext,
+        glob: &WebhookRxEventGlob,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<WebhookGlobStatus, Error> {
         slog::trace!(
             opctx.log,
             "reprocessing outdated webhook glob";
@@ -818,7 +938,6 @@ impl DataStore {
             "prior_version" => ?glob.schema_version,
             "current_version" => %SCHEMA_VERSION,
         );
-        let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
         let status = self
             .transaction_retry_wrapper("webhook_glob_reprocess")
@@ -1172,6 +1291,27 @@ mod test {
             "test.quux.**",
         )
         .await;
+
+        // Before we check whether the receivers are subscribed to the expected
+        // event classes, we must generate exact subscriptions for their globs.
+        // The webhook dispatcher background task does this prior to listing
+        // subscribed receivers, so this simulates its behavior.
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = datastore
+                .webhook_glob_list_reprocessable(opctx, &p.current_pagparams())
+                .await
+                .unwrap();
+            paginator = p.found_batch(&batch, &|glob| {
+                (glob.rx_id.into_untyped_uuid(), glob.glob.glob.clone())
+            });
+            for glob in batch {
+                datastore
+                    .webhook_glob_reprocess(opctx, dbg!(&glob))
+                    .await
+                    .unwrap();
+            }
+        }
 
         async fn check_event(
             datastore: &DataStore,
