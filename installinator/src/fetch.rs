@@ -188,7 +188,7 @@ impl FetchArtifactBackend {
         None
     }
 
-    pub(crate) fn peers(&self) -> PeerAddresses {
+    pub(crate) fn peers(&self) -> &PeerAddresses {
         self.imp.peers()
     }
 
@@ -308,7 +308,7 @@ impl FetchArtifactBackend {
 /// `mock_peers`.
 #[async_trait]
 pub(crate) trait FetchArtifactImpl: fmt::Debug + Send + Sync {
-    fn peers(&self) -> PeerAddresses;
+    fn peers(&self) -> &PeerAddresses;
 
     /// Returns (size, receiver) on success, and an error on failure.
     async fn fetch_from_peer_impl(
@@ -339,8 +339,8 @@ impl HttpFetchBackend {
 
 #[async_trait]
 impl FetchArtifactImpl for HttpFetchBackend {
-    fn peers(&self) -> PeerAddresses {
-        self.peers.clone()
+    fn peers(&self) -> &PeerAddresses {
+        &self.peers
     }
 
     async fn fetch_from_peer_impl(

@@ -143,10 +143,10 @@ impl MockPeersUniverse {
                                     .then(|| (*addr, peer.clone()))
                             })
                             .collect();
-                        Ok(MockFetchBackend {
-                            artifact: self.artifact.clone(),
+                        Ok(MockFetchBackend::new(
+                            self.artifact.clone(),
                             selected_peers,
-                        })
+                        ))
                     }
                     AttemptBitmap::Failure => {
                         bail!(
@@ -177,20 +177,27 @@ struct MockFetchBackend {
     artifact: Bytes,
     // Peers within the universe that have been selected
     selected_peers: BTreeMap<PeerAddress, MockPeer>,
+    // selected_peers keys stored in a suitable form for the
+    // FetchArtifactImpl trait
+    peer_addresses: PeerAddresses,
 }
 
 impl MockFetchBackend {
+    fn new(
+        artifact: Bytes,
+        selected_peers: BTreeMap<PeerAddress, MockPeer>,
+    ) -> Self {
+        let peer_addresses = selected_peers.keys().copied().collect();
+        Self { artifact, selected_peers, peer_addresses }
+    }
+
     fn get(&self, peer: PeerAddress) -> Option<&MockPeer> {
         self.selected_peers.get(&peer)
     }
 
-    fn peers(&self) -> impl Iterator<Item = (&PeerAddress, &MockPeer)> + '_ {
-        self.selected_peers.iter()
-    }
-
     /// Returns the peer that can return the entire dataset within the timeout.
     fn successful_peer(&self, timeout: Duration) -> Option<PeerAddress> {
-        self.peers()
+        self.selected_peers.iter()
             .filter_map(|(addr, peer)| {
                 if peer.artifact != self.artifact {
                     // We don't handle the case where the peer returns the wrong artifact yet.
@@ -235,8 +242,8 @@ impl MockFetchBackend {
 
 #[async_trait]
 impl FetchArtifactImpl for MockFetchBackend {
-    fn peers(&self) -> PeerAddresses {
-        PeerAddresses::new(self.selected_peers.keys().cloned())
+    fn peers(&self) -> &PeerAddresses {
+        &self.peer_addresses
     }
 
     async fn fetch_from_peer_impl(
@@ -475,11 +482,9 @@ impl ReportProgressImpl for MockProgressBackend {
     async fn discover_peers(
         &self,
     ) -> Result<PeerAddresses, DiscoverPeersError> {
-        Ok(PeerAddresses::new([
-            Self::VALID_PEER,
-            Self::INVALID_PEER,
-            Self::UNRESPONSIVE_PEER,
-        ]))
+        Ok([Self::VALID_PEER, Self::INVALID_PEER, Self::UNRESPONSIVE_PEER]
+            .into_iter()
+            .collect())
     }
 
     async fn report_progress_impl(
