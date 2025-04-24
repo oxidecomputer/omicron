@@ -583,13 +583,6 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
-    async fn zone_bundle_create(
-        _rqctx: RequestContext<Self::Context>,
-        _params: Path<ZonePathParam>,
-    ) -> Result<HttpResponseCreated<ZoneBundleMetadata>, HttpError> {
-        method_unimplemented()
-    }
-
     async fn zone_bundle_get(
         _rqctx: RequestContext<Self::Context>,
         _params: Path<ZoneBundleId>,
@@ -649,12 +642,6 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn sled_role_get(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledRole>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn cockroachdb_init(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
 
@@ -755,6 +742,21 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn support_zpool_info(
         _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn support_logs(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
+        // Return an empty zone list for testing.
+        Ok(HttpResponseOk(Default::default()))
+    }
+
+    async fn support_logs_download(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
+        _query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
         method_unimplemented()
     }
 }
