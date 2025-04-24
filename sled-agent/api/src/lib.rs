@@ -91,16 +91,6 @@ pub trait SledAgentApi {
         params: Path<ZonePathParam>,
     ) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError>;
 
-    /// Ask the sled agent to create a zone bundle.
-    #[endpoint {
-        method = POST,
-        path = "/zones/bundles/{zone_name}",
-    }]
-    async fn zone_bundle_create(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<ZonePathParam>,
-    ) -> Result<HttpResponseCreated<ZoneBundleMetadata>, HttpError>;
-
     /// Fetch the binary content of a single zone bundle.
     #[endpoint {
         method = GET,
@@ -304,15 +294,6 @@ pub trait SledAgentApi {
     async fn sled_role_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledRole>, HttpError>;
-
-    /// Initializes a CockroachDB cluster
-    #[endpoint {
-        method = POST,
-        path = "/cockroachdb",
-    }]
-    async fn cockroachdb_init(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
         method = PUT,
@@ -691,6 +672,27 @@ pub trait SledAgentApi {
     async fn support_zpool_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    /// This endpoint returns a list of known zones on a sled that have service
+    /// logs that can be collected into a support bundle.
+    #[endpoint {
+        method = GET,
+        path = "/support/logs/zones",
+    }]
+    async fn support_logs(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
+
+    /// This endpoint returns a zip file of a zone's logs organized by service.
+    #[endpoint {
+        method = GET,
+        path = "/support/logs/download/{zone}",
+    }]
+    async fn support_logs_download(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
+        query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -799,6 +801,20 @@ pub enum SupportBundleState {
 pub struct SupportBundleMetadata {
     pub support_bundle_id: SupportBundleUuid,
     pub state: SupportBundleState,
+}
+
+/// Path parameters for sled-diagnostics log requests used by support bundles
+/// (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+pub struct SledDiagnosticsLogsDownloadPathParm {
+    /// The zone for which one would like to collect logs for
+    pub zone: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SledDiagnosticsLogsDownloadQueryParam {
+    /// The max number of rotated logs to include in the final support bundle
+    pub max_rotated: usize,
 }
 
 /// Path parameters for Disk requests (sled agent API)

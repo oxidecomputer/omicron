@@ -7,8 +7,10 @@ use cockroach_admin_api::*;
 use cockroach_admin_types::NodeDecommission;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
+use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use slog::info;
 use std::sync::Arc;
 
 type CrdbApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
@@ -22,6 +24,22 @@ enum CockroachAdminImpl {}
 
 impl CockroachAdminApi for CockroachAdminImpl {
     type Context = Arc<ServerContext>;
+
+    async fn cluster_init(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let ctx = rqctx.context();
+        let cli = ctx.cockroach_cli();
+        let log = ctx.log();
+
+        info!(log, "Initializing CRDB cluster");
+        cli.cluster_init().await?;
+        info!(log, "CRDB cluster initialized - initializing Omicron schema");
+        cli.schema_init().await?;
+        info!(log, "Omicron schema initialized");
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
 
     async fn node_status(
         rqctx: RequestContext<Self::Context>,

@@ -133,11 +133,11 @@ mod init;
 mod status;
 mod tasks;
 
-pub use driver::Activator;
 pub use driver::Driver;
-pub use init::BackgroundTasks;
 pub use init::BackgroundTasksData;
 pub use init::BackgroundTasksInitializer;
+pub(crate) use init::BackgroundTasksInternal;
+pub use nexus_background_task_interface::Activator;
 pub use tasks::saga_recovery::SagaRecoveryHelpers;
 
 use futures::future::BoxFuture;

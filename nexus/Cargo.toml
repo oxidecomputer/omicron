@@ -52,6 +52,7 @@ ipnetwork.workspace = true
 itertools.workspace = true
 lldpd_client.workspace = true
 macaddr.workspace = true
+nexus-background-task-interface.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
 nexus-config.workspace = true
