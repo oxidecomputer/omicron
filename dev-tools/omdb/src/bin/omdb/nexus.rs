@@ -3665,9 +3665,7 @@ async fn cmd_nexus_support_bundles_inspect(
 ) -> Result<(), anyhow::Error> {
     let accessor: Box<dyn SupportBundleAccessor> = match (args.id, &args.path) {
         (None, Some(path)) => {
-            Box::new(
-                support_bundle_reader_lib::LocalFileAccess::new(path)?
-            )
+            Box::new(support_bundle_reader_lib::LocalFileAccess::new(path)?)
         }
         (maybe_id, None) => {
             Box::new(access_bundle_from_id(client, maybe_id).await?)
