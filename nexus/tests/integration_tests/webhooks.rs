@@ -16,7 +16,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::{params, shared, views};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::GenericUuid;
@@ -201,6 +201,38 @@ async fn secret_add(
         params,
     )
     .await
+}
+
+async fn subscription_add(
+    ctx: &ControlPlaneTestContext,
+    webhook_id: WebhookReceiverUuid,
+    params: &shared::WebhookSubscription,
+) -> shared::WebhookSubscription {
+    resource_helpers::object_create(
+        &ctx.external_client,
+        &format!("{RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions"),
+        params,
+    )
+    .await
+}
+
+async fn subscription_delete(
+    ctx: &ControlPlaneTestContext,
+    webhook_id: WebhookReceiverUuid,
+    params: &shared::WebhookSubscription,
+) {
+    let path = format!("{RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions");
+    let req =
+        RequestBuilder::new(&ctx.external_client, http::Method::DELETE, &path)
+            .body(Some(params))
+            .expect_status(Some(http::StatusCode::NO_CONTENT));
+    NexusRequest::new(req)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"DELETE\" request to {path}: {e}")
+        });
 }
 
 async fn webhook_send_probe(
@@ -1488,5 +1520,288 @@ async fn test_api_resends_failed_deliveries(
     dbg!(
         activate_background_task(internal_client, "webhook_deliverator").await
     );
+    mock.assert_calls_async(1).await;
+}
+
+#[nexus_test]
+async fn test_subscription_add(cptestctx: &ControlPlaneTestContext) {
+    subscription_add_test(cptestctx, "test.foo.bar").await
+}
+
+#[nexus_test]
+async fn test_glob_subscription_add(cptestctx: &ControlPlaneTestContext) {
+    subscription_add_test(cptestctx, "test.foo.*").await
+}
+
+async fn subscription_add_test(
+    cptestctx: &ControlPlaneTestContext,
+    new_subscription: &str,
+) {
+    let nexus = cptestctx.server.server_context().nexus.clone();
+    let internal_client = &cptestctx.internal_client;
+
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let server = httpmock::MockServer::start_async().await;
+
+    let id1 = WebhookEventUuid::new_v4();
+    let id2 = WebhookEventUuid::new_v4();
+
+    // Create a webhook receiver.
+    let webhook =
+        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
+    dbg!(&webhook);
+
+    let mock = {
+        let webhook = webhook.clone();
+        server
+            .mock_async(move |when, then| {
+                let body = serde_json::json!({
+                    "event_class": "test.foo.bar",
+                    "event_id": id2,
+                    "data": {
+                        "hello_world": true,
+                    }
+                })
+                .to_string();
+                when.method(POST)
+                    .header("x-oxide-event-class", "test.foo.bar")
+                    .header("x-oxide-event-id", id2.to_string())
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        MY_COOL_SECRET.as_bytes().to_vec(),
+                    ))
+                    .json_body_includes(body);
+                then.status(200);
+            })
+            .await
+    };
+
+    // Publish an event. This should not be received, as we are not subscribed
+    // to it.
+    let event = nexus
+        .webhook_event_publish(
+            &opctx,
+            id1,
+            WebhookEventClass::TestFooBar,
+            serde_json::json!({"hello_world": false}),
+        )
+        .await
+        .expect("event should be published successfully");
+    dbg!(event);
+
+    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+
+    mock.assert_calls_async(0).await;
+
+    let rx_id = WebhookReceiverUuid::from_untyped_uuid(webhook.identity.id);
+    let new_subscription =
+        new_subscription.parse::<shared::WebhookSubscription>().unwrap();
+    dbg!(subscription_add(&cptestctx, rx_id, &new_subscription).await);
+
+    // The new subscription should be there.
+    let rx = webhook_get(
+        &cptestctx.external_client,
+        &get_webhooks_url(webhook.identity.id),
+    )
+    .await;
+    dbg!(&rx);
+    assert!(rx.events.contains(&new_subscription));
+
+    // Publish an event. This one should make it through.
+    let event = nexus
+        .webhook_event_publish(
+            &opctx,
+            id2,
+            WebhookEventClass::TestFooBar,
+            serde_json::json!({"hello_world": true}),
+        )
+        .await
+        .expect("event should be published successfully");
+    dbg!(event);
+
+    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+
+    mock.assert_calls_async(1).await;
+}
+
+#[nexus_test]
+async fn test_subscription_delete(cptestctx: &ControlPlaneTestContext) {
+    subscription_delete_test(cptestctx, "test.foo.bar").await
+}
+
+#[nexus_test]
+async fn test_glob_subscription_delete(cptestctx: &ControlPlaneTestContext) {
+    subscription_delete_test(cptestctx, "test.foo.*").await
+}
+
+async fn subscription_delete_test(
+    cptestctx: &ControlPlaneTestContext,
+    deleted_subscription: &str,
+) {
+    let nexus = cptestctx.server.server_context().nexus.clone();
+    let internal_client = &cptestctx.internal_client;
+
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let server = httpmock::MockServer::start_async().await;
+
+    let id1 = WebhookEventUuid::new_v4();
+    let id2 = WebhookEventUuid::new_v4();
+    let id3 = WebhookEventUuid::new_v4();
+
+    let other_subscription =
+        "test.foo".parse::<shared::WebhookSubscription>().unwrap();
+    let deleted_subscription =
+        deleted_subscription.parse::<shared::WebhookSubscription>().unwrap();
+
+    // Create a webhook receiver.
+    let webhook = webhook_create(
+        &cptestctx,
+        &params::WebhookCreate {
+            events: vec![
+                other_subscription.clone(),
+                deleted_subscription.clone(),
+            ],
+            ..my_great_webhook_params(&server)
+        },
+    )
+    .await;
+    dbg!(&webhook);
+
+    let mock = {
+        let webhook = webhook.clone();
+        server
+            .mock_async(move |when, then| {
+                let body = serde_json::json!({
+                    "event_class": "test.foo.bar",
+                    "event_id": id1,
+                    "data": {
+                        "hello_world": true,
+                    }
+                })
+                .to_string();
+                when.method(POST)
+                    .header("x-oxide-event-class", "test.foo.bar")
+                    .header("x-oxide-event-id", id1.to_string())
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        MY_COOL_SECRET.as_bytes().to_vec(),
+                    ))
+                    .json_body_includes(body);
+                then.status(200);
+            })
+            .await
+    };
+
+    // Publish an event. This should be received, as it matches the subscription
+    // we are about to delete.
+    let event = nexus
+        .webhook_event_publish(
+            &opctx,
+            id1,
+            WebhookEventClass::TestFooBar,
+            serde_json::json!({"hello_world": true}),
+        )
+        .await
+        .expect("event should be published successfully");
+    dbg!(event);
+
+    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+
+    mock.assert_calls_async(1).await;
+
+    let rx_id = WebhookReceiverUuid::from_untyped_uuid(webhook.identity.id);
+    dbg!(subscription_delete(&cptestctx, rx_id, &deleted_subscription).await);
+
+    // The deleted subscription should no longer be there.
+    let rx = webhook_get(
+        &cptestctx.external_client,
+        &get_webhooks_url(webhook.identity.id),
+    )
+    .await;
+    dbg!(&rx);
+    assert_eq!(rx.events, vec![other_subscription.clone()]);
+
+    // Publish an event. This one should not be received, as we are no longer
+    // subscribed to its event class.
+    let event = nexus
+        .webhook_event_publish(
+            &opctx,
+            id2,
+            WebhookEventClass::TestFooBar,
+            serde_json::json!({"hello_world": false}),
+        )
+        .await
+        .expect("event should be published successfully");
+    dbg!(event);
+
+    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+
+    // No new calls should be observed.
+    mock.assert_calls_async(1).await;
+
+    // Finally, ensure that the other event class we were subscribed to still
+    // goes through.
+    let mock = {
+        let webhook = webhook.clone();
+        server
+            .mock_async(move |when, then| {
+                let body = serde_json::json!({
+                    "event_class": "test.foo",
+                    "event_id": id3,
+                    "data": {
+                        "whatever": 1
+                    }
+                })
+                .to_string();
+                when.method(POST)
+                    .header("x-oxide-event-class", "test.foo")
+                    .header("x-oxide-event-id", id3.to_string())
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        MY_COOL_SECRET.as_bytes().to_vec(),
+                    ))
+                    .json_body_includes(body);
+                then.status(200);
+            })
+            .await
+    };
+
+    let event = nexus
+        .webhook_event_publish(
+            &opctx,
+            id3,
+            WebhookEventClass::TestFoo,
+            serde_json::json!({"whatever": 1}),
+        )
+        .await
+        .expect("event should be published successfully");
+    dbg!(event);
+
+    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+
     mock.assert_calls_async(1).await;
 }

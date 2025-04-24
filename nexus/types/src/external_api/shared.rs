@@ -423,6 +423,12 @@ impl From<WebhookSubscription> for String {
     }
 }
 
+impl AsRef<str> for WebhookSubscription {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
 impl JsonSchema for WebhookSubscription {
     fn schema_name() -> String {
         "WebhookSubscription".to_string()
