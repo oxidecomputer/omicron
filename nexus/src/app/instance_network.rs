@@ -6,6 +6,7 @@
 
 use crate::app::switch_port;
 use ipnetwork::IpNetwork;
+use nexus_background_task_interface::BackgroundTasks;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IpAttachState;
@@ -27,7 +28,6 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use super::Nexus;
-use super::background::BackgroundTasks;
 
 impl Nexus {
     /// Returns the set of switches with uplinks configured and boundary
