@@ -21,7 +21,7 @@ use installinator_common::{Event, EventBuffer, EventReport};
 use tokio::{
     sync::{mpsc, watch},
     task::JoinHandle,
-    time::{self, Instant},
+    time,
 };
 use update_engine::AsError;
 use uuid::Uuid;
@@ -31,6 +31,9 @@ use crate::{
     errors::DiscoverPeersError,
     peers::{DiscoveryMechanism, PeerAddress, PeerAddresses},
 };
+
+const REPORT_INTERVAL: Duration = Duration::from_secs(2);
+const DISCOVER_INTERVAL: Duration = Duration::from_secs(5);
 
 /// A progress reporter that sends progress updates to a backend.
 ///
@@ -92,7 +95,7 @@ impl ProgressReporter {
     pub(crate) fn start(mut self) -> JoinHandle<()> {
         tokio::spawn(async move {
             // TODO: jitter?
-            let mut report_interval = time::interval(Duration::from_secs(2));
+            let mut report_interval = time::interval(REPORT_INTERVAL);
             report_interval
                 .set_missed_tick_behavior(time::MissedTickBehavior::Delay);
             // Do not tick report_interval immediately. We'd like to generate a
@@ -139,7 +142,7 @@ impl ProgressReporter {
             //
             // If events_done and reports_done are true, then the loop's goal is
             // met, so exit the loop.
-            loop {
+            while !(events_done && reports_done) {
                 tokio::select! {
                     event = self.event_receiver.recv(), if !events_done => {
                         if let Some(event) = event {
@@ -151,7 +154,7 @@ impl ProgressReporter {
                             // the next loop iteration can send the report right
                             // away.
                             events_done = true;
-                            report_interval.reset_at(Instant::now());
+                            report_interval.reset_immediately();
                         }
                     }
 
@@ -196,14 +199,11 @@ impl ProgressReporter {
                         reports_done = true;
                     }
                 }
-
-                if events_done && reports_done {
-                    _ = discover_cancel_tx.cancel(());
-                    // At least one peer has accepted a completed report. Exit
-                    // the loop.
-                    break;
-                }
             }
+
+            // At least one peer has accepted a completed report. The discovery
+            // task can now be cancelled.
+            _ = discover_cancel_tx.cancel(());
         })
     }
 
@@ -290,7 +290,7 @@ impl ProgressReporter {
                 let after_peers = peers.peers().clone();
                 let diff = before_peers.diff(&after_peers);
 
-                // For each peer in diff.removed, cancel the report task.
+                // For each removed peer, cancel the report task.
                 for peer in diff.removed {
                     let task = peer_tasks
                         .remove(&peer)
@@ -298,7 +298,7 @@ impl ProgressReporter {
                     _ = task.cancel_tx.cancel(());
                 }
 
-                // For each peer in diff.added, spawn a new report task.
+                // For each added pear, spawn a new report task.
                 for peer in diff.added {
                     let task = ReportTask::new(
                         *peer,
@@ -323,7 +323,7 @@ async fn discover_task_loop(
     report_backend: ReportProgressBackend,
     peers_tx: watch::Sender<Option<PeerAddresses>>,
 ) {
-    let mut discover_interval = time::interval(Duration::from_secs(5));
+    let mut discover_interval = time::interval(DISCOVER_INTERVAL);
     // MissedTickBehavior::Skip ensures that discovery happens every
     // interval, rather than bursting in case report_backend.discover_peers
     // takes a long time.
@@ -341,7 +341,7 @@ async fn discover_task_loop(
                     "failed to discover peers, will retry: {}",
                     DisplayErrorChain::new(error.as_error()),
                 );
-                return;
+                continue;
             }
             #[cfg(test)]
             Err(DiscoverPeersError::Abort(_)) => {
@@ -357,12 +357,14 @@ async fn discover_task_loop(
 
         slog::debug!(log, "discovered peers"; "peers" => ?peers);
 
-        if let Err(_) = peers_tx.send(Some(peers)) {
-            slog::warn!(
-                log,
-                "failed to send peers over watch channel (receiver dropped)",
-            );
-        }
+        peers_tx.send_if_modified(|prev_peers| {
+            if prev_peers.as_ref() == Some(&peers) {
+                false
+            } else {
+                *prev_peers = Some(peers);
+                true
+            }
+        });
     }
 }
 
@@ -418,6 +420,9 @@ async fn report_task_loop(
     mut report_rx: watch::Receiver<Option<ReportMessage>>,
     backend: ReportProgressBackend,
 ) {
+    // This loop is gated on report_rx updates, which only happen at every
+    // REPORT_INTERVAL -- so reports will be sent at that interval.
+    //
     // report_rx returning an error is a sign that report_tx was dropped, i.e.
     // that the discovery task completed or was cancelled.
     while let Ok(()) = report_rx.changed().await {
@@ -443,6 +448,7 @@ async fn report_task_loop(
                             "peer indicated that update ID is unknown, \
                              exiting report task"
                         );
+                        break;
                     }
                     SendReportStatus::Processed
                     | SendReportStatus::PeerFinished => {
@@ -521,7 +527,6 @@ impl ReportProgressBackend {
         report: EventReport,
     ) -> Result<SendReportStatus, ClientError> {
         let log = self.log.new(slog::o!("peer" => peer.to_string()));
-        // For each peer, report it to the network.
         match self.imp.report_progress_impl(peer, update_id, report).await {
             Ok(()) => {
                 slog::debug!(log, "sent report to peer");

@@ -145,10 +145,10 @@ impl MockPeersUniverse {
                                     .then(|| (*addr, peer.clone()))
                             })
                             .collect();
-                        Ok(MockFetchBackend {
-                            artifact: self.artifact.clone(),
+                        Ok(MockFetchBackend::new(
+                            self.artifact.clone(),
                             selected_peers,
-                        })
+                        ))
                     }
                     AttemptBitmap::Failure => {
                         bail!(
@@ -179,20 +179,27 @@ struct MockFetchBackend {
     artifact: Bytes,
     // Peers within the universe that have been selected
     selected_peers: BTreeMap<PeerAddress, MockPeer>,
+    // selected_peers keys stored in a suitable form for the
+    // FetchArtifactImpl trait
+    peer_addresses: PeerAddresses,
 }
 
 impl MockFetchBackend {
+    fn new(
+        artifact: Bytes,
+        selected_peers: BTreeMap<PeerAddress, MockPeer>,
+    ) -> Self {
+        let peer_addresses = selected_peers.keys().copied().collect();
+        Self { artifact, selected_peers, peer_addresses }
+    }
+
     fn get(&self, peer: PeerAddress) -> Option<&MockPeer> {
         self.selected_peers.get(&peer)
     }
 
-    fn peers(&self) -> impl Iterator<Item = (&PeerAddress, &MockPeer)> + '_ {
-        self.selected_peers.iter()
-    }
-
     /// Returns the peer that can return the entire dataset within the timeout.
     fn successful_peer(&self, timeout: Duration) -> Option<PeerAddress> {
-        self.peers()
+        self.selected_peers.iter()
             .filter_map(|(addr, peer)| {
                 if peer.artifact != self.artifact {
                     // We don't handle the case where the peer returns the wrong artifact yet.
@@ -237,8 +244,8 @@ impl MockFetchBackend {
 
 #[async_trait]
 impl FetchArtifactImpl for MockFetchBackend {
-    fn peers(&self) -> PeerAddresses {
-        PeerAddresses::new(self.selected_peers.keys().cloned())
+    fn peers(&self) -> &PeerAddresses {
+        &self.peer_addresses
     }
 
     async fn fetch_from_peer_impl(
@@ -454,7 +461,7 @@ struct MockProgressBackend {
     update_id: Uuid,
     // Use an unbounded sender to avoid async code in handle_valid_peer_event.
     report_sender: mpsc::UnboundedSender<EventReport>,
-    valid_peer_behaviors: Mutex<ReportValidPeerBehaviors>,
+    behaviors: Mutex<ReportBehaviors>,
 }
 
 impl MockProgressBackend {
@@ -476,13 +483,9 @@ impl MockProgressBackend {
     fn new(
         update_id: Uuid,
         report_sender: mpsc::UnboundedSender<EventReport>,
-        valid_peer_behaviors: ReportValidPeerBehaviors,
+        behaviors: ReportBehaviors,
     ) -> Self {
-        Self {
-            update_id,
-            report_sender,
-            valid_peer_behaviors: Mutex::new(valid_peer_behaviors),
-        }
+        Self { update_id, report_sender, behaviors: Mutex::new(behaviors) }
     }
 
     fn handle_valid_peer_event(
@@ -494,8 +497,8 @@ impl MockProgressBackend {
             Some(StepEventIsTerminal::Terminal { .. })
         );
 
-        let mut lock = self.valid_peer_behaviors.lock().unwrap();
-        let next_behavior = lock.next_behavior(is_terminal);
+        let mut lock = self.behaviors.lock().unwrap();
+        let next_behavior = lock.next_valid_peer_behavior(is_terminal);
 
         match next_behavior {
             ValidPeerBehavior::Accept => {
@@ -552,12 +555,20 @@ impl ReportProgressImpl for MockProgressBackend {
     async fn discover_peers(
         &self,
     ) -> Result<PeerAddresses, DiscoverPeersError> {
-        // TODO: it would be nice to simulate flakiness in peer discovery here.
-        Ok(PeerAddresses::new([
-            Self::VALID_PEER,
-            Self::INVALID_PEER,
-            Self::UNRESPONSIVE_PEER,
-        ]))
+        let mut lock = self.behaviors.lock().unwrap();
+        match lock.next_discovery_behavior() {
+            ReportDiscoveryBehavior::Retry => Err(DiscoverPeersError::Retry(
+                anyhow::anyhow!("simulated retry error"),
+            )),
+            // TODO: it would be nice to simulate some peers disappearing here.
+            ReportDiscoveryBehavior::Success => Ok([
+                Self::VALID_PEER,
+                Self::INVALID_PEER,
+                Self::UNRESPONSIVE_PEER,
+            ]
+            .into_iter()
+            .collect()),
+        }
     }
 
     async fn report_progress_impl(
@@ -589,18 +600,40 @@ impl ReportProgressImpl for MockProgressBackend {
     }
 }
 
-/// For reporting results, controls how the valid peer should behave.
+#[derive(Clone, Copy, Debug, Arbitrary)]
+enum ReportDiscoveryBehavior {
+    /// Return all peers successfully.
+    #[weight(4)]
+    Success,
+
+    /// Simulate a retry error.
+    #[weight(1)]
+    Retry,
+}
+
+/// For reporting results, controls how discovery and the valid peer should
+/// behave.
 ///
-/// Used to simulate network flakiness while reporting results.
+/// Used to simulate network flakiness while discovering peers and reporting
+/// results.
 #[derive(Clone, Debug)]
-struct ReportValidPeerBehaviors {
+struct ReportBehaviors {
+    discovery: VecDeque<ReportDiscoveryBehavior>,
     progress: VecDeque<ValidPeerBehavior>,
     terminal: VecDeque<ValidPeerBehavior>,
     terminal_accepted: bool,
 }
 
-impl ReportValidPeerBehaviors {
-    fn next_behavior(&mut self, is_terminal: bool) -> ValidPeerBehavior {
+impl ReportBehaviors {
+    fn next_discovery_behavior(&mut self) -> ReportDiscoveryBehavior {
+        // Once the queue of behaviors is exhausted, always return success.
+        self.discovery.pop_front().unwrap_or(ReportDiscoveryBehavior::Success)
+    }
+
+    fn next_valid_peer_behavior(
+        &mut self,
+        is_terminal: bool,
+    ) -> ValidPeerBehavior {
         // Once the queues of behaviors are exhausted, always accept.
         if is_terminal {
             self.terminal.pop_front().unwrap_or(ValidPeerBehavior::Accept)
@@ -610,16 +643,18 @@ impl ReportValidPeerBehaviors {
     }
 }
 
-impl Arbitrary for ReportValidPeerBehaviors {
+impl Arbitrary for ReportBehaviors {
     type Parameters = ();
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
         (
+            vec_deque(any::<ReportDiscoveryBehavior>(), 0..128),
             vec_deque(any::<ValidPeerBehavior>(), 0..128),
             vec_deque(any::<ValidPeerBehavior>(), 0..128),
         )
-            .prop_map(|(progress, terminal)| ReportValidPeerBehaviors {
+            .prop_map(|(discovery, progress, terminal)| ReportBehaviors {
+                discovery,
                 progress,
                 terminal,
                 terminal_accepted: false,
@@ -679,7 +714,7 @@ mod tests {
         timeout: Duration,
         #[strategy(any::<[u8; 16]>().prop_map(Uuid::from_bytes))]
         update_id: Uuid,
-        valid_peer_behaviors: ReportValidPeerBehaviors,
+        valid_peer_behaviors: ReportBehaviors,
     ) {
         with_test_runtime(async move {
             let logctx = test_setup_log("proptest_fetch_artifact");

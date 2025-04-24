@@ -2026,7 +2026,7 @@ mod illumos_tests {
         let info = insert_fake_bundle(
             &paths[0],
             DaysOfOurBundles::new().next().unwrap(),
-            ZoneBundleCause::ExplicitRequest,
+            ZoneBundleCause::UnexpectedZone,
         )
         .await
         .context("Failed to insert_fake_bundle")?;
@@ -2121,7 +2121,7 @@ mod illumos_tests {
             let it = insert_fake_bundle(
                 bundle_dir,
                 days.next().unwrap(),
-                ZoneBundleCause::ExplicitRequest,
+                ZoneBundleCause::UnexpectedZone,
             )
             .await?;
             info.push(it);
@@ -2172,7 +2172,7 @@ mod illumos_tests {
             let it = insert_fake_bundle_with_zone_name(
                 &ctx.resource_wrapper.dirs[0],
                 days.next().unwrap(),
-                ZoneBundleCause::ExplicitRequest,
+                ZoneBundleCause::UnexpectedZone,
                 format!("oxz_whatever_{i}").as_str(),
             )
             .await?;
