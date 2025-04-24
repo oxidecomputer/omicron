@@ -1018,7 +1018,10 @@ mod test {
     async fn test_blueprint_external_dns_basic() {
         static TEST_NAME: &str = "test_blueprint_external_dns_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let system_builder = ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(5).external_dns_count(3).expect("can set external dns count");
+        let system_builder = ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+            .nsleds(5)
+            .external_dns_count(3)
+            .expect("can set external dns count");
         let external_dns_count = system_builder.get_external_dns_zones();
         let (_, mut blueprint) = system_builder.build();
         blueprint.internal_dns_version = Generation::new();
@@ -1049,13 +1052,25 @@ mod test {
         // We'll only have external DNS nameserver records - the A/AAAA records for servers
         // themselves, and NS records at the apex.
         let baseline_external_dns_names = external_dns_count + 1;
-        assert_eq!(external_dns_zone.records.len(), baseline_external_dns_names);
-        let apex_records = external_dns_zone.records.get("@").expect("records are present for zone apex");
+        assert_eq!(
+            external_dns_zone.records.len(),
+            baseline_external_dns_names
+        );
+        let apex_records = external_dns_zone
+            .records
+            .get("@")
+            .expect("records are present for zone apex");
         assert_eq!(apex_records.len(), external_dns_count);
         for i in 1..=external_dns_count {
             let ns_name = format!("ns{}", i);
-            assert!(external_dns_zone.records.get(&ns_name).is_some());
-            assert_eq!(apex_records[i], DnsRecord::Ns(format!("{ns_name}.{}", external_dns_zone.zone_name)));
+            assert!(external_dns_zone.records.contains_key(&ns_name));
+            assert_eq!(
+                apex_records[i],
+                DnsRecord::Ns(format!(
+                    "{ns_name}.{}",
+                    external_dns_zone.zone_name
+                ))
+            );
         }
 
         // Now check a more typical case.
@@ -1080,7 +1095,9 @@ mod test {
                 .map(|record| match record {
                     DnsRecord::A(v) => IpAddr::V4(*v),
                     DnsRecord::Aaaa(v) => IpAddr::V6(*v),
-                    other => panic!("unexpected DNS record for silo: {other:?}"),
+                    other => {
+                        panic!("unexpected DNS record for silo: {other:?}")
+                    }
                 })
                 .collect();
             ips.sort();
@@ -1692,12 +1709,13 @@ mod test {
         let (new_name, new_records) = added[0];
         assert_eq!(new_name, silo_dns_name(&silo.identity.name));
         // And it should have the same IP addresses as all of the other Silos.
-        for (prior_silo_name, prior_silo_records) in old_external.zones[0].records.iter() {
+        for (prior_silo_name, prior_silo_records) in
+            old_external.zones[0].records.iter()
+        {
             // Only some records in the external zone are for Silos, though.
             if prior_silo_name.ends_with(".sys") {
                 assert_eq!(
-                    new_records,
-                    prior_silo_records,
+                    new_records, prior_silo_records,
                     "new silo ({new_name}) DNS records differ from \
                     another silo ({prior_silo_name})"
                 );

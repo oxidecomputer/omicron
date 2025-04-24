@@ -20,7 +20,10 @@ use crate::{
     silo::{default_silo_name, silo_dns_name},
 };
 
-use super::{Overridables, Sled, blueprint_external_dns_resolver_ips, blueprint_nexus_external_ips};
+use super::{
+    Overridables, Sled, blueprint_external_dns_resolver_ips,
+    blueprint_nexus_external_ips,
+};
 
 /// Returns the expected contents of internal DNS based on the given blueprint
 pub fn blueprint_internal_dns_config(
@@ -185,7 +188,10 @@ pub fn blueprint_external_dns_config<'a>(
             };
             // `idx` is 0-based, but nameservers start at `ns1` (1-based).
             let name = format!("ns{}", idx + 1);
-            zone_records.push(DnsRecord::Ns(format!("{}.{}", &name, external_dns_zone_name)));
+            zone_records.push(DnsRecord::Ns(format!(
+                "{}.{}",
+                &name, external_dns_zone_name
+            )));
             (name, vec![record])
         })
         .collect();
@@ -207,7 +213,7 @@ pub fn blueprint_external_dns_config<'a>(
         .chain(external_dns_records)
         .collect::<HashMap<String, Vec<DnsRecord>>>();
 
-    if zone_records.len() > 0 {
+    if !zone_records.is_empty() {
         let prior_records = records.insert("@".to_string(), zone_records);
         assert!(prior_records.is_none());
     }

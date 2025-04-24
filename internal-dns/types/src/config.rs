@@ -142,12 +142,6 @@ pub struct DnsConfigBuilder {
     /// network
     zones: BTreeMap<Zone, Ipv6Addr>,
 
-    /// set of addresses for the DNS servers that will be updated with the DNS
-    /// configuration described by this builder.  The ordering is arbitrary
-    /// here; we'll number these `ns1, ns2, ... nsN` but it shouldn't matter
-    /// which one is first or last.
-    nameservers: Vec<Ipv6Addr>,
-
     /// set of services (see module-level comment) that have been configured so
     /// far, mapping the name of the service (encapsulated in a [`ServiceName`])
     /// to the backends configured for that service.  The set of backends is
@@ -203,7 +197,6 @@ impl DnsConfigBuilder {
         DnsConfigBuilder {
             sleds: BTreeMap::new(),
             zones: BTreeMap::new(),
-            nameservers: Vec::new(),
             service_instances_zones: BTreeMap::new(),
             service_instances_sleds: BTreeMap::new(),
         }
@@ -622,10 +615,7 @@ impl DnsConfigBuilder {
             .chain(srv_records_zones)
             .collect();
 
-        DnsConfigZone {
-            zone_name: DNS_ZONE.to_owned(),
-            records: all_records,
-        }
+        DnsConfigZone { zone_name: DNS_ZONE.to_owned(), records: all_records }
     }
 
     /// Construct a complete [`DnsConfigParams`] (suitable for propagating to
@@ -798,7 +788,7 @@ impl Soa {
             // We pick a relatively short REFRESH period because we don't
             // support sending NOTIFY messages. We don't support zone transfers
             // though, so this is a moot point for the time being.
-            refresh: 1 * HOUR_IN_SECONDS,
+            refresh: HOUR_IN_SECONDS,
             retry: HOUR_IN_SECONDS / 10,
             expire: 24 * HOUR_IN_SECONDS,
             minimum: 60,

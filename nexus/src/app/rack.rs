@@ -219,20 +219,22 @@ impl super::Nexus {
 
         for (_, zc) in request
             .blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service) {
-
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        {
             match zc.zone_type {
-                BlueprintZoneType::InternalDns(blueprint_zone_type::InternalDns {
-                    dns_address,
-                    ..
-                }) => {
-                    internal_dns_records.push(DnsRecord::Aaaa(*dns_address.ip()));
+                BlueprintZoneType::InternalDns(
+                    blueprint_zone_type::InternalDns { dns_address, .. },
+                ) => {
+                    internal_dns_records
+                        .push(DnsRecord::Aaaa(*dns_address.ip()));
                     let seen_intdns = internal_dns_records.len();
-                    int_zone_records.push(DnsRecord::Ns(
-                        format!("ns{}.{}", seen_intdns, internal_dns_types::names::DNS_ZONE)
-                    ));
-                },
-                _ => {},
+                    int_zone_records.push(DnsRecord::Ns(format!(
+                        "ns{}.{}",
+                        seen_intdns,
+                        internal_dns_types::names::DNS_ZONE
+                    )));
+                }
+                _ => {}
             }
         }
 
@@ -248,11 +250,12 @@ impl super::Nexus {
         // sled-agent, in service of RSS, has configured internal DNS. We got its DNS configuration
         // in `request.internal_dns_zone_config`
         // and are appending to it before committing the initial RSS state to the database
-        let external_dns_config = nexus_types::deployment::execution::blueprint_external_dns_config(
-            &request.blueprint,
-            vec![silo_name],
-            request.external_dns_zone_name,
-        );
+        let external_dns_config =
+            nexus_types::deployment::execution::blueprint_external_dns_config(
+                &request.blueprint,
+                vec![silo_name],
+                request.external_dns_zone_name,
+            );
         for (name, records) in external_dns_config.records.into_iter() {
             dns_update.add_name(name, records)?;
         }

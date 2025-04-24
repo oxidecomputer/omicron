@@ -343,24 +343,30 @@ async fn handle_dns_message(
         .map(|record| {
             let record = dns_record_to_record(&name, record)?;
 
-            // DNS allows for the server to return additional records
-            // that weren't explicitly asked for by the client but that
-            // the server expects the client will want. The records
-            // corresponding to a lookup on a SRV target is one such case.
-            // We opportunistically attempt to resolve the target here
-            // and if successful return those additional records in the
-            // response.
-            // NOTE: we only do this one-layer deep.
-            if let Some(RData::SRV(srv)) = record.data() {
-                let target_records =
-                    store.query_name(srv.target()).map(|records| {
-                        records
-                            .into_iter()
-                            .map(|record| {
-                                dns_record_to_record(srv.target(), record)
-                            })
-                            .collect::<Result<Vec<_>, _>>()
-                    });
+            // DNS allows for the server to return additional records that
+            // weren't explicitly asked for by the client but that the server
+            // expects the client will want. SRV and NS records both use names
+            // for their referents (rather than IP addresses dierctly). If
+            // someone has queried for one of those kinds of records, they'll
+            // almost certainly be needing the IP addresses that go with them as
+            // well. We opportunistically attempt to resovle the target here and
+            // if successful return those additional records in the response.
+            //
+            // NOTE: we only do this one-layer deep. If the target of a SRV or
+            // NS is a CNAME instead of A/AAAA directly, it will be lost here.
+            let additionals_target = match record.data() {
+                Some(RData::SRV(srv)) => Some(srv.target()),
+                Some(RData::NS(ns)) => Some(&ns.0),
+                _ => None,
+            };
+
+            if let Some(target) = additionals_target {
+                let target_records = store.query_name(target).map(|records| {
+                    records
+                        .into_iter()
+                        .map(|record| dns_record_to_record(target, record))
+                        .collect::<Result<Vec<_>, _>>()
+                });
                 match target_records {
                     Ok(Ok(target_records)) => {
                         additional_records.extend(target_records);
@@ -374,7 +380,7 @@ async fn handle_dns_message(
                             &log,
                             "SRV target lookup failed";
                             "original_mr" => #?mr,
-                            "target" => ?srv.target(),
+                            "target" => ?target,
                             "error" => ?error,
                         );
                     }
@@ -383,13 +389,12 @@ async fn handle_dns_message(
                             &log,
                             "SRV target unexpected response";
                             "original_mr" => #?mr,
-                            "target" => ?srv.target(),
+                            "target" => ?target,
                             "error" => ?error,
                         );
                     }
                 }
             }
-            // TODO: return NS A/AAAA records as additionals for an NS query to the apex.
             Ok(record)
         })
         .collect::<Result<Vec<_>, RequestError>>()?;

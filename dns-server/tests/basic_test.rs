@@ -9,20 +9,22 @@ use dropshot::{HandlerTaskMode, test_util::LogContext};
 use hickory_client::{
     client::{AsyncClient, ClientHandle},
     error::ClientError,
+    rr::RData,
     udp::UdpClientStream,
 };
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::error::ResolveErrorKind;
 use hickory_resolver::{
     config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts},
+    error::ResolveError,
     proto::{
         op::ResponseCode,
-        rr::{DNSClass, Name, RecordType},
+        rr::{DNSClass, Name, RecordType, rdata::AAAA},
         xfer::DnsResponse,
     },
 };
 use internal_dns_types::config::{
-    DnsConfigParams, DnsConfigZone, DnsRecord, Srv,
+    DnsConfigParams, DnsConfigZone, DnsRecord, Soa, Srv,
 };
 use omicron_test_utils::dev::test_setup_log;
 use slog::o;
@@ -261,31 +263,47 @@ pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
 }
 
 async fn lookup_ip_expect_nxdomain(resolver: &TokioAsyncResolver, name: &str) {
+    lookup_ip_expect_error_code(resolver, name, ResponseCode::NXDomain).await;
+}
+
+async fn lookup_ip_expect_error_code(
+    resolver: &TokioAsyncResolver,
+    name: &str,
+    expected_code: ResponseCode,
+) {
     match resolver.lookup_ip(name).await {
         Ok(unexpected) => {
-            panic!("Expected NXDOMAIN, got record {:?}", unexpected);
+            panic!("Expected {expected_code}, got record {unexpected:?}");
         }
-        Err(e) => match e.kind() {
-            ResolveErrorKind::NoRecordsFound {
-                response_code,
-                query: _,
-                soa: _,
-                negative_ttl: _,
-                trusted: _,
-            } => match response_code {
-                ResponseCode::NXDomain => {}
-                unexpected => {
-                    panic!(
-                        "Expected NXDOMAIN, got response code {:?}",
-                        unexpected
-                    );
-                }
-            },
-            unexpected => {
-                panic!("Expected NXDOMAIN, got error {:?}", unexpected);
-            }
-        },
+        Err(e) => expect_no_records_error_code(&e, expected_code),
     };
+}
+
+fn expect_no_records_error_code(
+    err: &ResolveError,
+    expected_code: ResponseCode,
+) {
+    match err.kind() {
+        ResolveErrorKind::NoRecordsFound {
+            response_code,
+            query: _,
+            soa: _,
+            negative_ttl: _,
+            trusted: _,
+        } => {
+            if response_code == &expected_code {
+                // Error matches on all the conditions we're checking. No
+                // issues.
+            } else {
+                panic!(
+                    "Expected {expected_code}, got response code {response_code:?}"
+                );
+            }
+        }
+        unexpected => {
+            panic!("Expected {expected_code}, got error {unexpected:?}");
+        }
+    }
 }
 
 // Verify that the part of a name that's under the zone name can contain the
@@ -350,6 +368,142 @@ pub async fn empty_record() -> Result<(), anyhow::Error> {
 }
 
 #[tokio::test]
+pub async fn soa() -> Result<(), anyhow::Error> {
+    let test_ctx = init_client_server("soa").await?;
+    let resolver = &test_ctx.resolver;
+    let client = &test_ctx.client;
+
+    let ns1_addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
+    let ns1_aaaa = DnsRecord::Aaaa(ns1_addr);
+    let ns1_name = format!("ns1.{TEST_ZONE}.");
+    let ns1 = DnsRecord::Ns(ns1_name.clone());
+    let service_addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
+    let service_aaaa = DnsRecord::Aaaa(service_addr);
+
+    // Add a zone with only an SOA record and a NS it refers to. The server
+    // should reject this: while the records are coherent on their own, the DNS
+    // server will refuse to accept an externally-provided SOA record. It forms
+    // the SOA record as part of updating records when updated, and accepting
+    // external SOA records invites potential conflict with no clear resolution.
+    // What happens if we're provided two SOA records? What if they conflict?
+    // Should the DNS server still create another SOA record, and what if it's
+    // different than the provided one?
+
+    let mut records = HashMap::new();
+
+    let soa = DnsRecord::Soa(Soa {
+        mname: ns1_name.clone(),
+        rname: "admin".to_string(),
+        serial: 5,
+        refresh: 1,
+        retry: 2,
+        expire: 3,
+        minimum: 4,
+    });
+
+    records.insert("ns1".to_string(), vec![ns1_aaaa.clone()]);
+    records.insert("@".to_string(), vec![ns1.clone(), soa.clone()]);
+
+    let err = dns_records_create(client, TEST_ZONE, records).await.unwrap_err();
+    let err_text = err.root_cause().to_string();
+    assert!(
+        err_text
+            .contains(dns_service_client::ERROR_CODE_UPDATE_DEFINES_SOA_RECORD)
+    );
+
+    let lookup_err = resolver
+        .soa_lookup(TEST_ZONE)
+        .await
+        .expect_err("test zone should not exist");
+    // I think we really should answer with ResponseCode::Refused. We are not
+    // authoritative for the .internal TLD, so we don't know that some *other*
+    // server would have records for `oxide.internal`. It is not a failure of
+    // our server to not know what that domain is, we should just refuse to
+    // answer.
+    //
+    // One may imagine we should return at least NXDomain without the
+    // authoritative bit set. RFC 1035 says that "Name Error - Meaningful only
+    // from an authoritative name server, ...". Does that mean that recursive
+    // resolvers and clients would faithfully ignore our error in that case? Is
+    // there a risk that something would miss the non-authoritative nature of
+    // such an NXDomain and incorrectly cache the non-existence of some other
+    // domain? Hopefully not! Answering `Refused` would side-step this question.
+    expect_no_records_error_code(&lookup_err, ResponseCode::ServFail);
+
+    // If an update defines a zone with records, but defines no nameservers,
+    // that should be acceptable. We won't be able to define an SOA record,
+    // since we won't have a nameserver to include as the primary source, but
+    // the zone should otherwise be acceptable.
+    let mut records = HashMap::new();
+    records.insert("service".to_string(), vec![service_aaaa.clone()]);
+
+    dns_records_create(client, TEST_ZONE, records).await?;
+
+    let service_ip_answer =
+        resolver.lookup_ip(&format!("service.{TEST_ZONE}.")).await?;
+    let mut ip_iter = service_ip_answer.iter();
+    assert_eq!(ip_iter.next(), Some(IpAddr::V6(service_addr)));
+    assert_eq!(ip_iter.next(), None);
+
+    // When we let the DNS server construct its own SOA record, we should be
+    // able to tell it about a zone.
+    let mut records = HashMap::new();
+    records.insert("ns1".to_string(), vec![ns1_aaaa.clone()]);
+    records.insert("@".to_string(), vec![ns1.clone()]);
+
+    dns_records_create(client, TEST_ZONE, records).await?;
+
+    // Now the NS records should exist, and so should an SOA.
+    let soa_answer = resolver.soa_lookup(TEST_ZONE).await?;
+
+    let soa_records: Vec<&hickory_proto::rr::rdata::soa::SOA> =
+        soa_answer.iter().collect();
+
+    assert_eq!(soa_records.len(), 1);
+
+    // We should be able to query nameservers for the zone
+    let zone_ns_answer = resolver.ns_lookup(TEST_ZONE).await?;
+    let has_ns_record =
+        zone_ns_answer.as_lookup().records().iter().any(|record| {
+            if let Some(RData::NS(nsdname)) = record.data() {
+                nsdname.0.to_utf8().as_str() == &ns1_name
+            } else {
+                false
+            }
+        });
+    assert!(has_ns_record);
+
+    // The nameserver's AAAA record should be in additionals.
+    let has_aaaa_additional =
+        zone_ns_answer.as_lookup().records().iter().any(|record| {
+            if let Some(RData::AAAA(AAAA(addr))) = record.data() {
+                addr == &ns1_addr
+            } else {
+                false
+            }
+        });
+    assert!(has_aaaa_additional);
+
+    // And we should be able to directly query the SOA record's primary server
+    let soa_ns_aaaa_answer =
+        resolver.lookup_ip(soa_records[0].mname().to_owned()).await?;
+    assert_eq!(soa_ns_aaaa_answer.iter().collect::<Vec<_>>(), vec![ns1_addr]);
+
+    // SOA queries under the zone we now know we are authoritative for should
+    // fail with NXDomain.
+    //
+    // TODO: we should see the authoritative bit set here. It's not clear that
+    // hickory-proto has a way to see if that bit is present in an error.
+    let lookup_err = resolver
+        .soa_lookup(format!("foo.{TEST_ZONE}."))
+        .await
+        .expect_err("test zone should not exist");
+    expect_no_records_error_code(&lookup_err, ResponseCode::NXDomain);
+
+    Ok(())
+}
+
+#[tokio::test]
 pub async fn nxdomain() -> Result<(), anyhow::Error> {
     let test_ctx = init_client_server("nxdomain").await?;
     let resolver = &test_ctx.resolver;
@@ -387,31 +541,12 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
     // In this case, we haven't defined any zones yet, so any request should be
     // outside the server's authoritative zones.  That should result in a
     // SERVFAIL.
-    match resolver.lookup_ip("unicorn.oxide.internal").await {
-        Ok(unexpected) => {
-            panic!("Expected SERVFAIL, got record {:?}", unexpected);
-        }
-        Err(e) => match e.kind() {
-            ResolveErrorKind::NoRecordsFound {
-                response_code,
-                query: _,
-                soa: _,
-                negative_ttl: _,
-                trusted: _,
-            } => match response_code {
-                ResponseCode::ServFail => {}
-                unexpected => {
-                    panic!(
-                        "Expected SERVFAIL, got response code {:?}",
-                        unexpected
-                    );
-                }
-            },
-            unexpected => {
-                panic!("Expected SERVFAIL, got error {:?}", unexpected);
-            }
-        },
-    };
+    lookup_ip_expect_error_code(
+        &resolver,
+        "unicorn.oxide.internal",
+        ResponseCode::ServFail,
+    )
+    .await;
 
     test_ctx.cleanup().await;
     Ok(())

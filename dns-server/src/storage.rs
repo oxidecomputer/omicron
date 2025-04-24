@@ -161,6 +161,12 @@ pub enum UpdateError {
         req_id: String,
     },
 
+    #[error(
+        "update declares at least one SOA record, but updates \
+        may not provide SOA records"
+    )]
+    UpdateDefinesSoaRecord,
+
     #[error("internal error")]
     InternalError(#[from] anyhow::Error),
 }
@@ -350,6 +356,22 @@ impl Store {
             "req_id" => req_id.to_owned(),
             "new_generation" => u64::from(config.generation),
         ));
+
+        // We disallow updates that provide SOA records because the only SOA
+        // records we should have are ones we define when we're told we're
+        // authoritative for zones. SOA records are in the API types here
+        // because they are included when reporting this server's records (such
+        // as via `dns_config_get()`).
+        for zone in config.zones.iter() {
+            if let Some(apex_records) = zone.records.get("@") {
+                if apex_records
+                    .iter()
+                    .any(|record| matches!(record, DnsRecord::Soa(_)))
+                {
+                    return Err(UpdateError::UpdateDefinesSoaRecord);
+                }
+            }
+        }
 
         // Lock out concurrent updates.  We must not return until we've released
         // the "updating" lock.

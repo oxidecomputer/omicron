@@ -147,7 +147,7 @@ impl From<DnsRecord> for params::DnsRecord {
             DnsRecord::AAAA(addr) => params::DnsRecord::Aaaa(addr),
             DnsRecord::SRV(srv) => {
                 params::DnsRecord::Srv(params::Srv::from(srv))
-            },
+            }
             DnsRecord::NS(ns) => params::DnsRecord::Ns(ns),
             DnsRecord::SOA(soa) => {
                 params::DnsRecord::Soa(params::Soa::from(soa))
