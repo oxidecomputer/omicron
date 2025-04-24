@@ -468,39 +468,28 @@ struct MockReportPeers {
 }
 
 impl MockReportPeers {
-    // SocketAddr::new is not a const fn in stable Rust as of this writing
-    fn valid_peer() -> PeerAddress {
-        PeerAddress::new(SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
-            2000,
-        ))
-    }
+    const VALID_PEER: PeerAddress = PeerAddress::new(SocketAddr::new(
+        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
+        2000,
+    ));
 
-    fn invalid_peer() -> PeerAddress {
-        PeerAddress::new(SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 2)),
-            2000,
-        ))
-    }
+    const INVALID_PEER: PeerAddress = PeerAddress::new(SocketAddr::new(
+        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 2)),
+        2000,
+    ));
 
-    fn unresponsive_peer() -> PeerAddress {
-        PeerAddress::new(SocketAddr::new(
-            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3)),
-            2000,
-        ))
-    }
+    const UNRESPONSIVE_PEER: PeerAddress = PeerAddress::new(SocketAddr::new(
+        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3)),
+        2000,
+    ));
 }
 
 #[async_trait]
 impl PeersImpl for MockReportPeers {
     fn peers(&self) -> Box<dyn Iterator<Item = PeerAddress> + Send + '_> {
         Box::new(
-            [
-                Self::valid_peer(),
-                Self::invalid_peer(),
-                Self::unresponsive_peer(),
-            ]
-            .into_iter(),
+            [Self::VALID_PEER, Self::INVALID_PEER, Self::UNRESPONSIVE_PEER]
+                .into_iter(),
         )
     }
 
@@ -526,10 +515,10 @@ impl PeersImpl for MockReportPeers {
         report: EventReport,
     ) -> Result<(), ClientError> {
         assert_eq!(update_id, self.update_id, "update ID matches");
-        if peer == Self::valid_peer() {
+        if peer == Self::VALID_PEER {
             _ = self.report_sender.send(report).await;
             Ok(())
-        } else if peer == Self::invalid_peer() {
+        } else if peer == Self::INVALID_PEER {
             Err(ClientError::ErrorResponse(ResponseValue::new(
                 installinator_client::types::Error {
                     error_code: None,
@@ -539,7 +528,7 @@ impl PeersImpl for MockReportPeers {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Default::default(),
             )))
-        } else if peer == Self::unresponsive_peer() {
+        } else if peer == Self::UNRESPONSIVE_PEER {
             // The real implementation generates a reqwest::Error, which can't be
             // created outside of the reqwest library. Generate a different error.
             Err(ClientError::InvalidRequest("unresponsive peer".to_owned()))
