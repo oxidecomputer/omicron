@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
 use uuid::Uuid;
 
-use crate::{errors::HttpError, fetch::FetchReceiver};
+use crate::{errors::HttpError, peers::FetchReceiver};
 
 #[derive(Clone, Debug, Eq, PartialEq, Args)]
 pub(crate) struct ArtifactIdOpts {

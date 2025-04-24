@@ -23,11 +23,10 @@ use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 
 use crate::{
-    ArtifactWriter, WriteDestination,
     artifact::ArtifactIdOpts,
-    fetch::{FetchArtifactBackend, FetchedArtifact, HttpFetchBackend},
-    peers::DiscoveryMechanism,
-    reporter::{HttpProgressBackend, ProgressReporter, ReportProgressBackend},
+    peers::{DiscoveryMechanism, FetchedArtifact, Peers},
+    reporter::ProgressReporter,
+    write::{ArtifactWriter, WriteDestination},
 };
 
 /// Installinator app.
@@ -91,15 +90,12 @@ struct DebugDiscoverOpts {
 
 impl DebugDiscoverOpts {
     async fn exec(self, log: &slog::Logger) -> Result<()> {
-        let backend = FetchArtifactBackend::new(
+        let peers = Peers::new(
             log,
-            Box::new(HttpFetchBackend::new(
-                &log,
-                self.opts.mechanism.discover_peers(&log).await?,
-            )),
+            self.opts.mechanism.discover_peers(log).await?,
             Duration::from_secs(10),
         );
-        println!("discovered peers: {}", backend.peers().display());
+        println!("discovered peers: {}", peers.display());
         Ok(())
     }
 }
@@ -186,14 +182,19 @@ impl InstallOpts {
         let image_id = self.artifact_ids.resolve()?;
 
         let discovery = self.discover_opts.mechanism.clone();
-        let (progress_reporter, event_sender) = ProgressReporter::new(
-            log,
-            image_id.update_id,
-            ReportProgressBackend::new(
-                log,
-                HttpProgressBackend::new(log, discovery),
-            ),
-        );
+        let discovery_log = log.clone();
+        let (progress_reporter, event_sender) =
+            ProgressReporter::new(log, image_id.update_id, move || {
+                let log = discovery_log.clone();
+                let discovery = discovery.clone();
+                async move {
+                    Ok(Peers::new(
+                        &log,
+                        discovery.discover_peers(&log).await?,
+                        Duration::from_secs(10),
+                    ))
+                }
+            });
         let progress_handle = progress_reporter.start();
         let discovery = &self.discover_opts.mechanism;
 
@@ -233,7 +234,7 @@ impl InstallOpts {
                     )
                     .await?;
 
-                    let address = host_phase_2_artifact.peer.address();
+                    let address = host_phase_2_artifact.addr;
 
                     StepSuccess::new(host_phase_2_artifact)
                         .with_metadata(
@@ -272,7 +273,7 @@ impl InstallOpts {
                     )
                     .await?;
 
-                    let address = control_plane_artifact.peer.address();
+                    let address = control_plane_artifact.addr;
 
                     StepSuccess::new(control_plane_artifact)
                         .with_metadata(
@@ -492,12 +493,9 @@ async fn fetch_artifact(
         cx,
         &log,
         || async {
-            Ok(FetchArtifactBackend::new(
+            Ok(Peers::new(
                 &log,
-                Box::new(HttpFetchBackend::new(
-                    &log,
-                    discovery.discover_peers(&log).await?,
-                )),
+                discovery.discover_peers(&log).await?,
                 Duration::from_secs(10),
             ))
         },
@@ -510,7 +508,7 @@ async fn fetch_artifact(
         log,
         "fetched {} bytes from {}",
         artifact.artifact.num_bytes(),
-        artifact.peer,
+        artifact.addr,
     );
 
     Ok(artifact)

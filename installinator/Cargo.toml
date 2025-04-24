@@ -16,7 +16,6 @@ camino.workspace = true
 camino-tempfile.workspace = true
 cancel-safe-futures.workspace = true
 clap.workspace = true
-daft.workspace = true
 display-error-chain.workspace = true
 futures.workspace = true
 hex.workspace = true
