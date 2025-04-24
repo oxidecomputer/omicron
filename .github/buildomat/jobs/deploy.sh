@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.34"
+#: target = "lab-2.0-opte-0.35"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
@@ -134,9 +134,7 @@ z_swadm () {
 	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
 }
 
-# only set this if you want to override the version of opte/xde installed by the
-# install_opte.sh script
-OPTE_COMMIT=""
+source ./tools/opte_version_override
 if [[ "x$OPTE_COMMIT" != "x" ]]; then
 	curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde
 	pfexec rem_drv xde || true
