@@ -7,6 +7,9 @@
 use futures::{StreamExt, stream::FuturesUnordered};
 use slog::Logger;
 
+#[macro_use]
+extern crate slog;
+
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
         mod contract;
@@ -15,6 +18,9 @@ cfg_if::cfg_if! {
         use contract_stub as contract;
     }
 }
+
+pub mod logs;
+pub use logs::{LogError, LogsHandle};
 
 mod queries;
 pub use crate::queries::{

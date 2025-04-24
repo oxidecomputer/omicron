@@ -7,11 +7,7 @@
 use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
-use bytes::Buf;
-use bytes::BufMut;
-use bytes::BytesMut;
 use camino::Utf8PathBuf;
-use chrono::Local;
 use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
@@ -28,13 +24,8 @@ use slog::LevelFilter;
 use slog::Logger;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
-use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
-use std::time::SystemTime;
-use tar::Builder;
-use tar::Header;
 use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 use uuid::Uuid;
 
 fn parse_log_level(s: &str) -> anyhow::Result<Level> {
@@ -152,21 +143,13 @@ enum Cmd {
         #[arg(long, short = 'o', default_values_t = ListFields::all(), value_delimiter = ',')]
         fields: Vec<ListFields>,
     },
-    /// Request the sled agent create a new zone bundle.
-    Create {
-        /// The name of the zone to list bundles for.
-        zone_name: String,
-    },
     /// Get a zone bundle from the sled agent.
     Get {
         /// The name of the zone to fetch the bundle for.
         zone_name: String,
         /// The ID of the bundle to fetch.
-        #[arg(long, group = "id", required = true)]
-        bundle_id: Option<Uuid>,
-        /// Create a new bundle, and then fetch it.
-        #[arg(long, group = "id", required = true)]
-        create: bool,
+        #[arg(long, required = true)]
+        bundle_id: Uuid,
         /// The output file.
         ///
         /// If not specified, the output file is named by the bundle ID itself.
@@ -202,22 +185,6 @@ enum Cmd {
     },
     /// Trigger an explicit request to cleanup low-priority zone bundles.
     Cleanup,
-    /// Create a bundle for all zones on a host.
-    ///
-    /// This is intended for use cases such as before a system update, in which
-    /// one wants to capture bundles from all extant zones before removing them.
-    /// All individual zone bundles will be placed into a single, final tarball.
-    BundleAll {
-        /// The output file.
-        ///
-        /// All individual bundles will be combined here. If not provided, the
-        /// file we be named based on the current hostname and local timestamp.
-        #[arg(long)]
-        output: Option<Utf8PathBuf>,
-        /// Print verbose progress information.
-        #[arg(long, short)]
-        verbose: bool,
-    },
 }
 
 // Number of expected sort dimensions. Must match
@@ -386,32 +353,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Cmd::Create { zone_name } => {
-            let bundle = client
-                .zone_bundle_create(&zone_name)
-                .await
-                .context("failed to create zone bundle")?
-                .into_inner();
-            println!(
-                "Created zone bundle: {}/{}",
-                bundle.id.zone_name, bundle.id.bundle_id
-            );
-        }
-        Cmd::Get { zone_name, bundle_id, create, output } => {
-            let bundle_id = if create {
-                let bundle = client
-                    .zone_bundle_create(&zone_name)
-                    .await
-                    .context("failed to create zone bundle")?
-                    .into_inner();
-                println!(
-                    "Created zone bundle: {}/{}",
-                    bundle.id.zone_name, bundle.id.bundle_id
-                );
-                bundle.id.bundle_id
-            } else {
-                bundle_id.expect("clap should have ensured this was Some(_)")
-            };
+        Cmd::Get { zone_name, bundle_id, output } => {
             let output = output.unwrap_or_else(|| {
                 Utf8PathBuf::from(format!("{}.tar.gz", bundle_id))
             });
@@ -610,136 +552,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Cmd::BundleAll { output, verbose } => {
-            let output = match output {
-                Some(output) => output,
-                None => create_megabundle_filename()
-                    .await
-                    .context("failed to create output file")?,
-            };
-            if verbose {
-                println!("Using {} for sled-agent host", host);
-                println!("Collecting all bundles, using {} as output", output);
-            }
-
-            // Open megabundle output file.
-            let f = tokio::fs::File::create(&output)
-                .await
-                .context("failed to open output file")?
-                .into_std()
-                .await;
-            let gz = flate2::GzBuilder::new()
-                .filename(output.as_str())
-                .write(f, flate2::Compression::best());
-            let mut builder = Builder::new(gz);
-
-            let mut seen_zones = BTreeSet::new();
-            loop {
-                // List all extant zones, pass over all of them that we've not
-                // yet seen.
-                let zones: BTreeSet<_> = client
-                    .zones_list()
-                    .await
-                    .context("failed to list zones")?
-                    .into_inner()
-                    .into_iter()
-                    .collect();
-                let new_zones: BTreeSet<_> =
-                    zones.difference(&seen_zones).cloned().collect();
-                if new_zones.is_empty() {
-                    break;
-                }
-
-                for new_zone in new_zones.into_iter() {
-                    if verbose {
-                        println!("Fetching bundle for new zone: {}", new_zone);
-                    }
-                    // Create and fetch the bundle.
-                    let metadata = client
-                        .zone_bundle_create(&new_zone)
-                        .await
-                        .context("failed to create zone bundle")?
-                        .into_inner();
-                    let bundle = client
-                        .zone_bundle_get(&new_zone, &metadata.id.bundle_id)
-                        .await
-                        .context("failed to get zone bundle")?
-                        .into_inner();
-
-                    // Fetch the byte stream for this tarball.
-                    let mut stream = bundle.into_inner();
-                    let mut buf = BytesMut::new();
-                    while let Some(maybe_bytes) = stream.next().await {
-                        let bytes = maybe_bytes
-                            .context("failed to fetch all bundle data")?;
-                        buf.put(bytes);
-                    }
-
-                    // Plop all the bytes into the archive, at a path defined by
-                    // the zone name and bundle ID.
-                    let mtime = SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .context("failed to compute mtime")?
-                        .as_secs();
-
-                    // Add a "directory" for the zone name.
-                    let mut hdr = Header::new_ustar();
-                    hdr.set_size(0);
-                    hdr.set_mode(0o444);
-                    hdr.set_mtime(mtime);
-                    hdr.set_entry_type(tar::EntryType::Directory);
-                    hdr.set_path(&new_zone)
-                        .context("failed to set zone name directory path")?;
-                    hdr.set_cksum();
-
-                    // Add the bundle inside this zone.
-                    let mut hdr = Header::new_ustar();
-                    hdr.set_size(buf.remaining().try_into().unwrap());
-                    hdr.set_mode(0o444);
-                    hdr.set_mtime(mtime);
-                    hdr.set_entry_type(tar::EntryType::Regular);
-                    let bundle_path = format!(
-                        "{}/{}.tar.gz",
-                        new_zone, metadata.id.bundle_id
-                    );
-                    builder
-                        .append_data(&mut hdr, &bundle_path, buf.reader())
-                        .context(
-                            "failed to insert zone bundle into megabundle",
-                        )?;
-
-                    if verbose {
-                        println!("Added bundle: {}", bundle_path);
-                    }
-
-                    // Keep track of this zone.
-                    seen_zones.insert(new_zone);
-                }
-            }
-            if verbose {
-                println!(
-                    "Finished bundling {} zones into {}",
-                    seen_zones.len(),
-                    output
-                );
-            }
-        }
     }
     Ok(())
-}
-
-// Create a file used to store all bundles when running `bundle-all`.
-async fn create_megabundle_filename() -> anyhow::Result<Utf8PathBuf> {
-    let output = Command::new("hostname")
-        .output()
-        .await
-        .context("failed to launch `hostname` command")?;
-    anyhow::ensure!(output.status.success(), "failed to run hostname");
-    let hostname = String::from_utf8_lossy(&output.stdout);
-    let timestamp = Local::now().format("%Y-%m-%dT%H-%M-%S");
-    Utf8PathBuf::try_from(std::env::current_dir().context("failed to get CWD")?)
-        .context("failed to convert to UTF8 path")
-        .map(|p| p.join(format!("{}-{}.tar.gz", hostname.trim(), timestamp)))
 }
 
 // Compute used / avail as a percentage.

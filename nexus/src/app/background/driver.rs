@@ -15,6 +15,7 @@ use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
+use nexus_background_task_interface::Activator;
 use nexus_db_queries::context::OpContext;
 use nexus_types::internal_api::views::ActivationReason;
 use nexus_types::internal_api::views::CurrentStatus;
@@ -23,12 +24,8 @@ use nexus_types::internal_api::views::LastResult;
 use nexus_types::internal_api::views::LastResultCompleted;
 use nexus_types::internal_api::views::TaskStatus;
 use std::collections::BTreeMap;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
-use tokio::sync::Notify;
 use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
 
@@ -118,17 +115,10 @@ impl Driver {
         // requested.  The caller provides their own Activator, which just
         // provides a specific Notify for us to use here.
         let activator = taskdef.activator;
-        if let Err(previous) = activator.0.wired_up.compare_exchange(
-            false,
-            true,
-            Ordering::SeqCst,
-            Ordering::SeqCst,
-        ) {
+        if let Err(error) = activator.mark_wired_up() {
             panic!(
-                "attempted to wire up the same background task handle \
-                 twice (previous \"wired_up\" = {}): currently attempting \
-                 to wire it up to task {:?}",
-                previous, name
+                "{error}: currently attempting to wire it up to task {:?}",
+                name
             );
         }
 
@@ -141,7 +131,7 @@ impl Driver {
         let task_exec = TaskExec::new(
             taskdef.period,
             taskdef.task_impl,
-            Arc::clone(&activator.0),
+            activator.clone(),
             opctx,
             status_tx,
         );
@@ -241,59 +231,6 @@ pub struct TaskDefinition<'a, N: ToString, D: ToString> {
     pub activator: &'a Activator,
 }
 
-/// Activates a background task
-///
-/// See [`crate::app::background`] module-level documentation for more on what
-/// that means.
-///
-/// Activators are created with [`Activator::new()`] and then wired up to
-/// specific background tasks using [`Driver::register()`].  If you call
-/// `Activator::activate()` before the activator is wired up to a background
-/// task, then once the Activator _is_ wired up to a task, that task will
-/// immediately be activated.
-///
-/// Activators are designed specifically so they can be created before the
-/// corresponding task has been created and then wired up with just an
-/// `&Activator` (not a `&mut Activator`).  See the [`super::init`] module-level
-/// documentation for more on why.
-#[derive(Clone)]
-pub struct Activator(Arc<ActivatorInner>);
-
-/// Shared state for an `Activator`.
-struct ActivatorInner {
-    pub(super) notify: Notify,
-    pub(super) wired_up: AtomicBool,
-}
-
-impl Activator {
-    /// Create an activator that is not yet wired up to any background task
-    pub fn new() -> Activator {
-        Self(Arc::new(ActivatorInner {
-            notify: Notify::new(),
-            wired_up: AtomicBool::new(false),
-        }))
-    }
-
-    /// Activate the background task that this Activator has been wired up to
-    ///
-    /// If this Activator has not yet been wired up with [`Driver::register()`],
-    /// then whenever it _is_ wired up, that task will be immediately activated.
-    pub fn activate(&self) {
-        self.0.notify.notify_one();
-    }
-}
-
-impl ActivatorInner {
-    async fn activated(&self) {
-        debug_assert!(
-            self.wired_up.load(Ordering::SeqCst),
-            "nothing should await activation from an activator that hasn't \
-             been wired up"
-        );
-        self.notify.notified().await
-    }
-}
-
 /// Encapsulates state needed by the background tokio task to manage activation
 /// of the background task
 struct TaskExec {
@@ -303,7 +240,7 @@ struct TaskExec {
     imp: Box<dyn BackgroundTask>,
     /// used to receive notifications from the Driver that someone has requested
     /// explicit activation
-    activation: Arc<ActivatorInner>,
+    activation: Activator,
     /// passed through to the background task impl when activated
     opctx: OpContext,
     /// used to send current status back to the Driver
@@ -316,7 +253,7 @@ impl TaskExec {
     fn new(
         period: Duration,
         imp: Box<dyn BackgroundTask>,
-        activation: Arc<ActivatorInner>,
+        activation: Activator,
         opctx: OpContext,
         status_tx: watch::Sender<TaskStatus>,
     ) -> TaskExec {
