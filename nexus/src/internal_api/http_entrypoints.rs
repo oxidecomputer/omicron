@@ -23,6 +23,7 @@ use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::ClickhousePolicy;
+use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::UninitializedSledId;
@@ -36,6 +37,7 @@ use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::BackgroundTask;
 use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::Ipv4NatEntryView;
+use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::to_list;
 use omicron_common::api::external::Instance;
@@ -501,7 +503,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    // Sagas
+    // Debug interfaces for Sagas
 
     async fn saga_list(
         rqctx: RequestContext<Self::Context>,
@@ -581,7 +583,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    // Background Tasks
+    // Debug interfaces for Background Tasks
 
     async fn bgtask_list(
         rqctx: RequestContext<Self::Context>,
@@ -632,6 +634,24 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let body = body.into_inner();
             nexus.bgtask_activate(&opctx, body.bgtask_names).await?;
             Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    // Debug interfaces for MGS updates
+
+    async fn mgs_updates(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MgsUpdateDriverStatus>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let nexus = &apictx.nexus;
+            Ok(HttpResponseOk(nexus.mgs_updates(&opctx).await?))
         };
         apictx
             .internal_latencies
@@ -959,6 +979,50 @@ impl NexusInternalApi for NexusInternalApiImpl {
             nexus
                 .datastore()
                 .clickhouse_policy_insert_latest_version(
+                    &opctx,
+                    &policy.into_inner(),
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn oximeter_read_policy_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OximeterReadPolicy>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let nexus = &apictx.nexus;
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let policy = nexus
+                .datastore()
+                .oximeter_read_policy_get_latest(&opctx)
+                .await?;
+            Ok(HttpResponseOk(policy))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn oximeter_read_policy_set(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<OximeterReadPolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            nexus
+                .datastore()
+                .oximeter_read_policy_insert_latest_version(
                     &opctx,
                     &policy.into_inner(),
                 )

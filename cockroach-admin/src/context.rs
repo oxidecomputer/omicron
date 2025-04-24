@@ -32,6 +32,10 @@ impl ServerContext {
         Self { zone_id, cockroach_cli, node_id: OnceCell::new(), log }
     }
 
+    pub fn log(&self) -> &Logger {
+        &self.log
+    }
+
     pub fn cockroach_cli(&self) -> &CockroachCli {
         &self.cockroach_cli
     }

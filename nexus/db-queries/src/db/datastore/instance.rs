@@ -14,10 +14,7 @@ use crate::db::collection_detach_many::DetachManyError;
 use crate::db::collection_detach_many::DetachManyFromCollectionStatement;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
-use crate::db::lookup::LookupPath;
 use crate::db::model::ByteCount;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
@@ -36,14 +33,17 @@ use crate::db::model::Vmm;
 use crate::db::model::VmmState;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
-use crate::db::pool::DbConnection;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::Disk;
 use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
@@ -2116,9 +2116,9 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::datastore::sled;
-    use crate::db::lookup::LookupPath;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmRuntimeState;
@@ -2187,14 +2187,14 @@ mod tests {
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),
-                        anti_affinity_groups: None,
+                        anti_affinity_groups: Vec::new(),
                     },
                 ),
             )
             .await
             .expect("instance must be created successfully");
 
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await

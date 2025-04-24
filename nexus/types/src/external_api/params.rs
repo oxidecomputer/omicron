@@ -1116,8 +1116,8 @@ pub struct InstanceDiskAttach {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalIpCreate {
     /// An IP address providing both inbound and outbound access. The address is
-    /// automatically-assigned from the provided IP Pool, or the current silo's
-    /// default pool if not specified.
+    /// automatically assigned from the provided IP pool or the default IP pool
+    /// if not specified.
     Ephemeral { pool: Option<NameOrId> },
     /// An IP address providing both inbound and outbound access. The address is
     /// an existing floating IP object assigned to the current project.
@@ -1130,7 +1130,8 @@ pub enum ExternalIpCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub struct EphemeralIpCreate {
-    /// Name or ID of the IP pool used to allocate an address
+    /// Name or ID of the IP pool used to allocate an address. If unspecified,
+    /// the default IP pool will be used.
     pub pool: Option<NameOrId>,
 }
 
@@ -1230,10 +1231,8 @@ pub struct InstanceCreate {
     pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 
     /// Anti-Affinity groups which this instance should be added.
-    ///
-    /// A "null" set of groups is equivalent to an empty set of groups.
     #[serde(default)]
-    pub anti_affinity_groups: Option<Vec<NameOrId>>,
+    pub anti_affinity_groups: Vec<NameOrId>,
 }
 
 /// Parameters of an `Instance` that can be reconfigured after creation.

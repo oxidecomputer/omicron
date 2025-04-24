@@ -351,6 +351,10 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     state fingerprint:::::::::::::::::   (none)
     cluster.preserve_downgrade_option:   (do not modify)
 
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   test suite
     created at:::::::::::   <REDACTED_TIMESTAMP>
@@ -446,6 +450,10 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none)
     cluster.preserve_downgrade_option:   (do not modify)
+
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
 
  METADATA:
     created by:::::::::::   test suite

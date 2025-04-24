@@ -177,6 +177,17 @@ builder: "non_trivial"
       }
     }
   ],
+  "_oximeter-reader._tcp": [
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 9000,
+        "target": "001de000-c04e-4000-8000-000000000005.host.control-plane.oxide.internal"
+      }
+    }
+  ],
   "_oximeter._tcp": [
     {
       "type": "SRV",

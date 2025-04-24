@@ -13,8 +13,6 @@ use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::IncompleteVpc;
@@ -41,7 +39,6 @@ use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc::VniSearchIter;
 use crate::db::queries::vpc_subnet::InsertVpcSubnetError;
 use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -51,10 +48,14 @@ use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use ipnetwork::IpNetwork;
 use nexus_auth::authz::ApiResource;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::DbBpZoneDisposition;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::InternetGateway;
@@ -104,7 +105,7 @@ impl DataStore {
 
         // Create built-in VPC for Oxide Services
 
-        let (_, authz_project) = db::lookup::LookupPath::new(opctx, self)
+        let (_, authz_project) = nexus_db_lookup::LookupPath::new(opctx, self)
             .project_id(*SERVICES_PROJECT_ID)
             .lookup_for(authz::Action::CreateChild)
             .await
@@ -152,7 +153,7 @@ impl DataStore {
 
         // Also add the system router and internet gateway route
 
-        let system_router = db::lookup::LookupPath::new(opctx, self)
+        let system_router = nexus_db_lookup::LookupPath::new(opctx, self)
             .vpc_router_id(SERVICES_VPC.system_router_id)
             .lookup_for(authz::Action::CreateChild)
             .await;
@@ -240,7 +241,7 @@ impl DataStore {
 
         // Create firewall rules for Oxide Services
 
-        let (_, _, authz_vpc) = db::lookup::LookupPath::new(opctx, self)
+        let (_, _, authz_vpc) = nexus_db_lookup::LookupPath::new(opctx, self)
             .vpc_id(*SERVICES_VPC_ID)
             .lookup_for(authz::Action::CreateChild)
             .await
@@ -303,7 +304,7 @@ impl DataStore {
 
         // Create built-in VPC Subnets for Oxide Services
 
-        let (_, _, authz_vpc) = db::lookup::LookupPath::new(opctx, self)
+        let (_, _, authz_vpc) = nexus_db_lookup::LookupPath::new(opctx, self)
             .vpc_id(*SERVICES_VPC_ID)
             .lookup_for(authz::Action::CreateChild)
             .await
@@ -313,7 +314,7 @@ impl DataStore {
             (&*NEXUS_VPC_SUBNET, *NEXUS_VPC_SUBNET_ROUTE_ID),
             (&*NTP_VPC_SUBNET, *NTP_VPC_SUBNET_ROUTE_ID),
         ] {
-            if let Ok(_) = db::lookup::LookupPath::new(opctx, self)
+            if let Ok(_) = nexus_db_lookup::LookupPath::new(opctx, self)
                 .vpc_subnet_id(vpc_subnet.id())
                 .fetch()
                 .await
@@ -1772,7 +1773,7 @@ impl DataStore {
 
     pub async fn router_create_route_on_connection(
         route: RouterRoute,
-        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> CreateResult<RouterRoute> {
         use nexus_db_schema::schema::router_route::dsl;
         let router_id = route.vpc_router_id;
@@ -2497,7 +2498,7 @@ impl DataStore {
         opctx.check_complex_operations_allowed()?;
 
         let (.., authz_project, authz_vpc, authz_router) =
-            db::lookup::LookupPath::new(opctx, self)
+            nexus_db_lookup::LookupPath::new(opctx, self)
                 .vpc_router_id(vpc_router_id)
                 .lookup_for(authz::Action::Read)
                 .await
@@ -2586,7 +2587,7 @@ impl DataStore {
         //       complete set if we're a system router? We'll need it anyway.
         let mut subnets_by_id = stream::iter(subnet_ids)
             .filter_map(|id| async move {
-                db::lookup::LookupPath::new(opctx, self)
+                nexus_db_lookup::LookupPath::new(opctx, self)
                     .vpc_subnet_id(id)
                     .fetch()
                     .await
@@ -2608,7 +2609,7 @@ impl DataStore {
                 continue;
             }
 
-            let Some(res) = db::lookup::LookupPath::new(opctx, self)
+            let Some(res) = nexus_db_lookup::LookupPath::new(opctx, self)
                 .vpc_id(vpc_id)
                 .vpc_subnet_name(Name::ref_cast(name))
                 .fetch()
@@ -2627,7 +2628,7 @@ impl DataStore {
         // TODO: unused until VPC peering.
         let _vpcs = stream::iter(vpc_names)
             .filter_map(|name| async {
-                db::lookup::LookupPath::new(opctx, self)
+                nexus_db_lookup::LookupPath::new(opctx, self)
                     .project_id(authz_project.id())
                     .vpc_name(Name::ref_cast(&name))
                     .fetch()
@@ -2641,7 +2642,7 @@ impl DataStore {
 
         let inetgws = stream::iter(inetgw_names)
             .filter_map(|name| async {
-                db::lookup::LookupPath::new(opctx, self)
+                nexus_db_lookup::LookupPath::new(opctx, self)
                     .vpc_id(vpc_id)
                     .internet_gateway_name(Name::ref_cast(&name))
                     .fetch()
@@ -2655,7 +2656,7 @@ impl DataStore {
 
         let instances = stream::iter(instance_names)
             .filter_map(|name| async {
-                db::lookup::LookupPath::new(opctx, self)
+                nexus_db_lookup::LookupPath::new(opctx, self)
                     .project_id(authz_project.id())
                     .instance_name(Name::ref_cast(&name))
                     .fetch()
@@ -3877,14 +3878,14 @@ mod tests {
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),
-                        anti_affinity_groups: None,
+                        anti_affinity_groups: Vec::new(),
                     },
                 ),
             )
             .await
             .unwrap();
         let (.., authz_instance) =
-            db::lookup::LookupPath::new(&opctx, &datastore)
+            nexus_db_lookup::LookupPath::new(&opctx, datastore)
                 .instance_id(db_inst.id())
                 .lookup_for(authz::Action::CreateChild)
                 .await

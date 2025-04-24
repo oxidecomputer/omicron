@@ -5,7 +5,6 @@
 //! CTE implementation for "UPDATE with extended return status".
 
 use super::column_walker::ColumnWalker;
-use super::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::QuerySource;
 use diesel::associations::HasTable;
@@ -16,6 +15,7 @@ use diesel::query_dsl::methods::LoadQuery;
 use diesel::query_source::Table;
 use diesel::result::Error as DieselError;
 use diesel::sql_types::Nullable;
+use nexus_db_lookup::DbConnection;
 use std::marker::PhantomData;
 
 /// A simple wrapper type for Diesel's [`UpdateStatement`], which

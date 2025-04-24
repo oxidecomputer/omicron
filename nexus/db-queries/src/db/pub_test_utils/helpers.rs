@@ -7,7 +7,7 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::DataStore;
-use crate::db::lookup::LookupPath;
+use nexus_db_lookup::LookupPath;
 
 use anyhow::Result;
 use chrono::Utc;
@@ -222,7 +222,7 @@ pub async fn create_stopped_instance_record(
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
-            anti_affinity_groups: None,
+            anti_affinity_groups: Vec::new(),
         },
     );
 

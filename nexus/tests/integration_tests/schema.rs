@@ -7,6 +7,7 @@ use dropshot::test_util::LogContext;
 use futures::future::BoxFuture;
 use nexus_config::NexusConfig;
 use nexus_config::SchemaConfig;
+use nexus_db_lookup::DataStoreConnection;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
@@ -779,13 +780,9 @@ async fn dbinit_equals_sum_of_all_up() {
     logctx.cleanup_successful();
 }
 
-type Conn = qorb::claim::Handle<
-    async_bb8_diesel::Connection<nexus_db_queries::db::DbConnection>,
->;
-
 struct PoolAndConnection {
     pool: nexus_db_queries::db::Pool,
-    conn: Conn,
+    conn: DataStoreConnection,
 }
 
 impl PoolAndConnection {
@@ -1380,7 +1377,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         disks: Vec::new(),
                         start: false,
                         auto_restart_policy: Default::default(),
-                        anti_affinity_groups: None,
+                        anti_affinity_groups: Vec::new(),
                     },
                 ))
                 .execute_async(&*pool_and_conn.conn)

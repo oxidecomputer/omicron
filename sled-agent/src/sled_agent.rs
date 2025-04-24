@@ -30,8 +30,6 @@ use dropshot::HttpError;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use illumos_utils::opte::PortManager;
-use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use illumos_utils::zone::ZONE_PREFIX;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
@@ -481,10 +479,19 @@ impl SledAgent {
 
         // Start tracking the underlay physical links.
         for link in underlay::find_chelsio_links(&config.data_links)? {
-            metrics_manager
+            match metrics_manager
                 .request_queue()
                 .track_physical("global", &link.0)
-                .await;
+            {
+                Ok(_) => {
+                    debug!(log, "started tracking global zone underlay links")
+                }
+                Err(e) => error!(
+                    log,
+                    "failed to track global zone underlay link";
+                    "error" => slog_error_chain::InlineErrorChain::new(&e),
+                ),
+            }
         }
 
         // Create the PortManager to manage all the OPTE ports on the sled.
@@ -771,28 +778,6 @@ impl SledAgent {
         self.inner.zone_bundler.list_for_zone(name).await.map_err(Error::from)
     }
 
-    /// Create a zone bundle for the provided zone.
-    pub async fn create_zone_bundle(
-        &self,
-        name: &str,
-    ) -> Result<ZoneBundleMetadata, Error> {
-        if name.starts_with(PROPOLIS_ZONE_PREFIX) {
-            self.inner
-                .instances
-                .create_zone_bundle(name)
-                .await
-                .map_err(Error::from)
-        } else if name.starts_with(ZONE_PREFIX) {
-            self.inner
-                .services
-                .create_zone_bundle(name)
-                .await
-                .map_err(Error::from)
-        } else {
-            Err(Error::from(BundleError::NoSuchZone { name: name.to_string() }))
-        }
-    }
-
     /// Fetch the paths to all zone bundles with the provided name and ID.
     pub async fn get_zone_bundle_paths(
         &self,
@@ -1035,11 +1020,6 @@ impl SledAgent {
             .services
             .ensure_all_omicron_zones_persistent(requested_zones)
             .await?;
-        Ok(())
-    }
-
-    pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
-        self.inner.services.cockroachdb_initialize().await?;
         Ok(())
     }
 

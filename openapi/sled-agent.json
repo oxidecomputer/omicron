@@ -334,23 +334,6 @@
         }
       }
     },
-    "/cockroachdb": {
-      "post": {
-        "summary": "Initializes a CockroachDB cluster",
-        "operationId": "cockroachdb_init",
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/datasets": {
       "get": {
         "summary": "Lists the datasets that this sled is configured to use",
@@ -2013,39 +1996,6 @@
                   "items": {
                     "$ref": "#/components/schemas/ZoneBundleMetadata"
                   }
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "post": {
-        "summary": "Ask the sled agent to create a zone bundle.",
-        "operationId": "zone_bundle_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "zone_name",
-            "description": "The name of the zone.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ZoneBundleMetadata"
                 }
               }
             }
@@ -6533,13 +6483,6 @@
             "type": "string",
             "enum": [
               "terminated_instance"
-            ]
-          },
-          {
-            "description": "Generated in response to an explicit request to the sled agent.",
-            "type": "string",
-            "enum": [
-              "explicit_request"
             ]
           }
         ]

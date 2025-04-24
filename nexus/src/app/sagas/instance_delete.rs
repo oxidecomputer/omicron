@@ -8,7 +8,7 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
-use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::Deserialize;
@@ -117,7 +117,7 @@ async fn sid_delete_nat(
         &params.serialized_authn,
     );
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_instance) = LookupPath::new(&opctx, osagactx.datastore())
         .instance_id(instance_id)
         .lookup_for(authz::Action::Modify)
         .await
@@ -166,9 +166,8 @@ mod test {
         app::sagas::instance_delete::SagaInstanceDelete, external_api::params,
     };
     use dropshot::test_util::ClientTestContext;
-    use nexus_db_queries::{
-        authn::saga::Serialized, context::OpContext, db, db::lookup::LookupPath,
-    };
+    use nexus_db_lookup::LookupPath;
+    use nexus_db_queries::{authn::saga::Serialized, context::OpContext, db};
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_disk;
@@ -203,12 +202,11 @@ mod test {
         let opctx = test_opctx(&cptestctx);
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
-        let (.., authz_instance, instance) =
-            LookupPath::new(&opctx, &datastore)
-                .instance_id(instance_id)
-                .fetch()
-                .await
-                .expect("Failed to lookup instance");
+        let (.., authz_instance, instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance_id)
+            .fetch()
+            .await
+            .expect("Failed to lookup instance");
         Params {
             serialized_authn: Serialized::for_opctx(&opctx),
             authz_instance,
@@ -240,7 +238,7 @@ mod test {
             disks: Vec::new(),
             start: false,
             auto_restart_policy: Default::default(),
-            anti_affinity_groups: None,
+            anti_affinity_groups: Vec::new(),
         }
     }
 

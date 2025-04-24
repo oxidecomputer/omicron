@@ -4,6 +4,7 @@
 
 progenitor::generate_api!(
     spec = "../../openapi/dns-server/dns-server-latest.json",
+    interface = Positional,
     inner_type = slog::Logger,
     derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {

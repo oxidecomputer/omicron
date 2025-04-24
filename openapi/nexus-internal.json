@@ -915,6 +915,30 @@
         }
       }
     },
+    "/mgs-updates": {
+      "get": {
+        "summary": "Fetch information about ongoing MGS updates",
+        "operationId": "mgs_updates",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MgsUpdateDriverStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/nat/ipv4/changeset/{from_gen}": {
       "get": {
         "summary": "Fetch NAT ChangeSet",
@@ -956,6 +980,55 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/oximeter/read-policy": {
+      "get": {
+        "summary": "Get the current oximeter read policy",
+        "operationId": "oximeter_read_policy_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OximeterReadPolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set the new oximeter read policy",
+        "operationId": "oximeter_read_policy_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OximeterReadPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1571,25 +1644,6 @@
           }
         ]
       },
-      "ArtifactHashId": {
-        "description": "A hash-based identifier for an artifact or deployment unit: the kind and hash.",
-        "type": "object",
-        "properties": {
-          "hash": {
-            "description": "The hash of the artifact.",
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          },
-          "kind": {
-            "description": "The kind of artifact this is.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "hash",
-          "kind"
-        ]
-      },
       "ArtifactVersion": {
         "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
         "type": "string",
@@ -1975,6 +2029,22 @@
               }
             ]
           },
+          "oximeter_read_mode": {
+            "description": "Whether oximeter should read from a single node or a cluster",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OximeterReadMode"
+              }
+            ]
+          },
+          "oximeter_read_version": {
+            "description": "Oximeter read policy version when this blueprint was created",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "parent_blueprint_id": {
             "nullable": true,
             "description": "which blueprint this blueprint is based on",
@@ -2013,6 +2083,8 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
+          "oximeter_read_mode",
+          "oximeter_read_version",
           "pending_mgs_updates",
           "sleds",
           "time_created"
@@ -3110,6 +3182,67 @@
           }
         ]
       },
+      "CompletedAttempt": {
+        "description": "externally-exposed status for a completed attempt",
+        "type": "object",
+        "properties": {
+          "elapsed": {
+            "$ref": "#/components/schemas/Duration"
+          },
+          "nattempts_done": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "request": {
+            "$ref": "#/components/schemas/PendingMgsUpdate"
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/UpdateCompletedHow"
+                  }
+                },
+                "required": [
+                  "ok"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "time_done": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_started": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "elapsed",
+          "nattempts_done",
+          "request",
+          "result",
+          "time_done",
+          "time_started"
+        ]
+      },
       "CompressionAlgorithm": {
         "oneOf": [
           {
@@ -3946,6 +4079,29 @@
           }
         ]
       },
+      "InProgressUpdateStatus": {
+        "description": "externally-exposed status for each in-progress update",
+        "type": "object",
+        "properties": {
+          "nattempts_done": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/UpdateAttemptStatus"
+          },
+          "time_started": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "nattempts_done",
+          "status",
+          "time_started"
+        ]
+      },
       "Instance": {
         "description": "View of an Instance",
         "type": "object",
@@ -4478,6 +4634,35 @@
         "minLength": 5,
         "maxLength": 17
       },
+      "MgsUpdateDriverStatus": {
+        "description": "Status of ongoing update attempts, recently completed attempts, and update requests that are waiting for retry.",
+        "type": "object",
+        "properties": {
+          "in_progress": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/InProgressUpdateStatus"
+            }
+          },
+          "recent": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletedAttempt"
+            }
+          },
+          "waiting": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/WaitingStatus"
+            }
+          }
+        },
+        "required": [
+          "in_progress",
+          "recent",
+          "waiting"
+        ]
+      },
       "MigrationRuntimeState": {
         "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",
         "type": "object",
@@ -4755,16 +4940,68 @@
           "collector_id"
         ]
       },
+      "OximeterReadMode": {
+        "description": "Where oximeter should read from",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "single_node"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cluster"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "OximeterReadPolicy": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/OximeterReadMode"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "mode",
+          "time_created",
+          "version"
+        ]
+      },
       "PendingMgsUpdate": {
         "type": "object",
         "properties": {
-          "artifact_hash_id": {
+          "artifact_hash": {
             "description": "which artifact to apply to this device (implies which component is being updated)",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ArtifactHashId"
-              }
-            ]
+            "type": "string",
+            "format": "hex string (32 bytes)"
           },
           "artifact_version": {
             "$ref": "#/components/schemas/ArtifactVersion"
@@ -4801,7 +5038,7 @@
           }
         },
         "required": [
-          "artifact_hash_id",
+          "artifact_hash",
           "artifact_version",
           "baseboard_id",
           "details",
@@ -6217,6 +6454,29 @@
           "items"
         ]
       },
+      "UpdateAttemptStatus": {
+        "description": "status of a single update attempt",
+        "type": "string",
+        "enum": [
+          "not_started",
+          "fetching_artifact",
+          "precheck",
+          "updating",
+          "update_waiting",
+          "post_update",
+          "post_update_wait",
+          "done"
+        ]
+      },
+      "UpdateCompletedHow": {
+        "type": "string",
+        "enum": [
+          "found_no_changes_needed",
+          "completed_update",
+          "waited_for_concurrent_update",
+          "took_over_concurrent_update"
+        ]
+      },
       "UplinkAddressConfig": {
         "type": "object",
         "properties": {
@@ -6349,6 +6609,25 @@
         "type": "integer",
         "format": "uint32",
         "minimum": 0
+      },
+      "WaitingStatus": {
+        "description": "externally-exposed status for waiting updates",
+        "type": "object",
+        "properties": {
+          "nattempts_done": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "next_attempt_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "nattempts_done",
+          "next_attempt_time"
+        ]
       },
       "ZpoolName": {
         "title": "The name of a Zpool",

@@ -347,7 +347,6 @@ use super::{
 use crate::app::db::datastore::InstanceGestalt;
 use crate::app::db::datastore::VmmStateUpdateResult;
 use crate::app::db::datastore::instance;
-use crate::app::db::lookup::LookupPath;
 use crate::app::db::model::ByteCount;
 use crate::app::db::model::Generation;
 use crate::app::db::model::InstanceRuntimeState;
@@ -358,6 +357,7 @@ use crate::app::db::model::VmmState;
 use crate::app::sagas::declare_saga_actions;
 use anyhow::Context;
 use chrono::Utc;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
@@ -1478,8 +1478,8 @@ mod test {
     use crate::external_api::params;
     use chrono::Utc;
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
-    use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pool, create_project, object_create,
     };
@@ -1553,7 +1553,7 @@ mod test {
                 boot_disk: None,
                 start: true,
                 auto_restart_policy: Default::default(),
-                anti_affinity_groups: None,
+                anti_affinity_groups: Vec::new(),
             },
         )
         .await
@@ -2466,12 +2466,11 @@ mod test {
             )
             .await;
 
-            let (_, _, authz_instance, ..) =
-                LookupPath::new(&opctx, &datastore)
-                    .instance_id(instance_id.into_untyped_uuid())
-                    .fetch()
-                    .await
-                    .expect("test instance should be present in datastore");
+            let (_, _, authz_instance, ..) = LookupPath::new(&opctx, datastore)
+                .instance_id(instance_id.into_untyped_uuid())
+                .fetch()
+                .await
+                .expect("test instance should be present in datastore");
             let initial_state = datastore
                 .instance_fetch_all(&opctx, &authz_instance)
                 .await

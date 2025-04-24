@@ -5,9 +5,7 @@
 //! Queries for inserting and deleting network interfaces.
 
 use crate::db;
-use crate::db::error::{ErrorHandler, public_error_from_diesel, retryable};
 use crate::db::model::IncompleteNetworkInterface;
-use crate::db::pool::DbConnection;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::{NextItem, NextItemSelfJoined};
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -26,6 +24,8 @@ use diesel::sql_types::{self, Nullable};
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use nexus_db_errors::{ErrorHandler, public_error_from_diesel, retryable};
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::SqlU8;
 use nexus_db_model::{MAX_NICS_PER_INSTANCE, NetworkInterfaceKind};
 use nexus_db_schema::enums::NetworkInterfaceKindEnum;
@@ -249,7 +249,6 @@ fn decode_database_error(
     err: DieselError,
     interface: &IncompleteNetworkInterface,
 ) -> InsertError {
-    use crate::db::error;
     use diesel::result::DatabaseErrorKind;
 
     // Error message generated when we attempt to insert an interface in a
@@ -426,13 +425,15 @@ fn decode_database_error(
                         external::ResourceType::ProbeNetworkInterface
                     }
                 };
-                InsertError::External(error::public_error_from_diesel(
-                    err,
-                    error::ErrorHandler::Conflict(
-                        resource_type,
-                        interface.identity.name.as_str(),
+                InsertError::External(
+                    nexus_db_errors::public_error_from_diesel(
+                        err,
+                        nexus_db_errors::ErrorHandler::Conflict(
+                            resource_type,
+                            interface.identity.name.as_str(),
+                        ),
                     ),
-                ))
+                )
             }
             // Constraint violated if the user-requested UUID has already
             // been inserted.
@@ -443,16 +444,18 @@ fn decode_database_error(
                 )
             }
             // Any other constraint violation is a bug
-            _ => InsertError::External(error::public_error_from_diesel(
-                err,
-                error::ErrorHandler::Server,
-            )),
+            _ => InsertError::External(
+                nexus_db_errors::public_error_from_diesel(
+                    err,
+                    nexus_db_errors::ErrorHandler::Server,
+                ),
+            ),
         },
 
         // Any other error at all is a bug
-        _ => InsertError::External(error::public_error_from_diesel(
+        _ => InsertError::External(nexus_db_errors::public_error_from_diesel(
             err,
-            error::ErrorHandler::Server,
+            nexus_db_errors::ErrorHandler::Server,
         )),
     }
 }
@@ -1699,7 +1702,6 @@ impl DeleteError {
     /// either the instance is still running, or that the instance has one or
     /// more secondary interfaces.
     pub fn from_diesel(e: DieselError, query: &DeleteQuery) -> Self {
-        use crate::db::error;
         match e {
             // Catch the specific errors designed to communicate the failures we
             // want to distinguish
@@ -1728,10 +1730,12 @@ impl DeleteError {
                 })
             }
             // Any other error at all is a bug
-            _ => DeleteError::External(error::public_error_from_diesel(
-                e,
-                error::ErrorHandler::Server,
-            )),
+            _ => DeleteError::External(
+                nexus_db_errors::public_error_from_diesel(
+                    e,
+                    nexus_db_errors::ErrorHandler::Server,
+                ),
+            ),
         }
     }
 
@@ -1772,7 +1776,6 @@ fn decode_delete_network_interface_database_error(
     err: DieselError,
     parent_id: Uuid,
 ) -> DeleteError {
-    use crate::db::error;
     use diesel::result::DatabaseErrorKind;
 
     // Error message generated when we're attempting to delete a primary
@@ -1809,9 +1812,9 @@ fn decode_delete_network_interface_database_error(
         }
 
         // Any other error at all is a bug
-        _ => DeleteError::External(error::public_error_from_diesel(
+        _ => DeleteError::External(nexus_db_errors::public_error_from_diesel(
             err,
-            error::ErrorHandler::Server,
+            nexus_db_errors::ErrorHandler::Server,
         )),
     }
 }
@@ -1827,7 +1830,6 @@ mod tests {
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
     use crate::db::identity::Resource;
-    use crate::db::lookup::LookupPath;
     use crate::db::model;
     use crate::db::model::IncompleteNetworkInterface;
     use crate::db::model::Instance;
@@ -1840,6 +1842,7 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use model::NetworkInterfaceKind;
+    use nexus_db_lookup::LookupPath;
     use nexus_types::external_api::params;
     use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
@@ -1888,12 +1891,12 @@ mod tests {
             boot_disk: None,
             start: true,
             auto_restart_policy: Default::default(),
-            anti_affinity_groups: None,
+            anti_affinity_groups: Vec::new(),
         };
 
         let instance = Instance::new(instance_id, project_id, &params);
 
-        let (.., authz_project) = LookupPath::new(&opctx, &db_datastore)
+        let (.., authz_project) = LookupPath::new(&opctx, db_datastore)
             .project_id(project_id)
             .lookup_for(authz::Action::CreateChild)
             .await

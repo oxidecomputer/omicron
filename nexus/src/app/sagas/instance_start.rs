@@ -16,7 +16,8 @@ use crate::app::instance::{
 };
 use crate::app::sagas::declare_saga_actions;
 use chrono::Utc;
-use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
+use nexus_db_lookup::LookupPath;
+use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
@@ -295,7 +296,7 @@ async fn sis_move_to_starting(
 
     // For idempotency, refetch the instance to see if this step already applied
     // its desired update.
-    let (_, _, authz_instance, ..) = LookupPath::new(&opctx, &datastore)
+    let (_, _, authz_instance, ..) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch_for(authz::Action::Modify)
         .await
@@ -491,7 +492,7 @@ async fn sis_dpd_ensure(
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
     let sled_uuid = sagactx.lookup::<SledUuid>("sled_id")?;
-    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
+    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
         .sled_id(sled_uuid.into_untyped_uuid())
         .fetch()
         .await
@@ -522,7 +523,7 @@ async fn sis_dpd_ensure_undo(
           "instance_id" => %instance_id,
           "start_reason" => ?params.reason);
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_instance) = LookupPath::new(&opctx, osagactx.datastore())
         .instance_id(instance_id)
         .lookup_for(authz::Action::Modify)
         .await
@@ -576,7 +577,7 @@ async fn sis_ensure_registered(
           "start_reason" => ?params.reason);
 
     let (authz_silo, authz_project, authz_instance) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .instance_id(instance_id)
             .lookup_for(authz::Action::Modify)
             .await
@@ -646,7 +647,7 @@ async fn sis_ensure_registered_undo(
 
     // Fetch the latest record so that this callee can drive the instance into
     // a Failed state if the unregister call fails.
-    let (.., authz_instance, _) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance, _) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await
@@ -844,7 +845,7 @@ mod test {
                 boot_disk: None,
                 start: false,
                 auto_restart_policy: Default::default(),
-                anti_affinity_groups: None,
+                anti_affinity_groups: Vec::new(),
             },
         )
         .await

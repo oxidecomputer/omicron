@@ -19,6 +19,8 @@ use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use nexus_db_lookup::LookupPath;
+use nexus_db_lookup::lookup;
 use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
@@ -33,8 +35,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
-use nexus_db_queries::db::lookup;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -273,7 +273,7 @@ async fn normalize_ssh_keys(
         .authn
         .actor_required()
         .internal_context("loading current user's ssh keys for new Instance")?;
-    let (.., authz_user) = LookupPath::new(opctx, &datastore)
+    let (.., authz_user) = LookupPath::new(opctx, datastore)
         .silo_user_id(actor.actor_id())
         .lookup_for(authz::Action::ListChildren)
         .await?;
@@ -478,15 +478,11 @@ impl super::Nexus {
         )
         .await?;
 
-        let groups = match params.anti_affinity_groups.as_ref() {
-            Some(groups) => groups,
-            None => &Vec::new(),
-        };
         let anti_affinity_groups = normalize_anti_affinity_groups(
             &self.db_datastore,
             opctx,
             &authz_project,
-            groups,
+            &params.anti_affinity_groups,
         )
         .await?;
 
@@ -503,7 +499,7 @@ impl super::Nexus {
             project_id: authz_project.id(),
             create_params: params::InstanceCreate {
                 ssh_public_keys: ssh_keys,
-                anti_affinity_groups: Some(anti_affinity_groups),
+                anti_affinity_groups,
                 ..params.clone()
             },
             boundary_switches: self
@@ -2494,7 +2490,7 @@ mod tests {
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
-            anti_affinity_groups: None,
+            anti_affinity_groups: Vec::new(),
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());

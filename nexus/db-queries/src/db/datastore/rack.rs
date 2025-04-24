@@ -10,31 +10,31 @@ use super::dns::DnsVersionUpdateBuilder;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::MaybeRetryable::*;
-use crate::db::error::public_error_from_diesel;
-use crate::db::error::retryable;
 use crate::db::identity::Asset;
-use crate::db::lookup::LookupPath;
 use crate::db::model::CrucibleDataset;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::Rack;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
-use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
 use ipnetwork::IpNetwork;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::MaybeRetryable::*;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_errors::retryable;
 use nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET;
+use nexus_db_lookup::DbConnection;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
@@ -1019,7 +1019,7 @@ mod test {
     };
     use nexus_types::deployment::{
         BlueprintZoneDisposition, BlueprintZoneImageSource,
-        OmicronZoneExternalSnatIp,
+        OmicronZoneExternalSnatIp, OximeterReadMode,
     };
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::external_api::views::SledState;
@@ -1063,6 +1063,8 @@ mod test {
                     external_dns_version: *Generation::new(),
                     cockroachdb_fingerprint: String::new(),
                     clickhouse_cluster_config: None,
+                    oximeter_read_version: *Generation::new(),
+                    oximeter_read_mode: OximeterReadMode::SingleNode,
                     time_created: Utc::now(),
                     creator: "test suite".to_string(),
                     comment: "test suite".to_string(),
@@ -1175,7 +1177,7 @@ mod test {
             .expect("Failed to list Silos");
         // It should *not* show up in the list because it's not discoverable.
         assert_eq!(silos.len(), 0);
-        let (authz_silo, db_silo) = LookupPath::new(&opctx, &datastore)
+        let (authz_silo, db_silo) = LookupPath::new(&opctx, datastore)
             .silo_name(&nexus_db_model::Name(
                 rack_init.recovery_silo.identity.name.clone(),
             ))
@@ -1549,6 +1551,8 @@ mod test {
             external_dns_version: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: *Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -1807,6 +1811,8 @@ mod test {
             external_dns_version: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: *Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -2014,6 +2020,8 @@ mod test {
             external_dns_version: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: *Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -2151,6 +2159,8 @@ mod test {
             external_dns_version: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: *Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -2405,7 +2415,7 @@ mod test {
             }
 
             // Decommission the sled.
-            let (authz_sled,) = LookupPath::new(&opctx, &datastore)
+            let (authz_sled,) = LookupPath::new(&opctx, datastore)
                 .sled_id(sled.id())
                 .lookup_for(authz::Action::Modify)
                 .await

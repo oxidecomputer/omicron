@@ -45,6 +45,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::ser::SerializeSeq;
 use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -53,7 +54,6 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactHashId;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 
@@ -87,6 +87,8 @@ pub use planning_input::CockroachDbClusterVersion;
 pub use planning_input::CockroachDbPreserveDowngrade;
 pub use planning_input::CockroachDbSettings;
 pub use planning_input::DiskFilter;
+pub use planning_input::OximeterReadMode;
+pub use planning_input::OximeterReadPolicy;
 pub use planning_input::PlanningInput;
 pub use planning_input::PlanningInputBuildError;
 pub use planning_input::PlanningInputBuilder;
@@ -108,6 +110,8 @@ use blueprint_display::{
     BpTable, BpTableData, BpTableRow, KvListWithHeading, constants::*,
 };
 use id_map::{IdMap, IdMappable};
+use serde::de::SeqAccess;
+use serde::de::Visitor;
 use std::str::FromStr;
 
 /// Describes a complete set of software and configuration for the system
@@ -187,6 +191,12 @@ pub struct Blueprint {
     // structure to change any time soon.
     #[daft(leaf)]
     pub clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
+
+    /// Oximeter read policy version when this blueprint was created
+    pub oximeter_read_version: Generation,
+
+    /// Whether oximeter should read from a single node or a cluster
+    pub oximeter_read_mode: OximeterReadMode,
 
     /// when this blueprint was generated (for debugging)
     #[daft(ignore)]
@@ -444,6 +454,19 @@ impl BlueprintDisplay<'_> {
         )
     }
 
+    fn make_oximeter_table(&self) -> KvListWithHeading {
+        KvListWithHeading::new_unchanged(
+            OXIMETER_HEADING,
+            vec![
+                (GENERATION, self.blueprint.oximeter_read_version.to_string()),
+                (
+                    OXIMETER_READ_FROM,
+                    self.blueprint.oximeter_read_mode.to_string(),
+                ),
+            ],
+        )
+    }
+
     fn make_metadata_table(&self) -> KvListWithHeading {
         let comment = if self.blueprint.comment.is_empty() {
             NONE_PARENS.to_string()
@@ -507,6 +530,9 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // Handled by `make_clickhouse_cluster_config_tables()`, called
             // below.
             clickhouse_cluster_config: _,
+            // Handled by `make_oximeter_table`, called below.
+            oximeter_read_version: _,
+            oximeter_read_mode: _,
             // These five fields are handled by `make_metadata_table()`, called
             // below.
             internal_dns_version: _,
@@ -578,6 +604,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
         }
 
         writeln!(f, "{}", self.make_cockroachdb_table())?;
+        writeln!(f, "{}", self.make_oximeter_table())?;
         writeln!(f, "{}", self.make_metadata_table())?;
 
         writeln!(
@@ -597,14 +624,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
                         .map(|pu| {
                             BpTableRow::from_strings(
                                 BpDiffState::Unchanged,
-                                vec![
-                                    pu.sp_type.to_string(),
-                                    pu.slot_id.to_string(),
-                                    pu.baseboard_id.part_number.clone(),
-                                    pu.baseboard_id.serial_number.clone(),
-                                    pu.artifact_hash_id.kind.to_string(),
-                                    pu.artifact_hash_id.hash.to_string(),
-                                ],
+                                pu.to_bp_table_values(),
                             )
                         })
                         .collect()
@@ -1043,9 +1063,7 @@ impl fmt::Display for BlueprintZoneImageVersion {
     }
 }
 
-#[derive(
-    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
-)]
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Diffable)]
 pub struct PendingMgsUpdates {
     // The IdMap key is the baseboard_id.  Only one outstanding MGS-managed
     // update is allowed for a given baseboard.
@@ -1107,6 +1125,54 @@ impl<'a> IntoIterator for &'a PendingMgsUpdates {
     }
 }
 
+// `PendingMgsUpdates` is serialized as a sequence of `PendingMgsUpdate` objects
+// rather than a map.  (A map would not directly work because the keys here are
+// themselves objects, but JSON requires that they be strings.)
+impl Serialize for PendingMgsUpdates {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.len()))?;
+        for item in self {
+            seq.serialize_element(item)?;
+        }
+        seq.end()
+    }
+}
+
+// See the note on the `Serialize` impl above.
+impl<'de> Deserialize<'de> for PendingMgsUpdates {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct MyVisitor;
+
+        impl<'de> Visitor<'de> for MyVisitor {
+            type Value = PendingMgsUpdates;
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a sequence of objects")
+            }
+            fn visit_seq<A>(
+                self,
+                mut seq: A,
+            ) -> Result<PendingMgsUpdates, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut map = PendingMgsUpdates::new();
+                while let Some(u) = seq.next_element()? {
+                    map.insert(u);
+                }
+                Ok(map)
+            }
+        }
+
+        deserializer.deserialize_seq(MyVisitor)
+    }
+}
+
 #[derive(
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
@@ -1126,7 +1192,7 @@ pub struct PendingMgsUpdate {
 
     /// which artifact to apply to this device
     /// (implies which component is being updated)
-    pub artifact_hash_id: ArtifactHashId,
+    pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
 }
 
@@ -1142,12 +1208,8 @@ impl slog::KV for PendingMgsUpdate {
         serializer.emit_u32(Key::from("sp_slot"), self.slot_id)?;
         slog::KV::serialize(&self.details, record, serializer)?;
         serializer.emit_str(
-            Key::from("artifact_kind"),
-            &self.artifact_hash_id.kind.as_str(),
-        )?;
-        serializer.emit_str(
             Key::from("artifact_hash"),
-            &self.artifact_hash_id.hash.to_string(),
+            &self.artifact_hash.to_string(),
         )
     }
 }
@@ -1156,6 +1218,20 @@ impl IdMappable for PendingMgsUpdate {
     type Id = Arc<BaseboardId>;
     fn id(&self) -> Self::Id {
         self.baseboard_id.clone()
+    }
+}
+
+impl PendingMgsUpdate {
+    fn to_bp_table_values(&self) -> Vec<String> {
+        vec![
+            self.sp_type.to_string(),
+            self.slot_id.to_string(),
+            self.baseboard_id.part_number.clone(),
+            self.baseboard_id.serial_number.clone(),
+            self.artifact_hash.to_string(),
+            self.artifact_version.to_string(),
+            format!("{:?}", self.details),
+        ]
     }
 }
 
@@ -1595,4 +1671,52 @@ pub struct UnstableReconfiguratorState {
     pub external_dns: BTreeMap<Generation, DnsConfigParams>,
     pub silo_names: Vec<omicron_common::api::external::Name>,
     pub external_dns_zone_names: Vec<String>,
+}
+
+#[cfg(test)]
+mod test {
+    use super::ExpectedVersion;
+    use super::PendingMgsUpdate;
+    use super::PendingMgsUpdateDetails;
+    use super::PendingMgsUpdates;
+    use crate::inventory::BaseboardId;
+    use gateway_client::types::SpType;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_serialize_pending_mgs_updates() {
+        // Trivial case: empty map
+        let empty = PendingMgsUpdates::new();
+        let empty_serialized = serde_json::to_string(&empty).unwrap();
+        assert_eq!(empty_serialized, "[]");
+        let empty_deserialized: PendingMgsUpdates =
+            serde_json::from_str(&empty_serialized).unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(empty, empty_deserialized);
+
+        // Non-trivial case: contains an element.
+        let mut pending_mgs_updates = PendingMgsUpdates::new();
+        let update = PendingMgsUpdate {
+            baseboard_id: Arc::new(BaseboardId {
+                part_number: String::from("913-0000019"),
+                serial_number: String::from("BRM27230037"),
+            }),
+            sp_type: SpType::Sled,
+            slot_id: 15,
+            details: PendingMgsUpdateDetails::Sp {
+                expected_active_version: "1.0.36".parse().unwrap(),
+                expected_inactive_version: ExpectedVersion::Version(
+                    "1.0.36".parse().unwrap(),
+                ),
+            },
+            artifact_hash: "47266ede81e13f5f1e36623ea8dd963842606b783397e4809a9a5f0bda0f8170".parse().unwrap(),
+            artifact_version: "1.0.34".parse().unwrap(),
+        };
+        pending_mgs_updates.insert(update);
+        let serialized = serde_json::to_string(&pending_mgs_updates).unwrap();
+        let deserialized: PendingMgsUpdates =
+            serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, pending_mgs_updates);
+        assert!(!deserialized.is_empty());
+    }
 }

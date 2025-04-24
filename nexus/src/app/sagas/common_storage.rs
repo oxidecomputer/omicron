@@ -10,10 +10,10 @@ use crate::Nexus;
 use crucible_pantry_client::types::Error as CruciblePantryClientError;
 use crucible_pantry_client::types::VolumeConstructionRequest;
 use internal_dns_types::names::ServiceName;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
@@ -77,7 +77,7 @@ pub(crate) async fn call_pantry_attach_for_disk(
     disk_id: Uuid,
     pantry_address: SocketAddrV6,
 ) -> Result<(), ActionError> {
-    let (.., disk) = LookupPath::new(opctx, &nexus.datastore())
+    let (.., disk) = LookupPath::new(opctx, nexus.datastore())
         .disk_id(disk_id)
         .fetch_for(authz::Action::Modify)
         .await
