@@ -12117,6 +12117,7 @@ dependencies = [
  "omicron-workspace-hack",
  "reqwest",
  "tokio",
+ "zip 2.6.1",
 ]
 
 [[package]]

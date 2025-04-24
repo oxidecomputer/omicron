@@ -28,22 +28,24 @@ use crate::utf8_stream_to_string;
 /// An I/O source which can read to a buffer
 ///
 /// This describes access to individual files within the bundle.
-pub trait FileAccessor: AsyncRead {}
-impl<T: AsyncRead + ?Sized> FileAccessor for T {}
+pub trait FileAccessor: AsyncRead + Unpin {}
+impl<T: AsyncRead + Unpin + ?Sized> FileAccessor for T {}
+
+pub type BoxedFileAccessor<'a> = Box<dyn FileAccessor + 'a>;
 
 /// Describes how the support bundle's data and metadata are accessed.
 #[async_trait]
 pub trait SupportBundleAccessor {
-    type FileAccessor<'a>: FileAccessor
-    where
-        Self: 'a;
-
     /// Access the index of a support bundle
     async fn get_index(&self) -> Result<SupportBundleIndex>;
 
     /// Access a file within the support bundle
-    async fn get_file(&self, path: &Utf8Path)
-    -> Result<Self::FileAccessor<'_>>;
+    async fn get_file<'a>(
+        &mut self,
+        path: &Utf8Path,
+    ) -> Result<BoxedFileAccessor<'a>>
+    where
+        Self: 'a;
 }
 
 pub struct StreamedFile<'a> {
@@ -150,11 +152,6 @@ impl<'a> InternalApiAccess<'a> {
 // Access for: The nexus internal API
 #[async_trait]
 impl<'c> SupportBundleAccessor for InternalApiAccess<'c> {
-    type FileAccessor<'a>
-        = StreamedFile<'a>
-    where
-        Self: 'a;
-
     async fn get_index(&self) -> Result<SupportBundleIndex> {
         let stream = self
             .client
@@ -169,34 +166,75 @@ impl<'c> SupportBundleAccessor for InternalApiAccess<'c> {
         Ok(SupportBundleIndex::new(&s))
     }
 
-    async fn get_file(
-        &self,
+    async fn get_file<'a>(
+        &mut self,
         path: &Utf8Path,
-    ) -> Result<Self::FileAccessor<'_>> {
+    ) -> Result<BoxedFileAccessor<'a>>
+    where
+        'c: 'a,
+    {
         let mut file =
             StreamedFile::new(self.client, self.id, path.to_path_buf());
         file.start_stream()
             .await
             .with_context(|| "failed to start stream in get_file")?;
-        Ok(file)
+        Ok(Box::new(file))
     }
 }
 
-// TODO: Probably want to impl this on a new struct that contains a "ZipReader"
+pub struct LocalFileAccess {
+    archive: zip::read::ZipArchive<std::fs::File>,
+}
+
+impl LocalFileAccess {
+    pub fn new(path: &Utf8Path) -> Result<Self> {
+        let file = std::fs::File::open(path)?;
+        Ok(Self { archive: zip::read::ZipArchive::new(file)? })
+    }
+}
 
 // Access for: Local zip files
 #[async_trait]
-impl SupportBundleAccessor for tokio::fs::File {
-    type FileAccessor<'a> = tokio::fs::File;
-
+impl SupportBundleAccessor for LocalFileAccess {
     async fn get_index(&self) -> Result<SupportBundleIndex> {
-        todo!();
+        let names: Vec<&str> = self.archive.file_names().collect();
+        let all_names = names.join("\n");
+        Ok(SupportBundleIndex::new(&all_names))
     }
 
-    async fn get_file(
-        &self,
-        _path: &Utf8Path,
-    ) -> Result<Self::FileAccessor<'_>> {
-        todo!();
+    async fn get_file<'a>(
+        &mut self,
+        path: &Utf8Path,
+    ) -> Result<BoxedFileAccessor<'a>> {
+        let mut file = self.archive.by_name(path.as_str())?;
+        let mut buf = Vec::new();
+        std::io::copy(&mut file, &mut buf)?;
+
+        Ok(Box::new(AsyncZipFile { buf, copied: 0 }))
+    }
+}
+
+// We're currently buffering the entire file into memory, mostly because dealing with the lifetime
+// of ZipArchive and ZipFile objects is so difficult.
+pub struct AsyncZipFile {
+    buf: Vec<u8>,
+    copied: usize,
+}
+
+impl AsyncRead for AsyncZipFile {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let to_copy =
+            std::cmp::min(self.buf.len() - self.copied, buf.remaining());
+        if to_copy == 0 {
+            return Poll::Ready(Ok(()));
+        }
+        let src = &self.buf[self.copied..];
+        buf.put_slice(&src[..to_copy]);
+        self.copied += to_copy;
+        Poll::Ready(Ok(()))
     }
 }

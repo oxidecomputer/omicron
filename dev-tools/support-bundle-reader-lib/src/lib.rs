@@ -15,26 +15,31 @@ use tokio::io::AsyncReadExt;
 mod bundle_accessor;
 mod index;
 
+pub use bundle_accessor::AsyncZipFile;
+pub use bundle_accessor::BoxedFileAccessor;
 pub use bundle_accessor::FileAccessor;
 pub use bundle_accessor::InternalApiAccess;
+pub use bundle_accessor::LocalFileAccess;
 pub use bundle_accessor::SupportBundleAccessor;
 pub use index::SupportBundleIndex;
 
 enum FileState<'a> {
-    Open { access: Option<Pin<Box<dyn FileAccessor + 'a>>>, buffered: String },
+    Open { access: Option<Pin<BoxedFileAccessor<'a>>>, buffered: String },
     Closed,
 }
 
 /// A dashboard for inspecting a support bundle contents
-pub struct SupportBundleDashboard<'a, S> {
-    access: &'a S,
+pub struct SupportBundleDashboard<'a> {
+    access: Box<dyn SupportBundleAccessor + 'a>,
     index: SupportBundleIndex,
     selected: usize,
     file: FileState<'a>,
 }
 
-impl<'a, S: SupportBundleAccessor> SupportBundleDashboard<'a, S> {
-    pub async fn new(access: &'a S) -> Result<Self> {
+impl<'a> SupportBundleDashboard<'a> {
+    pub async fn new(
+        access: Box<dyn SupportBundleAccessor + 'a>,
+    ) -> Result<Self> {
         let index = access.get_index().await?;
         if index.files().is_empty() {
             bail!("No files found in support bundle");

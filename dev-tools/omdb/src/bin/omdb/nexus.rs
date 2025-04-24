@@ -544,10 +544,19 @@ struct SupportBundleFileArgs {
 
 #[derive(Debug, Args)]
 struct SupportBundleInspectArgs {
-    /// A specific bundle to inspect. If none is supplied, the latest active
-    /// bundle is used.
+    /// A specific bundle to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "path".
+    #[arg(short, long)]
     id: Option<SupportBundleUuid>,
-    // TODO: Option to view a local file?
+
+    /// A local bundle file to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "id".
+    #[arg(short, long)]
+    path: Option<Utf8PathBuf>,
 }
 
 impl NexusArgs {
@@ -3613,12 +3622,11 @@ enum InspectRunStep {
     PipeFile,
 }
 
-/// Runs `omdb nexus support-bundles inspect`
-async fn cmd_nexus_support_bundles_inspect(
+async fn access_bundle_from_id(
     client: &nexus_client::Client,
-    args: &SupportBundleInspectArgs,
-) -> Result<(), anyhow::Error> {
-    let id = match args.id {
+    id: Option<SupportBundleUuid>,
+) -> Result<support_bundle_reader_lib::InternalApiAccess<'_>, anyhow::Error> {
+    let id = match id {
         Some(id) => id,
         None => {
             // Grab the latest if one isn't supplied
@@ -3647,10 +3655,29 @@ async fn cmd_nexus_support_bundles_inspect(
             SupportBundleUuid::from_untyped_uuid(sb.id.into_untyped_uuid())
         }
     };
+    Ok(support_bundle_reader_lib::InternalApiAccess::new(client, id))
+}
 
-    let accessor =
-        support_bundle_reader_lib::InternalApiAccess::new(client, id);
-    let mut dashboard = SupportBundleDashboard::new(&accessor).await?;
+/// Runs `omdb nexus support-bundles inspect`
+async fn cmd_nexus_support_bundles_inspect(
+    client: &nexus_client::Client,
+    args: &SupportBundleInspectArgs,
+) -> Result<(), anyhow::Error> {
+    let accessor: Box<dyn SupportBundleAccessor> = match (args.id, &args.path) {
+        (None, Some(path)) => {
+            Box::new(
+                support_bundle_reader_lib::LocalFileAccess::new(path)?
+            )
+        }
+        (maybe_id, None) => {
+            Box::new(access_bundle_from_id(client, maybe_id).await?)
+        }
+        (Some(_), Some(_)) => {
+            bail!("Cannot specify both UUID and path");
+        }
+    };
+
+    let mut dashboard = SupportBundleDashboard::new(accessor).await?;
 
     enable_raw_mode()?;
 
@@ -3704,13 +3731,9 @@ async fn cmd_nexus_support_bundles_inspect(
     Ok(())
 }
 
-async fn run_support_bundle_dashboard<
-    'a,
-    B: Backend,
-    S: SupportBundleAccessor,
->(
+async fn run_support_bundle_dashboard<B: Backend>(
     terminal: &mut Terminal<B>,
-    dashboard: &mut SupportBundleDashboard<'a, S>,
+    dashboard: &mut SupportBundleDashboard<'_>,
     force_update: bool,
 ) -> anyhow::Result<InspectRunStep> {
     let update = if crossterm::event::poll(Duration::from_secs(0))? {
@@ -3750,9 +3773,7 @@ async fn run_support_bundle_dashboard<
     Ok(InspectRunStep::Continue)
 }
 
-fn create_file_list<'a, S: SupportBundleAccessor>(
-    dashboard: &'a SupportBundleDashboard<'_, S>,
-) -> List<'a> {
+fn create_file_list<'a>(dashboard: &'a SupportBundleDashboard<'_>) -> List<'a> {
     let files = dashboard.index().files().iter().map(|f| f.as_str());
     List::new(files)
         .highlight_symbol("> ")
@@ -3760,8 +3781,8 @@ fn create_file_list<'a, S: SupportBundleAccessor>(
         .block(Block::new().title("Files").borders(Borders::ALL))
 }
 
-fn create_file_contents<'a, S: SupportBundleAccessor>(
-    dashboard: &'a SupportBundleDashboard<'_, S>,
+fn create_file_contents<'a>(
+    dashboard: &'a SupportBundleDashboard<'_>,
 ) -> Option<Paragraph<'a>> {
     dashboard.buffered_file_contents().map(|c| {
         Paragraph::new(c).wrap(Wrap { trim: false }).block(
@@ -3786,10 +3807,7 @@ const FILE_VIEWER_USAGE: [&'static str; 4] = [
     "Press 'q' to quit",
 ];
 
-fn draw<'a, S: SupportBundleAccessor>(
-    f: &mut Frame,
-    dashboard: &mut SupportBundleDashboard<'a, S>,
-) {
+fn draw(f: &mut Frame, dashboard: &mut SupportBundleDashboard<'_>) {
     let file_list = create_file_list(dashboard);
     let file_contents = create_file_contents(dashboard);
 

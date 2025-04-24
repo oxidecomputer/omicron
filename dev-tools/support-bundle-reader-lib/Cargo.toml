@@ -18,3 +18,4 @@ omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
 reqwest.workspace = true
 tokio.workspace = true
+zip.workspace = true
