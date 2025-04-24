@@ -91,16 +91,6 @@ pub trait SledAgentApi {
         params: Path<ZonePathParam>,
     ) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError>;
 
-    /// Ask the sled agent to create a zone bundle.
-    #[endpoint {
-        method = POST,
-        path = "/zones/bundles/{zone_name}",
-    }]
-    async fn zone_bundle_create(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<ZonePathParam>,
-    ) -> Result<HttpResponseCreated<ZoneBundleMetadata>, HttpError>;
-
     /// Fetch the binary content of a single zone bundle.
     #[endpoint {
         method = GET,

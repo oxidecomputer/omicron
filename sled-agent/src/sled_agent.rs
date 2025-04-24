@@ -30,8 +30,6 @@ use dropshot::HttpError;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use illumos_utils::opte::PortManager;
-use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use illumos_utils::zone::ZONE_PREFIX;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
@@ -778,28 +776,6 @@ impl SledAgent {
         name: &str,
     ) -> Result<Vec<ZoneBundleMetadata>, Error> {
         self.inner.zone_bundler.list_for_zone(name).await.map_err(Error::from)
-    }
-
-    /// Create a zone bundle for the provided zone.
-    pub async fn create_zone_bundle(
-        &self,
-        name: &str,
-    ) -> Result<ZoneBundleMetadata, Error> {
-        if name.starts_with(PROPOLIS_ZONE_PREFIX) {
-            self.inner
-                .instances
-                .create_zone_bundle(name)
-                .await
-                .map_err(Error::from)
-        } else if name.starts_with(ZONE_PREFIX) {
-            self.inner
-                .services
-                .create_zone_bundle(name)
-                .await
-                .map_err(Error::from)
-        } else {
-            Err(Error::from(BundleError::NoSuchZone { name: name.to_string() }))
-        }
     }
 
     /// Fetch the paths to all zone bundles with the provided name and ID.

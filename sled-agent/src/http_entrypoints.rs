@@ -92,19 +92,6 @@ impl SledAgentApi for SledAgentImpl {
             .map_err(HttpError::from)
     }
 
-    async fn zone_bundle_create(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<ZonePathParam>,
-    ) -> Result<HttpResponseCreated<ZoneBundleMetadata>, HttpError> {
-        let params = params.into_inner();
-        let zone_name = params.zone_name;
-        let sa = rqctx.context();
-        sa.create_zone_bundle(&zone_name)
-            .await
-            .map(HttpResponseCreated)
-            .map_err(HttpError::from)
-    }
-
     async fn zone_bundle_get(
         rqctx: RequestContext<Self::Context>,
         params: Path<ZoneBundleId>,

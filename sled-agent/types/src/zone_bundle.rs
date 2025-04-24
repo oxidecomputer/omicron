@@ -66,8 +66,6 @@ pub enum ZoneBundleCause {
     UnexpectedZone,
     /// An instance zone was terminated.
     TerminatedInstance,
-    /// Generated in response to an explicit request to the sled agent.
-    ExplicitRequest,
 }
 
 /// Metadata about a zone bundle.
@@ -403,10 +401,8 @@ mod tests {
     #[test]
     fn test_sort_zone_bundle_cause() {
         use ZoneBundleCause::*;
-        let mut original =
-            [ExplicitRequest, Other, TerminatedInstance, UnexpectedZone];
-        let expected =
-            [Other, UnexpectedZone, TerminatedInstance, ExplicitRequest];
+        let mut original = [Other, TerminatedInstance, UnexpectedZone];
+        let expected = [Other, UnexpectedZone, TerminatedInstance];
         original.sort();
         assert_eq!(original, expected);
     }
@@ -496,16 +492,16 @@ mod tests {
         }
 
         let info = [
+            make_info(2020, 1, 2, ZoneBundleCause::UnexpectedZone),
             make_info(2020, 1, 2, ZoneBundleCause::TerminatedInstance),
-            make_info(2020, 1, 2, ZoneBundleCause::ExplicitRequest),
+            make_info(2020, 1, 1, ZoneBundleCause::UnexpectedZone),
             make_info(2020, 1, 1, ZoneBundleCause::TerminatedInstance),
-            make_info(2020, 1, 1, ZoneBundleCause::ExplicitRequest),
         ];
 
         let mut sorted = info.clone();
         sorted.sort_by(|lhs, rhs| time_first.compare_bundles(lhs, rhs));
         // Low -> high priority
-        // [old/terminated, old/explicit, new/terminated, new/explicit]
+        // [old/unexpected, old/terminated, new/unexpected, new/terminated]
         let expected = [
             info[2].clone(),
             info[3].clone(),
@@ -520,7 +516,7 @@ mod tests {
         let mut sorted = info.clone();
         sorted.sort_by(|lhs, rhs| cause_first.compare_bundles(lhs, rhs));
         // Low -> high priority
-        // [old/terminated, new/terminated, old/explicit, new/explicit]
+        // [old/unexpected, new/unexpected, old/terminated, new/terminated]
         let expected = [
             info[2].clone(),
             info[0].clone(),
