@@ -260,6 +260,9 @@ pub struct Caboose {
     pub git_commit: String,
     pub name: String,
     pub version: String,
+    // It is very unlikely that the sign hash will not be present.
+    // As far as we know, it will only be locally built BART signed images.
+    // We will be handling those edge cases by setting this field as an option.
     pub sign: Option<String>,
 }
 

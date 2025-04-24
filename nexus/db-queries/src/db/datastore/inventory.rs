@@ -12,7 +12,7 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
 use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
-use diesel::BoolExpressionMethods;
+use diesel::{BoolExpressionMethods, PgExpressionMethods};
 use diesel::ExpressionMethods;
 use diesel::IntoSql;
 use diesel::JoinOnDsl;
@@ -554,7 +554,7 @@ impl DataStore {
             // - `hw_baseboard` with an "id" primary key and lookup columns
             //   "part_number" and "serial_number"
             // - `sw_caboose` with an "id" primary key and lookup columns
-            //   "board", "git_commit", "name", and "version"
+            //   "board", "git_commit", "name", "version, and sign"
             // - `inv_caboose` with foreign keys "hw_baseboard_id",
             //   "sw_caboose_id", and various other columns
             //
@@ -597,7 +597,7 @@ impl DataStore {
             //         AND sw_caboose.git_commit = ...
             //         AND sw_caboose.name = ...
             //         AND sw_caboose.version = ...
-            //         AND sw_caboose.sign = ...;
+            //         AND sw_caboose.sign IS NOT DISTINCT FROM ...;
             //
             // Again, the whole point is to avoid back-and-forth between the
             // client and the database.  Those back-and-forth interactions can
@@ -644,7 +644,7 @@ impl DataStore {
                                     .and(dsl_sw_caboose::version.eq(
                                         found_caboose.caboose.version.clone(),
                                     ))
-                                    .and(dsl_sw_caboose::sign.eq(
+                                    .and(dsl_sw_caboose::sign.is_not_distinct_from(
                                         found_caboose.caboose.sign.clone(),
                                     )),
                             ),
