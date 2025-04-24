@@ -33,7 +33,6 @@ use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::pool::DbConnection;
 use crate::db::update_and_check::UpdateAndCheck;
-use crate::db::update_and_check::UpdateStatus;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -355,23 +354,20 @@ impl DataStore {
             endpoint: params.endpoint.as_ref().map(ToString::to_string),
             time_modified: chrono::Utc::now(),
         };
-        let result = diesel::update(rx_dsl::webhook_receiver)
+        let updated = diesel::update(rx_dsl::webhook_receiver)
             .filter(rx_dsl::id.eq(rx_id))
             .filter(rx_dsl::time_deleted.is_null())
             .set(update)
-            .check_if_exists::<WebhookReceiver>(rx_id)
+            .check_if_exists(rx_id)
             .execute_and_check(&conn)
             .await
-            .map_err(TransactionError::Database)?;
-
-        match result.status {
-            UpdateStatus::Updated => Ok(result.found),
-            UpdateStatus::NotUpdatedButExists => Err(Error::conflict(
-                "cannot update receiver configuration, as it has changed \
-                concurrently",
-            )
-            .into()),
-        }
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_rx),
+                )
+            })?;
+        Ok(updated.found)
     }
 
     pub async fn webhook_rx_list(
@@ -446,7 +442,7 @@ impl DataStore {
                 .rx_list_reprocessable_globs_on_conn(
                     Some(authz_rx.id()),
                     &p.current_pagparams(),
-                    &*conn,
+                    &conn,
                 )
                 .await?;
             paginator = p.found_batch(&batch, &|glob| {
@@ -650,7 +646,7 @@ impl DataStore {
                     )
                     .insert_and_get_result_async(conn)
                     .await
-                    .map_err(async_insert_error_to_txn(rx_id.into()))?;
+                    .map_err(async_insert_error_to_txn(rx_id))?;
                 slog::debug!(
                     &opctx.log,
                     "added glob subscription to webhook receiver";
@@ -675,7 +671,7 @@ impl DataStore {
                     )
                     .insert_and_get_result_async(conn)
                     .await
-                    .map_err(async_insert_error_to_txn(rx_id.into()))?;
+                    .map_err(async_insert_error_to_txn(rx_id))?;
                 slog::debug!(
                     &opctx.log,
                     "added exact subscription to webhook receiver";
@@ -700,7 +696,7 @@ impl DataStore {
             .on_conflict_do_nothing()
         ).insert_and_get_results_async(conn)
             .await
-            .map_err(async_insert_error_to_txn(rx_id.into()))
+            .map_err(async_insert_error_to_txn(rx_id))
     }
 
     async fn glob_generate_exact_subs(
@@ -822,7 +818,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (Uuid, String)>,
     ) -> ListResultVec<WebhookRxEventGlob> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.rx_list_reprocessable_globs_on_conn(None, pagparams, &*conn).await
+        self.rx_list_reprocessable_globs_on_conn(None, pagparams, &conn).await
     }
 
     async fn rx_list_reprocessable_globs_on_conn(
@@ -921,7 +917,7 @@ impl DataStore {
         glob: &WebhookRxEventGlob,
     ) -> Result<WebhookGlobStatus, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.glob_reprocess_on_conn(opctx, glob, &*conn).await
+        self.glob_reprocess_on_conn(opctx, glob, &conn).await
     }
 
     async fn glob_reprocess_on_conn(
