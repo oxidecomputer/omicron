@@ -141,13 +141,13 @@ pub fn create_pkgs(
             .take(shares_per_sled);
         let share = iter.next().unwrap();
         let plaintext_len = (shares_per_sled - 1) * SHARE_SIZE;
-        let plaintext: SecretBox<Vec<u8>> = SecretBox::new(iter.fold(
-            Box::new(Vec::with_capacity(plaintext_len)),
-            |mut acc, x| {
+        let plaintext: SecretBox<[u8]> = SecretBox::new(
+            iter.fold(Vec::with_capacity(plaintext_len), |mut acc, x| {
                 acc.extend_from_slice(x);
                 acc
-            },
-        ));
+            })
+            .into_boxed_slice(),
+        );
         let nonce = new_nonce(i);
         let encrypted_shares = cipher
             .encrypt((&nonce).into(), plaintext.expose_secret().as_ref())
