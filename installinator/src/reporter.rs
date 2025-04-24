@@ -48,8 +48,8 @@ use crate::{
 ///    to that peer's backend.
 ///
 /// Production users use [`HttpProgressBackend`] to send progress updates via
-/// HTTP. For testing, there's also a mock backend in [`crate::mock_peers`]
-/// which can inject faults.
+/// HTTP. For testing, there's also a mock backend in `crate::mock_peers` which
+/// can inject faults.
 #[derive(Debug)]
 pub(crate) struct ProgressReporter {
     log: slog::Logger,
