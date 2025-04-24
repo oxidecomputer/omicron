@@ -24,7 +24,7 @@ use update_engine::StepResult;
 
 use crate::{
     artifact::ArtifactIdOpts,
-    peers::{DiscoveryMechanism, FetchedArtifact, Peers},
+    peers::{DiscoveryMechanism, FetchedArtifact, HttpPeers, Peers},
     reporter::ProgressReporter,
     write::{ArtifactWriter, WriteDestination},
 };
@@ -92,7 +92,10 @@ impl DebugDiscoverOpts {
     async fn exec(self, log: &slog::Logger) -> Result<()> {
         let peers = Peers::new(
             log,
-            self.opts.mechanism.discover_peers(log).await?,
+            Box::new(HttpPeers::new(
+                log,
+                self.opts.mechanism.discover_peers(log).await?,
+            )),
             Duration::from_secs(10),
         );
         println!("discovered peers: {}", peers.display());
@@ -190,7 +193,10 @@ impl InstallOpts {
                 async move {
                     Ok(Peers::new(
                         &log,
-                        discovery.discover_peers(&log).await?,
+                        Box::new(HttpPeers::new(
+                            &log,
+                            discovery.discover_peers(&log).await?,
+                        )),
                         Duration::from_secs(10),
                     ))
                 }
@@ -234,7 +240,7 @@ impl InstallOpts {
                     )
                     .await?;
 
-                    let address = host_phase_2_artifact.addr;
+                    let address = host_phase_2_artifact.peer.address();
 
                     StepSuccess::new(host_phase_2_artifact)
                         .with_metadata(
@@ -273,7 +279,7 @@ impl InstallOpts {
                     )
                     .await?;
 
-                    let address = control_plane_artifact.addr;
+                    let address = control_plane_artifact.peer.address();
 
                     StepSuccess::new(control_plane_artifact)
                         .with_metadata(
@@ -495,7 +501,10 @@ async fn fetch_artifact(
         || async {
             Ok(Peers::new(
                 &log,
-                discovery.discover_peers(&log).await?,
+                Box::new(HttpPeers::new(
+                    &log,
+                    discovery.discover_peers(&log).await?,
+                )),
                 Duration::from_secs(10),
             ))
         },
@@ -508,7 +517,7 @@ async fn fetch_artifact(
         log,
         "fetched {} bytes from {}",
         artifact.artifact.num_bytes(),
-        artifact.addr,
+        artifact.peer,
     );
 
     Ok(artifact)

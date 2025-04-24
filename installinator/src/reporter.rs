@@ -10,6 +10,7 @@ use display_error_chain::DisplayErrorChain;
 use futures::{Future, StreamExt};
 use installinator_common::{Event, EventBuffer};
 use tokio::{sync::mpsc, task::JoinHandle, time};
+use update_engine::AsError;
 use uuid::Uuid;
 
 use crate::{errors::DiscoverPeersError, peers::Peers};
@@ -97,15 +98,23 @@ where
         tokio::spawn(async move {
             let peers = match (discover_fn)().await {
                 Ok(peers) => peers,
-                Err(error) => {
-                    // Ignore DiscoverPeersError::Abort here because the
-                    // installinator must keep retrying.
+                Err(DiscoverPeersError::Retry(error)) => {
                     slog::warn!(
                         log,
                         "failed to discover peers: {}",
-                        DisplayErrorChain::new(&error),
+                        DisplayErrorChain::new(error.as_error()),
                     );
                     return None;
+                }
+                #[cfg(test)]
+                Err(DiscoverPeersError::Abort(_)) => {
+                    // This is not possible, since test implementations don't
+                    // currently generate Abort errors during reporter
+                    // discovery.
+                    unreachable!(
+                        "DiscoverPeersError::Abort is not generated for the \
+                         reporter by test implementations"
+                    )
                 }
             };
 
