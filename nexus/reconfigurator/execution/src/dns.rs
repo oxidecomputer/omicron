@@ -6,6 +6,7 @@
 
 use crate::Sled;
 use internal_dns_types::diff::DnsDiff;
+use internal_dns_types::names::ZONE_APEX_NAME;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -1058,7 +1059,7 @@ mod test {
         );
         let apex_records = external_dns_zone
             .records
-            .get("@")
+            .get(ZONE_APEX_NAME)
             .expect("records are present for zone apex");
         assert_eq!(apex_records.len(), external_dns_count);
         for i in 1..=external_dns_count {

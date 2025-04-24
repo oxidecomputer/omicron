@@ -96,8 +96,9 @@ use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
 use hickory_proto::rr::LowerName;
 use hickory_resolver::Name;
-use internal_dns_types::config::{
-    DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord,
+use internal_dns_types::{
+    config::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord},
+    names::ZONE_APEX_NAME,
 };
 use omicron_common::api::external::Generation;
 use serde::{Deserialize, Serialize};
@@ -363,7 +364,7 @@ impl Store {
         // because they are included when reporting this server's records (such
         // as via `dns_config_get()`).
         for zone in config.zones.iter() {
-            if let Some(apex_records) = zone.records.get("@") {
+            if let Some(apex_records) = zone.records.get(ZONE_APEX_NAME) {
                 if apex_records
                     .iter()
                     .any(|record| matches!(record, DnsRecord::Soa(_)))
@@ -439,7 +440,7 @@ impl Store {
                 .with_context(|| format!("creating tree {:?}", &tree_name))?;
 
             for (name, records) in &zone_config.records {
-                if name == "@" {
+                if name == ZONE_APEX_NAME {
                     // If any records are present on the zone itself, we'll
                     // handle those separately.
                     continue;
@@ -472,7 +473,7 @@ impl Store {
             // records for the zone apex.  We should have NS records here, and
             // we'll want to add an SOA record here as well.
             let records: Option<Vec<DnsRecord>> =
-                zone_config.records.get("@").map(|x| x.clone());
+                zone_config.records.get(ZONE_APEX_NAME).map(|x| x.clone());
             if let Some(mut apex_records) = records {
                 // Sort for a stable ordering of NS records.  We'll pick the first
                 // NS record we see for the SOA record we'll create later.  It
@@ -521,9 +522,14 @@ impl Store {
                             zone_name,
                         )
                     })?;
-                tree.insert("@", records_json).with_context(|| {
-                    format!("inserting records for zone {:?} apex", zone_name,)
-                })?;
+                tree.insert(ZONE_APEX_NAME, records_json).with_context(
+                    || {
+                        format!(
+                            "inserting records for zone {:?} apex",
+                            zone_name,
+                        )
+                    },
+                )?;
             }
 
             // Flush this tree.  We do this here to make sure the tree is fully
@@ -743,7 +749,7 @@ impl Store {
             let key = name_only.to_string().to_lowercase();
             assert!(!key.ends_with('.'));
 
-            if key.is_empty() { "@".to_string() } else { key }
+            if key.is_empty() { ZONE_APEX_NAME.to_string() } else { key }
         };
 
         debug!(&self.log, "query key"; "key" => &key);
@@ -887,6 +893,7 @@ mod test {
     use internal_dns_types::config::DnsConfigParams;
     use internal_dns_types::config::DnsConfigZone;
     use internal_dns_types::config::DnsRecord;
+    use internal_dns_types::names::ZONE_APEX_NAME;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
@@ -1399,7 +1406,7 @@ mod test {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([
                     ("ns1".to_string(), vec![ns1_a.clone()]),
-                    ("@".to_string(), vec![ns1_ns.clone()]),
+                    (ZONE_APEX_NAME.to_string(), vec![ns1_ns.clone()]),
                 ]),
             }],
         };
@@ -1475,7 +1482,10 @@ mod test {
                 records: HashMap::from([
                     ("ns2".to_string(), vec![ns2_a.clone()]),
                     ("ns1".to_string(), vec![ns1_a.clone()]),
-                    ("@".to_string(), vec![ns1_ns.clone(), ns2_ns.clone()]),
+                    (
+                        ZONE_APEX_NAME.to_string(),
+                        vec![ns1_ns.clone(), ns2_ns.clone()],
+                    ),
                 ]),
             }],
         };

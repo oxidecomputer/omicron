@@ -23,8 +23,9 @@ use hickory_resolver::{
         xfer::DnsResponse,
     },
 };
-use internal_dns_types::config::{
-    DnsConfigParams, DnsConfigZone, DnsRecord, Soa, Srv,
+use internal_dns_types::{
+    config::{DnsConfigParams, DnsConfigZone, DnsRecord, Soa, Srv},
+    names::ZONE_APEX_NAME,
 };
 use omicron_test_utils::dev::test_setup_log;
 use slog::o;
@@ -402,7 +403,7 @@ pub async fn soa() -> Result<(), anyhow::Error> {
     });
 
     records.insert("ns1".to_string(), vec![ns1_aaaa.clone()]);
-    records.insert("@".to_string(), vec![ns1.clone(), soa.clone()]);
+    records.insert(ZONE_APEX_NAME.to_string(), vec![ns1.clone(), soa.clone()]);
 
     let err = dns_records_create(client, TEST_ZONE, records).await.unwrap_err();
     let err_text = err.root_cause().to_string();
@@ -449,7 +450,7 @@ pub async fn soa() -> Result<(), anyhow::Error> {
     // able to tell it about a zone.
     let mut records = HashMap::new();
     records.insert("ns1".to_string(), vec![ns1_aaaa.clone()]);
-    records.insert("@".to_string(), vec![ns1.clone()]);
+    records.insert(ZONE_APEX_NAME.to_string(), vec![ns1.clone()]);
 
     dns_records_create(client, TEST_ZONE, records).await?;
 

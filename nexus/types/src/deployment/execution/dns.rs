@@ -7,7 +7,10 @@ use std::{
     net::IpAddr,
 };
 
-use internal_dns_types::{config::DnsConfigBuilder, names::ServiceName};
+use internal_dns_types::{
+    config::DnsConfigBuilder,
+    names::{ServiceName, ZONE_APEX_NAME},
+};
 use omicron_common::api::external::Name;
 use omicron_uuid_kinds::SledUuid;
 
@@ -214,7 +217,8 @@ pub fn blueprint_external_dns_config<'a>(
         .collect::<HashMap<String, Vec<DnsRecord>>>();
 
     if !zone_records.is_empty() {
-        let prior_records = records.insert("@".to_string(), zone_records);
+        let prior_records =
+            records.insert(ZONE_APEX_NAME.to_string(), zone_records);
         assert!(prior_records.is_none());
     }
 
