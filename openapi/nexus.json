@@ -12103,7 +12103,7 @@
           {
             "in": "query",
             "name": "delivered",
-            "description": "If true, include  deliveries which have succeeded.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.",
+            "description": "If true, include deliveries which have succeeded.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.",
             "schema": {
               "nullable": true,
               "type": "boolean"
@@ -12121,7 +12121,7 @@
           {
             "in": "query",
             "name": "pending",
-            "description": "If true, include  deliveries which are currently in progress.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.\n\nA delivery is considered \"pending\" if it has not yet been sent at all, or if a delivery attempt has failed but the delivery has retries remaining.",
+            "description": "If true, include deliveries which are currently in progress.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.\n\nA delivery is considered \"pending\" if it has not yet been sent at all, or if a delivery attempt has failed but the delivery has retries remaining.",
             "schema": {
               "nullable": true,
               "type": "boolean"
@@ -12580,7 +12580,9 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
+      }
+    },
+    "/v1/webhooks/receivers/{receiver}/subscriptions/{subscription}": {
       "delete": {
         "tags": [
           "system/webhooks"
@@ -12596,18 +12598,17 @@
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
+          },
+          {
+            "in": "path",
+            "name": "subscription",
+            "description": "The event class subscription itself.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/WebhookSubscription"
+            }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WebhookSubscription"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "204": {
             "description": "successful deletion"
