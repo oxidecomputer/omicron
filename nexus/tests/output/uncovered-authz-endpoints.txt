@@ -1,6 +1,5 @@
 API endpoints with no coverage in authz tests:
 probe_delete                             (delete "/experimental/v1/probes/{probe}")
-webhook_receiver_subscription_delete     (delete "/v1/webhooks/receivers/{receiver}/subscriptions")
 probe_list                               (get    "/experimental/v1/probes")
 probe_view                               (get    "/experimental/v1/probes/{probe}")
 support_bundle_download                  (get    "/experimental/v1/system/support-bundles/{support_bundle}/download")
