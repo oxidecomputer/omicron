@@ -376,7 +376,7 @@ impl LogsHandle {
         // remaining log file's components. This eliminates the need for us to
         // track what zone we are operating on and if there's a delegated
         // dataset. Note that we use `iter::Peekable` here so that we don't
-        // extend past a compoent we care about.
+        // extend past a component we care about.
         //
         // Example:
         // log file: "/pool/ext/110131b4-7bde-4866-b37e-bd9e3ebcbdf3/crypt/debug/oxz_switch/oxide-dendrite:default.log.1745518771"
