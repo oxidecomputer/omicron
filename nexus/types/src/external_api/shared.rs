@@ -399,6 +399,11 @@ impl WebhookSubscription {
             ))
         }
     }
+
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl TryFrom<String> for WebhookSubscription {
@@ -425,7 +430,7 @@ impl From<WebhookSubscription> for String {
 
 impl AsRef<str> for WebhookSubscription {
     fn as_ref(&self) -> &str {
-        &self.0
+        self.as_str()
     }
 }
 
@@ -455,6 +460,12 @@ impl JsonSchema for WebhookSubscription {
             ..Default::default()
         }
         .into()
+    }
+}
+
+impl std::fmt::Display for WebhookSubscription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 

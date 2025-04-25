@@ -219,20 +219,20 @@ async fn subscription_add(
 async fn subscription_delete(
     ctx: &ControlPlaneTestContext,
     webhook_id: WebhookReceiverUuid,
-    params: &shared::WebhookSubscription,
+    subscription: &shared::WebhookSubscription,
 ) {
-    let path = format!("{RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions");
-    let req =
-        RequestBuilder::new(&ctx.external_client, http::Method::DELETE, &path)
-            .body(Some(params))
-            .expect_status(Some(http::StatusCode::NO_CONTENT));
-    NexusRequest::new(req)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap_or_else(|e| {
-            panic!("failed to make \"DELETE\" request to {path}: {e}")
-        });
+    resource_helpers::object_delete(
+        &ctx.external_client,
+        &subscription_delete_url(webhook_id, subscription),
+    )
+    .await
+}
+
+fn subscription_delete_url(
+    webhook_id: WebhookReceiverUuid,
+    subscription: &shared::WebhookSubscription,
+) -> String {
+    format!("{RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions/{subscription}")
 }
 
 async fn webhook_send_probe(

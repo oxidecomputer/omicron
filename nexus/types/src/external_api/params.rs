@@ -2452,6 +2452,15 @@ pub struct WebhookEventSelector {
     pub event_id: Uuid,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSubscriptionSelector {
+    /// The webhook receiver that the subscription is attached to.
+    #[serde(flatten)]
+    pub receiver: WebhookReceiverSelector,
+    /// The event class subscription itself.
+    pub subscription: shared::WebhookSubscription,
+}
+
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookDeliveryStateFilter {
     /// If true, include deliveries which are currently in progress.

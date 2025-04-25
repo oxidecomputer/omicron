@@ -1194,12 +1194,31 @@ pub static DEMO_WEBHOOK_RECEIVER_UPDATE: LazyLock<
 pub static DEMO_WEBHOOK_RECEIVER_URL: LazyLock<String> = LazyLock::new(|| {
     format!("{WEBHOOK_RECEIVERS_URL}/{}", *DEMO_WEBHOOK_RECEIVER_NAME)
 });
-// pub static DEMO_WEBHOOK_SUBSCRIPTIONS_URL: LazyLock<String> =
-//     LazyLock::new(|| format!("{}/subscriptions", *DEMO_WEBHOOK_RECEIVER_URL));
+
 pub static DEMO_WEBHOOK_RECEIVER_PROBE_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!("{WEBHOOK_RECEIVERS_URL}/{}/probe", *DEMO_WEBHOOK_RECEIVER_NAME)
     });
+
+pub static DEMO_WEBHOOK_SUBSCRIPTIONS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "{WEBHOOK_RECEIVERS_URL}/{}/subscriptions",
+            *DEMO_WEBHOOK_RECEIVER_NAME
+        )
+    });
+
+pub static DEMO_WEBHOOK_SUBSCRIPTION: LazyLock<shared::WebhookSubscription> =
+    LazyLock::new(|| "test.foo.**".parse().unwrap());
+
+pub static DEMO_WEBHOOK_SUBSCRIPTION_DELETE_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "{WEBHOOK_RECEIVERS_URL}/{}/subscriptions/{}",
+            *DEMO_WEBHOOK_RECEIVER_NAME, *DEMO_WEBHOOK_SUBSCRIPTION,
+        )
+    });
+
 pub static DEMO_WEBHOOK_DELIVERY_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/webhooks/deliveries?receiver={}", *DEMO_WEBHOOK_RECEIVER_NAME)
 });
@@ -2851,22 +2870,20 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                     ),
                 ],
             },
-            // TODO(eliza): deletes will 404 if there's no body, which
-            // `VerifyEndpoint` doesn't currently support.
-            /*
             VerifyEndpoint {
                 url: &DEMO_WEBHOOK_SUBSCRIPTIONS_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![
-                    AllowedMethod::Post(
-                        serde_json::to_value(&*DEMO_WEBHOOK_SUBSCRIPTION)
-                            .unwrap(),
-                    ),
-                    AllowedMethod::Delete,
-                ],
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_WEBHOOK_SUBSCRIPTION).unwrap(),
+                )],
             },
-            */
+            VerifyEndpoint {
+                url: &DEMO_WEBHOOK_SUBSCRIPTION_DELETE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Delete],
+            },
             VerifyEndpoint {
                 url: &DEMO_WEBHOOK_SECRET_DELETE_URL,
                 visibility: Visibility::Protected,

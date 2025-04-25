@@ -3633,13 +3633,12 @@ pub trait NexusExternalApi {
     /// Remove webhook receiver subscription
     #[endpoint {
         method = DELETE,
-        path = "/v1/webhooks/receivers/{receiver}/subscriptions",
+        path = "/v1/webhooks/receivers/{receiver}/subscriptions/{subscription}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_receiver_subscription_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-        typed_body: TypedBody<shared::WebhookSubscription>,
+        path_params: Path<params::WebhookSubscriptionSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Send liveness probe to webhook receiver
