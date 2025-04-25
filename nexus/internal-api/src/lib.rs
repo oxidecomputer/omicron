@@ -27,7 +27,10 @@ use nexus_types::{
             InstanceMigrateRequest, OximeterInfo, RackInitializationRequest,
             SledAgentInfo, SwitchPutRequest, SwitchPutResponse,
         },
-        views::{BackgroundTask, DemoSaga, Ipv4NatEntryView, Saga},
+        views::{
+            BackgroundTask, DemoSaga, Ipv4NatEntryView, MgsUpdateDriverStatus,
+            Saga,
+        },
     },
 };
 use omicron_common::api::{
@@ -277,7 +280,7 @@ pub trait NexusInternalApi {
         downstairs_client_stopped: TypedBody<DownstairsClientStopped>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    // Sagas
+    // Debug interfaces for sagas
 
     /// List sagas
     #[endpoint {
@@ -324,7 +327,7 @@ pub trait NexusInternalApi {
         path_params: Path<DemoSagaPathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    // Background Tasks
+    // Debug interfaces for background Tasks
 
     /// List background tasks
     ///
@@ -360,6 +363,17 @@ pub trait NexusInternalApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<BackgroundTasksActivateRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // Debug interfaces for ongoing MGS updates
+
+    /// Fetch information about ongoing MGS updates
+    #[endpoint {
+        method = GET,
+        path = "/mgs-updates",
+    }]
+    async fn mgs_updates(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MgsUpdateDriverStatus>, HttpError>;
 
     // NAT RPW internal APIs
 

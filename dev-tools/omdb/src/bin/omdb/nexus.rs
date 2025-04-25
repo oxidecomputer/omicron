@@ -143,15 +143,18 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
-    /// Interact with clickhouse policy
+    /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
-    /// Interact with oximeter read policy
+    /// print information about pending MGS updates
+    MgsUpdates,
+    /// interact with oximeter read policy
     OximeterReadPolicy(OximeterReadPolicyArgs),
     /// view sagas, create and complete demo sagas
     Sagas(SagasArgs),
     /// interact with sleds
     Sleds(SledsArgs),
     /// interact with support bundles
+    #[command(visible_alias = "sb")]
     SupportBundles(SupportBundleArgs),
 }
 
@@ -540,6 +543,10 @@ struct SupportBundleIndexArgs {
 struct SupportBundleFileArgs {
     id: SupportBundleUuid,
     path: Utf8PathBuf,
+    /// Optional output path where the file should be written,
+    /// instead of stdout.
+    #[arg(short, long)]
+    output: Option<Utf8PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -686,6 +693,8 @@ impl NexusArgs {
                     cmd_nexus_clickhouse_policy_set(&client, args, token).await
                 }
             },
+
+            NexusCommands::MgsUpdates => cmd_nexus_mgs_updates(&client).await,
 
             NexusCommands::OximeterReadPolicy(OximeterReadPolicyArgs {
                 command,
@@ -2963,6 +2972,18 @@ async fn cmd_nexus_clickhouse_policy_get(
     Ok(())
 }
 
+async fn cmd_nexus_mgs_updates(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let response = client
+        .mgs_updates()
+        .await
+        .context("fetching update status")?
+        .into_inner();
+    println!("{}", response.detailed_display());
+    Ok(())
+}
+
 async fn cmd_nexus_clickhouse_policy_set(
     client: &nexus_client::Client,
     args: &ClickhousePolicySetArgs,
@@ -3547,25 +3568,15 @@ async fn cmd_nexus_support_bundles_delete(
     Ok(())
 }
 
-async fn print_utf8_stream_to_stdout(
+async fn write_stream_to_sink(
     mut stream: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>>
     + std::marker::Unpin,
+    mut sink: impl std::io::Write,
 ) -> Result<(), anyhow::Error> {
-    let mut leftover = None;
     while let Some(data) = stream.next().await {
         match data {
             Err(err) => return Err(anyhow::anyhow!(err)),
-            Ok(data) => {
-                let combined = match leftover.take() {
-                    Some(old) => [old, data].concat(),
-                    None => data.to_vec(),
-                };
-
-                match std::str::from_utf8(&combined) {
-                    Ok(data) => print!("{data}"),
-                    Err(_) => leftover = Some(combined.into()),
-                }
-            }
+            Ok(data) => sink.write_all(&data)?,
         }
     }
     Ok(())
@@ -3583,9 +3594,10 @@ async fn cmd_nexus_support_bundles_get_index(
             format!("downloading support bundle index {}", args.id)
         })?
         .into_inner_stream();
-    print_utf8_stream_to_stdout(stream).await.with_context(|| {
-        format!("streaming support bundle index {}", args.id)
-    })?;
+
+    write_stream_to_sink(stream, std::io::stdout()).await.with_context(
+        || format!("streaming support bundle index {}", args.id),
+    )?;
     Ok(())
 }
 
@@ -3607,7 +3619,13 @@ async fn cmd_nexus_support_bundles_get_file(
             )
         })?
         .into_inner_stream();
-    print_utf8_stream_to_stdout(stream).await.with_context(|| {
+
+    let sink: Box<dyn std::io::Write> = match &args.output {
+        Some(path) => Box::new(std::fs::File::create(path)?),
+        None => Box::new(std::io::stdout()),
+    };
+
+    write_stream_to_sink(stream, sink).await.with_context(|| {
         format!("streaming support bundle file {}: {}", args.id, args.path)
     })?;
     Ok(())

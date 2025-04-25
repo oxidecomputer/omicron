@@ -8,3 +8,4 @@ mod component_list;
 mod config;
 mod location_discovery;
 mod serial_console;
+mod task_dump;

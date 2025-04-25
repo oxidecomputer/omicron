@@ -2197,38 +2197,38 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     let region_snapshots: Vec<(DatasetUuid, Uuid, Uuid, SocketAddr)> = vec![
         // first snapshot-create
         (
-            zpool0.datasets[0].id,
+            zpool0.crucible_dataset().id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             "[fd00:1122:3344:101::7]:19016".parse().unwrap(),
         ),
         (
-            zpool1.datasets[0].id,
+            zpool1.crucible_dataset().id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             "[fd00:1122:3344:102::7]:19016".parse().unwrap(),
         ),
         (
-            zpool2.datasets[0].id,
+            zpool2.crucible_dataset().id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             "[fd00:1122:3344:103::7]:19016".parse().unwrap(),
         ),
         // second snapshot-create
         (
-            zpool0.datasets[0].id,
+            zpool0.crucible_dataset().id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             "[fd00:1122:3344:101::7]:19016".parse().unwrap(),
         ),
         (
-            zpool3.datasets[0].id,
+            zpool3.crucible_dataset().id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             "[fd00:1122:3344:104::7]:19016".parse().unwrap(),
         ),
         (
-            zpool2.datasets[0].id,
+            zpool2.crucible_dataset().id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             "[fd00:1122:3344:103::7]:19017".parse().unwrap(),
@@ -2509,7 +2509,7 @@ async fn test_disk_create_saga_unwinds_correctly(
 
     // Set the third agent to fail creating the region
     let zpool = &disk_test.zpools().nth(2).expect("Expected three zpools");
-    let dataset = &zpool.datasets[0];
+    let dataset = zpool.crucible_dataset();
     cptestctx
         .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
@@ -2576,7 +2576,7 @@ async fn test_snapshot_create_saga_unwinds_correctly(
     // Set the third agent to fail creating the region for the snapshot
     let zpool =
         &disk_test.zpools().nth(2).expect("Expected at least three zpools");
-    let dataset = &zpool.datasets[0];
+    let dataset = zpool.crucible_dataset();
     cptestctx
         .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
@@ -5412,25 +5412,25 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     // (dataset_id, region_id, snapshot_id, snapshot_addr)
     let region_snapshots: Vec<(DatasetUuid, Uuid, Uuid, SocketAddr)> = vec![
         (
-            zpool0.datasets[0].id,
+            zpool0.crucible_dataset().id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             "[fd00:1122:3344:101::7]:19016".parse().unwrap(),
         ),
         (
-            zpool1.datasets[0].id,
+            zpool1.crucible_dataset().id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             "[fd00:1122:3344:102::7]:19016".parse().unwrap(),
         ),
         (
-            zpool2.datasets[0].id,
+            zpool2.crucible_dataset().id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             "[fd00:1122:3344:103::7]:19016".parse().unwrap(),
         ),
         (
-            zpool3.datasets[0].id,
+            zpool3.crucible_dataset().id,
             Uuid::new_v4(),
             Uuid::new_v4(),
             "[fd00:1122:3344:104::7]:19016".parse().unwrap(),

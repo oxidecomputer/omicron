@@ -179,7 +179,6 @@ mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external;
-    use omicron_common::disk::DatasetKind;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::VolumeUuid;
@@ -216,11 +215,8 @@ mod test {
             BTreeMap::default();
 
         for zpool in disk_test.zpools() {
-            for dataset in &zpool.datasets {
-                if matches!(dataset.kind, DatasetKind::Crucible) {
-                    dataset_to_zpool.insert(zpool.id, dataset.id);
-                }
-            }
+            let dataset = zpool.crucible_dataset();
+            dataset_to_zpool.insert(zpool.id, dataset.id);
         }
 
         let mut task =

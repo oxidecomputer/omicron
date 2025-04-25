@@ -1028,15 +1028,11 @@ pub(crate) mod test {
         let mut count = 0;
 
         for zpool in test.zpools() {
-            for dataset in &zpool.datasets {
-                if datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap()
-                    != 0
-                {
-                    count += 1;
-                }
+            let dataset = zpool.crucible_dataset();
+            if datastore.regions_total_reserved_size(dataset.id).await.unwrap()
+                != 0
+            {
+                count += 1;
             }
         }
 
