@@ -24,7 +24,7 @@ pub use bundle_accessor::SupportBundleAccessor;
 pub use index::SupportBundleIndex;
 
 enum FileState<'a> {
-    Open { access: Option<Pin<BoxedFileAccessor<'a>>>, buffered: String },
+    Open { access: Option<Pin<BoxedFileAccessor<'a>>>, buffered: Vec<u8> },
     Closed,
 }
 
@@ -86,8 +86,7 @@ impl<'a> SupportBundleDashboard<'a> {
     async fn open_file(&mut self) -> Result<()> {
         let path = &self.index.files()[self.selected];
         if path.as_str().ends_with("/") {
-            self.file =
-                FileState::Open { access: None, buffered: String::new() };
+            self.file = FileState::Open { access: None, buffered: Vec::new() };
             return Ok(());
         }
 
@@ -98,7 +97,7 @@ impl<'a> SupportBundleDashboard<'a> {
             .with_context(|| format!("Failed to access {path}"))?;
         self.file = FileState::Open {
             access: Some(Box::pin(file)),
-            buffered: String::new(),
+            buffered: Vec::new(),
         };
         Ok(())
     }
@@ -115,11 +114,11 @@ impl<'a> SupportBundleDashboard<'a> {
         let Some(file) = access.as_mut() else {
             return Ok(());
         };
-        file.read_to_string(buffered).await?;
+        file.read_to_end(buffered).await?;
         Ok(())
     }
 
-    pub fn buffered_file_contents(&self) -> Option<&str> {
+    pub fn buffered_file_contents(&self) -> Option<&[u8]> {
         let FileState::Open { ref buffered, .. } = &self.file else {
             return None;
         };

@@ -3736,7 +3736,7 @@ async fn cmd_nexus_support_bundles_inspect(
         Ok(true) => {
             if let Some(contents) = dashboard.buffered_file_contents() {
                 std::io::copy(
-                    &mut std::io::Cursor::new(contents.as_bytes()),
+                    &mut std::io::Cursor::new(contents),
                     &mut std::io::stdout(),
                 )?;
             }
@@ -3801,6 +3801,8 @@ fn create_file_contents<'a>(
     dashboard: &'a SupportBundleDashboard<'_>,
 ) -> Option<Paragraph<'a>> {
     dashboard.buffered_file_contents().map(|c| {
+        let c = std::str::from_utf8(c).unwrap_or("Not valid UTF-8");
+
         Paragraph::new(c).wrap(Wrap { trim: false }).block(
             Block::new()
                 .title(dashboard.selected_file_name().as_str())
