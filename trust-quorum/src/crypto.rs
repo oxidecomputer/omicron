@@ -9,7 +9,7 @@ use derive_more::From;
 use gfss::shamir::{self, CombineError, SecretShares, Share, SplitError};
 use rand::RngCore;
 use rand::rngs::OsRng;
-use secrecy::{DebugSecret, ExposeSecret, Secret};
+use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use slog_error_chain::SlogInlineError;
@@ -79,15 +79,11 @@ pub struct Sha3_256Digest(pub [u8; 32]);
 
 /// A boxed array containing rack secret data
 ///
-/// This should never be used directly, and always wrapped in a `Secret` upon
-/// construction. We sparate the two types, because a `Secret` must contain
-/// `Zeroizable` data, and a `Box<[u8; 32]>` is not zeroizable on its own.
-///
 /// We explicitly choose to box the data so that it is not littered around
 /// memory via moves, and also so that it is not accidentally growable like
 /// a `Vec`.
-#[derive(Zeroize, ZeroizeOnDrop)]
-struct RackSecretData(Box<[u8; 32]>);
+#[derive(Debug)]
+struct RackSecretData(SecretBox<[u8; 32]>);
 
 /// A rack secret reconstructed via share combination.
 ///
@@ -95,21 +91,14 @@ struct RackSecretData(Box<[u8; 32]>);
 /// differentiate between whether or not this secret was recreated via Ed25519
 /// +Ristretto key shares (LRTQ) or GF256 Key Shares (current protocol).
 /// Therefore, this rack secret should never be split back into key shares.
+#[derive(Debug)]
 pub struct ReconstructedRackSecret {
-    secret: Secret<RackSecretData>,
-}
-
-impl DebugSecret for ReconstructedRackSecret {}
-
-impl Debug for ReconstructedRackSecret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Self::debug_secret(f)
-    }
+    secret: RackSecretData,
 }
 
 impl ExposeSecret<[u8; 32]> for ReconstructedRackSecret {
     fn expose_secret(&self) -> &[u8; 32] {
-        &self.secret.expose_secret().0
+        &self.secret.0.expose_secret()
     }
 }
 
@@ -117,18 +106,17 @@ impl ExposeSecret<[u8; 32]> for ReconstructedRackSecret {
 #[error("invalid rack secret size")]
 pub struct InvalidRackSecretSizeError;
 
-impl TryFrom<Secret<Box<[u8]>>> for ReconstructedRackSecret {
+impl TryFrom<SecretBox<[u8]>> for ReconstructedRackSecret {
     type Error = InvalidRackSecretSizeError;
-    fn try_from(value: Secret<Box<[u8]>>) -> Result<Self, Self::Error> {
-        // This is somewhat janky
-        //
-        // We explicitly clone the secret out, then put it in a boxed array.
-        // This should avoid an intermediate allocation that we'd have to zero.
-        let v: Vec<u8> = value.expose_secret().clone().into();
-        let data: Box<[u8; 32]> =
-            v.try_into().map_err(|_| InvalidRackSecretSizeError)?;
+    fn try_from(value: SecretBox<[u8]>) -> Result<Self, Self::Error> {
+        let data: Box<[u8; 32]> = Box::new(
+            value
+                .expose_secret()
+                .try_into()
+                .map_err(|_| InvalidRackSecretSizeError)?,
+        );
         Ok(ReconstructedRackSecret {
-            secret: Secret::new(RackSecretData(data)),
+            secret: RackSecretData(SecretBox::new(data)),
         })
     }
 }
@@ -137,7 +125,7 @@ impl From<LrtqRackSecret> for ReconstructedRackSecret {
     fn from(value: LrtqRackSecret) -> Self {
         let secret = value.expose_secret().as_bytes();
         ReconstructedRackSecret {
-            secret: Secret::new(RackSecretData(Box::new(*secret))),
+            secret: RackSecretData(SecretBox::new(Box::new(*secret))),
         }
     }
 }
@@ -155,13 +143,14 @@ pub enum RackSecretReconstructError {
 }
 
 /// A shared secret based on GF256
+#[derive(Debug)]
 pub struct RackSecret {
-    secret: Secret<RackSecretData>,
+    secret: RackSecretData,
 }
 
 impl ExposeSecret<[u8; 32]> for RackSecret {
     fn expose_secret(&self) -> &[u8; 32] {
-        &self.secret.expose_secret().0
+        &self.secret.0.expose_secret()
     }
 }
 
@@ -179,10 +168,10 @@ impl RackSecret {
         while data.ct_eq(&[0u8; 32]).into() {
             rng.fill_bytes(&mut *data);
         }
-        RackSecret { secret: Secret::new(RackSecretData(data)) }
+        RackSecret { secret: RackSecretData(SecretBox::new(data)) }
     }
 
-    /// Split a secert into `total_shares` number of shares, where combining
+    /// Split a secret into `total_shares` number of shares, where combining
     /// `threshold` of the shares can be used to recover the secret.
     pub fn split(
         &self,
@@ -202,14 +191,6 @@ impl RackSecret {
     ) -> Result<ReconstructedRackSecret, RackSecretReconstructError> {
         let secret = shamir::compute_secret(shares)?.try_into()?;
         Ok(secret)
-    }
-}
-
-impl DebugSecret for RackSecret {}
-
-impl Debug for RackSecret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Self::debug_secret(f)
     }
 }
 
