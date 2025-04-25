@@ -53,8 +53,9 @@ impl DiscoveryMechanism {
     ) -> Result<Vec<PeerAddress>, DiscoverPeersError> {
         let peers = match self {
             Self::Bootstrap => {
-                // XXX: consider adding aborts to this after a certain number of tries.
-
+                // Note: we do not abort this process and instead keep retrying
+                // forever. This attempts to ensure that we'll eventually find
+                // peers.
                 let ddm_admin_client =
                     DdmAdminClient::localhost(log).map_err(|err| {
                         DiscoverPeersError::Retry(anyhow::anyhow!(err))
@@ -164,6 +165,7 @@ impl FetchedArtifact {
                     tokio::time::sleep(RETRY_DELAY).await;
                     continue;
                 }
+                #[cfg(test)]
                 Err(DiscoverPeersError::Abort(error)) => {
                     return Err(error);
                 }
