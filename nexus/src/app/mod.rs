@@ -127,7 +127,13 @@ pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
 pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
 
 pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
-pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 256 * (1 << 30); // 256 GiB
+// This is larger than total memory (let alone reservoir) on some sleds. Theoretically, we should
+// fail to create an instance like this if we can't find a sled with enough available reservoir to
+// run it. If the instance were created in the control plane and got to Propolis, it should fail to
+// start.
+//
+// This is just for testing at the momet!
+pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 1024 * (1 << 30); // 1024 GiB
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
