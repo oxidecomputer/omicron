@@ -129,6 +129,7 @@ enum NexusCommands {
     /// interact with sleds
     Sleds(SledsArgs),
     /// interact with support bundles
+    #[command(visible_alias = "sb")]
     SupportBundles(SupportBundleArgs),
 }
 
@@ -515,6 +516,10 @@ struct SupportBundleIndexArgs {
 struct SupportBundleFileArgs {
     id: SupportBundleUuid,
     path: Utf8PathBuf,
+    /// Optional output path where the file should be written,
+    /// instead of stdout.
+    #[arg(short, long)]
+    output: Option<Utf8PathBuf>,
 }
 
 impl NexusArgs {
@@ -3516,25 +3521,15 @@ async fn cmd_nexus_support_bundles_delete(
     Ok(())
 }
 
-async fn print_utf8_stream_to_stdout(
+async fn write_stream_to_sink(
     mut stream: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>>
     + std::marker::Unpin,
+    mut sink: impl std::io::Write,
 ) -> Result<(), anyhow::Error> {
-    let mut leftover = None;
     while let Some(data) = stream.next().await {
         match data {
             Err(err) => return Err(anyhow::anyhow!(err)),
-            Ok(data) => {
-                let combined = match leftover.take() {
-                    Some(old) => [old, data].concat(),
-                    None => data.to_vec(),
-                };
-
-                match std::str::from_utf8(&combined) {
-                    Ok(data) => print!("{data}"),
-                    Err(_) => leftover = Some(combined.into()),
-                }
-            }
+            Ok(data) => sink.write_all(&data)?,
         }
     }
     Ok(())
@@ -3552,9 +3547,10 @@ async fn cmd_nexus_support_bundles_get_index(
             format!("downloading support bundle index {}", args.id)
         })?
         .into_inner_stream();
-    print_utf8_stream_to_stdout(stream).await.with_context(|| {
-        format!("streaming support bundle index {}", args.id)
-    })?;
+
+    write_stream_to_sink(stream, std::io::stdout()).await.with_context(
+        || format!("streaming support bundle index {}", args.id),
+    )?;
     Ok(())
 }
 
@@ -3576,7 +3572,13 @@ async fn cmd_nexus_support_bundles_get_file(
             )
         })?
         .into_inner_stream();
-    print_utf8_stream_to_stdout(stream).await.with_context(|| {
+
+    let sink: Box<dyn std::io::Write> = match &args.output {
+        Some(path) => Box::new(std::fs::File::create(path)?),
+        None => Box::new(std::io::stdout()),
+    };
+
+    write_stream_to_sink(stream, sink).await.with_context(|| {
         format!("streaming support bundle file {}: {}", args.id, args.path)
     })?;
     Ok(())
