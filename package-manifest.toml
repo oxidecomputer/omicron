@@ -638,10 +638,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "976b95d4fdd2de890e1eb7737d186492550550b7"
+source.commit = "872aae7d76493f2a4f59711b24dde55523536b40"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "39e4a64dc782e841c26e4ea2a8a15c4b7e39805e92041873a672160c961b9f38"
+source.sha256 = "1b045d2d8868f4ff2f4d8b2d7b2832c90439048a7b7445cb683ce98dd6960e63"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "976b95d4fdd2de890e1eb7737d186492550550b7"
+source.commit = "872aae7d76493f2a4f59711b24dde55523536b40"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "0cca2dc4bd3cd40b69f61be223052a49e15cc1a389174cc6814eee70686f09ed"
+source.sha256 = "df6e08e78c2f593e52d5730d53442f4e179129e93bc3771fbc85c5643d9ad47f"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -669,7 +669,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "976b95d4fdd2de890e1eb7737d186492550550b7"
+source.commit = "872aae7d76493f2a4f59711b24dde55523536b40"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "b917e4952f459fe8aae00736cf10f28ab75a71eac6d7df8b1835da5ddae794ba"
