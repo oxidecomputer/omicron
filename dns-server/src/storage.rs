@@ -503,15 +503,9 @@ impl Store {
                     // would affect operations after 8,171 years.
                     let soa_serial = config.generation.as_u64() as u32;
                     apex_records.push(DnsRecord::Soa(
-                        internal_dns_types::config::Soa {
-                            mname: nsdname,
-                            rname: format!("admin.{}", zone_name),
-                            serial: soa_serial,
-                            refresh: 3600,
-                            retry: 600,
-                            expire: 18000,
-                            minimum: 150,
-                        },
+                        internal_dns_types::config::Soa::new(
+                            nsdname, soa_serial,
+                        ),
                     ));
                 }
 
@@ -1425,15 +1419,10 @@ mod test {
             Expect::Record(&DnsRecord::Ns("ns1.zone1.internal".to_string())),
         );
 
-        let zone_soa = DnsRecord::Soa(internal_dns_types::config::Soa {
-            mname: "ns1.zone1.internal".to_string(),
-            rname: "admin.zone1.internal".to_string(),
-            serial: update.generation.as_u64() as u32,
-            refresh: 3600,
-            retry: 600,
-            expire: 18000,
-            minimum: 150,
-        });
+        let zone_soa = DnsRecord::Soa(internal_dns_types::config::Soa::new(
+            "ns1.zone1.internal".to_string(),
+            update.generation.as_u64() as u32,
+        ));
 
         // The SOA record is created when the server is told it is serving
         // records for a zone.
@@ -1495,15 +1484,10 @@ mod test {
             .await
             .expect("can apply update");
 
-        let zone_soa = DnsRecord::Soa(internal_dns_types::config::Soa {
-            mname: "ns1.zone1.internal".to_string(),
-            rname: "admin.zone1.internal".to_string(),
-            serial: update3.generation.as_u64() as u32,
-            refresh: 3600,
-            retry: 600,
-            expire: 18000,
-            minimum: 150,
-        });
+        let zone_soa = DnsRecord::Soa(internal_dns_types::config::Soa::new(
+            "ns1.zone1.internal".to_string(),
+            update3.generation.as_u64() as u32,
+        ));
 
         // The SOA record is created when the server is told it is serving
         // records for a zone.

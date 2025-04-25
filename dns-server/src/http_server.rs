@@ -11,7 +11,7 @@ use dns_service_client::{
     ERROR_CODE_UPDATE_IN_PROGRESS,
 };
 use dropshot::RequestContext;
-use internal_dns_types::config::{DnsConfig, DnsConfigParams};
+use internal_dns_types::config::{v1, v2};
 
 pub struct Context {
     store: storage::Store,
@@ -33,9 +33,30 @@ enum DnsServerApiImpl {}
 impl DnsServerApi for DnsServerApiImpl {
     type Context = Context;
 
-    async fn dns_config_get(
+    async fn dns_config_get_v1(
         rqctx: RequestContext<Context>,
-    ) -> Result<dropshot::HttpResponseOk<DnsConfig>, dropshot::HttpError> {
+    ) -> Result<dropshot::HttpResponseOk<v1::DnsConfig>, dropshot::HttpError>
+    {
+        let apictx = rqctx.context();
+        let config = apictx
+            .store
+            .dns_config()
+            .await
+            .map_err(|e| {
+                dropshot::HttpError::for_internal_error(format!(
+                    "internal error: {:?}",
+                    e
+                ))
+            })?
+            .try_into()
+            .unwrap();
+        Ok(dropshot::HttpResponseOk(config))
+    }
+
+    async fn dns_config_get_v2(
+        rqctx: RequestContext<Context>,
+    ) -> Result<dropshot::HttpResponseOk<v2::DnsConfig>, dropshot::HttpError>
+    {
         let apictx = rqctx.context();
         let config = apictx.store.dns_config().await.map_err(|e| {
             dropshot::HttpError::for_internal_error(format!(
@@ -46,9 +67,25 @@ impl DnsServerApi for DnsServerApiImpl {
         Ok(dropshot::HttpResponseOk(config))
     }
 
-    async fn dns_config_put(
+    async fn dns_config_put_v1(
         rqctx: RequestContext<Context>,
-        rq: dropshot::TypedBody<DnsConfigParams>,
+        rq: dropshot::TypedBody<v1::DnsConfigParams>,
+    ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>
+    {
+        let apictx = rqctx.context();
+        apictx
+            .store
+            .dns_config_update(
+                &rq.into_inner().try_into().unwrap(),
+                &rqctx.request_id,
+            )
+            .await?;
+        Ok(dropshot::HttpResponseUpdatedNoContent())
+    }
+
+    async fn dns_config_put_v2(
+        rqctx: RequestContext<Context>,
+        rq: dropshot::TypedBody<v2::DnsConfigParams>,
     ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>
     {
         let apictx = rqctx.context();

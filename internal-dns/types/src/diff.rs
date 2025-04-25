@@ -6,9 +6,9 @@ use anyhow::ensure;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 
-use crate::config::DnsConfigZone;
-use crate::config::DnsRecord;
-use crate::config::Srv;
+use crate::config::v2::DnsConfigZone;
+use crate::config::v2::DnsRecord;
+use crate::config::v2::Srv;
 
 #[derive(Debug)]
 enum NameDiff<'a> {

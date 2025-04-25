@@ -682,7 +682,6 @@ external DNS:
 
 
 
-
 > # diff in the reverse direction.  Should show one removal.
 
 > blueprint-diff cca24b71-09b5-4042-9185-b33e9f2ebba0 ad97e762-7bf1-45a6-a98f-60afb7e491c0

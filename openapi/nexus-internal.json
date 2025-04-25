@@ -2006,7 +2006,7 @@
             "type": "string"
           },
           "external_dns_version": {
-            "description": "external DNS version when thi blueprint was created",
+            "description": "external DNS version when this blueprint was created",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
@@ -3733,6 +3733,7 @@
         ]
       },
       "DnsConfigZone": {
+        "description": "Configuration for a specific DNS zone, as opposed to illumos zones in which the services described by these records run.\n\nThe name `@` is special: it describes records that should be provided for queries about `zone_name`. This is used in favor of the empty string as `@` is the name used for this purpose in zone files for most DNS configurations. It also avoids potentially-confusing debug output from naively printing out records and their names - if you've seen an `@` record and tools are unclear about what that means, hopefully you've arrived here!",
         "type": "object",
         "properties": {
           "records": {
@@ -3803,6 +3804,42 @@
                 "type": "string",
                 "enum": [
                   "SRV"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "NS"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/Soa"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "SOA"
                 ]
               }
             },
@@ -6208,6 +6245,48 @@
         },
         "required": [
           "vmm_state"
+        ]
+      },
+      "Soa": {
+        "type": "object",
+        "properties": {
+          "expire": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "minimum": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "mname": {
+            "type": "string"
+          },
+          "refresh": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "retry": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "rname": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "expire",
+          "minimum",
+          "mname",
+          "refresh",
+          "retry",
+          "rname",
+          "serial"
         ]
       },
       "SourceNatConfig": {
