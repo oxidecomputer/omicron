@@ -1139,7 +1139,33 @@ pub struct TestDataset {
 pub struct TestZpool {
     pub id: ZpoolUuid,
     pub size: ByteCount,
-    pub datasets: Vec<TestDataset>,
+    datasets: Vec<TestDataset>,
+}
+
+impl TestZpool {
+    /// Returns the crucible dataset within a zpool.
+    ///
+    /// Panics if there are zero or more than one crucible datasets within the pool
+    pub fn crucible_dataset(&self) -> &TestDataset {
+        fn is_crucible(d: &&TestDataset) -> bool {
+            d.kind == DatasetKind::Crucible
+        }
+
+        assert_eq!(self.datasets.iter().filter(is_crucible).count(), 1);
+        self.datasets.iter().find(is_crucible).unwrap()
+    }
+
+    /// Returns the debug dataset within a zpool.
+    ///
+    /// Panics if there are zero or more than one debug datasets within the pool
+    pub fn debug_dataset(&self) -> &TestDataset {
+        fn is_debug(d: &&TestDataset) -> bool {
+            d.kind == DatasetKind::Debug
+        }
+
+        assert_eq!(self.datasets.iter().filter(is_debug).count(), 1);
+        self.datasets.iter().find(is_debug).unwrap()
+    }
 }
 
 enum WhichSledAgents {
