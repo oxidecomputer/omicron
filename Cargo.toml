@@ -484,7 +484,7 @@ itertools = "0.14.0"
 internet-checksum = "0.2"
 ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
-jiff = "0.2.6"
+jiff = "0.2.10"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
 libc = "0.2.170"
@@ -637,7 +637,7 @@ rustyline = "14.0.0"
 samael = { version = "0.0.18", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
-secrecy = "0.8.0"
+secrecy = "0.10.0"
 semver = { version = "1.0.25", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
