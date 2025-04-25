@@ -15,20 +15,17 @@ use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
-use futures::{Stream, StreamExt};
 use installinator_client::ClientError;
 use installinator_common::{
-    EventReport, InstallinatorProgressMetadata, StepContext, StepProgress,
+    InstallinatorProgressMetadata, StepContext, StepProgress,
 };
 use itertools::Itertools;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
-use reqwest::StatusCode;
 use sled_hardware_types::underlay::BootstrapInterface;
 use tokio::{sync::mpsc, time::Instant};
 use tufaceous_artifact::ArtifactHashId;
 use update_engine::events::ProgressUnits;
-use uuid::Uuid;
 
 use crate::{
     artifact::ArtifactClient,
@@ -139,7 +136,7 @@ impl FetchedArtifact {
     ) -> Result<Self>
     where
         F: FnMut() -> Fut,
-        Fut: Future<Output = Result<Peers, DiscoverPeersError>>,
+        Fut: Future<Output = Result<FetchArtifactBackend, DiscoverPeersError>>,
     {
         // How long to sleep between retries if we fail to find a peer or fail
         // to fetch an artifact from a found peer.
@@ -216,16 +213,16 @@ impl fmt::Debug for FetchedArtifact {
 }
 
 #[derive(Debug)]
-pub(crate) struct Peers {
+pub(crate) struct FetchArtifactBackend {
     log: slog::Logger,
-    imp: Box<dyn PeersImpl>,
+    imp: Box<dyn FetchArtifactImpl>,
     timeout: Duration,
 }
 
-impl Peers {
+impl FetchArtifactBackend {
     pub(crate) fn new(
         log: &slog::Logger,
-        imp: Box<dyn PeersImpl>,
+        imp: Box<dyn FetchArtifactImpl>,
         timeout: Duration,
     ) -> Self {
         let log = log.new(slog::o!("component" => "Peers"));
@@ -398,64 +395,10 @@ impl Peers {
 
         Ok(artifact_bytes)
     }
-
-    pub(crate) fn broadcast_report(
-        &self,
-        update_id: Uuid,
-        report: EventReport,
-    ) -> impl Stream<Item = Result<(), ClientError>> + Send + '_ {
-        futures::stream::iter(self.peers())
-            .map(move |peer| {
-                let report = report.clone();
-                self.send_report_to_peer(peer, update_id, report)
-            })
-            .buffer_unordered(8)
-    }
-
-    async fn send_report_to_peer(
-        &self,
-        peer: PeerAddress,
-        update_id: Uuid,
-        report: EventReport,
-    ) -> Result<(), ClientError> {
-        let log = self.log.new(slog::o!("peer" => peer.to_string()));
-        // For each peer, report it to the network.
-        match self.imp.report_progress_impl(peer, update_id, report).await {
-            Ok(()) => Ok(()),
-            Err(err) => {
-                // Error 422 means that the server didn't accept the update ID.
-                if err.status() == Some(StatusCode::UNPROCESSABLE_ENTITY) {
-                    slog::debug!(
-                        log,
-                        "received HTTP 422 Unprocessable Entity \
-                         for update ID {update_id} (update ID unrecognized)",
-                    );
-                } else if err.status() == Some(StatusCode::GONE) {
-                    // XXX If we establish a 1:1 relationship
-                    // between a particular instance of wicketd and
-                    // installinator, 410 Gone can be used to abort
-                    // the update. But we don't have that kind of
-                    // relationship at the moment.
-                    slog::warn!(
-                        log,
-                        "received HTTP 410 Gone for update ID {update_id} \
-                         (receiver closed)",
-                    );
-                } else {
-                    slog::warn!(
-                        log,
-                        "received HTTP error code {:?} for update ID {update_id}",
-                        err.status()
-                    );
-                }
-                Err(err)
-            }
-        }
-    }
 }
 
 #[async_trait]
-pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
+pub(crate) trait FetchArtifactImpl: fmt::Debug + Send + Sync {
     fn peers(&self) -> Box<dyn Iterator<Item = PeerAddress> + Send + '_>;
     fn peer_count(&self) -> usize;
 
@@ -465,13 +408,6 @@ pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
         peer: PeerAddress,
         artifact_hash_id: ArtifactHashId,
     ) -> Result<(u64, FetchReceiver), HttpError>;
-
-    async fn report_progress_impl(
-        &self,
-        peer: PeerAddress,
-        update_id: Uuid,
-        report: EventReport,
-    ) -> Result<(), ClientError>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq)]
@@ -508,14 +444,16 @@ impl FromStr for PeerAddress {
 /// The send side of the channel over which data is sent.
 pub(crate) type FetchReceiver = mpsc::Receiver<Result<Bytes, ClientError>>;
 
-/// A [`PeersImpl`] that uses HTTP to fetch artifacts from peers. This is the real implementation.
+/// A [`FetchArtifactImpl`] that uses HTTP to fetch artifacts from peers.
+///
+/// This is the real implementation.
 #[derive(Clone, Debug)]
-pub(crate) struct HttpPeers {
+pub(crate) struct HttpFetchBackend {
     log: slog::Logger,
     peers: Vec<PeerAddress>,
 }
 
-impl HttpPeers {
+impl HttpFetchBackend {
     pub(crate) fn new(log: &slog::Logger, peers: Vec<PeerAddress>) -> Self {
         let log = log.new(slog::o!("component" => "HttpPeers"));
         Self { log, peers }
@@ -523,7 +461,7 @@ impl HttpPeers {
 }
 
 #[async_trait]
-impl PeersImpl for HttpPeers {
+impl FetchArtifactImpl for HttpFetchBackend {
     fn peers(&self) -> Box<dyn Iterator<Item = PeerAddress> + Send + '_> {
         Box::new(self.peers.iter().copied())
     }
@@ -540,15 +478,5 @@ impl PeersImpl for HttpPeers {
         // TODO: be able to fetch from sled-agent clients as well
         let artifact_client = ArtifactClient::new(peer.address, &self.log);
         artifact_client.fetch(artifact_hash_id).await
-    }
-
-    async fn report_progress_impl(
-        &self,
-        peer: PeerAddress,
-        update_id: Uuid,
-        report: EventReport,
-    ) -> Result<(), ClientError> {
-        let artifact_client = ArtifactClient::new(peer.address, &self.log);
-        artifact_client.report_progress(update_id, report).await
     }
 }

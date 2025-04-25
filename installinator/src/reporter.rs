@@ -4,22 +4,29 @@
 
 //! Code to report events to the artifact server.
 
-use std::time::Duration;
+use std::{fmt, sync::Arc, time::Duration};
 
+use async_trait::async_trait;
 use display_error_chain::DisplayErrorChain;
-use futures::{Future, StreamExt};
-use installinator_common::{Event, EventBuffer};
+use futures::StreamExt;
+use http::StatusCode;
+use installinator_client::ClientError;
+use installinator_common::{Event, EventBuffer, EventReport};
 use tokio::{sync::mpsc, task::JoinHandle, time};
 use update_engine::AsError;
 use uuid::Uuid;
 
-use crate::{errors::DiscoverPeersError, peers::Peers};
+use crate::{
+    artifact::ArtifactClient,
+    errors::DiscoverPeersError,
+    peers::{DiscoveryMechanism, PeerAddress},
+};
 
 #[derive(Debug)]
-pub(crate) struct ProgressReporter<F> {
+pub(crate) struct ProgressReporter {
     log: slog::Logger,
     update_id: Uuid,
-    discover_fn: F,
+    report_backend: ReportProgressBackend,
     // Receives updates about progress and completion.
     event_receiver: mpsc::Receiver<Event>,
     buffer: EventBuffer,
@@ -27,27 +34,23 @@ pub(crate) struct ProgressReporter<F> {
     on_tick_task: Option<JoinHandle<Option<Option<usize>>>>,
 }
 
-impl<F, Fut> ProgressReporter<F>
-where
-    F: 'static + Clone + Send + FnMut() -> Fut,
-    Fut: Future<Output = Result<Peers, DiscoverPeersError>> + Send,
-{
+impl ProgressReporter {
     pub(crate) fn new(
         log: &slog::Logger,
         update_id: Uuid,
-        discover_fn: F,
+        report_backend: ReportProgressBackend,
     ) -> (Self, mpsc::Sender<Event>) {
         let (event_sender, event_receiver) = update_engine::channel();
         let ret = Self {
             log: log.new(slog::o!("component" => "EventReporter")),
             update_id,
-            discover_fn,
             event_receiver,
             // We have to keep max_low_priority low since a bigger number will
             // cause a payload that's too large.
             buffer: EventBuffer::new(8),
             last_reported: None,
             on_tick_task: None,
+            report_backend,
         };
         (ret, event_sender)
     }
@@ -91,12 +94,12 @@ where
 
     fn spawn_on_tick_task(&self) -> JoinHandle<Option<Option<usize>>> {
         let report = self.buffer.generate_report();
-        let mut discover_fn = self.discover_fn.clone();
         let update_id = self.update_id;
         let log = self.log.clone();
+        let report_backend = self.report_backend.clone();
 
         tokio::spawn(async move {
-            let peers = match (discover_fn)().await {
+            let peers = match report_backend.discover_peers().await {
                 Ok(peers) => peers,
                 Err(DiscoverPeersError::Retry(error)) => {
                     slog::warn!(
@@ -126,8 +129,18 @@ where
             // that if two servers both say, only one of them will
             // deterministically get the update. Need to decide post-PVT1.
             let last_reported = report.last_seen;
-            let results: Vec<_> =
-                peers.broadcast_report(update_id, report).collect().await;
+            let results: Vec<_> = futures::stream::iter(peers)
+                .map(|peer| {
+                    report_backend.send_report_to_peer(
+                        peer,
+                        update_id,
+                        report.clone(),
+                    )
+                })
+                .buffer_unordered(8)
+                .collect()
+                .await;
+
             if results.iter().any(|res| res.is_ok()) {
                 Some(last_reported)
             } else {
@@ -155,5 +168,136 @@ where
 
         // Spawn a task to do the actual work, which may take considerable time.
         self.on_tick_task = Some(self.spawn_on_tick_task());
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ReportProgressBackend {
+    log: slog::Logger,
+    imp: Arc<dyn ReportProgressImpl>,
+}
+
+impl ReportProgressBackend {
+    pub(crate) fn new<P: ReportProgressImpl + 'static>(
+        log: &slog::Logger,
+        imp: P,
+    ) -> Self {
+        let log = log.new(slog::o!("component" => "ReportProgressBackend"));
+        Self { log, imp: Arc::new(imp) }
+    }
+
+    pub(crate) async fn discover_peers(
+        &self,
+    ) -> Result<Vec<PeerAddress>, DiscoverPeersError> {
+        let log = self.log.new(slog::o!("task" => "discover_peers"));
+        slog::debug!(log, "discovering peers");
+
+        self.imp.discover_peers().await
+    }
+
+    pub(crate) async fn send_report_to_peer(
+        &self,
+        peer: PeerAddress,
+        update_id: Uuid,
+        report: EventReport,
+    ) -> Result<SendReportStatus, ClientError> {
+        let log = self.log.new(slog::o!("peer" => peer.to_string()));
+        match self.imp.report_progress_impl(peer, update_id, report).await {
+            Ok(()) => {
+                slog::debug!(log, "sent report to peer");
+                Ok(SendReportStatus::Processed)
+            }
+            Err(err) => {
+                // Error 422 means that the server didn't accept the update ID.
+                if err.status() == Some(StatusCode::UNPROCESSABLE_ENTITY) {
+                    slog::debug!(
+                        log,
+                        "received HTTP 422 Unprocessable Entity \
+                         for update ID {update_id} (returning UnknownUpdateId)",
+                    );
+                    Ok(SendReportStatus::UnknownUpdateId)
+                } else if err.status() == Some(StatusCode::GONE) {
+                    // XXX If we establish a 1:1 relationship between a
+                    // particular instance of wicketd and installinator, 410
+                    // Gone can be used to abort the update. But we don't have
+                    // that kind of relationship at the moment.
+                    slog::warn!(
+                        log,
+                        "received HTTP 410 Gone for update ID {update_id} \
+                         (peer closed, returning PeerFinished)",
+                    );
+                    Ok(SendReportStatus::PeerFinished)
+                } else {
+                    slog::warn!(
+                        log,
+                        "received HTTP error code {:?} for update ID {update_id}",
+                        err.status()
+                    );
+                    Err(err)
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[must_use]
+pub(crate) enum SendReportStatus {
+    /// The peer accepted the report.
+    Processed,
+
+    /// The peer could not process the report.
+    UnknownUpdateId,
+
+    /// The peer indicated that it had finished processing all reports.
+    PeerFinished,
+}
+
+#[async_trait]
+pub(crate) trait ReportProgressImpl: fmt::Debug + Send + Sync {
+    async fn discover_peers(
+        &self,
+    ) -> Result<Vec<PeerAddress>, DiscoverPeersError>;
+
+    async fn report_progress_impl(
+        &self,
+        peer: PeerAddress,
+        update_id: Uuid,
+        report: EventReport,
+    ) -> Result<(), ClientError>;
+}
+
+#[derive(Debug)]
+pub(crate) struct HttpProgressBackend {
+    log: slog::Logger,
+    discovery: DiscoveryMechanism,
+}
+
+impl HttpProgressBackend {
+    pub(crate) fn new(
+        log: &slog::Logger,
+        discovery: DiscoveryMechanism,
+    ) -> Self {
+        let log = log.new(slog::o!("component" => "HttpProgressBackend"));
+        Self { log, discovery }
+    }
+}
+
+#[async_trait]
+impl ReportProgressImpl for HttpProgressBackend {
+    async fn discover_peers(
+        &self,
+    ) -> Result<Vec<PeerAddress>, DiscoverPeersError> {
+        self.discovery.discover_peers(&self.log).await
+    }
+
+    async fn report_progress_impl(
+        &self,
+        peer: PeerAddress,
+        update_id: Uuid,
+        report: EventReport,
+    ) -> Result<(), ClientError> {
+        let artifact_client = ArtifactClient::new(peer.address(), &self.log);
+        artifact_client.report_progress(update_id, report).await
     }
 }
