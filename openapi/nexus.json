@@ -22796,11 +22796,14 @@
             "description": "The name of this link.",
             "type": "string"
           },
-          "lldp_link_config_id": {
+          "lldp_link_config": {
             "nullable": true,
-            "description": "The link-layer discovery protocol service configuration id for this link.",
-            "type": "string",
-            "format": "uuid"
+            "description": "The link-layer discovery protocol service configuration for this link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpLinkConfig"
+              }
+            ]
           },
           "mtu": {
             "description": "The maximum transmission unit for this link.",
@@ -22821,11 +22824,14 @@
               }
             ]
           },
-          "tx_eq_config_id": {
+          "tx_eq_config": {
             "nullable": true,
-            "description": "The tx_eq configuration id for this link.",
-            "type": "string",
-            "format": "uuid"
+            "description": "The tx_eq configuration for this link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig2"
+              }
+            ]
           }
         },
         "required": [
@@ -22871,11 +22877,8 @@
           },
           "gw": {
             "description": "The route's gateway address.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpNet"
-              }
-            ]
+            "type": "string",
+            "format": "ip"
           },
           "interface_name": {
             "description": "The interface name this route configuration is assigned to.",
@@ -23088,13 +23091,6 @@
               "$ref": "#/components/schemas/SwitchInterfaceConfig"
             }
           },
-          "link_lldp": {
-            "description": "Link-layer discovery protocol (LLDP) settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/LldpLinkConfig"
-            }
-          },
           "links": {
             "description": "Layer 2 link settings.",
             "type": "array",
@@ -23125,18 +23121,6 @@
               }
             ]
           },
-          "tx_eq": {
-            "description": "TX equalization settings.  These are optional, and most links will not need them.",
-            "type": "array",
-            "items": {
-              "nullable": true,
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/TxEqConfig"
-                }
-              ]
-            }
-          },
           "vlan_interfaces": {
             "description": "Vlan interface settings.",
             "type": "array",
@@ -23150,12 +23134,10 @@
           "bgp_peers",
           "groups",
           "interfaces",
-          "link_lldp",
           "links",
           "port",
           "routes",
           "settings",
-          "tx_eq",
           "vlan_interfaces"
         ]
       },
@@ -23412,6 +23394,42 @@
         ]
       },
       "TxEqConfig": {
+        "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
+        "type": "object",
+        "properties": {
+          "main": {
+            "nullable": true,
+            "description": "Main tap",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post1": {
+            "nullable": true,
+            "description": "Post-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post2": {
+            "nullable": true,
+            "description": "Post-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre1": {
+            "nullable": true,
+            "description": "Pre-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre2": {
+            "nullable": true,
+            "description": "Pre-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "TxEqConfig2": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
         "type": "object",
         "properties": {

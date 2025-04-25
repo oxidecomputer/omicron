@@ -14,7 +14,7 @@ use omicron_common::api::external::{
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
     LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder, RouteDestination,
-    RouteTarget, TxEqConfig, UserId,
+    RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -1824,6 +1824,36 @@ pub struct LinkConfigCreate {
 
     /// Optional tx_eq settings
     pub tx_eq: Option<TxEqConfig>,
+}
+
+/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
+/// equalization settings to improve signal integrity.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct TxEqConfig {
+    /// Pre-cursor tap1
+    pub pre1: Option<i32>,
+    /// Pre-cursor tap2
+    pub pre2: Option<i32>,
+    /// Main tap
+    pub main: Option<i32>,
+    /// Post-cursor tap2
+    pub post2: Option<i32>,
+    /// Post-cursor tap1
+    pub post1: Option<i32>,
+}
+
+impl From<omicron_common::api::internal::shared::TxEqConfig> for TxEqConfig {
+    fn from(
+        x: omicron_common::api::internal::shared::TxEqConfig,
+    ) -> TxEqConfig {
+        TxEqConfig {
+            pre1: x.pre1,
+            pre2: x.pre2,
+            main: x.main,
+            post2: x.post2,
+            post1: x.post1,
+        }
+    }
 }
 
 /// The LLDP configuration associated with a port.

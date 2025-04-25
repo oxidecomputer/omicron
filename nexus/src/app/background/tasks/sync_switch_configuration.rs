@@ -930,18 +930,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         },
                     };
 
-		    // TODO https://github.com/oxidecomputer/omicron/issues/3062
-		    let tx_eq = if let Some(Some(c)) = info.tx_eq.get(0) {
-			Some(TxEqConfig {
-			    pre1: c.pre1,
-			    pre2: c.pre2,
-			    main: c.main,
-			    post2: c.post2,
-			    post1: c.post1,
-			})
-		    } else {
-			None
-		    };
+                    // TODO https://github.com/oxidecomputer/omicron/issues/3062
+                    let tx_eq = if let Some(c) = info.tx_eq.get(0) {
+                        Some(TxEqConfig {
+                            pre1: c.pre1,
+                            pre2: c.pre2,
+                            main: c.main,
+                            post2: c.post2,
+                            post1: c.post1,
+                        })
+                    } else {
+                        None
+                    };
 
                     let mut port_config = PortConfigV2 {
                         addresses: info.addresses.iter().map(|a|
@@ -1556,7 +1556,7 @@ fn uplinks(
             })
         };
 
-        let tx_eq = if let Some(Some(c)) = config.tx_eq.get(0) {
+        let tx_eq = if let Some(c) = config.tx_eq.get(0) {
             Some(TxEqConfig {
                 pre1: c.pre1,
                 pre2: c.pre2,

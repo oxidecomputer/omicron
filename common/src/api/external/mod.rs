@@ -2484,13 +2484,6 @@ pub struct SwitchPortSettingsView {
     /// Layer 2 link settings.
     pub links: Vec<SwitchPortLinkConfig>,
 
-    /// Link-layer discovery protocol (LLDP) settings.
-    pub link_lldp: Vec<LldpLinkConfig>,
-
-    /// TX equalization settings.  These are optional, and most links will not
-    /// need them.
-    pub tx_eq: Vec<Option<TxEqConfig>>,
-
     /// Layer 3 interface settings.
     pub interfaces: Vec<SwitchInterfaceConfig>,
 
@@ -2629,13 +2622,6 @@ pub struct SwitchPortLinkConfig {
     /// The port settings this link configuration belongs to.
     pub port_settings_id: Uuid,
 
-    /// The link-layer discovery protocol service configuration id for this
-    /// link.
-    pub lldp_link_config_id: Option<Uuid>,
-
-    /// The tx_eq configuration id for this link.
-    pub tx_eq_config_id: Option<Uuid>,
-
     /// The name of this link.
     pub link_name: String,
 
@@ -2652,6 +2638,13 @@ pub struct SwitchPortLinkConfig {
 
     /// Whether or not the link has autonegotiation enabled.
     pub autoneg: bool,
+
+    /// The link-layer discovery protocol service configuration for this
+    /// link.
+    pub lldp_link_config: Option<LldpLinkConfig>,
+
+    /// The tx_eq configuration for this link.
+    pub tx_eq_config: Option<TxEqConfig>,
 }
 
 /// A link layer discovery protocol (LLDP) service configuration.
@@ -2742,18 +2735,6 @@ pub struct TxEqConfig {
     pub post1: Option<i32>,
 }
 
-impl From<crate::api::internal::shared::TxEqConfig> for TxEqConfig {
-    fn from(x: crate::api::internal::shared::TxEqConfig) -> TxEqConfig {
-        TxEqConfig {
-            pre1: x.pre1,
-            pre2: x.pre2,
-            main: x.main,
-            post2: x.post2,
-            post1: x.post1,
-        }
-    }
-}
-
 /// Describes the kind of an switch interface.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -2821,7 +2802,7 @@ pub struct SwitchPortRouteConfig {
     pub dst: oxnet::IpNet,
 
     /// The route's gateway address.
-    pub gw: oxnet::IpNet,
+    pub gw: IpAddr,
 
     /// The VLAN identifier for the route. Use this if the gateway is reachable
     /// over an 802.1Q tagged L2 segment.

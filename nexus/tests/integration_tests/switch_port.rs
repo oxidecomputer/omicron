@@ -183,7 +183,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(&link0.link_name, "phy0");
     assert_eq!(link0.mtu, 4700);
 
-    let lldp0 = &created.link_lldp[0];
+    let lldp0 = link0.lldp_link_config.clone().unwrap();
     assert_eq!(lldp0.enabled, true);
     assert_eq!(lldp0.link_name, Some("Link Name".to_string()));
     assert_eq!(lldp0.link_description, Some("Link Description".to_string()));
@@ -202,7 +202,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
 
     let route0 = &created.routes[0];
     assert_eq!(route0.dst, "1.2.3.0/24".parse().unwrap());
-    assert_eq!(route0.gw, "1.2.3.4".parse().unwrap());
+    assert_eq!(&route0.gw.to_string(), "1.2.3.4");
 
     let addr0 = &created.addresses[0];
     assert_eq!(addr0.address, "203.0.113.10/24".parse().unwrap());
@@ -227,7 +227,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(&link0.link_name, "phy0");
     assert_eq!(link0.mtu, 4700);
 
-    let lldp0 = &roundtrip.link_lldp[0];
+    let lldp0 = link0.lldp_link_config.clone().unwrap();
     assert_eq!(lldp0.enabled, true);
     assert_eq!(lldp0.link_name, Some("Link Name".to_string()));
     assert_eq!(lldp0.link_description, Some("Link Description".to_string()));
@@ -246,7 +246,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
 
     let route0 = &roundtrip.routes[0];
     assert_eq!(route0.dst, "1.2.3.0/24".parse().unwrap());
-    assert_eq!(route0.gw, "1.2.3.4".parse().unwrap());
+    assert_eq!(&route0.gw.to_string(), "1.2.3.4");
 
     let addr0 = &roundtrip.addresses[0];
     assert_eq!(addr0.address, "203.0.113.10/24".parse().unwrap());
