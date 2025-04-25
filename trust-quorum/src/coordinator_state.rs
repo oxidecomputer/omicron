@@ -187,10 +187,7 @@ impl CoordinatorState {
                 // Also exclude ourself.
                 for member in last_committed_members
                     .keys()
-                    .filter(|&m| {
-                        m != self.reconfigure_msg.coordinator_id()
-                            && !collected_shares.contains_key(m)
-                    })
+                    .filter(|&m| !collected_shares.contains_key(m))
                     .cloned()
                 {
                     outbox.push(Envelope {
