@@ -915,6 +915,30 @@
         }
       }
     },
+    "/mgs-updates": {
+      "get": {
+        "summary": "Fetch information about ongoing MGS updates",
+        "operationId": "mgs_updates",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MgsUpdateDriverStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/nat/ipv4/changeset/{from_gen}": {
       "get": {
         "summary": "Fetch NAT ChangeSet",
@@ -3158,6 +3182,67 @@
           }
         ]
       },
+      "CompletedAttempt": {
+        "description": "externally-exposed status for a completed attempt",
+        "type": "object",
+        "properties": {
+          "elapsed": {
+            "$ref": "#/components/schemas/Duration"
+          },
+          "nattempts_done": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "request": {
+            "$ref": "#/components/schemas/PendingMgsUpdate"
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/UpdateCompletedHow"
+                  }
+                },
+                "required": [
+                  "ok"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "time_done": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_started": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "elapsed",
+          "nattempts_done",
+          "request",
+          "result",
+          "time_done",
+          "time_started"
+        ]
+      },
       "CompressionAlgorithm": {
         "oneOf": [
           {
@@ -3994,6 +4079,29 @@
           }
         ]
       },
+      "InProgressUpdateStatus": {
+        "description": "externally-exposed status for each in-progress update",
+        "type": "object",
+        "properties": {
+          "nattempts_done": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/UpdateAttemptStatus"
+          },
+          "time_started": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "nattempts_done",
+          "status",
+          "time_started"
+        ]
+      },
       "Instance": {
         "description": "View of an Instance",
         "type": "object",
@@ -4525,6 +4633,35 @@
         "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
         "minLength": 5,
         "maxLength": 17
+      },
+      "MgsUpdateDriverStatus": {
+        "description": "Status of ongoing update attempts, recently completed attempts, and update requests that are waiting for retry.",
+        "type": "object",
+        "properties": {
+          "in_progress": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/InProgressUpdateStatus"
+            }
+          },
+          "recent": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletedAttempt"
+            }
+          },
+          "waiting": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/WaitingStatus"
+            }
+          }
+        },
+        "required": [
+          "in_progress",
+          "recent",
+          "waiting"
+        ]
       },
       "MigrationRuntimeState": {
         "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",
@@ -6317,6 +6454,29 @@
           "items"
         ]
       },
+      "UpdateAttemptStatus": {
+        "description": "status of a single update attempt",
+        "type": "string",
+        "enum": [
+          "not_started",
+          "fetching_artifact",
+          "precheck",
+          "updating",
+          "update_waiting",
+          "post_update",
+          "post_update_wait",
+          "done"
+        ]
+      },
+      "UpdateCompletedHow": {
+        "type": "string",
+        "enum": [
+          "found_no_changes_needed",
+          "completed_update",
+          "waited_for_concurrent_update",
+          "took_over_concurrent_update"
+        ]
+      },
       "UplinkAddressConfig": {
         "type": "object",
         "properties": {
@@ -6449,6 +6609,25 @@
         "type": "integer",
         "format": "uint32",
         "minimum": 0
+      },
+      "WaitingStatus": {
+        "description": "externally-exposed status for waiting updates",
+        "type": "object",
+        "properties": {
+          "nattempts_done": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "next_attempt_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "nattempts_done",
+          "next_attempt_time"
+        ]
       },
       "ZpoolName": {
         "title": "The name of a Zpool",

@@ -15,6 +15,7 @@ use crate::populate::populate_start;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns_types::names::ServiceName;
+use nexus_background_task_interface::BackgroundTasks;
 use nexus_config::NexusConfig;
 use nexus_config::RegionAllocationStrategy;
 use nexus_config::Tunables;
@@ -108,6 +109,7 @@ pub(crate) mod sagas;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
+use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use sagas::demo::CompletingDemoSagas;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
@@ -225,7 +227,10 @@ pub struct Nexus {
     background_tasks_driver: OnceLock<background::Driver>,
 
     /// Handles to various specific tasks
-    background_tasks: background::BackgroundTasks,
+    background_tasks: BackgroundTasks,
+
+    /// Internal state related to background tasks
+    background_tasks_internal: background::BackgroundTasksInternal,
 
     /// Default Crucible region allocation strategy
     default_region_allocation_strategy: RegionAllocationStrategy,
@@ -238,9 +243,7 @@ pub struct Nexus {
     tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
 
     /// reports status of pending MGS-managed updates
-    // This will be used in the future to expose driver state via the internal
-    // API.
-    _mgs_update_status_rx: watch::Receiver<nexus_mgs_updates::DriverStatus>,
+    mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
 }
 
 impl Nexus {
@@ -369,8 +372,11 @@ impl Nexus {
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
-        let (background_tasks_initializer, background_tasks) =
-            background::BackgroundTasksInitializer::new();
+        let (
+            background_tasks_initializer,
+            background_tasks,
+            background_tasks_internal,
+        ) = background::BackgroundTasksInitializer::new();
 
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
@@ -398,7 +404,7 @@ impl Nexus {
             mgs_resolver.monitor(),
             DEFAULT_RETRY_TIMEOUT,
         );
-        let _mgs_update_status_rx = mgs_update_driver.status_rx();
+        let mgs_update_status_rx = mgs_update_driver.status_rx();
         let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
         let nexus = Nexus {
@@ -441,6 +447,7 @@ impl Nexus {
                 .clone(),
             background_tasks_driver: OnceLock::new(),
             background_tasks,
+            background_tasks_internal,
             default_region_allocation_strategy: config
                 .pkg
                 .default_region_allocation_strategy
@@ -449,7 +456,7 @@ impl Nexus {
                 CompletingDemoSagas::new(),
             )),
             tuf_artifact_replication_tx,
-            _mgs_update_status_rx,
+            mgs_update_status_rx,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -560,7 +567,7 @@ impl Nexus {
         // Wait for the background task to complete at least once.  We don't
         // care about its value.  To do this, we need our own copy of the
         // channel.
-        let mut rx = self.background_tasks.external_endpoints.clone();
+        let mut rx = self.background_tasks_internal.external_endpoints.clone();
         let _ = rx.wait_for(|s| s.is_some()).await;
         if !tls_enabled {
             return None;
@@ -570,7 +577,7 @@ impl Nexus {
             .with_no_client_auth()
             .with_cert_resolver(Arc::new(NexusCertResolver::new(
                 self.log.new(o!("component" => "NexusCertResolver")),
-                self.background_tasks.external_endpoints.clone(),
+                self.background_tasks_internal.external_endpoints.clone(),
             )));
         rustls_cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Some(rustls_cfg)
@@ -1000,6 +1007,18 @@ impl Nexus {
                 return Err(Error::internal_error(&format!("{err}")));
             }
         }
+    }
+
+    pub(crate) async fn mgs_updates(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<MgsUpdateDriverStatus, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        // Borrowing from a watch receiver locks the channel until the borrow is
+        // dropped.  Return a cloned copy so that the caller doesn't have to
+        // think about this internal detail.
+        Ok(self.mgs_update_status_rx.borrow().clone())
     }
 }
 

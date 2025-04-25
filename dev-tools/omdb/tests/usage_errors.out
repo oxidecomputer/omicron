@@ -701,8 +701,9 @@ Usage: omdb nexus [OPTIONS] <COMMAND>
 Commands:
   background-tasks      print information about background tasks
   blueprints            interact with blueprints
-  clickhouse-policy     Interact with clickhouse policy
-  oximeter-read-policy  Interact with oximeter read policy
+  clickhouse-policy     interact with clickhouse policy
+  mgs-updates           print information about pending MGS updates
+  oximeter-read-policy  interact with oximeter read policy
   sagas                 view sagas, create and complete demo sagas
   sleds                 interact with sleds
   help                  Print this message or the help of the given subcommand(s)

@@ -27,6 +27,8 @@ use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DiscoverResponse;
+use gateway_messages::DumpCompression;
+use gateway_messages::DumpError;
 use gateway_messages::DumpSegment;
 use gateway_messages::DumpTask;
 use gateway_messages::IgnitionCommand;
@@ -56,6 +58,7 @@ use slog::Logger;
 use slog::debug;
 use slog::info;
 use slog::warn;
+use std::collections::HashMap;
 use std::iter;
 use std::net::SocketAddrV6;
 use std::pin::Pin;
@@ -394,6 +397,7 @@ struct Handler {
     should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
     no_stage0_caboose: bool,
     old_rot_state: bool,
+    sp_dumps: HashMap<[u8; 16], u32>,
 }
 
 impl Handler {
@@ -419,6 +423,8 @@ impl Handler {
 
         let sensors = Sensors::from_component_configs(&components);
 
+        let sp_dumps = HashMap::new();
+
         Self {
             log,
             components,
@@ -434,6 +440,7 @@ impl Handler {
             should_fail_to_respond_signal: None,
             old_rot_state,
             no_stage0_caboose,
+            sp_dumps,
         }
     }
 
@@ -1206,27 +1213,61 @@ impl SpHandler for Handler {
     }
 
     fn get_task_dump_count(&mut self) -> Result<u32, SpError> {
-        debug!(&self.log, "received get_task_dump_count");
-        Err(SpError::RequestUnsupportedForSp)
+        Ok(1)
     }
 
     fn task_dump_read_start(
         &mut self,
         index: u32,
-        _key: [u8; 16],
+        key: [u8; 16],
     ) -> Result<DumpTask, SpError> {
-        debug!(&self.log, "received task_dump_read_start"; "index" => index);
-        Err(SpError::RequestUnsupportedForSp)
+        if index != 0 {
+            return Err(SpError::Dump(DumpError::BadIndex));
+        }
+
+        // Hubris allows clients to reuse existing keys.
+        // Overwrite any in-flight requests using this key.
+        self.sp_dumps.insert(key, 0);
+
+        Ok(DumpTask { time: 1, task: 0, compression: DumpCompression::Lzss })
     }
 
     fn task_dump_read_continue(
         &mut self,
-        _key: [u8; 16],
+        key: [u8; 16],
         seq: u32,
-        _buf: &mut [u8],
+        buf: &mut [u8],
     ) -> Result<Option<DumpSegment>, SpError> {
-        debug!(&self.log, "received task_dump_read_continue"; "seq" => seq);
-        Err(SpError::RequestUnsupportedForSp)
+        let Some(expected_seq) = self.sp_dumps.get_mut(&key) else {
+            return Err(SpError::Dump(DumpError::BadKey));
+        };
+
+        if seq != *expected_seq {
+            return Err(SpError::Dump(DumpError::BadSequenceNumber));
+        }
+
+        const UNCOMPRESSED_MSG: &[u8] = b"my cool SP dump";
+        // "my cool SP dump" encoded with `lzss-cli e 6,4,0x20`
+        const COMPRESSED_MSG: &[u8] = &[
+            0xb6, 0xde, 0x64, 0x16, 0x3b, 0x7d, 0xbe, 0xd9, 0x20, 0xa9, 0xd4,
+            0x24, 0x16, 0x4b, 0xad, 0xb6, 0xe0,
+        ];
+        buf[..COMPRESSED_MSG.len()].copy_from_slice(COMPRESSED_MSG);
+
+        *expected_seq += 1;
+
+        match seq {
+            ..3 => Ok(Some(DumpSegment {
+                address: 1,
+                compressed_length: COMPRESSED_MSG.len() as u16,
+                uncompressed_length: UNCOMPRESSED_MSG.len() as u16,
+                seq,
+            })),
+            3.. => {
+                self.sp_dumps.remove(&key);
+                Ok(None)
+            }
+        }
     }
 }
 
