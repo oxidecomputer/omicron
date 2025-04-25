@@ -184,7 +184,6 @@ impl CoordinatorState {
                 ..
             } => {
                 // Send to all members that we haven't yet collected shares from.
-                // Also exclude ourself.
                 for member in last_committed_members
                     .keys()
                     .filter(|&m| !collected_shares.contains_key(m))
