@@ -189,12 +189,8 @@ impl Model {
         };
 
         // Return all members of the current configuration that haven't acked a
-        // `PrepareMsg` yet. Exclude ourself.
-
-        let mut waiting_for: BTreeSet<_> =
-            cs.msg.members.difference(acked_prepares).cloned().collect();
-        waiting_for.remove(&self.id);
-        Some(waiting_for)
+        // `PrepareMsg` yet.
+        Some(cs.msg.members.difference(acked_prepares).cloned().collect())
     }
 
     // Return the nodes that we are waiting for shares from
@@ -214,15 +210,14 @@ impl Model {
         };
 
         // Return all members of the last committed configuration that we
-        // haven't received a share from yet. Exclude ourself.
-
-        let mut waiting_for: BTreeSet<_> = last_committed_config_msg
-            .members
-            .difference(collected_from)
-            .cloned()
-            .collect();
-        waiting_for.remove(&self.id);
-        Some(waiting_for)
+        // haven't received a share from yet.
+        Some(
+            last_committed_config_msg
+                .members
+                .difference(collected_from)
+                .cloned()
+                .collect(),
+        )
     }
 
     // Return the current epoch being coordinated, if there is one

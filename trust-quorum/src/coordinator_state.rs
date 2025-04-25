@@ -198,7 +198,6 @@ impl CoordinatorState {
             }
             CoordinatorOperation::CollectLrtqShares { .. } => {}
             CoordinatorOperation::Prepare { prepares, .. } => {
-                // prepares already filter ourself
                 for (platform_id, prepare) in prepares.clone().into_iter() {
                     outbox.push(Envelope {
                         to: platform_id,
