@@ -13,7 +13,7 @@ use dropshot::{
     TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, OmicronSledConfigResult, SledRole,
+    Inventory, OmicronSledConfig, SledRole,
 };
 use omicron_common::{
     api::external::Generation,
@@ -24,7 +24,7 @@ use omicron_common::{
             SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
         },
     },
-    disk::{DatasetsConfig, DiskVariant, OmicronPhysicalDisksConfig},
+    disk::DiskVariant,
     ledger::Ledgerable,
 };
 use omicron_uuid_kinds::{
@@ -260,32 +260,7 @@ pub trait SledAgentApi {
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronSledConfig>,
-    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError>;
-
-    /// Lists the datasets that this sled is configured to use
-    #[endpoint {
-        method = GET,
-        path = "/datasets",
-    }]
-    async fn datasets_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/omicron-physical-disks",
-    }]
-    async fn omicron_physical_disks_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/zpools",
-    }]
-    async fn zpools_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError>;
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
         method = GET,

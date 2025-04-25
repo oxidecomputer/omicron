@@ -34,14 +34,6 @@ enum SledAgentCommands {
     #[clap(subcommand)]
     Zones(ZoneCommands),
 
-    /// print information about zpools
-    #[clap(subcommand)]
-    Zpools(ZpoolCommands),
-
-    /// print information about datasets
-    #[clap(subcommand)]
-    Datasets(DatasetCommands),
-
     /// print information about the local bootstore node
     #[clap(subcommand)]
     Bootstore(BootstoreCommands),
@@ -97,12 +89,6 @@ impl SledAgentArgs {
             SledAgentCommands::Zones(ZoneCommands::List) => {
                 cmd_zones_list(&client).await
             }
-            SledAgentCommands::Zpools(ZpoolCommands::List) => {
-                cmd_zpools_list(&client).await
-            }
-            SledAgentCommands::Datasets(DatasetCommands::List) => {
-                cmd_datasets_list(&client).await
-            }
             SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
                 cmd_bootstore_status(&client).await
             }
@@ -124,44 +110,6 @@ async fn cmd_zones_list(
     }
     for zone in &zones {
         println!("    {:?}", zone);
-    }
-
-    Ok(())
-}
-
-/// Runs `omdb sled-agent zpools list`
-async fn cmd_zpools_list(
-    client: &sled_agent_client::Client,
-) -> Result<(), anyhow::Error> {
-    let response = client.zpools_get().await.context("listing zpools")?;
-    let zpools = response.into_inner();
-
-    println!("zpools:");
-    if zpools.is_empty() {
-        println!("    <none>");
-    }
-    for zpool in &zpools {
-        println!("    {:?}", zpool);
-    }
-
-    Ok(())
-}
-
-/// Runs `omdb sled-agent datasets list`
-async fn cmd_datasets_list(
-    client: &sled_agent_client::Client,
-) -> Result<(), anyhow::Error> {
-    let response = client.datasets_get().await.context("listing datasets")?;
-    let response = response.into_inner();
-
-    println!("dataset configuration @ generation {}:", response.generation);
-    let datasets = response.datasets;
-
-    if datasets.is_empty() {
-        println!("    <none>");
-    }
-    for dataset in &datasets {
-        println!("    {:?}", dataset);
     }
 
     Ok(())
