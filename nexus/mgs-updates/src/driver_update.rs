@@ -8,7 +8,6 @@ use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::STATUS_POLL_INTERVAL;
 use crate::common_sp_update::SpComponentUpdateHelper;
-use crate::driver::UpdateAttemptStatus;
 use crate::driver::UpdateAttemptStatusUpdater;
 use crate::mgs_clients::GatewayClientError;
 use crate::{ArtifactCache, ArtifactCacheError, MgsClients};
@@ -16,6 +15,8 @@ use gateway_client::SpComponent;
 use gateway_client::types::UpdateAbortBody;
 use gateway_client::types::{SpType, SpUpdateStatus};
 use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::internal_api::views::UpdateAttemptStatus;
+use nexus_types::internal_api::views::UpdateCompletedHow;
 use qorb::resolver::AllBackends;
 use slog::{debug, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
@@ -59,14 +60,6 @@ impl SpComponentUpdate {
     fn component(&self) -> &str {
         self.component.const_as_str()
     }
-}
-
-#[derive(Clone, Debug)]
-pub enum UpdateCompletedHow {
-    FoundNoChangesNeeded,
-    CompletedUpdate,
-    WaitedForConcurrentUpdate,
-    TookOverConcurrentUpdate,
 }
 
 #[derive(Debug, Error)]
@@ -162,8 +155,7 @@ pub(crate) async fn apply_update(
     };
 
     // Obtain the contents of the artifact that we need.
-    let data =
-        artifacts.artifact_contents(&update.artifact_hash_id.hash).await?;
+    let data = artifacts.artifact_contents(&update.artifact_hash).await?;
     debug!(log, "loaded artifact contents");
 
     // Check the live state first to see if:

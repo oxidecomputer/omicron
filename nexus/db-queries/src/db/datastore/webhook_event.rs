@@ -6,14 +6,14 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::WebhookEvent;
 use crate::db::model::WebhookEventClass;
 use crate::db::model::WebhookEventIdentity;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::OptionalExtension;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::webhook_event::dsl as event_dsl;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;

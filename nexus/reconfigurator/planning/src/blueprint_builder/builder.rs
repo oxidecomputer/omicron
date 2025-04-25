@@ -41,6 +41,7 @@ use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
@@ -84,7 +85,8 @@ use thiserror::Error;
 
 use super::ClickhouseZonesThatShouldBeRunning;
 use super::clickhouse::ClickhouseAllocator;
-use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::inventory::BaseboardId;
+use std::sync::Arc;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
@@ -405,6 +407,7 @@ pub struct BlueprintBuilder<'a> {
     creator: String,
     operations: Vec<Operation>,
     comments: Vec<String>,
+    pending_mgs_updates: PendingMgsUpdates,
 
     // Random number generator for new UUIDs
     rng: PlannerRng,
@@ -535,6 +538,7 @@ impl<'a> BlueprintBuilder<'a> {
             sled_editors,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
+            pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -699,10 +703,7 @@ impl<'a> BlueprintBuilder<'a> {
         Blueprint {
             id: blueprint_id,
             sleds,
-            pending_mgs_updates: self
-                .parent_blueprint
-                .pending_mgs_updates
-                .clone(),
+            pending_mgs_updates: self.pending_mgs_updates,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.input.internal_dns_version(),
             external_dns_version: self.input.external_dns_version(),
@@ -1873,6 +1874,20 @@ impl<'a> BlueprintBuilder<'a> {
         addr: IpAddr,
     ) -> Result<(), Error> {
         Ok(self.resource_allocator()?.inject_untracked_external_dns_ip(addr)?)
+    }
+
+    pub fn pending_mgs_update_insert(
+        &mut self,
+        update: nexus_types::deployment::PendingMgsUpdate,
+    ) {
+        self.pending_mgs_updates.insert(update);
+    }
+
+    pub fn pending_mgs_update_delete(
+        &mut self,
+        baseboard_id: &Arc<BaseboardId>,
+    ) {
+        self.pending_mgs_updates.remove(baseboard_id);
     }
 }
 

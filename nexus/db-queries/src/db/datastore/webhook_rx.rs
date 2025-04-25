@@ -8,13 +8,10 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::Generation;
 use crate::db::model::Name;
 use crate::db::model::SCHEMA_VERSION;
@@ -31,12 +28,15 @@ use crate::db::model::WebhookSubscriptionKind;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
-use crate::db::pool::DbConnection;
 use crate::db::update_and_check::UpdateAndCheck;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_auth::authz::ApiResource;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as delivery_attempt_dsl;
 use nexus_db_schema::schema::webhook_event::dsl as event_dsl;
@@ -526,7 +526,7 @@ impl DataStore {
                 ))
             }
             diesel::result::Error::DatabaseError(kind, info) => {
-                Error::internal_error(&crate::db::error::format_database_error(
+                Error::internal_error(&nexus_db_errors::format_database_error(
                     kind, &*info,
                 ))
             }
@@ -1159,8 +1159,8 @@ mod test {
     use super::*;
     use crate::authz;
     use crate::db::explain::ExplainableAsync;
-    use crate::db::lookup::LookupPath;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_db_lookup::LookupPath;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::WebhookEventUuid;

@@ -36,8 +36,8 @@ use nexus_client::types::PhysicalDiskPath;
 use nexus_client::types::SagaState;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_inventory::now_db_precision;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
@@ -117,9 +117,11 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
-    /// Interact with clickhouse policy
+    /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
-    /// Interact with oximeter read policy
+    /// print information about pending MGS updates
+    MgsUpdates,
+    /// interact with oximeter read policy
     OximeterReadPolicy(OximeterReadPolicyArgs),
     /// view sagas, create and complete demo sagas
     Sagas(SagasArgs),
@@ -600,6 +602,8 @@ impl NexusArgs {
                     cmd_nexus_clickhouse_policy_set(&client, args, token).await
                 }
             },
+
+            NexusCommands::MgsUpdates => cmd_nexus_mgs_updates(&client).await,
 
             NexusCommands::OximeterReadPolicy(OximeterReadPolicyArgs {
                 command,
@@ -3149,6 +3153,18 @@ async fn cmd_nexus_clickhouse_policy_get(
     Ok(())
 }
 
+async fn cmd_nexus_mgs_updates(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let response = client
+        .mgs_updates()
+        .await
+        .context("fetching update status")?
+        .into_inner();
+    println!("{}", response.detailed_display());
+    Ok(())
+}
+
 async fn cmd_nexus_clickhouse_policy_set(
     client: &nexus_client::Client,
     args: &ClickhousePolicySetArgs,
@@ -3464,7 +3480,7 @@ async fn cmd_nexus_sled_expunge_with_datastore(
     let opctx = &opctx;
 
     // First, we need to look up the sled so we know its serial number.
-    let (_authz_sled, sled) = LookupPath::new(opctx, &datastore)
+    let (_authz_sled, sled) = LookupPath::new(opctx, datastore)
         .sled_id(args.sled_id.into_untyped_uuid())
         .fetch()
         .await
@@ -3568,7 +3584,7 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 
     // First, we need to look up the disk so we can lookup identity information.
     let (_authz_physical_disk, physical_disk) =
-        LookupPath::new(opctx, &datastore)
+        LookupPath::new(opctx, datastore)
             .physical_disk(args.physical_disk_id)
             .fetch()
             .await

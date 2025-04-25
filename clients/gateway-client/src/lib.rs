@@ -46,6 +46,7 @@ pub use gateway_messages::SpComponent;
 // calls into Nexus, the current scheme is okay.)
 progenitor::generate_api!(
     spec = "../../openapi/gateway.json",
+    interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";

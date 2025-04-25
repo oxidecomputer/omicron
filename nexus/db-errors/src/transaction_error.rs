@@ -2,15 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Error handling and conversions.
-
-use crate::transaction_retry::OptionalError;
-use diesel::result::DatabaseErrorInformation;
-use diesel::result::DatabaseErrorKind as DieselErrorKind;
-use diesel::result::Error as DieselError;
+use diesel::result::{
+    DatabaseErrorInformation, DatabaseErrorKind as DieselErrorKind,
+    Error as DieselError,
+};
+use nexus_auth::authz;
 use omicron_common::api::external::{
     Error as PublicError, LookupType, ResourceType,
 };
+
+use crate::OptionalError;
 
 /// Wrapper around an error which may be returned from a Diesel transaction.
 #[derive(Debug, thiserror::Error)]
@@ -33,11 +34,9 @@ pub fn retryable(error: &DieselError) -> bool {
     match error {
         DieselError::DatabaseError(kind, boxed_error_information) => match kind
         {
-            DieselErrorKind::SerializationFailure => {
-                return boxed_error_information
-                    .message()
-                    .starts_with("restart transaction");
-            }
+            DieselErrorKind::SerializationFailure => boxed_error_information
+                .message()
+                .starts_with("restart transaction"),
             _ => false,
         },
         _ => false,
@@ -113,7 +112,7 @@ impl From<TransactionError<PublicError>> for PublicError {
 }
 
 /// Summarizes details provided with a database error.
-pub(crate) fn format_database_error(
+pub fn format_database_error(
     kind: DieselErrorKind,
     info: &dyn DatabaseErrorInformation,
 ) -> String {
@@ -148,16 +147,15 @@ pub(crate) fn format_database_error(
 /// etc.
 pub enum ErrorHandler<'a> {
     /// The operation expected to fetch, update, or delete exactly one resource
-    /// identified by the [`crate::authz::ApiResource`].
-    /// If that row is not found, an appropriate "Not Found" error will be
-    /// returned.
-    NotFoundByResource(&'a dyn crate::authz::ApiResource),
+    /// identified by the [`authz::ApiResource`]. If that row is not found, an
+    /// appropriate "Not Found" error will be returned.
+    NotFoundByResource(&'a dyn authz::ApiResource),
     /// The operation was attempting to lookup or update a resource.
     /// If that row is not found, an appropriate "Not Found" error will be
     /// returned.
     ///
-    /// NOTE: If you already have an [`crate::authz::ApiResource`] object, you
-    /// should use the [`ErrorHandler::NotFoundByResource`] variant instead.
+    /// NOTE: If you already have an [`authz::ApiResource`] object, you should
+    /// use the [`ErrorHandler::NotFoundByResource`] variant instead.
     /// Eventually, the only uses of this function should be in the DataStore
     /// functions that actually look up a record for the first time.
     NotFoundByLookup(ResourceType, LookupType),
@@ -202,7 +200,7 @@ pub fn public_error_from_diesel(
 
 /// Converts a Diesel error to an external error, handling "NotFound" using
 /// `make_not_found_error`.
-pub(crate) fn public_error_from_diesel_lookup(
+pub fn public_error_from_diesel_lookup(
     error: DieselError,
     resource_type: ResourceType,
     lookup_type: &LookupType,
@@ -227,7 +225,7 @@ pub(crate) fn public_error_from_diesel_lookup(
 
 /// Converts a Diesel error to an external error, when requested as
 /// part of a creation operation.
-pub(crate) fn public_error_from_diesel_create(
+pub fn public_error_from_diesel_create(
     error: DieselError,
     resource_type: ResourceType,
     object_name: &str,

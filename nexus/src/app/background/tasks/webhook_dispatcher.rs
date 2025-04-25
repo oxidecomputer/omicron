@@ -426,7 +426,7 @@ mod test {
             .expect("should insert glob entry");
         // Also give the webhook receiver a secret just so everything
         // looks normalish.
-        let (authz_rx, _) = db::lookup::LookupPath::new(&opctx, datastore)
+        let (authz_rx, _) = nexus_db_lookup::LookupPath::new(&opctx, datastore)
             .webhook_receiver_id(rx_id)
             .fetch()
             .await

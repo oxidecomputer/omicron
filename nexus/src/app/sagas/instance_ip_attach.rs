@@ -330,9 +330,9 @@ pub(crate) mod test {
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::{ExternalIp, IpKind};
     use nexus_db_queries::context::OpContext;
-    use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pool, create_floating_ip, create_instance,
         create_project,

@@ -462,7 +462,9 @@ pub trait NexusExternalApi {
 
     // Silo identity providers
 
-    /// List a silo's IdP's name
+    /// List identity providers for silo
+    ///
+    /// List identity providers for silo by silo name or ID.
     #[endpoint {
         method = GET,
         path = "/v1/system/identity-providers",
@@ -475,7 +477,7 @@ pub trait NexusExternalApi {
 
     // Silo SAML identity providers
 
-    /// Create SAML IdP
+    /// Create SAML identity provider
     #[endpoint {
         method = POST,
         path = "/v1/system/identity-providers/saml",
@@ -487,7 +489,7 @@ pub trait NexusExternalApi {
         new_provider: TypedBody<params::SamlIdentityProviderCreate>,
     ) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError>;
 
-    /// Fetch SAML IdP
+    /// Fetch SAML identity provider
     #[endpoint {
         method = GET,
         path = "/v1/system/identity-providers/saml/{provider}",

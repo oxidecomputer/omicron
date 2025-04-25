@@ -5,19 +5,18 @@
 //! [`DataStore`] methods on [`VolumeRepair`]s.
 
 use super::DataStore;
-use crate::db;
-use crate::db::DbConnection;
 use crate::db::datastore::OpContext;
 use crate::db::datastore::RunnableQuery;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::VolumeRepair;
 use crate::db::model::to_db_typed_uuid;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeUuid;
 use uuid::Uuid;
@@ -151,7 +150,7 @@ impl DataStore {
     }
 
     pub async fn volume_repair_get(
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         volume_id: VolumeUuid,
         repair_id: Uuid,
     ) -> Result<VolumeRepair, DieselError> {

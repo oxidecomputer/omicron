@@ -54,7 +54,6 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactHashId;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 
@@ -625,14 +624,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
                         .map(|pu| {
                             BpTableRow::from_strings(
                                 BpDiffState::Unchanged,
-                                vec![
-                                    pu.sp_type.to_string(),
-                                    pu.slot_id.to_string(),
-                                    pu.baseboard_id.part_number.clone(),
-                                    pu.baseboard_id.serial_number.clone(),
-                                    pu.artifact_hash_id.kind.to_string(),
-                                    pu.artifact_hash_id.hash.to_string(),
-                                ],
+                                pu.to_bp_table_values(),
                             )
                         })
                         .collect()
@@ -1200,7 +1192,7 @@ pub struct PendingMgsUpdate {
 
     /// which artifact to apply to this device
     /// (implies which component is being updated)
-    pub artifact_hash_id: ArtifactHashId,
+    pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
 }
 
@@ -1216,12 +1208,8 @@ impl slog::KV for PendingMgsUpdate {
         serializer.emit_u32(Key::from("sp_slot"), self.slot_id)?;
         slog::KV::serialize(&self.details, record, serializer)?;
         serializer.emit_str(
-            Key::from("artifact_kind"),
-            &self.artifact_hash_id.kind.as_str(),
-        )?;
-        serializer.emit_str(
             Key::from("artifact_hash"),
-            &self.artifact_hash_id.hash.to_string(),
+            &self.artifact_hash.to_string(),
         )
     }
 }
@@ -1230,6 +1218,20 @@ impl IdMappable for PendingMgsUpdate {
     type Id = Arc<BaseboardId>;
     fn id(&self) -> Self::Id {
         self.baseboard_id.clone()
+    }
+}
+
+impl PendingMgsUpdate {
+    fn to_bp_table_values(&self) -> Vec<String> {
+        vec![
+            self.sp_type.to_string(),
+            self.slot_id.to_string(),
+            self.baseboard_id.part_number.clone(),
+            self.baseboard_id.serial_number.clone(),
+            self.artifact_hash.to_string(),
+            self.artifact_version.to_string(),
+            format!("{:?}", self.details),
+        ]
     }
 }
 
@@ -1680,9 +1682,6 @@ mod test {
     use crate::inventory::BaseboardId;
     use gateway_client::types::SpType;
     use std::sync::Arc;
-    use tufaceous_artifact::ArtifactHashId;
-    use tufaceous_artifact::ArtifactKind;
-    use tufaceous_artifact::KnownArtifactKind;
 
     #[test]
     fn test_serialize_pending_mgs_updates() {
@@ -1710,10 +1709,7 @@ mod test {
                     "1.0.36".parse().unwrap(),
                 ),
             },
-            artifact_hash_id: ArtifactHashId {
-            kind: ArtifactKind::from_known(KnownArtifactKind::GimletSp),
-            hash: "47266ede81e13f5f1e36623ea8dd963842606b783397e4809a9a5f0bda0f8170".parse().unwrap(),
-            },
+            artifact_hash: "47266ede81e13f5f1e36623ea8dd963842606b783397e4809a9a5f0bda0f8170".parse().unwrap(),
             artifact_version: "1.0.34".parse().unwrap(),
         };
         pending_mgs_updates.insert(update);

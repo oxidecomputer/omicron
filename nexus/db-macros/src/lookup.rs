@@ -93,7 +93,6 @@ impl InputPrimaryKeyColumn {
     }
 }
 
-//
 // MACRO STATE
 //
 
@@ -419,7 +418,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
 
                 let resource_silo_id = authz_silo.id();
                 if resource_silo_id != actor_silo_id {
-                    use crate::authz::ApiResource;
+                    use nexus_auth::authz::ApiResource;
                     error!(
                         log,
                         "unexpected successful lookup of siloed resource \
@@ -613,7 +612,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         ) -> LookupResult<(#(authz::#path_types,)* nexus_db_model::#resource_name)> {
             let lookup = self.lookup_root();
             let opctx = &lookup.opctx;
-            let datastore = &lookup.datastore;
+            let datastore = lookup.datastore;
 
             match &self {
                 #resource_name::Error(_, error) => Err(error.clone()),
@@ -704,7 +703,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
         ) -> LookupResult<(#(authz::#path_types,)*)> {
             let lookup = self.lookup_root();
             let opctx = &lookup.opctx;
-            let datastore = &lookup.datastore;
+            let datastore = lookup.datastore;
 
             match &self {
                 #resource_name::Error(_, error) => Err(error.clone()),
@@ -815,7 +814,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             // Do NOT make this function public.
             async fn fetch_by_name_for(
                 opctx: &OpContext,
-                datastore: &DataStore,
+                datastore: &dyn LookupDataStore,
                 #parent_lookup_arg_formal
                 name: &Name,
                 action: authz::Action,
@@ -841,7 +840,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             // Do NOT make this function public.
             async fn lookup_by_name_no_authz(
                 opctx: &OpContext,
-                datastore: &DataStore,
+                datastore: &dyn LookupDataStore,
                 #parent_lookup_arg_formal
                 name: &Name,
             ) -> LookupResult<
@@ -912,7 +911,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         // Do NOT make this function public.
         async fn fetch_by_id_for(
             opctx: &OpContext,
-            datastore: &DataStore,
+            datastore: &dyn LookupDataStore,
             #(#pkey_names: &#pkey_types,)*
             action: authz::Action,
         ) -> LookupResult<(#(authz::#path_types,)* nexus_db_model::#resource_name)> {
@@ -935,7 +934,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         // Do NOT make this function public.
         async fn lookup_by_id_no_authz(
             opctx: &OpContext,
-            datastore: &DataStore,
+            datastore: &dyn LookupDataStore,
             #(#pkey_names: &#pkey_types,)*
         ) -> LookupResult<(#(authz::#path_types,)* nexus_db_model::#resource_name)> {
             use ::nexus_db_schema::schema::#resource_as_snake::dsl;
