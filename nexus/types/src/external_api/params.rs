@@ -2454,7 +2454,7 @@ pub struct WebhookEventSelector {
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookDeliveryStateFilter {
-    /// If true, include  deliveries which are currently in progress.
+    /// If true, include deliveries which are currently in progress.
     ///
     /// If any of the "pending", "failed", or "delivered" query parameters are
     /// set to true, only deliveries matching those state(s) will be included in
@@ -2475,7 +2475,7 @@ pub struct WebhookDeliveryStateFilter {
     /// A delivery fails permanently when the retry limit of three total
     /// attempts is reached without a successful delivery.
     pub failed: Option<bool>,
-    /// If true, include  deliveries which have succeeded.
+    /// If true, include deliveries which have succeeded.
     ///
     /// If any of the "pending", "failed", or "delivered" query parameters are
     /// set to true, only deliveries matching those state(s) will be included in
