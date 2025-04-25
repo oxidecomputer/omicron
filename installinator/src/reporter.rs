@@ -202,7 +202,6 @@ impl ReportProgressBackend {
         report: EventReport,
     ) -> Result<SendReportStatus, ClientError> {
         let log = self.log.new(slog::o!("peer" => peer.to_string()));
-        // For each peer, report it to the network.
         match self.imp.report_progress_impl(peer, update_id, report).await {
             Ok(()) => {
                 slog::debug!(log, "sent report to peer");
