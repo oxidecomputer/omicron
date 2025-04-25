@@ -27,7 +27,8 @@ use uuid::Uuid;
 
 use crate::{
     errors::{DiscoverPeersError, HttpError},
-    peers::{FetchArtifactImpl, FetchReceiver, PeerAddress},
+    fetch::{FetchArtifactImpl, FetchReceiver},
+    peers::PeerAddress,
     reporter::ReportProgressImpl,
 };
 
@@ -515,7 +516,7 @@ mod tests {
     use super::*;
     use crate::{
         errors::DiscoverPeersError,
-        peers::{FetchArtifactBackend, FetchedArtifact},
+        fetch::{FetchArtifactBackend, FetchedArtifact},
         reporter::{ProgressReporter, ReportProgressBackend},
         test_helpers::{dummy_artifact_hash_id, with_test_runtime},
     };

@@ -25,10 +25,8 @@ use update_engine::StepResult;
 use crate::{
     ArtifactWriter, WriteDestination,
     artifact::ArtifactIdOpts,
-    peers::{
-        DiscoveryMechanism, FetchArtifactBackend, FetchedArtifact,
-        HttpFetchBackend,
-    },
+    fetch::{FetchArtifactBackend, FetchedArtifact, HttpFetchBackend},
+    peers::DiscoveryMechanism,
     reporter::{HttpProgressBackend, ProgressReporter, ReportProgressBackend},
 };
 
