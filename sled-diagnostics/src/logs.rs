@@ -49,9 +49,6 @@ pub enum LogError {
     #[error("ZFS dataset {0} is missing a mountpoint")]
     MissingMountpoint(String),
 
-    #[error("Log file is missing {zone} in path {logfile}")]
-    MissingZonePathComponent { zone: String, logfile: Utf8PathBuf },
-
     #[error(transparent)]
     Snapshot(#[from] CreateSnapshotError),
 
