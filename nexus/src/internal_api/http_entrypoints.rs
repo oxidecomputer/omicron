@@ -1164,7 +1164,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
 
             let bundle = nexus
-                .support_bundle_create(&opctx, "Created by external API")
+                .support_bundle_create(&opctx, "Created by internal API")
                 .await?;
             Ok(HttpResponseCreated(bundle.into()))
         };
