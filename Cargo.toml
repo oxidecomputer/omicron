@@ -598,8 +598,8 @@ pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
 prettyplease = { version = "0.2.30", features = ["verbatim"] }
 proc-macro2 = "1.0"
-progenitor = "0.9.1"
-progenitor-client = "0.9.1"
+progenitor = { git = "https://github.com/oxidecomputer/progenitor", rev = "e4af3302c20e35dff6ceafc61e0175739922c132" }
+progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", rev = "e4af3302c20e35dff6ceafc61e0175739922c132" }
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
@@ -901,6 +901,9 @@ opt-level = 3
 opt-level = 3
 
 
+[patch.crates-io]
+progenitor = { git = "https://github.com/oxidecomputer/progenitor", rev = "e4af3302c20e35dff6ceafc61e0175739922c132" }
+progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", rev = "e4af3302c20e35dff6ceafc61e0175739922c132" }
 #
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.

@@ -86,6 +86,14 @@ pub async fn start_servers(
             log.new(o!("component" => "http")),
         )
         .config(dropshot_config.clone())
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                "api-version"
+                    .parse::<http::header::HeaderName>()
+                    .expect("TODO asghahgahghag"),
+                semver::Version::new(2, 0, 0),
+            ),
+        )))
         .start()
         .map_err(|error| anyhow!("setting up HTTP server: {:#}", error))?
     };
