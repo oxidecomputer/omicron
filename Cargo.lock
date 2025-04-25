@@ -920,7 +920,7 @@ dependencies = [
  "pq-sys",
  "proptest",
  "rand 0.8.5",
- "secrecy",
+ "secrecy 0.10.3",
  "serde",
  "serde_with",
  "sha3",
@@ -2244,7 +2244,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=8452936a53c3b16e53cbbf4e34e5e59899afc965#8452936a53c3b16e53cbbf4e34e5e59899afc965"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=872aae7d76493f2a4f59711b24dde55523536b40#872aae7d76493f2a4f59711b24dde55523536b40"
 dependencies = [
  "oxnet",
  "percent-encoding",
@@ -3354,6 +3354,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88a41f105fe1d5b6b34b2055e3dc59bb79b46b48b2040b9e6c7b4b5de097aa41"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "fs-err"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f89bda4c2a21204059a977ed3bfe746677dfd137b83c339e702b0ac91d482aa"
+dependencies = [
+ "autocfg",
  "tokio",
 ]
 
@@ -3689,7 +3698,7 @@ dependencies = [
  "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
- "secrecy",
+ "secrecy 0.10.3",
  "serde",
  "subtle",
  "test-strategy",
@@ -4597,7 +4606,10 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa#cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa"
+source = "git+https://github.com/oxidecomputer/opte?rev=88adb1a5df689b3e2daddab9325ee94047f6ffad#88adb1a5df689b3e2daddab9325ee94047f6ffad"
+dependencies = [
+ "bitflags 2.9.0",
+]
 
 [[package]]
 name = "illumos-utils"
@@ -5075,9 +5087,9 @@ checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 
 [[package]]
 name = "jiff"
-version = "0.2.6"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f33145a5cbea837164362c7bd596106eb7c5198f97d1ba6f6ebb3223952e488"
+checksum = "5a064218214dc6a10fbae5ec5fa888d80c45d611aba169222fc272072bf7aef6"
 dependencies = [
  "jiff-static",
  "jiff-tzdb-platform",
@@ -5090,9 +5102,9 @@ dependencies = [
 
 [[package]]
 name = "jiff-static"
-version = "0.2.6"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43ce13c40ec6956157a3635d97a1ee2df323b263f09ea14165131289cb0f5c19"
+checksum = "199b7932d97e325aff3a7030e141eafe7f2c6268e1d1b24859b753a627f45254"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5149,7 +5161,7 @@ dependencies = [
  "hkdf",
  "omicron-common",
  "omicron-workspace-hack",
- "secrecy",
+ "secrecy 0.10.3",
  "sha3",
  "slog",
  "thiserror 1.0.69",
@@ -5160,7 +5172,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa#cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa"
+source = "git+https://github.com/oxidecomputer/opte?rev=88adb1a5df689b3e2daddab9325ee94047f6ffad#88adb1a5df689b3e2daddab9325ee94047f6ffad"
 dependencies = [
  "quote",
  "syn 2.0.98",
@@ -5682,7 +5694,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=8452936a53c3b16e53cbbf4e34e5e59899afc965#8452936a53c3b16e53cbbf4e34e5e59899afc965"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=872aae7d76493f2a4f59711b24dde55523536b40#872aae7d76493f2a4f59711b24dde55523536b40"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5884,6 +5896,15 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "nexus-background-task-interface"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
@@ -7014,6 +7035,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "camino-tempfile",
  "chrono",
  "clap",
  "cockroach-admin-api",
@@ -7200,6 +7222,7 @@ dependencies = [
  "toml 0.8.20",
  "tufaceous-artifact",
  "uuid",
+ "zip 2.6.1",
 ]
 
 [[package]]
@@ -7313,6 +7336,7 @@ dependencies = [
  "macaddr",
  "mg-admin-client",
  "nexus-auth",
+ "nexus-background-task-interface",
  "nexus-client",
  "nexus-config",
  "nexus-db-lookup",
@@ -7546,7 +7570,7 @@ dependencies = [
  "anyhow",
  "camino",
  "cargo_metadata 0.19.2",
- "fs-err",
+ "fs-err 3.1.0",
  "omicron-workspace-hack",
  "serde",
  "toml_edit 0.22.24",
@@ -7592,7 +7616,7 @@ dependencies = [
  "cargo_metadata 0.19.2",
  "chrono",
  "clap",
- "fs-err",
+ "fs-err 3.1.0",
  "futures",
  "hex",
  "omicron-pins",
@@ -7673,6 +7697,7 @@ dependencies = [
  "chrono",
  "clap",
  "clickhouse-admin-types",
+ "cockroach-admin-client",
  "crucible-agent-client",
  "derive_more",
  "display-error-chain",
@@ -7863,7 +7888,7 @@ dependencies = [
  "elliptic-curve",
  "ff",
  "flate2",
- "fs-err",
+ "fs-err 3.1.0",
  "futures",
  "futures-channel",
  "futures-core",
@@ -8044,7 +8069,7 @@ dependencies = [
  "dns-server-api",
  "dropshot 0.16.0",
  "ereport-api",
- "fs-err",
+ "fs-err 3.1.0",
  "gateway-api",
  "hex",
  "indent_write",
@@ -8141,7 +8166,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa#cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa"
+source = "git+https://github.com/oxidecomputer/opte?rev=88adb1a5df689b3e2daddab9325ee94047f6ffad#88adb1a5df689b3e2daddab9325ee94047f6ffad"
 dependencies = [
  "bitflags 2.9.0",
  "cfg-if",
@@ -8160,7 +8185,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa#cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa"
+source = "git+https://github.com/oxidecomputer/opte?rev=88adb1a5df689b3e2daddab9325ee94047f6ffad#88adb1a5df689b3e2daddab9325ee94047f6ffad"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -8173,7 +8198,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa#cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa"
+source = "git+https://github.com/oxidecomputer/opte?rev=88adb1a5df689b3e2daddab9325ee94047f6ffad#88adb1a5df689b3e2daddab9325ee94047f6ffad"
 dependencies = [
  "libc",
  "libnet",
@@ -8242,7 +8267,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa#cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa"
+source = "git+https://github.com/oxidecomputer/opte?rev=88adb1a5df689b3e2daddab9325ee94047f6ffad#88adb1a5df689b3e2daddab9325ee94047f6ffad"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -11000,6 +11025,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "secrecy"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e891af845473308773346dc847b2c23ee78fe442e0472ac50e22a18a93d3ae5a"
+dependencies = [
+ "zeroize",
+]
+
+[[package]]
 name = "security-framework"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11465,16 +11499,27 @@ dependencies = [
 name = "sled-diagnostics"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "camino",
  "cfg-if",
- "fs-err",
+ "fs-err 3.1.0",
  "futures",
+ "illumos-utils",
  "libc",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "once_cell",
+ "oxlog",
+ "rand 0.8.5",
  "schemars",
  "serde",
+ "sled-storage",
  "slog",
  "thiserror 1.0.69",
  "tokio",
+ "zip 2.6.1",
 ]
 
 [[package]]
@@ -11837,7 +11882,7 @@ dependencies = [
  "libipcc",
  "pem-rfc7468",
  "rustls 0.23.19",
- "secrecy",
+ "secrecy 0.8.0",
  "serde",
  "sha2",
  "sha3",
@@ -13025,7 +13070,7 @@ dependencies = [
  "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
- "secrecy",
+ "secrecy 0.10.3",
  "serde",
  "serde_with",
  "sha3",
@@ -13127,7 +13172,7 @@ dependencies = [
  "daft",
  "debug-ignore",
  "flate2",
- "fs-err",
+ "fs-err 2.11.0",
  "futures",
  "hex",
  "hubtools",
@@ -13463,7 +13508,7 @@ dependencies = [
  "display-error-chain",
  "dropshot 0.16.0",
  "flate2",
- "fs-err",
+ "fs-err 3.1.0",
  "futures",
  "hex",
  "hubtools",
@@ -14033,7 +14078,7 @@ dependencies = [
  "expectorate",
  "flate2",
  "flume",
- "fs-err",
+ "fs-err 3.1.0",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -14547,7 +14592,7 @@ dependencies = [
  "cargo_toml",
  "clap",
  "dev-tools-common",
- "fs-err",
+ "fs-err 3.1.0",
  "macaddr",
  "serde",
  "swrite",
@@ -14777,6 +14822,7 @@ dependencies = [
  "indexmap 2.7.1",
  "memchr",
  "zopfli",
+ "zstd",
 ]
 
 [[package]]
@@ -14861,4 +14907,32 @@ dependencies = [
  "log",
  "once_cell",
  "simd-adler32",
+]
+
+[[package]]
+name = "zstd"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "7.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3051792fbdc2e1e143244dc28c60f73d8470e93f3f9cbd0ead44da5ed802722"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.0.14+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fb060d4926e4ac3a3ad15d864e99ceb5f343c6b34f5bd6d81ae6ed417311be5"
+dependencies = [
+ "cc",
+ "pkg-config",
 ]

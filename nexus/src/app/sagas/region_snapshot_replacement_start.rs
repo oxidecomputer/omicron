@@ -1238,7 +1238,6 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::views;
     use nexus_types::identity::Asset;
-    use omicron_common::disk::DatasetKind;
     use omicron_uuid_kinds::GenericUuid;
     use sled_agent_client::VolumeConstructionRequest;
 
@@ -1501,24 +1500,18 @@ pub(crate) mod test {
         let mut non_destroyed_regions_from_agent = vec![];
 
         for zpool in test.zpools() {
-            for dataset in &zpool.datasets {
-                if !matches!(dataset.kind, DatasetKind::Crucible) {
-                    continue;
-                }
+            let dataset = zpool.crucible_dataset();
+            let crucible_dataset =
+                sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+            for region in crucible_dataset.list() {
+                match region.state {
+                    crucible_agent_client::types::State::Tombstoned
+                    | crucible_agent_client::types::State::Destroyed => {
+                        // ok
+                    }
 
-                let crucible_dataset =
-                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
-                for region in crucible_dataset.list() {
-                    match region.state {
-                        crucible_agent_client::types::State::Tombstoned
-                        | crucible_agent_client::types::State::Destroyed => {
-                            // ok
-                        }
-
-                        _ => {
-                            non_destroyed_regions_from_agent
-                                .push(region.clone());
-                        }
+                    _ => {
+                        non_destroyed_regions_from_agent.push(region.clone());
                     }
                 }
             }

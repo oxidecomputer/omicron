@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use rand::rngs::OsRng;
-use secrecy::{DebugSecret, ExposeSecret, Secret};
+use secrecy::{ExposeSecret, SecretBox};
 use std::fmt::Debug;
 use vsss_rs::curve25519::WrappedScalar;
 use vsss_rs::curve25519_dalek::Scalar;
@@ -38,21 +38,16 @@ use vsss_rs::subtle::ConstantTimeEq;
 /// `rack unlock`. The establishment of secure channels and the ability to trust
 /// the validity of a participating peer is outside the scope of this particular
 /// type and orthogonal to its implementation.
+#[derive(Debug)]
 pub struct RackSecret {
-    secret: Secret<Scalar>,
+    secret: SecretBox<Scalar>,
 }
 
 impl Clone for RackSecret {
     fn clone(&self) -> Self {
-        RackSecret { secret: Secret::new(*self.secret.expose_secret()) }
-    }
-}
-
-impl DebugSecret for RackSecret {}
-
-impl Debug for RackSecret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Self::debug_secret(f)
+        RackSecret {
+            secret: SecretBox::new(Box::new(*self.secret.expose_secret())),
+        }
     }
 }
 
@@ -68,23 +63,29 @@ impl RackSecret {
     /// Create a secret based on Curve25519
     pub fn new() -> RackSecret {
         let mut rng = OsRng;
-        RackSecret { secret: Secret::new(Scalar::random(&mut rng)) }
+        RackSecret {
+            secret: SecretBox::new(Box::new(Scalar::random(&mut rng))),
+        }
     }
 
-    /// Split a secert into `total_shares` number of shares, where combining
+    /// Split a secret into `total_shares` number of shares, where combining
     /// `threshold` of the shares can be used to recover the secret.
     pub fn split(
         &self,
         threshold: u8,
         total_shares: u8,
-    ) -> Result<Secret<Vec<Vec<u8>>>, vsss_rs::Error> {
+    ) -> Result<SecretBox<Vec<Vec<u8>>>, vsss_rs::Error> {
         let mut rng = OsRng;
-        Ok(Secret::new(shamir::split_secret::<WrappedScalar, u8, Vec<u8>>(
+        Ok(SecretBox::new(Box::new(shamir::split_secret::<
+            WrappedScalar,
+            u8,
+            Vec<u8>,
+        >(
             threshold as usize,
             total_shares as usize,
             (*self.secret.expose_secret()).into(),
             &mut rng,
-        )?))
+        )?)))
     }
 
     /// Combine a set of shares and return a RackSecret
@@ -93,7 +94,7 @@ impl RackSecret {
         shares: &[Vec<u8>],
     ) -> Result<RackSecret, vsss_rs::Error> {
         let wrapped_scalar: WrappedScalar = vsss_rs::combine_shares(shares)?;
-        Ok(RackSecret { secret: Secret::new(wrapped_scalar.0) })
+        Ok(RackSecret { secret: SecretBox::new(Box::new(wrapped_scalar.0)) })
     }
 
     pub fn expose_secret(&self) -> &Scalar {

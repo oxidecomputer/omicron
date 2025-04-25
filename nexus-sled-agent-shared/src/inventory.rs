@@ -654,6 +654,18 @@ pub enum OmicronZoneImageSource {
     Artifact { hash: ArtifactHash },
 }
 
+impl OmicronZoneImageSource {
+    /// Return the artifact hash used for the zone image, if the zone's image
+    /// source is from the artifact store.
+    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
+        if let OmicronZoneImageSource::Artifact { hash } = self {
+            Some(*hash)
+        } else {
+            None
+        }
+    }
+}
+
 // See `OmicronZoneConfig`. This is a separate function instead of being `impl
 // Default` because we don't want to accidentally use this default in Rust code.
 fn deserialize_image_source_default() -> OmicronZoneImageSource {

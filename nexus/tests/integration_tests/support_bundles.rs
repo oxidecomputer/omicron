@@ -19,7 +19,6 @@ use nexus_types::external_api::shared::SupportBundleInfo;
 use nexus_types::external_api::shared::SupportBundleState;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
-use omicron_common::api::internal::shared::DatasetKind;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
@@ -348,11 +347,8 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     // in our disk test.
     let mut debug_dataset_count = 0;
     for zpool in disk_test.zpools() {
-        for dataset in &zpool.datasets {
-            if matches!(dataset.kind, DatasetKind::Debug) {
-                debug_dataset_count += 1;
-            }
-        }
+        let _dataset = zpool.debug_dataset();
+        debug_dataset_count += 1;
     }
     assert_eq!(debug_dataset_count, 1);
 
