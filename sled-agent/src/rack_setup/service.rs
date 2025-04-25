@@ -117,6 +117,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
+use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
@@ -127,8 +128,6 @@ use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::time_sync::TimeSync;
 use sled_hardware_types::underlay::BootstrapInterface;
-use sled_storage::dataset::CONFIG_DATASET;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet, btree_map};
@@ -257,15 +256,14 @@ impl RackSetupService {
     /// Arguments:
     /// - `log`: The logger.
     /// - `config`: The config file, which is used to setup the rack.
-    /// - `storage_manager`: A handle for interacting with the storage manager
-    ///   task
+    /// - `internal_disks_rx`: Tells us about available internal disks
     /// - `local_bootstrap_agent`: Communication channel by which we can send
     ///   commands to our local bootstrap-agent (e.g., to start sled-agents)
     /// - `bootstore` - A handle to call bootstore APIs
     pub(crate) fn new(
         log: Logger,
         config: Config,
-        storage_manager: StorageHandle,
+        internal_disks_rx: InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
         step_tx: watch::Sender<RssStep>,
@@ -275,7 +273,7 @@ impl RackSetupService {
             if let Err(e) = svc
                 .run(
                     &config,
-                    &storage_manager,
+                    &internal_disks_rx,
                     local_bootstrap_agent,
                     bootstore,
                     step_tx,
@@ -375,86 +373,9 @@ impl ServiceInner {
                 "datasets" => ?sled_config.datasets,
                 "zones" => ?sled_config.zones,
             );
-            let result = client.omicron_config_put(&sled_config).await;
-            let error = match result {
-                Ok(response) => {
-                    let response = response.into_inner();
-
-                    // An HTTP OK may contain _partial_ success: check whether
-                    // we got any individual disk failures, and split those out
-                    // into transient/permanent cases based on whether they
-                    // indicate we should retry.
-                    let disk_errors =
-                        response.disks.into_iter().filter_map(|status| {
-                            status.err.map(|err| (status.identity, err))
-                        });
-                    let mut transient_errors = Vec::new();
-                    let mut permanent_errors = Vec::new();
-                    for (identity, error) in disk_errors {
-                        if error.retryable() {
-                            transient_errors.push(format!(
-                                "Retryable error initializing disk \
-                                 {} / {} / {}: {}",
-                                identity.vendor,
-                                identity.model,
-                                identity.serial,
-                                InlineErrorChain::new(&error)
-                            ));
-                        } else {
-                            permanent_errors.push(format!(
-                                "Non-retryable error initializing disk \
-                                 {} / {} / {}: {}",
-                                identity.vendor,
-                                identity.model,
-                                identity.serial,
-                                InlineErrorChain::new(&error)
-                            ));
-                        }
-                    }
-                    if !permanent_errors.is_empty() {
-                        return Err(BackoffError::permanent(
-                            SetupServiceError::DiskInitializationPermanent {
-                                permanent_errors,
-                            },
-                        ));
-                    }
-                    if !transient_errors.is_empty() {
-                        return Err(BackoffError::transient(
-                            SetupServiceError::DiskInitializationTransient {
-                                transient_errors,
-                            },
-                        ));
-                    }
-
-                    // No individual disk errors reported; all disks were
-                    // initialized. Check for any dataset errors; these are not
-                    // retryable.
-                    let dataset_errors = response
-                        .datasets
-                        .into_iter()
-                        .filter_map(|status| {
-                            status.err.map(|err| {
-                                format!(
-                                    "Error initializing dataset {}: {err}",
-                                    status.dataset_name.full_name()
-                                )
-                            })
-                        })
-                        .collect::<Vec<_>>();
-                    if !dataset_errors.is_empty() {
-                        return Err(BackoffError::permanent(
-                            SetupServiceError::DatasetInitialization {
-                                errors: dataset_errors,
-                            },
-                        ));
-                    }
-
-                    // No individual dataset errors reported. We don't get
-                    // status for individual zones (any failure there results in
-                    // an HTTP-level error), so everything is good.
-                    return Ok(());
-                }
-                Err(error) => error,
+            let Err(error) = client.omicron_config_put(&sled_config).await
+            else {
+                return Ok(());
             };
 
             if let sled_agent_client::Error::ErrorResponse(response) = &error {
@@ -502,6 +423,16 @@ impl ServiceInner {
         Ok(())
     }
 
+    // Wait until the config reconciler on the target sled has successfully
+    // reconciled the config at `generation`.
+    async fn wait_for_config_reconciliation_on_sled(
+        &self,
+        _sled_address: SocketAddrV6,
+        _generation: Generation,
+    ) -> Result<(), SetupServiceError> {
+        unimplemented!("needs updated inventory")
+    }
+
     // Ensure that the desired sled configuration for a particular zone version
     // is deployed.
     //
@@ -530,21 +461,27 @@ impl ServiceInner {
                     })?
                     .clone();
 
+                // We bump the zone generation as we step through phases of
+                // RSS; use that as the overall sled config generation.
+                let generation = zones_config.generation;
                 let sled_config = OmicronSledConfig {
-                    // We bump the zone generation as we step through phases of
-                    // RSS; use that as the overall sled config generation.
-                    generation: zones_config.generation,
+                    generation,
                     disks: config
                         .disks
                         .iter()
                         .map(|c| c.clone().into())
                         .collect(),
                     datasets: config.datasets.values().cloned().collect(),
-                    zones: zones_config.zones.iter().cloned().collect(),
+                    zones: zones_config.zones.into_iter().collect(),
                     remove_mupdate_override: None,
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
+                self.wait_for_config_reconciliation_on_sled(
+                    *sled_address,
+                    generation,
+                )
+                .await?;
 
                 Ok::<(), SetupServiceError>(())
             }),
@@ -1121,7 +1058,7 @@ impl ServiceInner {
     async fn run(
         &self,
         config: &Config,
-        storage_manager: &StorageHandle,
+        internal_disks_rx: &InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
         step_tx: watch::Sender<RssStep>,
@@ -1134,19 +1071,18 @@ impl ServiceInner {
             config.az_subnet(),
         )?;
 
-        let started_marker_paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter()
+        let config_dataset_paths = internal_disks_rx
+            .current()
+            .all_config_datasets()
+            .collect::<Vec<_>>();
+
+        let started_marker_paths: Vec<Utf8PathBuf> = config_dataset_paths
+            .iter()
             .map(|p| p.join(RSS_STARTED_FILENAME))
             .collect();
 
-        let completed_marker_paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter()
+        let completed_marker_paths: Vec<Utf8PathBuf> = config_dataset_paths
+            .iter()
             .map(|p| p.join(RSS_COMPLETED_FILENAME))
             .collect();
 

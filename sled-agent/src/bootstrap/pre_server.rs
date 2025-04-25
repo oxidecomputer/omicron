@@ -20,7 +20,6 @@ use crate::long_running_tasks::{
     LongRunningTaskHandles, spawn_all_longrunning_tasks,
 };
 use crate::services::ServiceManager;
-use crate::services::TimeSyncConfig;
 use crate::sled_agent::SledAgent;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
@@ -134,23 +133,17 @@ impl BootstrapAgentStartup {
         let global_zone_bootstrap_ip =
             startup_networking.global_zone_bootstrap_ip;
 
-        let time_sync = if let Some(true) = config.skip_timesync {
-            TimeSyncConfig::Skip
-        } else {
-            TimeSyncConfig::Normal
-        };
-
         let service_manager = ServiceManager::new(
             &base_log,
             ddm_reconciler,
             startup_networking,
             sled_mode,
-            time_sync,
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
-            long_running_task_handles.storage_manager.clone(),
-            long_running_task_handles.zone_bundler.clone(),
-            long_running_task_handles.zone_image_resolver.clone(),
+            long_running_task_handles
+                .config_reconciler
+                .internal_disks_rx()
+                .clone(),
         );
 
         // Inform the hardware monitor that the service manager is ready

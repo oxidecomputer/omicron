@@ -14,6 +14,7 @@ use futures::Stream;
 use futures::StreamExt;
 use illumos_utils::zfs::DatasetProperties;
 use omicron_common::api::external::Error as ExternalError;
+use omicron_common::api::external::Generation;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
@@ -28,15 +29,16 @@ use range_requests::PotentialRange;
 use range_requests::SingleRange;
 use sha2::{Digest, Sha256};
 use sled_agent_api::*;
+use sled_agent_config_reconciler::ConfigReconcilerHandle;
+use sled_agent_config_reconciler::DatasetTaskError;
 use sled_agent_types::support_bundle::BUNDLE_FILE_NAME;
 use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME_SUFFIX;
 use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::NestedDatasetLocation;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::io::Write;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
@@ -86,6 +88,9 @@ pub enum Error {
 
     #[error(transparent)]
     Zip(#[from] ZipError),
+
+    #[error(transparent)]
+    DatasetTask(#[from] DatasetTaskError),
 }
 
 fn err_str(err: &dyn std::error::Error) -> String {
@@ -144,7 +149,6 @@ pub trait LocalStorage: Sync {
     async fn dyn_ensure_mounted_and_get_mountpoint(
         &self,
         dataset: NestedDatasetLocation,
-        mount_root: &Utf8Path,
     ) -> Result<Utf8PathBuf, Error>;
 
     /// Returns all nested datasets within an existing dataset
@@ -165,19 +169,29 @@ pub trait LocalStorage: Sync {
         &self,
         name: NestedDatasetLocation,
     ) -> Result<(), Error>;
-
-    /// Returns the root filesystem path where datasets are mounted.
-    ///
-    /// This is typically "/" in prod, but can be a temporary directory
-    /// for tests to isolate storage that typically appears globally.
-    fn zpool_mountpoint_root(&self) -> Cow<Utf8Path>;
 }
 
 /// This implementation is effectively a pass-through to the real methods
 #[async_trait]
-impl LocalStorage for StorageHandle {
+impl LocalStorage for ConfigReconcilerHandle {
     async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
-        self.datasets_config_list().await.map_err(|err| err.into())
+        // TODO-cleanup This is super gross; add a better API (maybe fetch a
+        // single dataset by ID, since that's what our caller wants?)
+        Ok(self
+            .inventory()
+            .ledgered_sled_config
+            .map(|sled_config| DatasetsConfig {
+                generation: sled_config.generation,
+                datasets: sled_config
+                    .datasets
+                    .into_iter()
+                    .map(|d| (d.id, d))
+                    .collect(),
+            })
+            .unwrap_or_else(|| DatasetsConfig {
+                generation: Generation::new(),
+                datasets: BTreeMap::new(),
+            }))
     }
 
     async fn dyn_dataset_get(
@@ -205,12 +219,10 @@ impl LocalStorage for StorageHandle {
     async fn dyn_ensure_mounted_and_get_mountpoint(
         &self,
         dataset: NestedDatasetLocation,
-        mount_root: &Utf8Path,
     ) -> Result<Utf8PathBuf, Error> {
-        dataset
-            .ensure_mounted_and_get_mountpoint(mount_root)
+        self.nested_dataset_ensure_mounted(dataset)
             .await
-            .map_err(Error::from)
+            .map_err(|err| err.into())
     }
 
     async fn dyn_nested_dataset_list(
@@ -234,10 +246,6 @@ impl LocalStorage for StorageHandle {
     ) -> Result<(), Error> {
         self.nested_dataset_destroy(name).await.map_err(|err| err.into())
     }
-
-    fn zpool_mountpoint_root(&self) -> Cow<Utf8Path> {
-        Cow::Borrowed(self.mount_config().root.as_path())
-    }
 }
 
 /// This implementation allows storage bundles to be stored on simulated storage
@@ -257,10 +265,10 @@ impl LocalStorage for crate::sim::Storage {
     async fn dyn_ensure_mounted_and_get_mountpoint(
         &self,
         dataset: NestedDatasetLocation,
-        mount_root: &Utf8Path,
     ) -> Result<Utf8PathBuf, Error> {
+        let slf = self.lock();
         // Simulated storage treats all datasets as mounted.
-        Ok(dataset.mountpoint(mount_root))
+        Ok(dataset.mountpoint(slf.root()))
     }
 
     async fn dyn_nested_dataset_list(
@@ -283,10 +291,6 @@ impl LocalStorage for crate::sim::Storage {
         name: NestedDatasetLocation,
     ) -> Result<(), Error> {
         self.lock().nested_dataset_destroy(name).map_err(|err| err.into())
-    }
-
-    fn zpool_mountpoint_root(&self) -> Cow<Utf8Path> {
-        Cow::Owned(self.lock().root().to_path_buf())
     }
 }
 
@@ -512,10 +516,7 @@ impl<'a> SupportBundleManager<'a> {
             // The dataset for a support bundle exists.
             let support_bundle_path = self
                 .storage
-                .dyn_ensure_mounted_and_get_mountpoint(
-                    dataset.name,
-                    &self.storage.zpool_mountpoint_root(),
-                )
+                .dyn_ensure_mounted_and_get_mountpoint(dataset.name)
                 .await?
                 .join(BUNDLE_FILE_NAME);
 
@@ -625,13 +626,8 @@ impl<'a> SupportBundleManager<'a> {
         info!(log, "Dataset does exist for bundle");
 
         // The mounted root of the support bundle dataset
-        let support_bundle_dir = self
-            .storage
-            .dyn_ensure_mounted_and_get_mountpoint(
-                dataset,
-                &self.storage.zpool_mountpoint_root(),
-            )
-            .await?;
+        let support_bundle_dir =
+            self.storage.dyn_ensure_mounted_and_get_mountpoint(dataset).await?;
         let support_bundle_path = support_bundle_dir.join(BUNDLE_FILE_NAME);
         let support_bundle_path_tmp = support_bundle_dir.join(format!(
             "{}-{BUNDLE_TMP_FILE_NAME_SUFFIX}",
@@ -737,13 +733,8 @@ impl<'a> SupportBundleManager<'a> {
             NestedDatasetLocation { path: support_bundle_id.to_string(), root };
 
         // The mounted root of the support bundle dataset
-        let support_bundle_dir = self
-            .storage
-            .dyn_ensure_mounted_and_get_mountpoint(
-                dataset,
-                &self.storage.zpool_mountpoint_root(),
-            )
-            .await?;
+        let support_bundle_dir =
+            self.storage.dyn_ensure_mounted_and_get_mountpoint(dataset).await?;
         let path = support_bundle_dir.join(BUNDLE_FILE_NAME);
 
         let f = tokio::fs::File::open(&path).await?;
@@ -944,10 +935,79 @@ mod tests {
     use omicron_common::disk::DatasetsConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
+    use sled_storage::manager::StorageHandle;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::collections::BTreeMap;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
+
+    // TODO-cleanup Should we rework these tests to not use StorageHandle (real
+    // code now goes through `ConfigReconcilerHandle`)?
+    #[async_trait]
+    impl LocalStorage for StorageHandle {
+        async fn dyn_datasets_config_list(
+            &self,
+        ) -> Result<DatasetsConfig, Error> {
+            self.datasets_config_list().await.map_err(|err| err.into())
+        }
+
+        fn dyn_dataset_get(
+            &self,
+            dataset_name: &String,
+        ) -> Result<DatasetProperties, Error> {
+            let Some(dataset) =
+                illumos_utils::zfs::Zfs::get_dataset_properties(
+                    &[dataset_name.clone()],
+                    illumos_utils::zfs::WhichDatasets::SelfOnly,
+                )
+                .map_err(|err| Error::DatasetLookup(err))?
+                .pop()
+            else {
+                // This should not be possible, unless the "zfs get" command is
+                // behaving unpredictably. We're only asking for a single dataset,
+                // so on success, we should see the result of that dataset.
+                return Err(Error::DatasetLookup(anyhow::anyhow!(
+                    "Zfs::get_dataset_properties returned an empty vec?"
+                )));
+            };
+
+            Ok(dataset)
+        }
+
+        async fn dyn_ensure_mounted_and_get_mountpoint(
+            &self,
+            dataset: NestedDatasetLocation,
+        ) -> Result<Utf8PathBuf, Error> {
+            dataset
+                .ensure_mounted_and_get_mountpoint(&self.mount_config().root)
+                .await
+                .map_err(|err| err.into())
+        }
+
+        async fn dyn_nested_dataset_list(
+            &self,
+            name: NestedDatasetLocation,
+            options: NestedDatasetListOptions,
+        ) -> Result<Vec<NestedDatasetConfig>, Error> {
+            self.nested_dataset_list(name, options)
+                .await
+                .map_err(|err| err.into())
+        }
+
+        async fn dyn_nested_dataset_ensure(
+            &self,
+            config: NestedDatasetConfig,
+        ) -> Result<(), Error> {
+            self.nested_dataset_ensure(config).await.map_err(|err| err.into())
+        }
+
+        async fn dyn_nested_dataset_destroy(
+            &self,
+            name: NestedDatasetLocation,
+        ) -> Result<(), Error> {
+            self.nested_dataset_destroy(name).await.map_err(|err| err.into())
+        }
+    }
 
     struct SingleU2StorageHarness {
         storage_test_harness: StorageManagerTestHarness,
