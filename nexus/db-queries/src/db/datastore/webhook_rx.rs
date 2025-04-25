@@ -638,13 +638,16 @@ impl DataStore {
         match subscription {
             WebhookSubscriptionKind::Glob(glob) => {
                 let glob = WebhookRxEventGlob::new(rx_id, glob);
-                let result: WebhookRxEventGlob =
+                let result: Option<WebhookRxEventGlob> =
                     WebhookReceiver::insert_resource(
                         rx_id.into_untyped_uuid(),
                         diesel::insert_into(glob_dsl::webhook_rx_event_glob)
-                            .values(glob),
+                            .values(glob)
+                            // If there's already a subscription to this glob,
+                            // that's fine...
+                            .on_conflict_do_nothing(),
                     )
-                    .insert_and_get_result_async(conn)
+                    .insert_and_get_optional_result_async(conn)
                     .await
                     .map_err(async_insert_error_to_txn(rx_id))?;
                 slog::debug!(
@@ -661,15 +664,18 @@ impl DataStore {
                     glob: None,
                     time_created: chrono::Utc::now(),
                 };
-                let result: WebhookRxSubscription =
+                let result: Option<WebhookRxSubscription> =
                     WebhookReceiver::insert_resource(
                         rx_id.into_untyped_uuid(),
                         diesel::insert_into(
                             subscription_dsl::webhook_rx_subscription,
                         )
-                        .values(subscription),
+                        .values(subscription)
+                        // If there's already a subscription to this event
+                        // class, that's fine...
+                        .on_conflict_do_nothing(),
                     )
-                    .insert_and_get_result_async(conn)
+                    .insert_and_get_optional_result_async(conn)
                     .await
                     .map_err(async_insert_error_to_txn(rx_id))?;
                 slog::debug!(

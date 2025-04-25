@@ -1632,6 +1632,12 @@ async fn subscription_add_test(
     );
 
     mock.assert_calls_async(1).await;
+
+    // Finally, make sure adding a subscription is idempotent. A second POST
+    // should succeed, even though the subscriptions already exist.
+    let original_subscription = "test.foo".parse().unwrap();
+    dbg!(subscription_add(&cptestctx, rx_id, &new_subscription).await);
+    dbg!(subscription_add(&cptestctx, rx_id, &original_subscription).await);
 }
 
 #[nexus_test]
@@ -1804,4 +1810,14 @@ async fn subscription_delete_test(
     );
 
     mock.assert_calls_async(1).await;
+
+    // Deleting a subscription that doesn't exist should 404.
+    dbg!(
+        resource_helpers::object_delete_error(
+            &internal_client,
+            &subscription_delete_url(rx_id, &deleted_subscription),
+            http::StatusCode::NOT_FOUND
+        )
+        .await
+    );
 }
