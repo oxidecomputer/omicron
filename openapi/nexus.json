@@ -12103,7 +12103,7 @@
           {
             "in": "query",
             "name": "delivered",
-            "description": "If true, include only deliveries which have succeeded.",
+            "description": "If true, include  deliveries which have succeeded.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.",
             "schema": {
               "nullable": true,
               "type": "boolean"
@@ -12112,7 +12112,7 @@
           {
             "in": "query",
             "name": "failed",
-            "description": "If true, include only deliveries which have failed permanently.\n\nA delivery fails permanently when the retry limit of three total attempts is reached without a successful delivery.",
+            "description": "If true, include deliveries which have failed permanently.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.\n\nA delivery fails permanently when the retry limit of three total attempts is reached without a successful delivery.",
             "schema": {
               "nullable": true,
               "type": "boolean"
@@ -12121,7 +12121,7 @@
           {
             "in": "query",
             "name": "pending",
-            "description": "If true, include only deliveries which are currently in progress.\n\nA delivery is considered \"pending\" if  it has not yet been sent at all, or if a delivery attempt has failed but the delivery has retries remaining.",
+            "description": "If true, include  deliveries which are currently in progress.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.\n\nA delivery is considered \"pending\" if it has not yet been sent at all, or if a delivery attempt has failed but the delivery has retries remaining.",
             "schema": {
               "nullable": true,
               "type": "boolean"
