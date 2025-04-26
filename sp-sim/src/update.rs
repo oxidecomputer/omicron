@@ -18,58 +18,6 @@ use gateway_messages::UpdateChunk;
 use gateway_messages::UpdateId;
 use gateway_messages::UpdateInProgressStatus;
 
-// XXX-dap
-// Default caboose information
-
-const SP_GITC0: &str = "ffffffff";
-const SP_GITC1: &str = "fefefefe";
-const SP_VERS0: &str = "0.0.2";
-const SP_VERS1: &str = "0.0.1";
-
-const ROT_GITC0: &str = "eeeeeeee";
-const ROT_GITC1: &str = "edededed";
-const ROT_VERS0: &str = "0.0.4";
-const ROT_VERS1: &str = "0.0.3";
-// staging/devel key signature
-const ROT_STAGING_DEVEL_SIGN: &str =
-    "11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf";
-
-const STAGE0_GITC0: &str = "ddddddddd";
-const STAGE0_GITC1: &str = "dadadadad";
-const STAGE0_VERS0: &str = "0.0.200";
-const STAGE0_VERS1: &str = "0.0.200";
-
-pub enum BaseboardKind {
-    Gimlet,
-    Sidecar,
-}
-
-impl BaseboardKind {
-    fn sp_board(&self) -> &str {
-        match self {
-            BaseboardKind::Gimlet => &SIM_GIMLET_BOARD,
-            BaseboardKind::Sidecar => &SIM_SIDECAR_BOARD,
-        }
-    }
-
-    fn sp_name(&self) -> &str {
-        match self {
-            BaseboardKind::Gimlet => "SimGimlet",
-            BaseboardKind::Sidecar => "SimSidecar",
-        }
-    }
-
-    fn rot_name(&self) -> &str {
-        // XXX-dap this is inconsistent with the previous behavior.  There,
-        // ROT_NAME was SimGimletRot (not SimGimlet) but sidecar's ROT_NAME was
-        // SimSidecar (not SimSidecarRot).
-        match self {
-            BaseboardKind::Gimlet => "SimGimletRot",
-            BaseboardKind::Sidecar => "SimSidecarRot",
-        }
-    }
-}
-
 pub(crate) struct SimSpUpdate {
     state: UpdateState,
     last_sp_update_data: Option<Box<[u8]>>,
@@ -86,57 +34,29 @@ pub(crate) struct SimSpUpdate {
     rot_state: RotStateV2,
 }
 
-enum CabooseValue {
-    // emulate an actual caboose
-    Caboose(hubtools::Caboose),
-    // emulate "the image does not include a caboose"
-    InvalidMissing,
-    // emulate "the image caboose does not contain 'KEY'"
-    InvalidMissingAllKeys,
-    // emulate "failed to read data from the caboose" (erased)
-    InvalidFailedRead,
-}
-
-impl CabooseValue {
-    fn value(&self, key: [u8; 4], buf: &mut [u8]) -> Result<usize, SpError> {
-        match self {
-            CabooseValue::Caboose(caboose) => {
-                let value = match &key {
-                    b"GITC" => caboose.git_commit(),
-                    b"BORD" => caboose.board(),
-                    b"NAME" => caboose.name(),
-                    b"VERS" => caboose.version(),
-                    b"SIGN" => caboose.sign(),
-                    _ => return Err(SpError::NoSuchCabooseKey(key)),
-                };
-
-                match value {
-                    Ok(value) => {
-                        buf[..value.len()].copy_from_slice(value);
-                        Ok(value.len())
-                    }
-                    Err(hubtools::CabooseError::MissingTag { .. }) => {
-                        Err(SpError::NoSuchCabooseKey(key))
-                    }
-                    Err(hubtools::CabooseError::TlvcReadError(_)) => {
-                        Err(SpError::CabooseReadError)
-                    }
-                }
-            }
-            CabooseValue::InvalidMissing => Err(SpError::NoCaboose),
-            CabooseValue::InvalidMissingAllKeys => {
-                Err(SpError::NoSuchCabooseKey(key))
-            }
-            CabooseValue::InvalidFailedRead => Err(SpError::CabooseReadError),
-        }
-    }
-}
-
 impl SimSpUpdate {
     pub(crate) fn new(
         baseboard_kind: BaseboardKind,
         no_stage0_caboose: bool,
     ) -> Self {
+        const SP_GITC0: &str = "ffffffff";
+        const SP_GITC1: &str = "fefefefe";
+        const SP_VERS0: &str = "0.0.2";
+        const SP_VERS1: &str = "0.0.1";
+
+        const ROT_GITC0: &str = "eeeeeeee";
+        const ROT_GITC1: &str = "edededed";
+        const ROT_VERS0: &str = "0.0.4";
+        const ROT_VERS1: &str = "0.0.3";
+        // staging/devel key signature
+        const ROT_STAGING_DEVEL_SIGN: &str =
+            "11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf";
+
+        const STAGE0_GITC0: &str = "ddddddddd";
+        const STAGE0_GITC1: &str = "dadadadad";
+        const STAGE0_VERS0: &str = "0.0.200";
+        const STAGE0_VERS1: &str = "0.0.200";
+
         let sp_board = baseboard_kind.sp_board();
         let sp_name = baseboard_kind.sp_name();
         let rot_name = baseboard_kind.rot_name();
@@ -417,6 +337,85 @@ impl SimSpUpdate {
 
     pub(crate) fn rot_state(&self) -> &RotStateV2 {
         &self.rot_state
+    }
+}
+
+/// Specifies what kind of device we're constructing caboose metadata for
+pub enum BaseboardKind {
+    Gimlet,
+    Sidecar,
+}
+
+impl BaseboardKind {
+    fn sp_board(&self) -> &str {
+        match self {
+            BaseboardKind::Gimlet => &SIM_GIMLET_BOARD,
+            BaseboardKind::Sidecar => &SIM_SIDECAR_BOARD,
+        }
+    }
+
+    fn sp_name(&self) -> &str {
+        match self {
+            BaseboardKind::Gimlet => "SimGimlet",
+            BaseboardKind::Sidecar => "SimSidecar",
+        }
+    }
+
+    fn rot_name(&self) -> &str {
+        // XXX-dap this is inconsistent with the previous behavior.  There,
+        // ROT_NAME was SimGimletRot (not SimGimlet) but sidecar's ROT_NAME was
+        // SimSidecar (not SimSidecarRot).
+        match self {
+            BaseboardKind::Gimlet => "SimGimletRot",
+            BaseboardKind::Sidecar => "SimSidecarRot",
+        }
+    }
+}
+
+/// Represents a simulated caboose
+enum CabooseValue {
+    /// emulate an actual caboose
+    Caboose(hubtools::Caboose),
+    /// emulate "the image does not include a caboose"
+    InvalidMissing,
+    /// emulate "the image caboose does not contain 'KEY'"
+    InvalidMissingAllKeys,
+    /// emulate "failed to read data from the caboose" (erased)
+    InvalidFailedRead,
+}
+
+impl CabooseValue {
+    fn value(&self, key: [u8; 4], buf: &mut [u8]) -> Result<usize, SpError> {
+        match self {
+            CabooseValue::Caboose(caboose) => {
+                let value = match &key {
+                    b"GITC" => caboose.git_commit(),
+                    b"BORD" => caboose.board(),
+                    b"NAME" => caboose.name(),
+                    b"VERS" => caboose.version(),
+                    b"SIGN" => caboose.sign(),
+                    _ => return Err(SpError::NoSuchCabooseKey(key)),
+                };
+
+                match value {
+                    Ok(value) => {
+                        buf[..value.len()].copy_from_slice(value);
+                        Ok(value.len())
+                    }
+                    Err(hubtools::CabooseError::MissingTag { .. }) => {
+                        Err(SpError::NoSuchCabooseKey(key))
+                    }
+                    Err(hubtools::CabooseError::TlvcReadError(_)) => {
+                        Err(SpError::CabooseReadError)
+                    }
+                }
+            }
+            CabooseValue::InvalidMissing => Err(SpError::NoCaboose),
+            CabooseValue::InvalidMissingAllKeys => {
+                Err(SpError::NoSuchCabooseKey(key))
+            }
+            CabooseValue::InvalidFailedRead => Err(SpError::CabooseReadError),
+        }
     }
 }
 
