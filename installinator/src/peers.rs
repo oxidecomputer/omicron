@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
+    collections::BTreeSet,
     fmt,
     net::{AddrParseError, IpAddr, SocketAddr},
     str::FromStr,
@@ -31,7 +32,7 @@ impl DiscoveryMechanism {
     pub(crate) async fn discover_peers(
         &self,
         log: &slog::Logger,
-    ) -> Result<Vec<PeerAddress>, DiscoverPeersError> {
+    ) -> Result<PeerAddresses, DiscoverPeersError> {
         let peers = match self {
             Self::Bootstrap => {
                 // Note: we do not abort this process and instead keep retrying
@@ -61,7 +62,7 @@ impl DiscoveryMechanism {
                     })
                     .collect()
             }
-            Self::List(peers) => peers.clone(),
+            Self::List(peers) => peers.iter().copied().collect(),
         };
 
         Ok(peers)
@@ -97,6 +98,32 @@ impl FromStr for DiscoveryMechanism {
                 s
             );
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct PeerAddresses {
+    peers: BTreeSet<PeerAddress>,
+}
+
+impl PeerAddresses {
+    pub(crate) fn peers(&self) -> &BTreeSet<PeerAddress> {
+        &self.peers
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.peers.len()
+    }
+
+    pub(crate) fn display(&self) -> impl fmt::Display {
+        self.peers().iter().join(", ")
+    }
+}
+
+impl FromIterator<PeerAddress> for PeerAddresses {
+    fn from_iter<I: IntoIterator<Item = PeerAddress>>(iter: I) -> Self {
+        let peers = iter.into_iter().collect::<BTreeSet<_>>();
+        Self { peers }
     }
 }
 

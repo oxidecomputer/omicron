@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::{
     artifact::ArtifactClient,
     errors::DiscoverPeersError,
-    peers::{DiscoveryMechanism, PeerAddress},
+    peers::{DiscoveryMechanism, PeerAddress, PeerAddresses},
 };
 
 #[derive(Debug)]
@@ -129,17 +129,18 @@ impl ProgressReporter {
             // that if two servers both say, only one of them will
             // deterministically get the update. Need to decide post-PVT1.
             let last_reported = report.last_seen;
-            let results: Vec<_> = futures::stream::iter(peers)
-                .map(|peer| {
-                    report_backend.send_report_to_peer(
-                        peer,
-                        update_id,
-                        report.clone(),
-                    )
-                })
-                .buffer_unordered(8)
-                .collect()
-                .await;
+            let results: Vec<_> =
+                futures::stream::iter(peers.peers().iter().copied())
+                    .map(|peer| {
+                        report_backend.send_report_to_peer(
+                            peer,
+                            update_id,
+                            report.clone(),
+                        )
+                    })
+                    .buffer_unordered(8)
+                    .collect()
+                    .await;
 
             if results.iter().any(|res| res.is_ok()) {
                 Some(last_reported)
@@ -188,7 +189,7 @@ impl ReportProgressBackend {
 
     pub(crate) async fn discover_peers(
         &self,
-    ) -> Result<Vec<PeerAddress>, DiscoverPeersError> {
+    ) -> Result<PeerAddresses, DiscoverPeersError> {
         let log = self.log.new(slog::o!("task" => "discover_peers"));
         slog::debug!(log, "discovering peers");
 
@@ -255,9 +256,8 @@ pub(crate) enum SendReportStatus {
 
 #[async_trait]
 pub(crate) trait ReportProgressImpl: fmt::Debug + Send + Sync {
-    async fn discover_peers(
-        &self,
-    ) -> Result<Vec<PeerAddress>, DiscoverPeersError>;
+    async fn discover_peers(&self)
+    -> Result<PeerAddresses, DiscoverPeersError>;
 
     async fn report_progress_impl(
         &self,
@@ -287,7 +287,7 @@ impl HttpProgressBackend {
 impl ReportProgressImpl for HttpProgressBackend {
     async fn discover_peers(
         &self,
-    ) -> Result<Vec<PeerAddress>, DiscoverPeersError> {
+    ) -> Result<PeerAddresses, DiscoverPeersError> {
         self.discovery.discover_peers(&self.log).await
     }
 

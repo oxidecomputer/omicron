@@ -15,7 +15,6 @@ use installinator_client::ClientError;
 use installinator_common::{
     InstallinatorProgressMetadata, StepContext, StepProgress,
 };
-use itertools::Itertools;
 use tokio::{sync::mpsc, time::Instant};
 use tufaceous_artifact::ArtifactHashId;
 use update_engine::events::ProgressUnits;
@@ -23,7 +22,7 @@ use update_engine::events::ProgressUnits;
 use crate::{
     artifact::ArtifactClient,
     errors::{ArtifactFetchError, DiscoverPeersError, HttpError},
-    peers::PeerAddress,
+    peers::{PeerAddress, PeerAddresses},
 };
 
 /// A fetched artifact.
@@ -55,7 +54,7 @@ impl FetchedArtifact {
         let mut attempt = 0;
         loop {
             attempt += 1;
-            let peers = match discover_fn().await {
+            let fetch_backend = match discover_fn().await {
                 Ok(peers) => peers,
                 Err(DiscoverPeersError::Retry(error)) => {
                     slog::warn!(
@@ -78,13 +77,14 @@ impl FetchedArtifact {
                 }
             };
 
+            let peers = fetch_backend.peers();
             slog::info!(
                 log,
                 "discovered {} peers: [{}]",
-                peers.peer_count(),
+                peers.len(),
                 peers.display(),
             );
-            match peers.fetch_artifact(&cx, artifact_hash_id).await {
+            match fetch_backend.fetch_artifact(&cx, artifact_hash_id).await {
                 Some((peer, artifact)) => {
                     return Ok(Self { attempt, peer, artifact });
                 }
@@ -95,7 +95,7 @@ impl FetchedArtifact {
                     );
                     cx.send_progress(StepProgress::retry(format!(
                         "unable to fetch artifact from any of {} peers, retrying",
-                        peers.peer_count(),
+                        peers.len(),
                     )))
                     .await;
                     tokio::time::sleep(RETRY_DELAY).await;
@@ -146,7 +146,7 @@ impl FetchArtifactBackend {
     ) -> Option<(PeerAddress, BufList)> {
         // TODO: do we want a check phase that happens before the download?
         let peers = self.peers();
-        let mut remaining_peers = self.peer_count();
+        let mut remaining_peers = peers.len();
 
         let log = self.log.new(
             slog::o!("artifact_hash_id" => format!("{artifact_hash_id:?}")),
@@ -154,7 +154,7 @@ impl FetchArtifactBackend {
 
         slog::debug!(log, "start fetch from peers"; "remaining_peers" => remaining_peers);
 
-        for peer in peers {
+        for &peer in peers.peers() {
             remaining_peers -= 1;
 
             slog::debug!(
@@ -188,16 +188,8 @@ impl FetchArtifactBackend {
         None
     }
 
-    pub(crate) fn peers(&self) -> impl Iterator<Item = PeerAddress> + '_ {
+    pub(crate) fn peers(&self) -> &PeerAddresses {
         self.imp.peers()
-    }
-
-    pub(crate) fn peer_count(&self) -> usize {
-        self.imp.peer_count()
-    }
-
-    pub(crate) fn display(&self) -> impl fmt::Display {
-        self.peers().join(", ")
     }
 
     async fn fetch_from_peer(
@@ -307,10 +299,16 @@ impl FetchArtifactBackend {
     }
 }
 
+/// Backend implementation for fetching artifacts.
+///
+/// Note: While [`crate::reporter::ReportProgressImpl`] is a persistent
+/// structure, a new `FetchArtifactImpl` is generated separately each time
+/// discovery occurs. We should align this with `ReportProgressImpl` in the
+/// future, though we'd need some way of looking up delay information in
+/// `mock_peers`.
 #[async_trait]
 pub(crate) trait FetchArtifactImpl: fmt::Debug + Send + Sync {
-    fn peers(&self) -> Box<dyn Iterator<Item = PeerAddress> + Send + '_>;
-    fn peer_count(&self) -> usize;
+    fn peers(&self) -> &PeerAddresses;
 
     /// Returns (size, receiver) on success, and an error on failure.
     async fn fetch_from_peer_impl(
@@ -329,11 +327,11 @@ pub(crate) type FetchReceiver = mpsc::Receiver<Result<Bytes, ClientError>>;
 #[derive(Clone, Debug)]
 pub(crate) struct HttpFetchBackend {
     log: slog::Logger,
-    peers: Vec<PeerAddress>,
+    peers: PeerAddresses,
 }
 
 impl HttpFetchBackend {
-    pub(crate) fn new(log: &slog::Logger, peers: Vec<PeerAddress>) -> Self {
+    pub(crate) fn new(log: &slog::Logger, peers: PeerAddresses) -> Self {
         let log = log.new(slog::o!("component" => "HttpPeers"));
         Self { log, peers }
     }
@@ -341,12 +339,8 @@ impl HttpFetchBackend {
 
 #[async_trait]
 impl FetchArtifactImpl for HttpFetchBackend {
-    fn peers(&self) -> Box<dyn Iterator<Item = PeerAddress> + Send + '_> {
-        Box::new(self.peers.iter().copied())
-    }
-
-    fn peer_count(&self) -> usize {
-        self.peers.len()
+    fn peers(&self) -> &PeerAddresses {
+        &self.peers
     }
 
     async fn fetch_from_peer_impl(

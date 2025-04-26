@@ -91,7 +91,7 @@ struct DebugDiscoverOpts {
 
 impl DebugDiscoverOpts {
     async fn exec(self, log: &slog::Logger) -> Result<()> {
-        let peers = FetchArtifactBackend::new(
+        let backend = FetchArtifactBackend::new(
             log,
             Box::new(HttpFetchBackend::new(
                 &log,
@@ -99,7 +99,7 @@ impl DebugDiscoverOpts {
             )),
             Duration::from_secs(10),
         );
-        println!("discovered peers: {}", peers.display());
+        println!("discovered peers: {}", backend.peers().display());
         Ok(())
     }
 }
