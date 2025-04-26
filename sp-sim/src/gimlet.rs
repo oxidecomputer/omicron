@@ -8,6 +8,7 @@ use crate::config::GimletConfig;
 use crate::config::SpComponentConfig;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
+use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
 use crate::serial_number_padded;
 use crate::server;
@@ -705,7 +706,7 @@ impl Handler {
             revision: 0,
             base_mac_address: [0; 6],
             power_state: self.power_state,
-            rot: Ok(self.update_state.rot_state().clone()),
+            rot: Ok(rot_state_v2(self.update_state.rot_state())),
         }
     }
 }
@@ -1407,47 +1408,14 @@ impl SpHandler for Handler {
         if self.old_rot_state {
             Err(SpError::RequestUnsupportedForSp)
         } else {
-            // XXX-dap this needs to be updated too, both here and in Sidecar.
-            // (Where else do we construct these?)
-            const SLOT_A_DIGEST: [u8; 32] = [0xaa; 32];
-            const SLOT_B_DIGEST: [u8; 32] = [0xbb; 32];
-            const STAGE0_DIGEST: [u8; 32] = [0xcc; 32];
-            const STAGE0NEXT_DIGEST: [u8; 32] = [0xdd; 32];
-
             match version {
                 0 => Err(SpError::Update(
                     gateway_messages::UpdateError::VersionNotSupported,
                 )),
-                1 => Ok(RotBootInfo::V2(gateway_messages::RotStateV2 {
-                    active: RotSlotId::A,
-                    persistent_boot_preference: RotSlotId::A,
-                    pending_persistent_boot_preference: None,
-                    transient_boot_preference: None,
-                    slot_a_sha3_256_digest: Some(SLOT_A_DIGEST),
-                    slot_b_sha3_256_digest: Some(SLOT_B_DIGEST),
-                })),
-                _ => Ok(RotBootInfo::V3(gateway_messages::RotStateV3 {
-                    active: RotSlotId::A,
-                    persistent_boot_preference: RotSlotId::A,
-                    pending_persistent_boot_preference: None,
-                    transient_boot_preference: None,
-                    slot_a_fwid: gateway_messages::Fwid::Sha3_256(
-                        SLOT_A_DIGEST,
-                    ),
-                    slot_b_fwid: gateway_messages::Fwid::Sha3_256(
-                        SLOT_B_DIGEST,
-                    ),
-                    stage0_fwid: gateway_messages::Fwid::Sha3_256(
-                        STAGE0_DIGEST,
-                    ),
-                    stage0next_fwid: gateway_messages::Fwid::Sha3_256(
-                        STAGE0NEXT_DIGEST,
-                    ),
-                    slot_a_status: Ok(()),
-                    slot_b_status: Ok(()),
-                    stage0_status: Ok(()),
-                    stage0next_status: Ok(()),
-                })),
+                1 => Ok(RotBootInfo::V2(rot_state_v2(
+                    self.update_state.rot_state(),
+                ))),
+                _ => Ok(RotBootInfo::V3(self.update_state.rot_state().clone())),
             }
         }
     }

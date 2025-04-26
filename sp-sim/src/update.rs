@@ -11,7 +11,7 @@ use crate::SIM_ROT_BOARD;
 use crate::SIM_ROT_STAGE0_BOARD;
 use crate::SIM_SIDECAR_BOARD;
 use gateway_messages::RotSlotId;
-use gateway_messages::RotStateV2;
+use gateway_messages::RotStateV3;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
 use gateway_messages::UpdateChunk;
@@ -31,7 +31,7 @@ pub(crate) struct SimSpUpdate {
     caboose_rot_b: CabooseValue,
     caboose_stage0: CabooseValue,
     caboose_stage0next: CabooseValue,
-    rot_state: RotStateV2,
+    rot_state: RotStateV3,
 }
 
 impl SimSpUpdate {
@@ -126,13 +126,28 @@ impl SimSpUpdate {
             )
         };
 
-        let rot_state = RotStateV2 {
+        // XXX-dap these values were historically used when getting
+        // rot_boot_info(), but not when getting sp_state().
+        const SLOT_A_DIGEST: [u8; 32] = [0xaa; 32];
+        const SLOT_B_DIGEST: [u8; 32] = [0xbb; 32];
+        const STAGE0_DIGEST: [u8; 32] = [0xcc; 32];
+        const STAGE0NEXT_DIGEST: [u8; 32] = [0xdd; 32];
+
+        let rot_state = RotStateV3 {
             active: RotSlotId::A,
             persistent_boot_preference: RotSlotId::A,
             pending_persistent_boot_preference: None,
             transient_boot_preference: None,
-            slot_a_sha3_256_digest: Some([0x55; 32]),
-            slot_b_sha3_256_digest: Some([0x66; 32]),
+            slot_a_fwid: gateway_messages::Fwid::Sha3_256(SLOT_A_DIGEST),
+            slot_b_fwid: gateway_messages::Fwid::Sha3_256(SLOT_B_DIGEST),
+            stage0_fwid: gateway_messages::Fwid::Sha3_256(STAGE0_DIGEST),
+            stage0next_fwid: gateway_messages::Fwid::Sha3_256(
+                STAGE0NEXT_DIGEST,
+            ),
+            slot_a_status: Ok(()),
+            slot_b_status: Ok(()),
+            stage0_status: Ok(()),
+            stage0next_status: Ok(()),
         };
 
         Self {
@@ -335,7 +350,7 @@ impl SimSpUpdate {
         which_caboose.value(key, buf)
     }
 
-    pub(crate) fn rot_state(&self) -> &RotStateV2 {
+    pub(crate) fn rot_state(&self) -> &RotStateV3 {
         &self.rot_state
     }
 }
