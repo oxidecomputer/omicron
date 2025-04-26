@@ -352,7 +352,6 @@ impl DataStore {
 
         let rx_id = authz_rx.id().into_untyped_uuid();
         let update = db::model::WebhookReceiverUpdate {
-            subscription_gen: None,
             name: params.identity.name.map(db::model::Name),
             description: params.identity.description,
             endpoint: params.endpoint.as_ref().map(ToString::to_string),

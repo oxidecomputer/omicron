@@ -122,7 +122,6 @@ pub struct WebhookReceiverUpdate {
     pub description: Option<String>,
     pub endpoint: Option<String>,
     pub time_modified: DateTime<Utc>,
-    pub subscription_gen: Option<Generation>,
 }
 
 #[derive(
