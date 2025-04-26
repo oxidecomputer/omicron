@@ -2416,12 +2416,12 @@ pub struct WebhookCreate {
     /// A non-empty list of secret keys used to sign webhook payloads.
     pub secrets: Vec<String>,
 
-    /// A list of webhook event classes to subscribe to.
+    /// A list of webhook event class subscriptions.
     ///
     /// If this list is empty or is not included in the request body, the
     /// webhook will not be subscribed to any events.
     #[serde(default)]
-    pub events: Vec<shared::WebhookSubscription>,
+    pub subscriptions: Vec<shared::WebhookSubscription>,
 }
 
 /// Parameters to update a webhook configuration.
@@ -2432,6 +2432,12 @@ pub struct WebhookReceiverUpdate {
 
     /// The URL that webhook notification requests should be sent to
     pub endpoint: Option<Url>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSubscriptionCreate {
+    /// The event class pattern to subscribe to.
+    pub subscription: shared::WebhookSubscription,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

@@ -489,7 +489,9 @@ mod test {
                     },
                     endpoint: "http://webhooks.example.com".parse().unwrap(),
                     secrets: vec!["my cool secret".to_string()],
-                    events: vec!["test.*".to_string().try_into().unwrap()],
+                    subscriptions: vec![
+                        "test.*".to_string().try_into().unwrap(),
+                    ],
                 },
             )
             .await

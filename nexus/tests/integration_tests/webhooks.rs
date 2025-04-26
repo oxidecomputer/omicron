@@ -174,7 +174,7 @@ fn my_great_webhook_params(
             .parse()
             .expect("this should be a valid URL"),
         secrets: vec![MY_COOL_SECRET.to_string()],
-        events: vec!["test.foo".parse().unwrap()],
+        subscriptions: vec!["test.foo".parse().unwrap()],
     }
 }
 
@@ -206,29 +206,31 @@ async fn secret_add(
 async fn subscription_add(
     ctx: &ControlPlaneTestContext,
     webhook_id: WebhookReceiverUuid,
-    params: &shared::WebhookSubscription,
+    subscription: &shared::WebhookSubscription,
 ) -> shared::WebhookSubscription {
     resource_helpers::object_create(
         &ctx.external_client,
         &format!("{RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions"),
-        params,
+        &params::WebhookSubscriptionCreate {
+            subscription: subscription.clone(),
+        },
     )
     .await
 }
 
-async fn subscription_delete(
+async fn subscription_remove(
     ctx: &ControlPlaneTestContext,
     webhook_id: WebhookReceiverUuid,
     subscription: &shared::WebhookSubscription,
 ) {
     resource_helpers::object_delete(
         &ctx.external_client,
-        &subscription_delete_url(webhook_id, subscription),
+        &subscription_remove_url(webhook_id, subscription),
     )
     .await
 }
 
-fn subscription_delete_url(
+fn subscription_remove_url(
     webhook_id: WebhookReceiverUuid,
     subscription: &shared::WebhookSubscription,
 ) -> String {
@@ -363,7 +365,7 @@ async fn test_webhook_receiver_get(cptestctx: &ControlPlaneTestContext) {
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![MY_COOL_SECRET.to_string()],
-            events: vec!["test.foo".parse().unwrap()],
+            subscriptions: vec!["test.foo".parse().unwrap()],
         },
     )
     .await;
@@ -395,7 +397,7 @@ async fn test_webhook_receiver_create_delete(
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![MY_COOL_SECRET.to_string()],
-            events: vec!["test.foo".parse().unwrap()],
+            subscriptions: vec!["test.foo".parse().unwrap()],
         },
     )
     .await;
@@ -431,7 +433,7 @@ async fn test_webhook_receiver_names_are_unique(
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![MY_COOL_SECRET.to_string()],
-            events: vec!["test.foo".parse().unwrap()],
+            subscriptions: vec!["test.foo".parse().unwrap()],
         },
     )
     .await;
@@ -446,7 +448,7 @@ async fn test_webhook_receiver_names_are_unique(
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![MY_COOL_SECRET.to_string()],
-            events: vec!["test.foo.bar".parse().unwrap()],
+            subscriptions: vec!["test.foo.bar".parse().unwrap()],
         },
         http::StatusCode::BAD_REQUEST,
     )
@@ -470,7 +472,10 @@ async fn test_cannot_subscribe_to_probes(cptestctx: &ControlPlaneTestContext) {
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![MY_COOL_SECRET.to_string()],
-            events: vec!["probe".parse().unwrap(), "test.foo".parse().unwrap()],
+            subscriptions: vec![
+                "probe".parse().unwrap(),
+                "test.foo".parse().unwrap(),
+            ],
         },
         http::StatusCode::BAD_REQUEST,
     )
@@ -575,7 +580,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
             },
             endpoint,
             secrets: vec![SECRET1.to_string()],
-            events: vec!["test.foo".parse().unwrap()],
+            subscriptions: vec!["test.foo".parse().unwrap()],
         },
     )
     .await;
@@ -704,7 +709,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![BAR_SECRET.to_string()],
-            events: vec!["test.foo.bar".parse().unwrap()],
+            subscriptions: vec!["test.foo.bar".parse().unwrap()],
         },
     )
     .await;
@@ -741,7 +746,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![BAZ_SECRET.to_string()],
-            events: vec!["test.foo.baz".parse().unwrap()],
+            subscriptions: vec!["test.foo.baz".parse().unwrap()],
         },
     )
     .await;
@@ -778,7 +783,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                 .parse()
                 .expect("this should be a valid URL"),
             secrets: vec![STAR_SECRET.to_string()],
-            events: vec!["test.foo.*".parse().unwrap()],
+            subscriptions: vec!["test.foo.*".parse().unwrap()],
         },
     )
     .await;
@@ -1612,7 +1617,7 @@ async fn subscription_add_test(
     )
     .await;
     dbg!(&rx);
-    assert!(rx.events.contains(&new_subscription));
+    assert!(rx.subscriptions.contains(&new_subscription));
 
     // Publish an event. This one should make it through.
     let event = nexus
@@ -1641,16 +1646,16 @@ async fn subscription_add_test(
 }
 
 #[nexus_test]
-async fn test_subscription_delete(cptestctx: &ControlPlaneTestContext) {
-    subscription_delete_test(cptestctx, "test.foo.bar").await
+async fn test_subscription_remove(cptestctx: &ControlPlaneTestContext) {
+    subscription_remove_test(cptestctx, "test.foo.bar").await
 }
 
 #[nexus_test]
-async fn test_glob_subscription_delete(cptestctx: &ControlPlaneTestContext) {
-    subscription_delete_test(cptestctx, "test.foo.*").await
+async fn test_subscription_remove_glob(cptestctx: &ControlPlaneTestContext) {
+    subscription_remove_test(cptestctx, "test.foo.*").await
 }
 
-async fn subscription_delete_test(
+async fn subscription_remove_test(
     cptestctx: &ControlPlaneTestContext,
     deleted_subscription: &str,
 ) {
@@ -1676,7 +1681,7 @@ async fn subscription_delete_test(
     let webhook = webhook_create(
         &cptestctx,
         &params::WebhookCreate {
-            events: vec![
+            subscriptions: vec![
                 other_subscription.clone(),
                 deleted_subscription.clone(),
             ],
@@ -1733,7 +1738,7 @@ async fn subscription_delete_test(
     mock.assert_calls_async(1).await;
 
     let rx_id = WebhookReceiverUuid::from_untyped_uuid(webhook.identity.id);
-    dbg!(subscription_delete(&cptestctx, rx_id, &deleted_subscription).await);
+    dbg!(subscription_remove(&cptestctx, rx_id, &deleted_subscription).await);
 
     // The deleted subscription should no longer be there.
     let rx = webhook_get(
@@ -1742,7 +1747,7 @@ async fn subscription_delete_test(
     )
     .await;
     dbg!(&rx);
-    assert_eq!(rx.events, vec![other_subscription.clone()]);
+    assert_eq!(rx.subscriptions, vec![other_subscription.clone()]);
 
     // Publish an event. This one should not be received, as we are no longer
     // subscribed to its event class.
@@ -1815,7 +1820,7 @@ async fn subscription_delete_test(
     dbg!(
         resource_helpers::object_delete_error(
             &internal_client,
-            &subscription_delete_url(rx_id, &deleted_subscription),
+            &subscription_remove_url(rx_id, &deleted_subscription),
             http::StatusCode::NOT_FOUND
         )
         .await

@@ -7974,8 +7974,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn webhook_receiver_subscription_add(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookReceiverSelector>,
-        typed_body: TypedBody<shared::WebhookSubscription>,
-    ) -> Result<HttpResponseCreated<shared::WebhookSubscription>, HttpError>
+        params: TypedBody<params::WebhookSubscriptionCreate>,
+    ) -> Result<HttpResponseCreated<views::WebhookSubscriptionCreated>, HttpError>
     {
         let apictx = rqctx.context();
         let handler = async {
@@ -7985,7 +7985,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
             let webhook_selector = path_params.into_inner();
-            let subscription = typed_body.into_inner();
+            let subscription = params.into_inner();
             let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
 
             let subscription = nexus
@@ -8001,7 +8001,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_receiver_subscription_delete(
+    async fn webhook_receiver_subscription_remove(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookSubscriptionSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
@@ -8017,7 +8017,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let rx = nexus.webhook_receiver_lookup(&opctx, receiver)?;
 
             nexus
-                .webhook_receiver_subscription_delete(&opctx, rx, subscription)
+                .webhook_receiver_subscription_remove(&opctx, rx, subscription)
                 .await?;
 
             Ok(HttpResponseDeleted())

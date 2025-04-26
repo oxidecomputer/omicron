@@ -12556,7 +12556,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/WebhookSubscription"
+                "$ref": "#/components/schemas/WebhookSubscriptionCreate"
               }
             }
           },
@@ -12568,7 +12568,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebhookSubscription"
+                  "$ref": "#/components/schemas/WebhookSubscriptionCreated"
                 }
               }
             }
@@ -12588,7 +12588,7 @@
           "system/webhooks"
         ],
         "summary": "Remove webhook receiver subscription",
-        "operationId": "webhook_receiver_subscription_delete",
+        "operationId": "webhook_receiver_subscription_remove",
         "parameters": [
           {
             "in": "path",
@@ -25624,14 +25624,6 @@
             "type": "string",
             "format": "uri"
           },
-          "events": {
-            "description": "A list of webhook event classes to subscribe to.\n\nIf this list is empty or is not included in the request body, the webhook will not be subscribed to any events.",
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WebhookSubscription"
-            }
-          },
           "name": {
             "$ref": "#/components/schemas/Name"
           },
@@ -25640,6 +25632,14 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "subscriptions": {
+            "description": "A list of webhook event class subscriptions.\n\nIf this list is empty or is not included in the request body, the webhook will not be subscribed to any events.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookSubscription"
             }
           }
         },
@@ -25933,13 +25933,6 @@
             "type": "string",
             "format": "uri"
           },
-          "events": {
-            "description": "The list of event classes to which this receiver is subscribed.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WebhookSubscription"
-            }
-          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -25959,6 +25952,13 @@
               "$ref": "#/components/schemas/WebhookSecretId"
             }
           },
+          "subscriptions": {
+            "description": "The list of event classes to which this receiver is subscribed.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookSubscription"
+            }
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -25973,10 +25973,10 @@
         "required": [
           "description",
           "endpoint",
-          "events",
           "id",
           "name",
           "secrets",
+          "subscriptions",
           "time_created",
           "time_modified"
         ]
@@ -26071,6 +26071,38 @@
         "description": "A webhook event class subscription matches either a single event class exactly, or a glob pattern including wildcards that may match multiple event classes",
         "type": "string",
         "pattern": "^([a-zA-Z0-9_]+|\\*|\\*\\*)(\\.([a-zA-Z0-9_]+|\\*|\\*\\*))*$"
+      },
+      "WebhookSubscriptionCreate": {
+        "type": "object",
+        "properties": {
+          "subscription": {
+            "description": "The event class pattern to subscribe to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookSubscription"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subscription"
+        ]
+      },
+      "WebhookSubscriptionCreated": {
+        "type": "object",
+        "properties": {
+          "subscription": {
+            "description": "The new subscription added to the receiver.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookSubscription"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subscription"
+        ]
       },
       "NameOrIdSortMode": {
         "description": "Supported set of sort modes for scanning by name or id",

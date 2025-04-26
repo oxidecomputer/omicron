@@ -71,10 +71,14 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let params::WebhookCreate { identity, endpoint, secrets, events } =
-            params;
+        let params::WebhookCreate {
+            identity,
+            endpoint,
+            secrets,
+            subscriptions,
+        } = params;
 
-        let subscriptions = events
+        let subscriptions = subscriptions
             .into_iter()
             .map(WebhookSubscriptionKind::try_from)
             .collect::<Result<Vec<_>, _>>()?;
@@ -166,7 +170,7 @@ impl DataStore {
                     ),
                 )
             })?;
-        Ok(WebhookReceiverConfig { rx, secrets, events: subscriptions })
+        Ok(WebhookReceiverConfig { rx, secrets, subscriptions })
     }
 
     pub async fn webhook_rx_config_fetch(
@@ -413,7 +417,11 @@ impl DataStore {
             let secrets = self.rx_secret_list_on_conn(rx.id(), &conn).await?;
             let events =
                 self.rx_subscription_list_on_conn(rx.id(), &conn).await?;
-            result.push(WebhookReceiverConfig { rx, secrets, events });
+            result.push(WebhookReceiverConfig {
+                rx,
+                secrets,
+                subscriptions: events,
+            });
         }
 
         Ok(result)
@@ -508,7 +516,7 @@ impl DataStore {
         })
     }
 
-    pub async fn webhook_rx_subscription_delete(
+    pub async fn webhook_rx_subscription_remove(
         &self,
         opctx: &OpContext,
         authz_rx: &authz::WebhookReceiver,
@@ -1187,7 +1195,7 @@ mod test {
                     },
                     endpoint: format!("http://{name}").parse().unwrap(),
                     secrets: vec![name.to_string()],
-                    events: events
+                    subscriptions: events
                         .into_iter()
                         .map(TryFrom::try_from)
                         .collect::<Result<Vec<_>, _>>()
@@ -1337,11 +1345,11 @@ mod test {
                 })
                 .collect::<Vec<_>>();
 
-            for WebhookReceiverConfig { rx, events, .. } in matches {
+            for WebhookReceiverConfig { rx, subscriptions, .. } in matches {
                 assert!(
                     subscribed.contains(&rx.identity),
                     "expected {rx:?} to be subscribed to {event_class}\n\
-                     subscriptions: {events:?}"
+                     subscriptions: {subscriptions:?}"
                 );
             }
 
@@ -1352,11 +1360,11 @@ mod test {
                         .all(|match_rx| rx.identity != match_rx.rx.identity)
                 },
             );
-            for WebhookReceiverConfig { rx, events, .. } in not_matches {
+            for WebhookReceiverConfig { rx, subscriptions, .. } in not_matches {
                 assert!(
                     !subscribed.contains(&rx.identity),
                     "expected {rx:?} to not be subscribed to {event_class}\n\
-                     subscriptions: {events:?}"
+                     subscriptions: {subscriptions:?}"
                 );
             }
         }

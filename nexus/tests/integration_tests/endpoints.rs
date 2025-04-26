@@ -1175,7 +1175,7 @@ pub static DEMO_WEBHOOK_RECEIVER_CREATE: LazyLock<params::WebhookCreate> =
         },
         endpoint: "https://example.com/my-great-webhook".parse().unwrap(),
         secrets: vec!["my cool secret".to_string()],
-        events: vec![
+        subscriptions: vec![
             "test.foo.bar".parse().unwrap(),
             "test.*".parse().unwrap(),
         ],
@@ -1210,6 +1210,12 @@ pub static DEMO_WEBHOOK_SUBSCRIPTIONS_URL: LazyLock<String> =
 
 pub static DEMO_WEBHOOK_SUBSCRIPTION: LazyLock<shared::WebhookSubscription> =
     LazyLock::new(|| "test.foo.**".parse().unwrap());
+
+pub static DEMO_WEBHOOK_SUBSCRIPTION_CREATE: LazyLock<
+    params::WebhookSubscriptionCreate,
+> = LazyLock::new(|| params::WebhookSubscriptionCreate {
+    subscription: DEMO_WEBHOOK_SUBSCRIPTION.clone(),
+});
 
 pub static DEMO_WEBHOOK_SUBSCRIPTION_DELETE_URL: LazyLock<String> =
     LazyLock::new(|| {
@@ -2875,7 +2881,8 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_WEBHOOK_SUBSCRIPTION).unwrap(),
+                    serde_json::to_value(&*DEMO_WEBHOOK_SUBSCRIPTION_CREATE)
+                        .unwrap(),
                 )],
             },
             VerifyEndpoint {

@@ -33,13 +33,13 @@ use uuid::Uuid;
 pub struct WebhookReceiverConfig {
     pub rx: WebhookReceiver,
     pub secrets: Vec<WebhookSecret>,
-    pub events: Vec<WebhookSubscriptionKind>,
+    pub subscriptions: Vec<WebhookSubscriptionKind>,
 }
 
 impl TryFrom<WebhookReceiverConfig> for views::WebhookReceiver {
     type Error = Error;
     fn try_from(
-        WebhookReceiverConfig { rx, secrets, events }: WebhookReceiverConfig,
+        WebhookReceiverConfig { rx, secrets, subscriptions }: WebhookReceiverConfig,
     ) -> Result<views::WebhookReceiver, Self::Error> {
         let secrets = secrets
             .iter()
@@ -47,7 +47,7 @@ impl TryFrom<WebhookReceiverConfig> for views::WebhookReceiver {
                 id: identity.id.into_untyped_uuid(),
             })
             .collect();
-        let events = events
+        let subscriptions = subscriptions
             .into_iter()
             .map(shared::WebhookSubscription::try_from)
             .collect::<Result<Vec<_>, _>>()?;
@@ -64,7 +64,7 @@ impl TryFrom<WebhookReceiverConfig> for views::WebhookReceiver {
             identity: rx.identity(),
             endpoint,
             secrets,
-            events,
+            subscriptions,
         })
     }
 }

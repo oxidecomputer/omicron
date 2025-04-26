@@ -3627,8 +3627,8 @@ pub trait NexusExternalApi {
     async fn webhook_receiver_subscription_add(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookReceiverSelector>,
-        typed_body: TypedBody<shared::WebhookSubscription>,
-    ) -> Result<HttpResponseCreated<shared::WebhookSubscription>, HttpError>;
+        params: TypedBody<params::WebhookSubscriptionCreate>,
+    ) -> Result<HttpResponseCreated<views::WebhookSubscriptionCreated>, HttpError>;
 
     /// Remove webhook receiver subscription
     #[endpoint {
@@ -3636,7 +3636,7 @@ pub trait NexusExternalApi {
         path = "/v1/webhooks/receivers/{receiver}/subscriptions/{subscription}",
         tags = ["system/webhooks"],
     }]
-    async fn webhook_receiver_subscription_delete(
+    async fn webhook_receiver_subscription_remove(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookSubscriptionSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;

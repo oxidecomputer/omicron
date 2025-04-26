@@ -372,9 +372,9 @@ impl Nexus {
         rx: lookup::WebhookReceiver<'_>,
     ) -> LookupResult<WebhookReceiverConfig> {
         let (authz_rx, rx) = rx.fetch().await?;
-        let (events, secrets) =
+        let (subscriptions, secrets) =
             self.datastore().webhook_rx_config_fetch(opctx, &authz_rx).await?;
-        Ok(WebhookReceiverConfig { rx, secrets, events })
+        Ok(WebhookReceiverConfig { rx, secrets, subscriptions })
     }
 
     pub async fn webhook_receiver_create(
@@ -416,8 +416,8 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         rx: lookup::WebhookReceiver<'_>,
-        subscription: shared::WebhookSubscription,
-    ) -> CreateResult<shared::WebhookSubscription> {
+        params::WebhookSubscriptionCreate { subscription}: params::WebhookSubscriptionCreate,
+    ) -> CreateResult<views::WebhookSubscriptionCreated> {
         let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
         let db_subscription =
             nexus_db_model::WebhookSubscriptionKind::try_from(
@@ -427,10 +427,10 @@ impl Nexus {
             .datastore()
             .webhook_rx_subscription_add(opctx, &authz_rx, db_subscription)
             .await?;
-        Ok(subscription)
+        Ok(views::WebhookSubscriptionCreated { subscription })
     }
 
-    pub async fn webhook_receiver_subscription_delete(
+    pub async fn webhook_receiver_subscription_remove(
         &self,
         opctx: &OpContext,
         rx: lookup::WebhookReceiver<'_>,
@@ -441,7 +441,7 @@ impl Nexus {
             nexus_db_model::WebhookSubscriptionKind::try_from(subscription)?;
         let _ = self
             .datastore()
-            .webhook_rx_subscription_delete(opctx, &authz_rx, db_subscription)
+            .webhook_rx_subscription_remove(opctx, &authz_rx, db_subscription)
             .await?;
         Ok(())
     }
