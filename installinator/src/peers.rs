@@ -101,7 +101,7 @@ impl FromStr for DiscoveryMechanism {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PeerAddresses {
     peers: BTreeSet<PeerAddress>,
 }
