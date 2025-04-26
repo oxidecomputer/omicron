@@ -6,11 +6,40 @@ use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::mem;
 
+use crate::SIM_GIMLET_BOARD;
+use crate::SIM_ROT_BOARD;
+use crate::SIM_ROT_STAGE0_BOARD;
+use gateway_messages::RotSlotId;
+use gateway_messages::RotStateV2;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
 use gateway_messages::UpdateChunk;
 use gateway_messages::UpdateId;
 use gateway_messages::UpdateInProgressStatus;
+
+// XXX-dap
+// Default caboose information
+
+const SP_GITC0: &str = "ffffffff";
+const SP_GITC1: &str = "fefefefe";
+const SP_NAME: &str = "SimGimlet";
+const SP_VERS0: &str = "0.0.2";
+const SP_VERS1: &str = "0.0.1";
+
+const STAGE0_GITC0: &str = "ddddddddd";
+const STAGE0_GITC1: &str = "dadadadad";
+const STAGE0_NAME: &str = "SimGimletRot";
+const STAGE0_VERS0: &str = "0.0.200";
+const STAGE0_VERS1: &str = "0.0.200";
+
+const ROT_GITC0: &str = "eeeeeeee";
+const ROT_GITC1: &str = "edededed";
+const ROT_NAME: &str = "SimGimletRot";
+const ROT_VERS0: &str = "0.0.4";
+const ROT_VERS1: &str = "0.0.3";
+// staging/devel key signature
+const ROT_STAGING_DEVEL_SIGN: &str =
+    "11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf";
 
 pub(crate) struct SimSpUpdate {
     state: UpdateState,
@@ -18,10 +47,139 @@ pub(crate) struct SimSpUpdate {
     last_rot_update_data: Option<Box<[u8]>>,
     last_host_phase1_update_data: BTreeMap<u16, Box<[u8]>>,
     active_host_slot: Option<u16>,
+
+    caboose_sp_active: CabooseValue,
+    caboose_sp_inactive: CabooseValue,
+    caboose_rot_a: CabooseValue,
+    caboose_rot_b: CabooseValue,
+    caboose_stage0: CabooseValue,
+    caboose_stage0next: CabooseValue,
+    rot_state: RotStateV2,
 }
 
-impl Default for SimSpUpdate {
-    fn default() -> Self {
+enum CabooseValue {
+    // emulate an actual caboose
+    Caboose(hubtools::Caboose),
+    // emulate "the image does not include a caboose"
+    InvalidMissing,
+    // emulate "the image caboose does not contain 'KEY'"
+    InvalidMissingAllKeys,
+    // emulate "failed to read data from the caboose" (erased)
+    InvalidFailedRead,
+}
+
+impl CabooseValue {
+    fn value(&self, key: [u8; 4], buf: &mut [u8]) -> Result<usize, SpError> {
+        match self {
+            CabooseValue::Caboose(caboose) => {
+                let value = match &key {
+                    b"GITC" => caboose.git_commit(),
+                    b"BORD" => caboose.board(),
+                    b"NAME" => caboose.name(),
+                    b"VERS" => caboose.version(),
+                    b"SIGN" => caboose.sign(),
+                    _ => return Err(SpError::NoSuchCabooseKey(key)),
+                };
+
+                match value {
+                    Ok(value) => {
+                        buf[..value.len()].copy_from_slice(value);
+                        Ok(value.len())
+                    }
+                    Err(hubtools::CabooseError::MissingTag { .. }) => {
+                        Err(SpError::NoSuchCabooseKey(key))
+                    }
+                    Err(hubtools::CabooseError::TlvcReadError(_)) => {
+                        Err(SpError::CabooseReadError)
+                    }
+                }
+            }
+            CabooseValue::InvalidMissing => Err(SpError::NoCaboose),
+            CabooseValue::InvalidMissingAllKeys => {
+                Err(SpError::NoSuchCabooseKey(key))
+            }
+            CabooseValue::InvalidFailedRead => Err(SpError::CabooseReadError),
+        }
+    }
+}
+
+impl SimSpUpdate {
+    pub(crate) fn new(no_stage0_caboose: bool) -> Self {
+        // XXX-dap these are going to depend on whether it's Gimlet or Sidecar
+        let caboose_sp_active = CabooseValue::Caboose(
+            hubtools::CabooseBuilder::default()
+                .git_commit(SP_GITC0)
+                .board(SIM_GIMLET_BOARD)
+                .name(SP_NAME)
+                .version(SP_VERS0)
+                .build(),
+        );
+        let caboose_sp_inactive = CabooseValue::Caboose(
+            hubtools::CabooseBuilder::default()
+                .git_commit(SP_GITC1)
+                .board(SIM_GIMLET_BOARD)
+                .name(SP_NAME)
+                .version(SP_VERS1)
+                .build(),
+        );
+
+        let caboose_rot_a = CabooseValue::Caboose(
+            hubtools::CabooseBuilder::default()
+                .git_commit(ROT_GITC0)
+                .board(SIM_ROT_BOARD)
+                .name(ROT_NAME)
+                .version(ROT_VERS0)
+                .sign(ROT_STAGING_DEVEL_SIGN)
+                .build(),
+        );
+
+        let caboose_rot_b = CabooseValue::Caboose(
+            hubtools::CabooseBuilder::default()
+                .git_commit(ROT_GITC1)
+                .board(SIM_ROT_BOARD)
+                .name(ROT_NAME)
+                .version(ROT_VERS1)
+                .sign(ROT_STAGING_DEVEL_SIGN)
+                .build(),
+        );
+
+        let (caboose_stage0, caboose_stage0next) = if no_stage0_caboose {
+            (
+                CabooseValue::InvalidMissingAllKeys,
+                CabooseValue::InvalidMissingAllKeys,
+            )
+        } else {
+            (
+                CabooseValue::Caboose(
+                    hubtools::CabooseBuilder::default()
+                        .git_commit(STAGE0_GITC0)
+                        .board(SIM_ROT_STAGE0_BOARD)
+                        .name(STAGE0_NAME)
+                        .version(STAGE0_VERS0)
+                        .sign(ROT_STAGING_DEVEL_SIGN)
+                        .build(),
+                ),
+                CabooseValue::Caboose(
+                    hubtools::CabooseBuilder::default()
+                        .git_commit(STAGE0_GITC1)
+                        .board(SIM_ROT_STAGE0_BOARD)
+                        .name(STAGE0_NAME)
+                        .version(STAGE0_VERS1)
+                        .sign(ROT_STAGING_DEVEL_SIGN)
+                        .build(),
+                ),
+            )
+        };
+
+        let rot_state = RotStateV2 {
+            active: RotSlotId::A,
+            persistent_boot_preference: RotSlotId::A,
+            pending_persistent_boot_preference: None,
+            transient_boot_preference: None,
+            slot_a_sha3_256_digest: Some([0x55; 32]),
+            slot_b_sha3_256_digest: Some([0x66; 32]),
+        };
+
         Self {
             state: UpdateState::NotPrepared,
             last_sp_update_data: None,
@@ -33,11 +191,18 @@ impl Default for SimSpUpdate {
             // ensure any tests that expect to read or write a particular slot
             // set that slot as active first.
             active_host_slot: None,
+
+            caboose_sp_active,
+            caboose_sp_inactive,
+            caboose_rot_a,
+            caboose_rot_b,
+            caboose_stage0,
+            caboose_stage0next,
+
+            rot_state,
         }
     }
-}
 
-impl SimSpUpdate {
     // TODO-completeness Split into `sp_prepare` and `component_prepare` when we
     // need to simulate aux flash-related (SP update only) things.
     pub(crate) fn prepare(
@@ -188,6 +353,35 @@ impl SimSpUpdate {
 
     pub(crate) fn set_active_host_slot(&mut self, slot: u16) {
         self.active_host_slot = Some(slot);
+    }
+
+    pub(crate) fn get_component_caboose_value(
+        &mut self,
+        component: SpComponent,
+        slot: u16,
+        key: [u8; 4],
+        buf: &mut [u8],
+    ) -> Result<usize, SpError> {
+        let which_caboose = match (component, slot) {
+            (SpComponent::SP_ITSELF, 0) => &self.caboose_sp_active,
+            (SpComponent::SP_ITSELF, 1) => &self.caboose_sp_inactive,
+            (SpComponent::ROT, 0) => &self.caboose_rot_a,
+            (SpComponent::ROT, 1) => &self.caboose_rot_b,
+            (SpComponent::STAGE0, 0) => &self.caboose_stage0,
+            (SpComponent::STAGE0, 1) => &self.caboose_stage0next,
+            _ => {
+                // XXX-dap this is the error that was returned previously, but
+                // it seems like it should really be a NoSuchComponent or
+                // NoSuchSlot, but those don't exist.
+                return Err(SpError::NoSuchCabooseKey(key));
+            }
+        };
+
+        which_caboose.value(key, buf)
+    }
+
+    pub(crate) fn rot_state(&self) -> &RotStateV2 {
+        &self.rot_state
     }
 }
 

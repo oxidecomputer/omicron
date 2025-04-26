@@ -429,7 +429,7 @@ impl Handler {
             ignition,
             rot_active_slot: RotSlotId::A,
             power_state: PowerState::A2,
-            update_state: SimSpUpdate::default(),
+            update_state: SimSpUpdate::new(no_stage0_caboose),
             reset_pending: None,
             should_fail_to_respond_signal: None,
             old_rot_state,
