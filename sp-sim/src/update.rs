@@ -26,12 +26,6 @@ const SP_NAME: &str = "SimGimlet";
 const SP_VERS0: &str = "0.0.2";
 const SP_VERS1: &str = "0.0.1";
 
-const STAGE0_GITC0: &str = "ddddddddd";
-const STAGE0_GITC1: &str = "dadadadad";
-const STAGE0_NAME: &str = "SimGimletRot";
-const STAGE0_VERS0: &str = "0.0.200";
-const STAGE0_VERS1: &str = "0.0.200";
-
 const ROT_GITC0: &str = "eeeeeeee";
 const ROT_GITC1: &str = "edededed";
 const ROT_NAME: &str = "SimGimletRot";
@@ -40,6 +34,13 @@ const ROT_VERS1: &str = "0.0.3";
 // staging/devel key signature
 const ROT_STAGING_DEVEL_SIGN: &str =
     "11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf";
+
+const STAGE0_GITC0: &str = "ddddddddd";
+const STAGE0_GITC1: &str = "dadadadad";
+const STAGE0_NAME: &str = "SimGimletRot";
+const STAGE0_VERS0: &str = "0.0.200";
+const STAGE0_VERS1: &str = "0.0.200";
+
 
 pub(crate) struct SimSpUpdate {
     state: UpdateState,

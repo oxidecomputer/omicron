@@ -1031,6 +1031,8 @@ impl SpHandler for Handler {
         static ROT_GITC0: &[u8] = b"eeeeeeee";
         static ROT_GITC1: &[u8] = b"edededed";
         static ROT_BORD: &[u8] = SIM_ROT_BOARD.as_bytes();
+        // XXX-dap this is inconsistent with the Gimlet one, where ROT_NAME is
+        // SimGimletRot (not SimGimlet)
         static ROT_NAME: &[u8] = b"SimSidecar";
         static ROT_VERS0: &[u8] = b"0.0.4";
         static ROT_VERS1: &[u8] = b"0.0.3";
@@ -1038,6 +1040,8 @@ impl SpHandler for Handler {
         static STAGE0_GITC0: &[u8] = b"dddddddd";
         static STAGE0_GITC1: &[u8] = b"dadadada";
         static STAGE0_BORD: &[u8] = SIM_ROT_STAGE0_BOARD.as_bytes();
+        // XXX-dap this is inconsistent with the Gimlet one, where ROT_NAME is
+        // SimGimletRot (not SimGimlet)
         static STAGE0_NAME: &[u8] = b"SimSidecar";
         static STAGE0_VERS0: &[u8] = b"0.0.200";
         static STAGE0_VERS1: &[u8] = b"0.0.200";
