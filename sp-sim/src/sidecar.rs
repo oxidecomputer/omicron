@@ -3,8 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::Responsiveness;
-use crate::SIM_ROT_BOARD;
-use crate::SIM_ROT_STAGE0_BOARD;
 use crate::SimulatedSp;
 use crate::config::Config;
 use crate::config::SidecarConfig;
@@ -17,6 +15,7 @@ use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -392,7 +391,6 @@ struct Handler {
     // this, our caller will pass us a function to call if they should ignore
     // whatever result we return and fail to respond at all.
     should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
-    no_stage0_caboose: bool,
     old_rot_state: bool,
 }
 
@@ -429,11 +427,13 @@ impl Handler {
             ignition,
             rot_active_slot: RotSlotId::A,
             power_state: PowerState::A2,
-            update_state: SimSpUpdate::new(no_stage0_caboose),
+            update_state: SimSpUpdate::new(
+                BaseboardKind::Sidecar,
+                no_stage0_caboose,
+            ),
             reset_pending: None,
             should_fail_to_respond_signal: None,
             old_rot_state,
-            no_stage0_caboose,
         }
     }
 
@@ -1021,59 +1021,7 @@ impl SpHandler for Handler {
         key: [u8; 4],
         buf: &mut [u8],
     ) -> std::result::Result<usize, SpError> {
-        static SP_GITC0: &[u8] = b"ffffffff";
-        static SP_GITC1: &[u8] = b"fefefefe";
-        static SP_BORD: &[u8] = SIM_SIDECAR_BOARD.as_bytes();
-        static SP_NAME: &[u8] = b"SimSidecar";
-        static SP_VERS0: &[u8] = b"0.0.2";
-        static SP_VERS1: &[u8] = b"0.0.1";
-
-        static ROT_GITC0: &[u8] = b"eeeeeeee";
-        static ROT_GITC1: &[u8] = b"edededed";
-        static ROT_BORD: &[u8] = SIM_ROT_BOARD.as_bytes();
-        // XXX-dap this is inconsistent with the Gimlet one, where ROT_NAME is
-        // SimGimletRot (not SimGimlet)
-        static ROT_NAME: &[u8] = b"SimSidecar";
-        static ROT_VERS0: &[u8] = b"0.0.4";
-        static ROT_VERS1: &[u8] = b"0.0.3";
-
-        static STAGE0_GITC0: &[u8] = b"dddddddd";
-        static STAGE0_GITC1: &[u8] = b"dadadada";
-        static STAGE0_BORD: &[u8] = SIM_ROT_STAGE0_BOARD.as_bytes();
-        // XXX-dap this is inconsistent with the Gimlet one, where ROT_NAME is
-        // SimGimletRot (not SimGimlet)
-        static STAGE0_NAME: &[u8] = b"SimSidecar";
-        static STAGE0_VERS0: &[u8] = b"0.0.200";
-        static STAGE0_VERS1: &[u8] = b"0.0.200";
-
-        let val = match (component, &key, slot, self.no_stage0_caboose) {
-            (SpComponent::SP_ITSELF, b"GITC", 0, _) => SP_GITC0,
-            (SpComponent::SP_ITSELF, b"GITC", 1, _) => SP_GITC1,
-            (SpComponent::SP_ITSELF, b"BORD", _, _) => SP_BORD,
-            (SpComponent::SP_ITSELF, b"NAME", _, _) => SP_NAME,
-            (SpComponent::SP_ITSELF, b"VERS", 0, _) => SP_VERS0,
-            (SpComponent::SP_ITSELF, b"VERS", 1, _) => SP_VERS1,
-            (SpComponent::ROT, b"GITC", 0, _) => ROT_GITC0,
-            (SpComponent::ROT, b"GITC", 1, _) => ROT_GITC1,
-            (SpComponent::ROT, b"BORD", _, _) => ROT_BORD,
-            (SpComponent::ROT, b"NAME", _, _) => ROT_NAME,
-            (SpComponent::ROT, b"VERS", 0, _) => ROT_VERS0,
-            (SpComponent::ROT, b"VERS", 1, _) => ROT_VERS1,
-            // sidecar staging/devel hash
-            (SpComponent::ROT, b"SIGN", _, _) => &"1432cc4cfe5688c51b55546fe37837c753cfbc89e8c3c6aabcf977fdf0c41e27".as_bytes(),
-            (SpComponent::STAGE0, b"GITC", 0, false) => STAGE0_GITC0,
-            (SpComponent::STAGE0, b"GITC", 1, false) => STAGE0_GITC1,
-            (SpComponent::STAGE0, b"BORD", _, false) => STAGE0_BORD,
-            (SpComponent::STAGE0, b"NAME", _, false) => STAGE0_NAME,
-            (SpComponent::STAGE0, b"VERS", 0, false) => STAGE0_VERS0,
-            (SpComponent::STAGE0, b"VERS", 1, false) => STAGE0_VERS1,
-            // sidecar staging/devel hash
-            (SpComponent::STAGE0, b"SIGN", _, false) => &"1432cc4cfe5688c51b55546fe37837c753cfbc89e8c3c6aabcf977fdf0c41e27".as_bytes(),
-            _ => return Err(SpError::NoSuchCabooseKey(key)),
-        };
-
-        buf[..val.len()].copy_from_slice(val);
-        Ok(val.len())
+        self.update_state.get_component_caboose_value(component, slot, key, buf)
     }
 
     fn read_sensor(

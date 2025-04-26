@@ -13,6 +13,7 @@ use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -679,7 +680,10 @@ impl Handler {
             rot_active_slot: RotSlotId::A,
             power_state: PowerState::A2,
             startup_options: StartupOptions::empty(),
-            update_state: SimSpUpdate::new(no_stage0_caboose),
+            update_state: SimSpUpdate::new(
+                BaseboardKind::Gimlet,
+                no_stage0_caboose,
+            ),
             reset_pending: None,
             last_request_handled: None,
             should_fail_to_respond_signal: None,
@@ -1403,6 +1407,8 @@ impl SpHandler for Handler {
         if self.old_rot_state {
             Err(SpError::RequestUnsupportedForSp)
         } else {
+            // XXX-dap this needs to be updated too, both here and in Sidecar.
+            // (Where else do we construct these?)
             const SLOT_A_DIGEST: [u8; 32] = [0xaa; 32];
             const SLOT_B_DIGEST: [u8; 32] = [0xbb; 32];
             const STAGE0_DIGEST: [u8; 32] = [0xcc; 32];

@@ -9,6 +9,7 @@ use std::mem;
 use crate::SIM_GIMLET_BOARD;
 use crate::SIM_ROT_BOARD;
 use crate::SIM_ROT_STAGE0_BOARD;
+use crate::SIM_SIDECAR_BOARD;
 use gateway_messages::RotSlotId;
 use gateway_messages::RotStateV2;
 use gateway_messages::SpComponent;
@@ -22,13 +23,11 @@ use gateway_messages::UpdateInProgressStatus;
 
 const SP_GITC0: &str = "ffffffff";
 const SP_GITC1: &str = "fefefefe";
-const SP_NAME: &str = "SimGimlet";
 const SP_VERS0: &str = "0.0.2";
 const SP_VERS1: &str = "0.0.1";
 
 const ROT_GITC0: &str = "eeeeeeee";
 const ROT_GITC1: &str = "edededed";
-const ROT_NAME: &str = "SimGimletRot";
 const ROT_VERS0: &str = "0.0.4";
 const ROT_VERS1: &str = "0.0.3";
 // staging/devel key signature
@@ -37,10 +36,39 @@ const ROT_STAGING_DEVEL_SIGN: &str =
 
 const STAGE0_GITC0: &str = "ddddddddd";
 const STAGE0_GITC1: &str = "dadadadad";
-const STAGE0_NAME: &str = "SimGimletRot";
 const STAGE0_VERS0: &str = "0.0.200";
 const STAGE0_VERS1: &str = "0.0.200";
 
+pub enum BaseboardKind {
+    Gimlet,
+    Sidecar,
+}
+
+impl BaseboardKind {
+    fn sp_board(&self) -> &str {
+        match self {
+            BaseboardKind::Gimlet => &SIM_GIMLET_BOARD,
+            BaseboardKind::Sidecar => &SIM_SIDECAR_BOARD,
+        }
+    }
+
+    fn sp_name(&self) -> &str {
+        match self {
+            BaseboardKind::Gimlet => "SimGimlet",
+            BaseboardKind::Sidecar => "SimSidecar",
+        }
+    }
+
+    fn rot_name(&self) -> &str {
+        // XXX-dap this is inconsistent with the previous behavior.  There,
+        // ROT_NAME was SimGimletRot (not SimGimlet) but sidecar's ROT_NAME was
+        // SimSidecar (not SimSidecarRot).
+        match self {
+            BaseboardKind::Gimlet => "SimGimletRot",
+            BaseboardKind::Sidecar => "SimSidecarRot",
+        }
+    }
+}
 
 pub(crate) struct SimSpUpdate {
     state: UpdateState,
@@ -105,21 +133,27 @@ impl CabooseValue {
 }
 
 impl SimSpUpdate {
-    pub(crate) fn new(no_stage0_caboose: bool) -> Self {
-        // XXX-dap these are going to depend on whether it's Gimlet or Sidecar
+    pub(crate) fn new(
+        baseboard_kind: BaseboardKind,
+        no_stage0_caboose: bool,
+    ) -> Self {
+        let sp_board = baseboard_kind.sp_board();
+        let sp_name = baseboard_kind.sp_name();
+        let rot_name = baseboard_kind.rot_name();
+
         let caboose_sp_active = CabooseValue::Caboose(
             hubtools::CabooseBuilder::default()
                 .git_commit(SP_GITC0)
-                .board(SIM_GIMLET_BOARD)
-                .name(SP_NAME)
+                .board(sp_board)
+                .name(sp_name)
                 .version(SP_VERS0)
                 .build(),
         );
         let caboose_sp_inactive = CabooseValue::Caboose(
             hubtools::CabooseBuilder::default()
                 .git_commit(SP_GITC1)
-                .board(SIM_GIMLET_BOARD)
-                .name(SP_NAME)
+                .board(sp_board)
+                .name(sp_name)
                 .version(SP_VERS1)
                 .build(),
         );
@@ -128,7 +162,7 @@ impl SimSpUpdate {
             hubtools::CabooseBuilder::default()
                 .git_commit(ROT_GITC0)
                 .board(SIM_ROT_BOARD)
-                .name(ROT_NAME)
+                .name(rot_name)
                 .version(ROT_VERS0)
                 .sign(ROT_STAGING_DEVEL_SIGN)
                 .build(),
@@ -138,7 +172,7 @@ impl SimSpUpdate {
             hubtools::CabooseBuilder::default()
                 .git_commit(ROT_GITC1)
                 .board(SIM_ROT_BOARD)
-                .name(ROT_NAME)
+                .name(rot_name)
                 .version(ROT_VERS1)
                 .sign(ROT_STAGING_DEVEL_SIGN)
                 .build(),
@@ -155,7 +189,7 @@ impl SimSpUpdate {
                     hubtools::CabooseBuilder::default()
                         .git_commit(STAGE0_GITC0)
                         .board(SIM_ROT_STAGE0_BOARD)
-                        .name(STAGE0_NAME)
+                        .name(rot_name)
                         .version(STAGE0_VERS0)
                         .sign(ROT_STAGING_DEVEL_SIGN)
                         .build(),
@@ -164,7 +198,7 @@ impl SimSpUpdate {
                     hubtools::CabooseBuilder::default()
                         .git_commit(STAGE0_GITC1)
                         .board(SIM_ROT_STAGE0_BOARD)
-                        .name(STAGE0_NAME)
+                        .name(rot_name)
                         .version(STAGE0_VERS1)
                         .sign(ROT_STAGING_DEVEL_SIGN)
                         .build(),
