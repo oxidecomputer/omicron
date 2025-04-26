@@ -792,6 +792,8 @@ pub(crate) mod test {
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
     type DiskTest<'a> =
         nexus_test_utils::resource_helpers::DiskTest<'a, crate::Server>;
+    type DiskTestBuilder<'a> =
+        nexus_test_utils::resource_helpers::DiskTestBuilder<'a, crate::Server>;
 
     const DISK_NAME: &str = "my-disk";
     const PROJECT_NAME: &str = "springfield-squidport";
@@ -800,8 +802,8 @@ pub(crate) mod test {
     async fn test_region_replacement_start_saga(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+        let _disk_test =
+            DiskTestBuilder::new(cptestctx).with_zpool_count(4).build().await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
@@ -1026,15 +1028,11 @@ pub(crate) mod test {
         let mut count = 0;
 
         for zpool in test.zpools() {
-            for dataset in &zpool.datasets {
-                if datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap()
-                    != 0
-                {
-                    count += 1;
-                }
+            let dataset = zpool.crucible_dataset();
+            if datastore.regions_total_reserved_size(dataset.id).await.unwrap()
+                != 0
+            {
+                count += 1;
             }
         }
 
@@ -1119,8 +1117,8 @@ pub(crate) mod test {
     async fn test_action_failure_can_unwind_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+        let disk_test =
+            DiskTestBuilder::new(cptestctx).with_zpool_count(4).build().await;
 
         let log = &cptestctx.logctx.log;
 
@@ -1196,8 +1194,8 @@ pub(crate) mod test {
     async fn test_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+        let _disk_test =
+            DiskTestBuilder::new(cptestctx).with_zpool_count(4).build().await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;

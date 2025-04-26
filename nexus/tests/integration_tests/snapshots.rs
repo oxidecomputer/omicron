@@ -978,7 +978,7 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
 
     // Set the third region's running snapshot callback so it fails
     let zpool = disk_test.zpools().nth(2).expect("Not enough zpools");
-    let dataset = &zpool.datasets[0];
+    let dataset = zpool.crucible_dataset();
     cptestctx
         .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
@@ -1616,7 +1616,7 @@ async fn test_region_allocation_for_snapshot(
     assert_eq!(allocated_regions.len(), 1);
 
     // If an additional region is required, make sure that works too.
-    disk_test.add_zpool_with_dataset(sled_id).await;
+    disk_test.add_zpool_with_datasets(sled_id).await;
 
     datastore
         .arbitrary_region_allocate(
