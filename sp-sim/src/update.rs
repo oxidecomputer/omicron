@@ -126,8 +126,6 @@ impl SimSpUpdate {
             )
         };
 
-        // XXX-dap these values were historically used when getting
-        // rot_boot_info(), but not when getting sp_state().
         const SLOT_A_DIGEST: [u8; 32] = [0xaa; 32];
         const SLOT_B_DIGEST: [u8; 32] = [0xbb; 32];
         const STAGE0_DIGEST: [u8; 32] = [0xcc; 32];
@@ -340,9 +338,6 @@ impl SimSpUpdate {
             (SpComponent::STAGE0, 0) => &self.caboose_stage0,
             (SpComponent::STAGE0, 1) => &self.caboose_stage0next,
             _ => {
-                // XXX-dap this is the error that was returned previously, but
-                // it seems like it should really be a NoSuchComponent or
-                // NoSuchSlot, but those don't exist.
                 return Err(SpError::NoSuchCabooseKey(key));
             }
         };
@@ -350,8 +345,8 @@ impl SimSpUpdate {
         which_caboose.value(key, buf)
     }
 
-    pub(crate) fn rot_state(&self) -> &RotStateV3 {
-        &self.rot_state
+    pub(crate) fn rot_state(&self) -> RotStateV3 {
+        self.rot_state
     }
 }
 
@@ -377,9 +372,6 @@ impl BaseboardKind {
     }
 
     fn rot_name(&self) -> &str {
-        // XXX-dap this is inconsistent with the previous behavior.  There,
-        // ROT_NAME was SimGimletRot (not SimGimlet) but sidecar's ROT_NAME was
-        // SimSidecar (not SimSidecarRot).
         match self {
             BaseboardKind::Gimlet => "SimGimletRot",
             BaseboardKind::Sidecar => "SimSidecarRot",
@@ -392,10 +384,14 @@ enum CabooseValue {
     /// emulate an actual caboose
     Caboose(hubtools::Caboose),
     /// emulate "the image does not include a caboose"
+    // This will be used shortly.
+    #[allow(dead_code)]
     InvalidMissing,
     /// emulate "the image caboose does not contain 'KEY'"
     InvalidMissingAllKeys,
     /// emulate "failed to read data from the caboose" (erased)
+    // This will be used shortly.
+    #[allow(dead_code)]
     InvalidFailedRead,
 }
 

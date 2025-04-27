@@ -19,7 +19,7 @@ pub(crate) fn rot_slot_id_from_u16(slot_id: u16) -> Result<RotSlotId, SpError> {
     }
 }
 
-pub(crate) fn rot_state_v2(v3: &RotStateV3) -> RotStateV2 {
+pub(crate) fn rot_state_v2(v3: RotStateV3) -> RotStateV2 {
     let Fwid::Sha3_256(slot_a_sha3_256_digest) = v3.slot_a_fwid;
     let Fwid::Sha3_256(slot_b_sha3_256_digest) = v3.slot_b_fwid;
     RotStateV2 {

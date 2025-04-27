@@ -1115,7 +1115,7 @@ impl SpHandler for Handler {
                 1 => Ok(RotBootInfo::V2(rot_state_v2(
                     self.update_state.rot_state(),
                 ))),
-                _ => Ok(RotBootInfo::V3(self.update_state.rot_state().clone())),
+                _ => Ok(RotBootInfo::V3(self.update_state.rot_state())),
             }
         }
     }
