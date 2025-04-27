@@ -431,6 +431,7 @@ table! {
         migration_id -> Nullable<Uuid>,
         state -> crate::enums::InstanceStateEnum,
         time_last_auto_restarted -> Nullable<Timestamptz>,
+        intended_state -> crate::enums::InstanceIntendedStateEnum,
         updater_id -> Nullable<Uuid>,
         updater_gen-> Int8,
     }

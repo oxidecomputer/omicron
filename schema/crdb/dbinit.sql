@@ -84,13 +84,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.clickhouse_policy (
 
 
 /*
- * The ClickHouse installation Oximeter should read from 
+ * The ClickHouse installation Oximeter should read from
  */
 CREATE TYPE IF NOT EXISTS omicron.public.oximeter_read_mode AS ENUM (
-   -- Read from the single node ClickHouse installation 
+   -- Read from the single node ClickHouse installation
    'single_node',
 
-   -- Read from the replicated ClickHouse cluster 
+   -- Read from the replicated ClickHouse cluster
    'cluster'
 );
 
@@ -1151,6 +1151,19 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
      'best_effort'
 );
 
+/*
+ * Represents the *desired* state of an instance, as requested by the user.
+*/
+CREATE TYPE IF NOT EXISTS omicron.public.instance_intended_state AS ENUM (
+    /* The instance should be running. */
+    'running',
+
+    /* The instance should be stopped */
+    'stopped',
+
+    /* The instance should be destroyed. */
+    'destroyed'
+);
 
 /*
  * TODO consider how we want to manage multiple sagas operating on the same
@@ -1207,6 +1220,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * `separate-instance-and-vmm-states` schema change for details.
      */
     state omicron.public.instance_state_v2 NOT NULL,
+
+    /*
+     * The intended state of the instance, as requested by the user.
+     *
+     * This may differ from its current state, and is used to determine what
+     * action should be taken when the instance's VMM state changes.
+     */
+    intended_state omicron.public.instance_intended_state NOT NULL,
 
     /*
      * The time of the most recent auto-restart attempt, or NULL if the control
@@ -5098,7 +5119,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '138.0.0', NULL)
+    (TRUE, NOW(), NOW(), '139.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

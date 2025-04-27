@@ -21,6 +21,7 @@ use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::InstanceIntendedState as IntendedState;
 use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
@@ -586,6 +587,14 @@ impl super::Nexus {
         let (.., authz_instance, instance) =
             instance_lookup.fetch_for(authz::Action::Delete).await?;
 
+        self.db_datastore
+            .instance_set_intended_state(
+                opctx,
+                &authz_instance,
+                IntendedState::Destroyed,
+            )
+            .await?;
+
         // TODO: #3593 Correctness
         // When the set of boundary switches changes, there is no cleanup /
         // reconciliation logic performed to ensure that the NAT entries are
@@ -676,9 +685,17 @@ impl super::Nexus {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let state = self
+        let mut state = self
             .db_datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await?;
+        state.instance = self
+            .db_datastore
+            .instance_set_intended_state(
+                opctx,
+                &authz_instance,
+                IntendedState::Running,
+            )
             .await?;
 
         if let Err(e) = self
@@ -719,9 +736,17 @@ impl super::Nexus {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let state = self
+        let mut state = self
             .db_datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await?;
+        state.instance = self
+            .db_datastore
+            .instance_set_intended_state(
+                opctx,
+                &authz_instance,
+                IntendedState::Running,
+            )
             .await?;
 
         match instance_start_allowed(&self.log, &state, reason)? {
@@ -756,9 +781,17 @@ impl super::Nexus {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let state = self
+        let mut state = self
             .db_datastore
             .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await?;
+        state.instance = self
+            .db_datastore
+            .instance_set_intended_state(
+                opctx,
+                &authz_instance,
+                IntendedState::Stopped,
+            )
             .await?;
 
         if let Err(e) = self

@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::InstanceIntendedState as IntendedState;
 use super::{
     ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
     InstanceCpuCount, InstanceState, Vmm, VmmState,
@@ -69,6 +70,15 @@ pub struct Instance {
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
 
+    /// The most recently requested state of the instance.
+    ///
+    /// This is used to determine whether the instance should be automatically
+    /// restarted when it fails. Instances that were requested to stop should
+    /// not be automatically restarted if they have transitioned to the `Failed`
+    /// state.
+    #[diesel(column_name = intended_state)]
+    pub intended_state: IntendedState,
+
     /// A UUID identifying the saga currently holding the update lock on this
     /// instance. If this is [`None`] the instance is not locked. Otherwise, if
     /// this is [`Some`], the instance is locked by the saga owning this UUID.
@@ -111,6 +121,12 @@ impl Instance {
             cooldown: None,
         };
 
+        let intended_state = if params.start {
+            IntendedState::Running
+        } else {
+            IntendedState::Stopped
+        };
+
         Self {
             identity,
             project_id,
@@ -124,6 +140,7 @@ impl Instance {
             boot_disk_id: None,
 
             runtime_state,
+            intended_state,
 
             updater_gen: Generation::new(),
             updater_id: None,
@@ -132,6 +149,47 @@ impl Instance {
 
     pub fn runtime(&self) -> &InstanceRuntimeState {
         &self.runtime_state
+    }
+
+    /// Returns an instance's karmic status.
+    pub fn auto_restart_status(
+        &self,
+        active_vmm: Option<&Vmm>,
+    ) -> InstanceKarmicStatus {
+        let state = &self.runtime_state;
+        // Instances only need to be automatically restarted if they are in the
+        // `Failed` state, or if their active VMM is in the `SagaUnwound` state.
+        //
+        // If the instance's intended state is not Running, it should
+        // not be reincarnated, even if it has failed.
+        let needs_reincarnation =
+            match (self.intended_state, state.nexus_state, active_vmm) {
+                (IntendedState::Running, InstanceState::Failed, _vmm) => {
+                    debug_assert!(
+                        _vmm.is_none(),
+                        "a Failed instance will never have an active VMM!"
+                    );
+                    true
+                }
+                (IntendedState::Running, InstanceState::Vmm, Some(ref vmm)) => {
+                    debug_assert_eq!(
+                        state.propolis_id,
+                        Some(vmm.id),
+                        "don't call `InstanceAutoRestart::status with a VMM \
+                         that isn't this instance's active VMM!?!?"
+                    );
+                    // Note that we *don't* reincarnate instances with `Failed` active
+                    // VMMs; in that case, an instance-update saga must first run to
+                    // move the *instance* record to the `Failed` state.
+                    vmm.runtime.state == VmmState::SagaUnwound
+                }
+                _ => false,
+            };
+
+        InstanceKarmicStatus {
+            needs_reincarnation,
+            can_reincarnate: self.auto_restart.can_reincarnate(&state),
+        }
     }
 }
 
@@ -319,43 +377,6 @@ impl InstanceAutoRestart {
     pub const DEFAULT_POLICY: InstanceAutoRestartPolicy =
         InstanceAutoRestartPolicy::BestEffort;
 
-    /// Returns an instance's karmic status.
-    pub fn status(
-        &self,
-        state: &InstanceRuntimeState,
-        active_vmm: Option<&Vmm>,
-    ) -> InstanceKarmicStatus {
-        // Instances only need to be automatically restarted if they are in the
-        // `Failed` state, or if their active VMM is in the `SagaUnwound` state.
-        let needs_reincarnation = match (state.nexus_state, active_vmm) {
-            (InstanceState::Failed, _vmm) => {
-                debug_assert!(
-                    _vmm.is_none(),
-                    "a Failed instance will never have an active VMM!"
-                );
-                true
-            }
-            (InstanceState::Vmm, Some(ref vmm)) => {
-                debug_assert_eq!(
-                    state.propolis_id,
-                    Some(vmm.id),
-                    "don't call `InstanceAutoRestart::status with a VMM \
-                     that isn't this instance's active VMM!?!?"
-                );
-                // Note that we *don't* reincarnate instances with `Failed` active
-                // VMMs; in that case, an instance-update saga must first run to
-                // move the *instance* record to the `Failed` state.
-                vmm.runtime.state == VmmState::SagaUnwound
-            }
-            _ => false,
-        };
-
-        InstanceKarmicStatus {
-            needs_reincarnation,
-            can_reincarnate: self.can_reincarnate(&state),
-        }
-    }
-
     /// Returns whether or not this auto-restart configuration will permit an
     /// instance with the provided `InstanceRuntimeState` to reincarnate.
     ///
@@ -424,10 +445,13 @@ impl InstanceAutoRestart {
             // If the auto-restart policy is null, then it should
             // default to "best effort".
             .or(dsl::auto_restart_policy.is_null()))
-        // An instance whose last reincarnation was within the cooldown
-        // interval from now must remain in _bardo_ --- the liminal
-        // state between death and rebirth --- before its next
-        // reincarnation.
+        // An instance should only be automatically restarted if it is intended
+        // to be in the `Running` state. Instances which were requested to stop
+        // should not be automatically restarted, even if they have failed.
+        .and(dsl::intended_state.eq(IntendedState::Running))
+        // instance whose last reincarnation was within the cooldown interval
+        // from now must remain in _bardo_ --- the liminal state between death
+        // and rebirth --- before its next reincarnation.
         .and(
             // If the instance has never previously been reincarnated, then
             // it's allowed to reincarnate.

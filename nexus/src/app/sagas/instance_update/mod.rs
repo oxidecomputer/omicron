@@ -1287,10 +1287,9 @@ async fn siu_chain_successor_saga(
             // auto-restart policy allows it to be automatically restarted. If
             // it does, activate the instance-reincarnation background task to
             // automatically restart it.
-            let karmic_state = new_state.instance.auto_restart.status(
-                &new_state.instance.runtime_state,
-                new_state.active_vmm.as_ref(),
-            );
+            let karmic_state = new_state
+                .instance
+                .auto_restart_status(new_state.active_vmm.as_ref());
             if karmic_state.should_reincarnate() {
                 info!(
                     log,
@@ -1300,6 +1299,7 @@ async fn siu_chain_successor_saga(
                     "instance_id" => %instance_id,
                     "auto_restart_config" => ?new_state.instance.auto_restart,
                     "runtime_state" => ?new_state.instance.runtime_state,
+                    "intended_state" => %new_state.instance.intended_state,
                 );
                 nexus.background_tasks.task_instance_reincarnation.activate();
             } else {
@@ -1310,6 +1310,7 @@ async fn siu_chain_successor_saga(
                     "auto_restart_config" => ?new_state.instance.auto_restart,
                     "needs_reincarnation" => karmic_state.needs_reincarnation,
                     "karmic_state" => ?karmic_state.can_reincarnate,
+                    "intended_state" => %new_state.instance.intended_state,
                 )
             }
         }

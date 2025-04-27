@@ -778,6 +778,47 @@ impl DataStore {
         Ok(updated)
     }
 
+    pub async fn instance_set_intended_state(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        intended_state: db::model::InstanceIntendedState,
+    ) -> Result<Instance, Error> {
+        use nexus_db_schema::schema::instance::dsl;
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        let instance_id = authz_instance.id().into_untyped_uuid();
+
+        let UpdateAndQueryResult { status, found } =
+            diesel::update(dsl::instance)
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::id.eq(instance_id))
+                // Don't spuriously set time_modified if the intended state won't change.
+                .filter(dsl::intended_state.ne(intended_state))
+                .set((
+                    dsl::intended_state.eq(intended_state),
+                    dsl::time_modified.eq(chrono::Utc::now()),
+                ))
+                .check_if_exists::<Instance>(instance_id)
+                .execute_and_check(&*self.pool_connection_unauthorized().await?)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByResource(authz_instance),
+                    )
+                })?;
+
+        slog::info!(
+            opctx.log,
+            "set intended instance state";
+            "instance_id" => ?instance_id,
+            "intended_state" => %intended_state,
+            "changed" => status == UpdateStatus::Updated,
+        );
+
+        Ok(found)
+    }
+
     /// Updates an instance record by setting the instance's migration ID to the
     /// provided `migration_id` and the target VMM ID to the provided
     /// `target_propolis_id`, if the instance does not currently have an active
