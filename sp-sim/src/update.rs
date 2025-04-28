@@ -17,6 +17,7 @@ use gateway_messages::SpError;
 use gateway_messages::UpdateChunk;
 use gateway_messages::UpdateId;
 use gateway_messages::UpdateInProgressStatus;
+use hubtools::RawHubrisImage;
 
 pub(crate) struct SimSpUpdate {
     state: UpdateState,
@@ -186,6 +187,7 @@ impl SimSpUpdate {
             UpdateState::NotPrepared
             | UpdateState::Aborted(_)
             | UpdateState::Completed { .. } => {
+                // XXX-dap shouldn't we fail in some of these cases?
                 let slot = if component == SpComponent::HOST_CPU_BOOT_FLASH {
                     match self.active_host_slot {
                         Some(slot) => slot,
@@ -202,8 +204,29 @@ impl SimSpUpdate {
                     slot,
                     data: Cursor::new(vec![0u8; total_size].into_boxed_slice()),
                 };
+
+                if let Some(caboose) = self.caboose_mut(component, slot) {
+                    *caboose = CabooseValue::InvalidMissing;
+                }
+
                 Ok(())
             }
+        }
+    }
+
+    fn caboose_mut(
+        &mut self,
+        component: SpComponent,
+        slot: u16,
+    ) -> Option<&mut CabooseValue> {
+        match (component, slot) {
+            // SP always updates slot 0.
+            (SpComponent::SP_ITSELF, 0) => Some(&mut self.caboose_sp_inactive),
+            (SpComponent::ROT, 0) => Some(&mut self.caboose_rot_a),
+            (SpComponent::ROT, 1) => Some(&mut self.caboose_rot_b),
+            // RoT bootloader always updates slot 1.
+            (SpComponent::STAGE0, 1) => Some(&mut self.caboose_stage0next),
+            _ => None,
         }
     }
 
@@ -219,8 +242,9 @@ impl SimSpUpdate {
         match &mut self.state {
             UpdateState::Prepared { component, id, slot, data } => {
                 // Ensure that the update ID and target component are correct.
-                if chunk.id != *id || chunk.component != *component {
-                    return Err(SpError::InvalidUpdateId { sp_update_id: *id });
+                let id = *id;
+                if chunk.id != id || chunk.component != *component {
+                    return Err(SpError::InvalidUpdateId { sp_update_id: id });
                 };
                 if data.position() != u64::from(chunk.offset) {
                     return Err(SpError::UpdateInProgress(
@@ -245,11 +269,29 @@ impl SimSpUpdate {
                             .insert(*slot, data.clone());
                     }
 
-                    self.state = UpdateState::Completed {
-                        component: *component,
-                        id: *id,
-                        data,
-                    };
+                    let component = *component;
+                    let slot = *slot;
+                    if let Some(caboose_value) =
+                        self.caboose_mut(component, slot)
+                    {
+                        let caboose = RawHubrisImage::from_binary(
+                            data.clone().to_vec(),
+                            0,
+                            0,
+                        )
+                        .and_then(|image| image.read_caboose());
+                        match caboose {
+                            Ok(caboose) => {
+                                *caboose_value = CabooseValue::Caboose(caboose);
+                            }
+                            Err(_) => {
+                                // XXX-dap log error
+                                *caboose_value = CabooseValue::InvalidMissing;
+                            }
+                        };
+                    }
+
+                    self.state = UpdateState::Completed { component, id, data };
                 }
 
                 Ok(())
@@ -279,6 +321,7 @@ impl SimSpUpdate {
     }
 
     pub(crate) fn sp_reset(&mut self) {
+        // XXX-dap copy state fields
         match &self.state {
             UpdateState::Completed { data, component, .. } => {
                 if *component == SpComponent::SP_ITSELF {
@@ -292,6 +335,7 @@ impl SimSpUpdate {
     }
 
     pub(crate) fn rot_reset(&mut self) {
+        // XXX-dap copy state fields
         match &self.state {
             UpdateState::Completed { data, component, .. } => {
                 if *component == SpComponent::ROT {

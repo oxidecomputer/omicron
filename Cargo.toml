@@ -914,6 +914,8 @@ opt-level = 3
 # progenitor-client = { path = "../progenitor/progenitor-client" }
 # steno = { path = "../steno" }
 
+[patch."https://github.com/oxidecomputer/hubtools.git"]
+hubtools = { path = "../hubtools/hubtools" }
 # [patch."https://github.com/oxidecomputer/crucible"]
 # crucible-agent-client = { path = "../crucible/agent-client" }
 # crucible-pantry-client = { path = "../crucible/pantry-client" }
