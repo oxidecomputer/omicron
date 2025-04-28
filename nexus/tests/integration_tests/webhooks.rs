@@ -207,7 +207,7 @@ async fn subscription_add(
     ctx: &ControlPlaneTestContext,
     webhook_id: WebhookReceiverUuid,
     subscription: &shared::WebhookSubscription,
-) -> shared::WebhookSubscription {
+) -> views::WebhookSubscriptionCreated {
     resource_helpers::object_create(
         &ctx.external_client,
         &format!("{RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions"),
