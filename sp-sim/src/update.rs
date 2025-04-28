@@ -363,10 +363,6 @@ impl SimSpUpdate {
         self.last_host_phase1_update_data.get(&slot).cloned()
     }
 
-    pub(crate) fn set_active_host_slot(&mut self, slot: u16) {
-        self.active_host_slot = Some(slot);
-    }
-
     pub(crate) fn get_component_caboose_value(
         &mut self,
         component: SpComponent,
@@ -391,6 +387,53 @@ impl SimSpUpdate {
 
     pub(crate) fn rot_state(&self) -> RotStateV3 {
         self.rot_state
+    }
+
+    pub(crate) fn component_set_active_slot(
+        &mut self,
+        component: SpComponent,
+        slot: u16,
+        persist: bool,
+    ) -> Result<(), SpError> {
+        match component {
+            SpComponent::ROT => {
+                // XXX-dap
+                Ok(())
+            }
+            SpComponent::STAGE0 => {
+                if slot == 1 {
+                    // XXX-dap
+                    return Ok(());
+                } else {
+                    Err(SpError::RequestUnsupportedForComponent)
+                }
+            }
+            SpComponent::HOST_CPU_BOOT_FLASH => {
+                // XXX-dap
+                self.active_host_slot = Some(slot);
+                Ok(())
+            }
+            _ => {
+                // The real SP returns `RequestUnsupportedForComponent` for
+                // anything other than the RoT and host boot flash, including
+                // SP_ITSELF.
+                Err(SpError::RequestUnsupportedForComponent)
+            }
+        }
+    }
+
+    pub(crate) fn component_get_active_slot(
+        &mut self,
+        component: SpComponent,
+    ) -> Result<u16, SpError> {
+        match component {
+            SpComponent::ROT => todo!(), // XXX-dap
+            // The only active component is stage0
+            SpComponent::STAGE0 => Ok(0),
+            // The real SP returns `RequestUnsupportedForComponent` for anything
+            // other than the RoT, including SP_ITSELF.
+            _ => Err(SpError::RequestUnsupportedForComponent),
+        }
     }
 }
 
