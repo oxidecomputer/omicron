@@ -142,6 +142,8 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
+use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
@@ -383,6 +385,8 @@ enum DbCommands {
     Vmms(VmmListArgs),
     /// Print information about the oximeter collector.
     Oximeter(OximeterArgs),
+    /// Print information about webhooks
+    Webhook(WebhookArgs),
     /// Commands for querying and interacting with pools
     Zpool(ZpoolArgs),
 }
@@ -1150,6 +1154,44 @@ struct SetStorageBufferArgs {
     storage_buffer: i64,
 }
 
+struct WebhookArgs {
+    #[command(subcommand)]
+    command: WebhookCommands,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum WebhookCommands {
+    /// Get information on webhook receivers.
+    #[clap(alias = "rx")]
+    Receiver {
+        #[command(subcommand)]
+        command: WebhookRxCommands,
+    },
+    /// Get information on webhook events
+    Event,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum WebhookRxCommands {
+    /// List webhook receivers
+    #[clap(alias = "ls")]
+    List(WebhookRxListArgs),
+
+    #[clap(alias = "show")]
+    Info(WebhookRxInfoArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct WebhookRxInfoArgs {
+    receiver: NameOrId,
+}
+
+#[derive(Debug, Args, Clone)]
+struct WebhookRxListArgs {
+    #[clap(long, short)]
+    start_at: Option<Uuid>,
+}
+
 impl DbArgs {
     /// Run a `omdb db` subcommand.
     ///
@@ -1460,6 +1502,8 @@ impl DbArgs {
                     DbCommands::Oximeter(OximeterArgs {
                         command: OximeterCommands::ListProducers
                     }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
+
+                    DbCommands::Webhook(WebhookArgs { command }) => cmd_db_webhook(&opctx, &datastore, &fetch_opts, command).await,
                     DbCommands::Zpool(ZpoolArgs {
                         command: ZpoolCommands::List(args)
                     }) => cmd_db_zpool_list(&opctx, &datastore, &args).await,
@@ -8024,6 +8068,93 @@ async fn cmd_db_oximeter_list_producers(
     println!("{}", table);
 
     Ok(())
+}
+
+async fn cmd_db_webhook(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    command: &WebhookCommands,
+) -> anyhow::Result<()> {
+    match command {
+        WebhookCommands::Receiver {
+            command: WebhookRxCommands::List(args),
+        } => cmd_db_webhook_rx_list(opctx, datastore, fetch_opts, args).await,
+        WebhookCommands::Receiver {
+            command: WebhookRxCommands::Info(args),
+        } => cmd_db_webhook_rx_info(opctx, datastore, fetch_opts, args).await,
+        WebhookCommands::Event => {
+            Err(anyhow::anyhow!("not yet implemented, sorry!"))
+        }
+    }
+}
+
+async fn cmd_db_webhook_rx_list(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &WebhookRxListArgs,
+) -> anyhow::Result<()> {
+    let ctx = || {
+        if let Some(starting_at) = args.start_at {
+            format!("listing webhook receivers (starting at {starting_at}")
+        } else {
+            "listing webhook_receivers".to_string()
+        }
+    };
+    let pagparams = DataPageParams {
+        marker: args.start_at.as_ref(),
+        ..first_page(fetch_opts.fetch_limit)
+    };
+    let rxs = datastore
+        .webhook_rx_list(opctx, &PaginatedBy::Id(pagparams))
+        .await
+        .with_context(ctx)?;
+
+    check_limit(&rxs, fetch_opts.fetch_limit, ctx);
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct RxRow {
+        id: Uuid,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        created: chrono::DateTime<Utc>,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        modified: chrono::DateTime<Utc>,
+        secrets: usize,
+        events: usize,
+        name: String,
+        endpoint: String,
+    }
+
+    let rows = rxs.into_iter().map(
+        |db::model::WebhookReceiverConfig { rx, secrets, events }| RxRow {
+            id: rx.id().into_untyped_uuid(),
+            name: rx.identity.name.to_string(),
+            created: rx.time_created(),
+            modified: rx.time_modified(),
+            secrets: secrets.len(),
+            events: events.len(),
+            endpoint: rx.endpoint,
+        },
+    );
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    println!("{table}");
+
+    Ok(())
+}
+
+async fn cmd_db_webhook_rx_info(
+    _opctx: &OpContext,
+    _datastore: &DataStore,
+    _fetch_opts: &DbFetchOptions,
+    _args: &WebhookRxInfoArgs,
+) -> anyhow::Result<()> {
+    anyhow::bail!("TODO: eliza, implement this one!")
 }
 
 // Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using
