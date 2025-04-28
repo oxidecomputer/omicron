@@ -501,6 +501,7 @@ pub async fn soa() -> Result<(), anyhow::Error> {
         .expect_err("test zone should not exist");
     expect_no_records_error_code(&lookup_err, ResponseCode::NXDomain);
 
+    test_ctx.cleanup().await;
     Ok(())
 }
 
