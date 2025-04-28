@@ -210,8 +210,20 @@ impl SimSpUpdate {
                     data: Cursor::new(vec![0u8; total_size].into_boxed_slice()),
                 };
 
+                // When the SP or RoT begins preparing an update, we can start
+                // seeing various errors when we try to read the caboose for the
+                // slot we're updating.  Empirically, during the SP update we
+                // tend to see InvalidMissing.  During the stage0next update, we
+                // see InvalidFailedRead.  It'd be nice to get these exactly
+                // right, but it's most important that consumers handle both
+                // cases, which they will if they test updates to both of these
+                // components.
                 if let Some(caboose) = self.caboose_mut(component, slot) {
-                    *caboose = CabooseValue::InvalidMissing;
+                    *caboose = if component == SpComponent::STAGE0 {
+                        CabooseValue::InvalidFailedRead
+                    } else {
+                        CabooseValue::InvalidMissing
+                    }
                 }
 
                 Ok(())
@@ -518,13 +530,10 @@ enum CabooseValue {
     /// emulate an actual caboose
     Caboose(hubtools::Caboose),
     /// emulate "the image does not include a caboose"
-    #[allow(dead_code)]
     InvalidMissing,
     /// emulate "the image caboose does not contain 'KEY'"
     InvalidMissingAllKeys,
     /// emulate "failed to read data from the caboose" (erased)
-    // XXX-dap
-    #[allow(dead_code)]
     InvalidFailedRead,
 }
 
