@@ -356,6 +356,8 @@ impl SimSpUpdate {
             | UpdateState::Prepared { .. }
             | UpdateState::Aborted(_) => (),
         }
+
+        self.state = UpdateState::NotPrepared;
     }
 
     pub(crate) fn rot_reset(&mut self) {
@@ -369,6 +371,8 @@ impl SimSpUpdate {
             | UpdateState::Prepared { .. }
             | UpdateState::Aborted(_) => (),
         }
+
+        self.state = UpdateState::NotPrepared;
 
         // If there was a pending persistent boot preference set, apply that now
         // (and unset it).
