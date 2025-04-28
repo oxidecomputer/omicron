@@ -135,7 +135,7 @@ pub trait DnsServerApi {
     async fn dns_config_get_v1(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<internal_dns_types::config::v1::DnsConfig>,
+        HttpResponseOk<internal_dns_types::v1::config::DnsConfig>,
         HttpError,
     >;
 
@@ -148,7 +148,7 @@ pub trait DnsServerApi {
     async fn dns_config_get_v2(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<internal_dns_types::config::v2::DnsConfig>,
+        HttpResponseOk<internal_dns_types::v2::config::DnsConfig>,
         HttpError,
     >;
 
@@ -161,7 +161,7 @@ pub trait DnsServerApi {
     async fn dns_config_put_v1(
         rqctx: RequestContext<Self::Context>,
         rq: dropshot::TypedBody<
-            internal_dns_types::config::v1::DnsConfigParams,
+            internal_dns_types::v1::config::DnsConfigParams,
         >,
     ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>;
 
@@ -174,7 +174,7 @@ pub trait DnsServerApi {
     async fn dns_config_put_v2(
         rqctx: RequestContext<Self::Context>,
         rq: dropshot::TypedBody<
-            internal_dns_types::config::v2::DnsConfigParams,
+            internal_dns_types::v2::config::DnsConfigParams,
         >,
     ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>;
 }

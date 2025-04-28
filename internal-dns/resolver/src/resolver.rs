@@ -830,7 +830,7 @@ mod test {
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     "api-version"
                         .parse::<reqwest::header::HeaderName>()
-                        .expect("TODO asghahgahghag"),
+                        .expect("api-version is a valid header name"),
                     semver::Version::new(2, 0, 0),
                 ),
             )))
