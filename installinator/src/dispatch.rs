@@ -23,10 +23,11 @@ use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 
 use crate::{
+    ArtifactWriter, WriteDestination,
     artifact::ArtifactIdOpts,
-    peers::{DiscoveryMechanism, FetchedArtifact, HttpPeers, Peers},
-    reporter::ProgressReporter,
-    write::{ArtifactWriter, WriteDestination},
+    fetch::{FetchArtifactBackend, FetchedArtifact, HttpFetchBackend},
+    peers::DiscoveryMechanism,
+    reporter::{HttpProgressBackend, ProgressReporter, ReportProgressBackend},
 };
 
 /// Installinator app.
@@ -90,15 +91,15 @@ struct DebugDiscoverOpts {
 
 impl DebugDiscoverOpts {
     async fn exec(self, log: &slog::Logger) -> Result<()> {
-        let peers = Peers::new(
+        let backend = FetchArtifactBackend::new(
             log,
-            Box::new(HttpPeers::new(
-                log,
-                self.opts.mechanism.discover_peers(log).await?,
+            Box::new(HttpFetchBackend::new(
+                &log,
+                self.opts.mechanism.discover_peers(&log).await?,
             )),
             Duration::from_secs(10),
         );
-        println!("discovered peers: {}", peers.display());
+        println!("discovered peers: {}", backend.peers().display());
         Ok(())
     }
 }
@@ -185,22 +186,14 @@ impl InstallOpts {
         let image_id = self.artifact_ids.resolve()?;
 
         let discovery = self.discover_opts.mechanism.clone();
-        let discovery_log = log.clone();
-        let (progress_reporter, event_sender) =
-            ProgressReporter::new(log, image_id.update_id, move || {
-                let log = discovery_log.clone();
-                let discovery = discovery.clone();
-                async move {
-                    Ok(Peers::new(
-                        &log,
-                        Box::new(HttpPeers::new(
-                            &log,
-                            discovery.discover_peers(&log).await?,
-                        )),
-                        Duration::from_secs(10),
-                    ))
-                }
-            });
+        let (progress_reporter, event_sender) = ProgressReporter::new(
+            log,
+            image_id.update_id,
+            ReportProgressBackend::new(
+                log,
+                HttpProgressBackend::new(log, discovery),
+            ),
+        );
         let progress_handle = progress_reporter.start();
         let discovery = &self.discover_opts.mechanism;
 
@@ -499,9 +492,9 @@ async fn fetch_artifact(
         cx,
         &log,
         || async {
-            Ok(Peers::new(
+            Ok(FetchArtifactBackend::new(
                 &log,
-                Box::new(HttpPeers::new(
+                Box::new(HttpFetchBackend::new(
                     &log,
                     discovery.discover_peers(&log).await?,
                 )),

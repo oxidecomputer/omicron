@@ -600,10 +600,14 @@ impl SledAgent {
             )
             .await?;
 
-        let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
-            .await
-            .start(sled_address, &config.dropshot)
-            .await?;
+        let repo_depot = ArtifactStore::new(
+            &log,
+            storage_manager.clone(),
+            Some(services.clone()),
+        )
+        .await
+        .start(sled_address, &config.dropshot)
+        .await?;
 
         // Spawn a background task for managing notifications to nexus
         // about this sled-agent.
