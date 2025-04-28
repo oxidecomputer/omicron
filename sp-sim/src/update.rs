@@ -10,6 +10,7 @@ use crate::SIM_GIMLET_BOARD;
 use crate::SIM_ROT_BOARD;
 use crate::SIM_ROT_STAGE0_BOARD;
 use crate::SIM_SIDECAR_BOARD;
+use crate::helpers::rot_slot_id_to_u16;
 use gateway_messages::RotSlotId;
 use gateway_messages::RotStateV3;
 use gateway_messages::SpComponent;
@@ -25,6 +26,7 @@ pub(crate) struct SimSpUpdate {
     last_rot_update_data: Option<Box<[u8]>>,
     last_host_phase1_update_data: BTreeMap<u16, Box<[u8]>>,
     active_host_slot: Option<u16>,
+    pending_stage0_update: bool,
 
     caboose_sp_active: CabooseValue,
     caboose_sp_inactive: CabooseValue,
@@ -160,6 +162,8 @@ impl SimSpUpdate {
             // ensure any tests that expect to read or write a particular slot
             // set that slot as active first.
             active_host_slot: None,
+
+            pending_stage0_update: false,
 
             caboose_sp_active,
             caboose_sp_inactive,
@@ -321,11 +325,18 @@ impl SimSpUpdate {
     }
 
     pub(crate) fn sp_reset(&mut self) {
-        // XXX-dap copy state fields
         match &self.state {
             UpdateState::Completed { data, component, .. } => {
                 if *component == SpComponent::SP_ITSELF {
                     self.last_sp_update_data = Some(data.clone());
+
+                    // Swap the cabooses to simulate what a real SP does in
+                    // terms of swapping the active slot upon reset after an
+                    // update.
+                    std::mem::swap(
+                        &mut self.caboose_sp_active,
+                        &mut self.caboose_sp_inactive,
+                    );
                 }
             }
             UpdateState::NotPrepared
@@ -335,7 +346,6 @@ impl SimSpUpdate {
     }
 
     pub(crate) fn rot_reset(&mut self) {
-        // XXX-dap copy state fields
         match &self.state {
             UpdateState::Completed { data, component, .. } => {
                 if *component == SpComponent::ROT {
@@ -346,6 +356,17 @@ impl SimSpUpdate {
             | UpdateState::Prepared { .. }
             | UpdateState::Aborted(_) => (),
         }
+
+        if let Some(new_boot_pref) =
+            self.rot_state.pending_persistent_boot_preference.take()
+        {
+            self.rot_state.persistent_boot_preference = new_boot_pref;
+            self.rot_state.active = new_boot_pref;
+        }
+
+        // We do not currently simulate changes to the transient boot
+        // preference.
+        self.rot_state.transient_boot_preference = None;
     }
 
     pub(crate) fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
@@ -397,19 +418,24 @@ impl SimSpUpdate {
     ) -> Result<(), SpError> {
         match component {
             SpComponent::ROT => {
-                // XXX-dap
+                if persist {
+                    self.rot_state.pending_persistent_boot_preference =
+                        Some(rot_slot_id_from_u16(slot));
+                } else {
+                    self.rot_state.transient_boot_preference =
+                        Some(rot_slot_id_from_u16(slot));
+                }
                 Ok(())
             }
             SpComponent::STAGE0 => {
                 if slot == 1 {
-                    // XXX-dap
+                    self.pending_stage0_update = true;
                     return Ok(());
                 } else {
                     Err(SpError::RequestUnsupportedForComponent)
                 }
             }
             SpComponent::HOST_CPU_BOOT_FLASH => {
-                // XXX-dap
                 self.active_host_slot = Some(slot);
                 Ok(())
             }
@@ -427,7 +453,9 @@ impl SimSpUpdate {
         component: SpComponent,
     ) -> Result<u16, SpError> {
         match component {
-            SpComponent::ROT => todo!(), // XXX-dap
+            SpComponent::ROT => {
+                rot_slot_id_to_u16(self.rot_state.persistent_boot_preference)
+            }
             // The only active component is stage0
             SpComponent::STAGE0 => Ok(0),
             // The real SP returns `RequestUnsupportedForComponent` for anything
