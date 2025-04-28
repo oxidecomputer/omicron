@@ -37,7 +37,7 @@ use std::time::Duration;
 // operation can upsample the data. Another way to think of it is that this
 // limits the ratio between the requested period and the largest interval
 // between timestamps in the data.
-const MAX_UPSAMPLING_RATIO: u128 = 10;
+const MAX_UPSAMPLING_RATIO: u128 = 100;
 
 fn verify_max_upsampling_ratio(
     timestamps: &[DateTime<Utc>],
@@ -683,11 +683,11 @@ mod tests {
 
     #[test]
     fn test_verify_max_upsampling_ratio() {
-        // We'll use a 1 second period, and ensure that we allow downsampling,
+        // We'll use a 10 second period, and ensure that we allow downsampling,
         // and upsampling up to the max factor. That's 1/10th of a second,
         // currently.
         let now = Utc::now();
-        let timestamps = &[now - Duration::from_secs(1), now];
+        let timestamps = &[now - Duration::from_secs(10), now];
 
         // All values within the threshold.
         for period in [

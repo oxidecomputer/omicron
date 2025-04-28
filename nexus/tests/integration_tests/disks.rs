@@ -13,13 +13,13 @@ use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::fixed_data::FLEET_ID;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::Collection;
@@ -35,6 +35,7 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use nexus_types::identity::Asset;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -416,7 +417,7 @@ async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
         let opctx =
             OpContext::for_tests(ctx.logctx.log.new(o!()), datastore.clone());
 
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk_id)
             .fetch()
             .await
@@ -998,16 +999,12 @@ async fn test_disk_backed_by_multiple_region_sets(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create three zpools, each with one dataset
-    let mut test = DiskTest::new(&cptestctx).await;
+    // Create six zpools, each with one crucible dataset
+    let _test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(6).build().await;
 
     // Assert default is still 16 GiB
     assert_eq!(16, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
-
-    // Create another three zpools, each with one dataset
-    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
-    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
-    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
 
     create_project_and_pool(client).await;
 
@@ -1337,7 +1334,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     // Set the third agent to fail when deleting regions
     let zpool =
         &disk_test.zpools().nth(2).expect("Expected at least three zpools");
-    let dataset = &zpool.datasets[0];
+    let dataset = zpool.crucible_dataset();
     cptestctx
         .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
@@ -1556,24 +1553,16 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Total occupied size should start at 0
     for zpool in test.zpools() {
-        for dataset in &zpool.datasets {
-            assert_eq!(
-                datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap(),
-                0
-            );
+        let dataset = zpool.crucible_dataset();
+        assert_eq!(
+            datastore.regions_total_reserved_size(dataset.id).await.unwrap(),
+            0
+        );
 
-            assert_eq!(
-                datastore
-                    .crucible_dataset_get(dataset.id)
-                    .await
-                    .unwrap()
-                    .size_used,
-                0,
-            );
-        }
+        assert_eq!(
+            datastore.crucible_dataset_get(dataset.id).await.unwrap().size_used,
+            0,
+        );
     }
 
     // Ask for a 7 gibibyte disk, this should succeed
@@ -1605,15 +1594,11 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     // regions to make a region set for an Upstairs, one region per dataset)
     // plus reservation overhead
     for zpool in test.zpools() {
-        for dataset in &zpool.datasets {
-            assert_eq!(
-                datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap(),
-                ByteCount::from_mebibytes_u32(8960).to_bytes(),
-            );
-        }
+        let dataset = zpool.crucible_dataset();
+        assert_eq!(
+            datastore.regions_total_reserved_size(dataset.id).await.unwrap(),
+            ByteCount::from_mebibytes_u32(8960).to_bytes(),
+        );
     }
 
     // Ask for a 6 gibibyte disk, this should fail because there isn't space
@@ -1642,15 +1627,11 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Total occupied size is still 7 GiB * 3 (plus overhead)
     for zpool in test.zpools() {
-        for dataset in &zpool.datasets {
-            assert_eq!(
-                datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap(),
-                ByteCount::from_mebibytes_u32(8960).to_bytes(),
-            );
-        }
+        let dataset = zpool.crucible_dataset();
+        assert_eq!(
+            datastore.regions_total_reserved_size(dataset.id).await.unwrap(),
+            ByteCount::from_mebibytes_u32(8960).to_bytes(),
+        );
     }
 
     // Delete the first disk, freeing up 7 gibibytes.
@@ -1666,15 +1647,11 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Total occupied size should be 0
     for zpool in test.zpools() {
-        for dataset in &zpool.datasets {
-            assert_eq!(
-                datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap(),
-                0,
-            );
-        }
+        let dataset = zpool.crucible_dataset();
+        assert_eq!(
+            datastore.regions_total_reserved_size(dataset.id).await.unwrap(),
+            0,
+        );
     }
 
     // Ask for a 10 gibibyte disk.
@@ -1702,15 +1679,11 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Total occupied size should be 10 GiB * 3 plus overhead
     for zpool in test.zpools() {
-        for dataset in &zpool.datasets {
-            assert_eq!(
-                datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap(),
-                ByteCount::from_mebibytes_u32(12800).to_bytes(),
-            );
-        }
+        let dataset = zpool.crucible_dataset();
+        assert_eq!(
+            datastore.regions_total_reserved_size(dataset.id).await.unwrap(),
+            ByteCount::from_mebibytes_u32(12800).to_bytes(),
+        );
     }
 }
 
@@ -2053,7 +2026,7 @@ async fn test_project_delete_disk_no_auth_idempotent(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -2069,7 +2042,7 @@ async fn test_project_delete_disk_no_auth_idempotent(
         .await
         .unwrap();
 
-    let r = LookupPath::new(&opctx, &datastore)
+    let r = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await;
@@ -2135,19 +2108,16 @@ async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
     let mut number_of_matching_regions = 0;
 
     for zpool in disk_test.zpools() {
-        for dataset in &zpool.datasets {
-            let total_size = datastore
-                .regions_total_reserved_size(dataset.id)
-                .await
-                .unwrap();
+        let dataset = zpool.crucible_dataset();
+        let total_size =
+            datastore.regions_total_reserved_size(dataset.id).await.unwrap();
 
-            if total_size == allocated_region.reserved_size() {
-                number_of_matching_regions += 1;
-            } else if total_size == 0 {
-                // ok, unallocated
-            } else {
-                panic!("unexpected regions total size of {total_size}");
-            }
+        if total_size == allocated_region.reserved_size() {
+            number_of_matching_regions += 1;
+        } else if total_size == 0 {
+            // ok, unallocated
+        } else {
+            panic!("unexpected regions total size of {total_size}");
         }
     }
 
@@ -2179,7 +2149,7 @@ async fn test_region_allocation_strategy_random_is_idempotent(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .fetch()
         .await
@@ -2309,7 +2279,7 @@ async fn test_single_region_allocate_for_replace(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .fetch()
         .await
@@ -2393,7 +2363,7 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .fetch()
         .await
@@ -2489,7 +2459,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
 
     // Choose one of the datasets, and drop the simulated Crucible agent
     let zpool = disk_test.zpools().next().expect("Expected at least one zpool");
-    let dataset = &zpool.datasets[0];
+    let dataset = zpool.crucible_dataset();
 
     cptestctx.first_sled_agent().drop_dataset(zpool.id, dataset.id);
 
@@ -2561,7 +2531,7 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .fetch()
         .await
@@ -2592,6 +2562,249 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     assert_eq!(expunged_regions.len(), 3);
+}
+
+#[nexus_test(extra_sled_agents = 3)]
+async fn test_do_not_provision_on_dataset(cptestctx: &ControlPlaneTestContext) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create one zpool, each with one dataset, on all the sleds
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(1)
+        .build()
+        .await;
+
+    // For one of the datasets, mark it as not provisionable
+    let dataset = disk_test.zpools().next().unwrap().crucible_dataset();
+
+    datastore
+        .mark_crucible_dataset_not_provisionable(&opctx, dataset.id)
+        .await
+        .unwrap();
+
+    // Create a disk
+    let client = &cptestctx.external_client;
+    let _project_id = create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+
+    // Assert no region was allocated to the marked dataset
+    let disk_id = disk.identity.id;
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
+        .disk_id(disk_id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+
+    for (allocated_region_dataset, _) in allocated_regions {
+        assert_ne!(allocated_region_dataset.id(), dataset.id);
+    }
+}
+
+#[nexus_test(extra_sled_agents = 2)]
+async fn test_do_not_provision_on_dataset_not_enough(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create one zpool, each with one dataset, on all the sleds
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(1)
+        .build()
+        .await;
+
+    // For one of the datasets, mark it as not provisionable
+    let dataset = disk_test.zpools().next().unwrap().crucible_dataset();
+
+    datastore
+        .mark_crucible_dataset_not_provisionable(&opctx, dataset.id)
+        .await
+        .unwrap();
+
+    // Because there's only 3 sled agents, each with one zpool with one dataset,
+    // this shouldn't be enough to create a disk.
+
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    let disks_url = get_disks_url();
+
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: ByteCount::from_gibibytes_u32(1),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::INSUFFICIENT_STORAGE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Marking that dataset as provisionable should allow the disk to be
+    // created.
+
+    datastore
+        .mark_crucible_dataset_provisionable(&opctx, dataset.id)
+        .await
+        .unwrap();
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+#[nexus_test(extra_sled_agents = 2)]
+async fn test_zpool_control_plane_storage_buffer(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create one zpool, each with one dataset, on all the sleds
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(1)
+        .build()
+        .await;
+
+    // Assert default is still 16 GiB
+    assert_eq!(16, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    let disks_url = get_disks_url();
+
+    // Creating a 8G disk will work (10G size used due to reservation overhead)
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk1".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: ByteCount::from_gibibytes_u32(8),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Creating a 4G disk will also work (5G size used due to reservation
+    // overhead plus the previous 10G size used is less than 16G)
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk2".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: ByteCount::from_gibibytes_u32(4),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Delete the 4G disk
+    let disk_url = get_disk_url("disk2");
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+
+    // For any of the zpools, set the control plane storage buffer to 2G. This
+    // should prevent the disk's region allocation from succeeding (as the
+    // reserved sizes of 10G + 5G plus the storage buffer of 2G is 1G over the
+    // the backing pool's 16G).
+
+    let zpool = &disk_test.zpools().next().unwrap();
+    datastore
+        .zpool_set_control_plane_storage_buffer(
+            &opctx,
+            zpool.id,
+            ByteCount::from_gibibytes_u32(2).into(),
+        )
+        .await
+        .unwrap();
+
+    // Now creating the 4G disk should fail
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::INSUFFICIENT_STORAGE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Setting the storage buffer to 1G should allow the disk creation to
+    // succeed.
+
+    datastore
+        .zpool_set_control_plane_storage_buffer(
+            &opctx,
+            zpool.id,
+            ByteCount::from_gibibytes_u32(1).into(),
+        )
+        .await
+        .unwrap();
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

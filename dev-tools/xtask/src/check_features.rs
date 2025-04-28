@@ -7,9 +7,8 @@
 use anyhow::{Result, bail};
 use camino::Utf8PathBuf;
 use clap::Parser;
+use dev_tools_common::{CargoLocation, cargo_command};
 use std::{collections::HashSet, process::Command};
-
-use crate::common::cargo_command;
 
 const SUPPORTED_ARCHITECTURES: [&str; 1] = ["x86_64"];
 const CI_EXCLUDED_FEATURES: [&str; 2] = ["image-trampoline", "image-standard"];
@@ -42,7 +41,7 @@ pub fn run_cmd(args: Args) -> Result<()> {
         bail!("cannot specify --ci and --install-version together");
     }
 
-    let mut command = cargo_command();
+    let mut command = cargo_command(CargoLocation::FromEnv);
 
     // Add the `hack check` subcommand.
     command.args(&["hack", "check"]);
@@ -132,7 +131,7 @@ fn out_dir() -> Utf8PathBuf {
 /// download a pre-built version if it's not already in our `out` directory.
 fn install_cargo_hack(version: Option<String>) -> Result<()> {
     if let Some(version) = version {
-        let mut command = cargo_command();
+        let mut command = cargo_command(CargoLocation::FromEnv);
 
         eprintln!(
             "installing cargo-hack at version {} to {}",
@@ -153,7 +152,7 @@ fn install_cargo_hack(version: Option<String>) -> Result<()> {
 /// Download a pre-built version of `cargo-hack` to the `out` directory via the
 /// download `xtask`.
 fn install_prebuilt_cargo_hack() -> Result<()> {
-    let mut command = cargo_command();
+    let mut command = cargo_command(CargoLocation::FromEnv);
 
     let out_dir = out_dir();
     eprintln!(

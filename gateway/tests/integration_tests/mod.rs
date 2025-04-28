@@ -9,3 +9,4 @@ mod config;
 mod ereports;
 mod location_discovery;
 mod serial_console;
+mod task_dump;

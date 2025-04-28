@@ -7,10 +7,7 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db::TransactionError;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::ReadOnlyTargetReplacement;
 use crate::db::model::ReadOnlyTargetReplacementType;
 use crate::db::model::RegionSnapshot;
@@ -23,9 +20,12 @@ use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeUuid;
 use std::net::SocketAddrV6;
@@ -120,11 +120,10 @@ impl DataStore {
                 // needed: snapshot volumes should never be directly
                 // constructed, and therefore won't ever have an associated
                 // Upstairs that receives a volume replacement request.
-                // However it's being done in an attempt to be overly
-                // cautious, and it validates that the volume exist:
-                // otherwise it would be possible to create a region
-                // snapshot replacement request for a volume that didn't
-                // exist!
+                //
+                // However, per-volume serialization is still required in order
+                // to serialize allocating an additional region for a particular
+                // volume id.
 
                 Self::volume_repair_insert_in_txn(
                     &conn, err, volume_id, request.id,
@@ -1442,12 +1441,7 @@ impl DataStore {
             }
 
             ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
-                let region = match self.get_region_optional(region_id).await? {
-                    Some(region) => region,
-                    None => return Ok(None),
-                };
-
-                Ok(self.region_addr(region.id()).await?)
+                self.region_addr(region_id).await
             }
         }
     }
@@ -1675,19 +1669,6 @@ mod test {
         let snapshot_id = Uuid::new_v4();
 
         let volume_id = VolumeUuid::new_v4();
-
-        datastore
-            .volume_create(
-                volume_id,
-                VolumeConstructionRequest::Volume {
-                    id: Uuid::new_v4(), // not required to match!
-                    block_size: 512,
-                    sub_volumes: vec![], // nothing needed here
-                    read_only_parent: None,
-                },
-            )
-            .await
-            .unwrap();
 
         let request = RegionSnapshotReplacement::new_from_region_snapshot(
             dataset_id,
@@ -1996,19 +1977,6 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let volume_id = VolumeUuid::new_v4();
-
-        datastore
-            .volume_create(
-                volume_id,
-                VolumeConstructionRequest::Volume {
-                    id: Uuid::new_v4(), // not required to match!
-                    block_size: 512,
-                    sub_volumes: vec![], // nothing needed here
-                    read_only_parent: None,
-                },
-            )
-            .await
-            .unwrap();
 
         let mut request = RegionSnapshotReplacement::new_from_region_snapshot(
             DatasetUuid::new_v4(),

@@ -142,12 +142,7 @@ impl super::Nexus {
                 },
                 system_name: n.system_info.system_name.clone(),
                 system_description: n.system_info.system_description.clone(),
-                management_ip: n
-                    .system_info
-                    .management_addresses
-                    .iter()
-                    .map(|a| oxnet::IpNet::host_net(a.addr))
-                    .collect(),
+                management_ip: n.system_info.management_addresses.clone(),
             })
             .collect())
     }

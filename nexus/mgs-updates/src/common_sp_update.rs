@@ -7,13 +7,21 @@
 
 use super::MgsClients;
 use super::UpdateProgress;
+use futures::future::BoxFuture;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
+use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::PendingMgsUpdate;
 use slog::Logger;
 use slog::{debug, error, info, warn};
 use std::time::Duration;
+use thiserror::Error;
 use tokio::sync::watch;
+use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
+
+/// How frequently do we poll MGS for the update progress?
+pub(crate) const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
 
@@ -45,7 +53,12 @@ pub enum SpComponentUpdateError {
     UpdateFailedWithMessage(String),
 }
 
-pub(super) trait SpComponentUpdater {
+/// Describes an update to a component for which the SP drives the update
+///
+/// This trait is essentially historical at this point.  We maintain impls so
+/// that we have tested reference implementations.  But these will eventually be
+/// migrated to `ReconfiguratorSpComponentUpdater` instead.
+pub trait SpComponentUpdater {
     /// The target component.
     ///
     /// Should be produced via `SpComponent::const_as_str()`.
@@ -81,9 +94,6 @@ pub(super) async fn deliver_update(
     updater: &(dyn SpComponentUpdater + Send + Sync),
     mgs_clients: &mut MgsClients,
 ) -> Result<(), SpComponentUpdateError> {
-    // How frequently do we poll MGS for the update progress?
-    const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(3);
-
     // Start the update.
     mgs_clients
         .try_all_serially(updater.logger(), |client| async move {
@@ -237,4 +247,67 @@ fn status_is_complete(
             }
         }
     }
+}
+
+/// Provides helper functions used while updating a particular SP component
+pub trait SpComponentUpdateHelper {
+    /// Checks if the component is already updated or ready for update
+    fn precheck<'a>(
+        &'a self,
+        log: &'a slog::Logger,
+        mgs_clients: &'a mut MgsClients,
+        update: &'a PendingMgsUpdate,
+    ) -> BoxFuture<'a, Result<PrecheckStatus, PrecheckError>>;
+
+    /// Attempts once to perform any post-update actions (e.g., reset the
+    /// device)
+    fn post_update<'a>(
+        &'a self,
+        log: &'a slog::Logger,
+        mgs_clients: &'a mut MgsClients,
+        update: &'a PendingMgsUpdate,
+    ) -> BoxFuture<'a, Result<(), GatewayClientError>>;
+}
+
+/// Describes the live state of the component before the update begins
+#[derive(Debug)]
+pub enum PrecheckStatus {
+    UpdateComplete,
+    ReadyForUpdate,
+}
+
+#[derive(Debug, Error)]
+pub enum PrecheckError {
+    #[error("communicating with MGS")]
+    GatewayClientError(#[from] GatewayClientError),
+
+    #[error(
+        "in {sp_type} slot {slot_id}, expected to find
+         part {expected_part:?} serial {expected_serial:?}, but found
+         part {found_part:?} serial {found_serial:?}"
+    )]
+    WrongDevice {
+        sp_type: SpType,
+        slot_id: u32,
+        expected_part: String,
+        expected_serial: String,
+        found_part: String,
+        found_serial: String,
+    },
+
+    #[error(
+        "expected to find active version {expected:?}, but found {found:?}"
+    )]
+    WrongActiveVersion { expected: ArtifactVersion, found: String },
+
+    #[error(
+        "expected to find inactive version {expected:?}, but found {found:?}"
+    )]
+    WrongInactiveVersion { expected: ExpectedVersion, found: FoundVersion },
+}
+
+#[derive(Debug)]
+pub enum FoundVersion {
+    MissingVersion,
+    Version(String),
 }

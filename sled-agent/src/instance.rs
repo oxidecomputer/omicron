@@ -13,9 +13,7 @@ use crate::instance_manager::{
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::profile::*;
-use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
-use anyhow::anyhow;
 use chrono::Utc;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -39,7 +37,7 @@ use propolis_client::Client as PropolisClient;
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_types::instance::*;
-use sled_agent_types::zone_bundle::{ZoneBundleCause, ZoneBundleMetadata};
+use sled_agent_types::zone_bundle::ZoneBundleCause;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -211,9 +209,6 @@ struct PropolisSetup {
 // Requests that can be made of instances
 #[derive(strum::Display)]
 enum InstanceRequest {
-    RequestZoneBundle {
-        tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
-    },
     GetFilesystemPool {
         tx: oneshot::Sender<Result<Option<ZpoolName>, ManagerError>>,
     },
@@ -269,9 +264,6 @@ impl InstanceRequest {
         };
 
         match this {
-            Self::RequestZoneBundle { tx } => tx
-                .send(Err(BundleError::FailedSend(anyhow!(error))))
-                .map_err(|_| Error::FailedSendClientClosed),
             Self::GetFilesystemPool { tx } => tx
                 .send(Err(error.into()))
                 .map_err(|_| Error::FailedSendClientClosed),
@@ -669,10 +661,6 @@ impl InstanceRunner {
                     // request from the termination  channel.
                     let op = async {
                         match request {
-                            RequestZoneBundle { tx } => {
-                                tx.send(self.request_zone_bundle().await)
-                                    .map_err(|_| Error::FailedSendClientClosed)
-                            },
                             GetFilesystemPool { tx } => {
                                 tx.send(Ok(self.get_filesystem_zpool()))
                                     .map_err(|_| Error::FailedSendClientClosed)
@@ -801,9 +789,6 @@ impl InstanceRunner {
             // instead of bailing out, since we still need to drain the rest of
             // the queue,
             let _ = match request {
-                RequestZoneBundle { tx } => tx
-                    .send(Err(BundleError::InstanceTerminating))
-                    .map_err(|_| ()),
                 GetFilesystemPool { tx } => tx.send(Ok(None)).map_err(|_| ()),
                 CurrentState { tx } => {
                     tx.send(Ok(self.current_state())).map_err(|_| ())
@@ -1468,9 +1453,20 @@ impl InstanceRunner {
 
         // Ask the sled-agent's metrics task to stop tracking statistics for our
         // control VNIC and any OPTE ports in the zone as well.
-        self.metrics_queue
-            .untrack_zone_links(&running_state.running_zone)
-            .await;
+        match self.metrics_queue.untrack_zone_links(&running_state.running_zone)
+        {
+            Ok(_) => debug!(
+                self.log,
+                "stopped tracking zone datalinks";
+                "zone_name" => &zname,
+            ),
+            Err(errors) => error!(
+                self.log,
+                "failed to stop tracking zone datalinks";
+                "zone_name" => &zname,
+                "errors" => ?errors,
+            ),
+        }
 
         // Take a zone bundle whenever this instance stops.
         if let Err(e) = self
@@ -1903,16 +1899,6 @@ impl Instance {
         self.id
     }
 
-    /// Create bundle from an instance zone.
-    pub fn request_zone_bundle(
-        &self,
-        tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
-    ) -> Result<(), Error> {
-        self.tx
-            .try_send(InstanceRequest::RequestZoneBundle { tx })
-            .or_else(InstanceRequest::fail_try_send)
-    }
-
     pub fn get_filesystem_zpool(
         &self,
         tx: oneshot::Sender<Result<Option<ZpoolName>, ManagerError>>,
@@ -2024,20 +2010,6 @@ impl Instance {
 // TODO: Move this implementation higher. I'm just keeping it here to make the
 // incremental diff smaller.
 impl InstanceRunner {
-    async fn request_zone_bundle(
-        &self,
-    ) -> Result<ZoneBundleMetadata, BundleError> {
-        let name = propolis_zone_name(&self.propolis_id);
-        match &self.running_state {
-            None => Err(BundleError::Unavailable { name }),
-            Some(RunningState { ref running_zone, .. }) => {
-                self.zone_bundler
-                    .create(running_zone, ZoneBundleCause::ExplicitRequest)
-                    .await
-            }
-        }
-    }
-
     fn get_filesystem_zpool(&self) -> Option<ZpoolName> {
         let Some(run_state) = &self.running_state else {
             return None;
@@ -2331,13 +2303,19 @@ impl InstanceRunner {
         info!(self.log, "Propolis SMF service is online");
 
         // Notify the metrics task about the instance zone's datalinks.
-        if !self.metrics_queue.track_zone_links(&running_zone).await {
-            error!(
+        match self.metrics_queue.track_zone_links(&running_zone) {
+            Ok(_) => debug!(
+                self.log,
+                "Started tracking datalinks";
+                "zone_name" => running_zone.name(),
+            ),
+            Err(errors) => error!(
                 self.log,
                 "Failed to track one or more datalinks in the zone, \
                 some metrics will not be produced";
+                "errors" => ?errors,
                 "zone_name" => running_zone.name(),
-            );
+            ),
         }
 
         // We use a custom client builder here because the default progenitor

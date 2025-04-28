@@ -31,8 +31,6 @@ const NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL: &'static str =
 /// Translates a generic pool error to an external error based
 /// on messages which may be emitted during region provisioning.
 pub fn from_diesel(e: DieselError) -> external::Error {
-    use crate::db::error;
-
     let sentinels = [
         NOT_ENOUGH_DATASETS_SENTINEL,
         NOT_ENOUGH_ZPOOL_SPACE_SENTINEL,
@@ -68,7 +66,10 @@ pub fn from_diesel(e: DieselError) -> external::Error {
         }
     }
 
-    error::public_error_from_diesel(e, error::ErrorHandler::Server)
+    nexus_db_errors::public_error_from_diesel(
+        e,
+        nexus_db_errors::ErrorHandler::Server,
+    )
 }
 
 type SelectableSql<T> = <
@@ -165,6 +166,9 @@ impl From<AllocationQueryError> for external::Error {
 /// for the region set that is in the top level of the Volume (not the deeper
 /// layers of the hierarchy). If that volume has region snapshots in the region
 /// set, a `snapshot_id` should be supplied matching those entries.
+///
+/// Depending on the call site, it may not safe for multiple callers to call
+/// this function concurrently for the same volume id. Care is required!
 pub fn allocation_query(
     volume_id: VolumeUuid,
     snapshot_id: Option<uuid::Uuid>,
@@ -273,7 +277,10 @@ pub fn allocation_query(
     SELECT
       crucible_dataset.pool_id,
       sum(crucible_dataset.size_used) AS size_used
-    FROM crucible_dataset WHERE ((crucible_dataset.size_used IS NOT NULL) AND (crucible_dataset.time_deleted IS NULL)) GROUP BY crucible_dataset.pool_id),");
+    FROM crucible_dataset
+    WHERE
+      ((crucible_dataset.size_used IS NOT NULL) AND (crucible_dataset.time_deleted IS NULL))
+    GROUP BY crucible_dataset.pool_id),");
 
     if let Some(snapshot_id) = snapshot_id {
         // Any zpool already have this volume's existing regions, or host the
@@ -288,7 +295,7 @@ pub fn allocation_query(
        select crucible_dataset.pool_id from
  crucible_dataset inner join region_snapshot on (region_snapshot.dataset_id = crucible_dataset.id)
  where region_snapshot.snapshot_id = ").param().sql(")),")
-        .bind::<sql_types::Uuid, _>(snapshot_id)
+        .bind::<sql_types::Uuid, _>(snapshot_id);
     } else {
         // Any zpool already have this volume's existing regions?
         builder.sql("
@@ -297,8 +304,8 @@ pub fn allocation_query(
           crucible_dataset.pool_id
         FROM
           crucible_dataset INNER JOIN old_regions ON (old_regions.dataset_id = crucible_dataset.id)
-      ),")
-    };
+      ),");
+    }
 
     // If `distinct_sleds` is selected, then take note of the sleds used by
     // existing allocations, and filter those out later. This step is required
@@ -317,7 +324,7 @@ pub fn allocation_query(
             zpool.id = ANY(SELECT pool_id FROM existing_zpools)
         ),",
         );
-    };
+    }
 
     // Identifies zpools with enough space for region allocation, that are not
     // currently used by this Volume's existing regions.
@@ -341,8 +348,10 @@ pub fn allocation_query(
         (zpool INNER JOIN sled ON (zpool.sled_id = sled.id)) ON (zpool.id = old_zpool_usage.pool_id)
         INNER JOIN
         physical_disk ON (zpool.physical_disk_id = physical_disk.id)
+        INNER JOIN
+        crucible_dataset ON (crucible_dataset.pool_id = zpool.id)
     WHERE (
-      (old_zpool_usage.size_used + ").param().sql(" ) <=
+      (old_zpool_usage.size_used + ").param().sql(" + zpool.control_plane_storage_buffer) <=
          (SELECT total_size FROM omicron.public.inv_zpool WHERE
           inv_zpool.id = old_zpool_usage.pool_id
           ORDER BY inv_zpool.time_collected DESC LIMIT 1)
@@ -351,6 +360,8 @@ pub fn allocation_query(
       AND physical_disk.disk_policy = 'in_service'
       AND physical_disk.disk_state = 'active'
       AND NOT(zpool.id = ANY(SELECT existing_zpools.pool_id FROM existing_zpools))
+      AND (crucible_dataset.time_deleted is NULL)
+      AND (crucible_dataset.no_provision = false)
     "
     ).bind::<sql_types::BigInt, _>(size_delta);
 
@@ -375,7 +386,7 @@ pub fn allocation_query(
       crucible_dataset.id,
       crucible_dataset.pool_id
     FROM (crucible_dataset INNER JOIN candidate_zpools ON (crucible_dataset.pool_id = candidate_zpools.pool_id))
-    WHERE (crucible_dataset.time_deleted IS NULL)
+    WHERE (crucible_dataset.time_deleted IS NULL) AND (crucible_dataset.no_provision = false)
     ORDER BY crucible_dataset.pool_id, md5((CAST(crucible_dataset.id as BYTEA) || ").param().sql("))
   ),")
     .bind::<sql_types::Bytea, _>(seed.clone())

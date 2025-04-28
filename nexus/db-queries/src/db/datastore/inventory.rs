@@ -5,9 +5,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::pagination::{Paginator, paginated, paginated_multicolumn};
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use anyhow::Context;
@@ -27,6 +24,9 @@ use diesel::expression::SelectableHelper;
 use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::HwPowerState;
 use nexus_db_model::HwRotSlot;
@@ -84,7 +84,7 @@ use uuid::Uuid;
 /// We use a [`Paginator`] to guard against single queries returning an
 /// unchecked number of rows.
 // unsafe: `new_unchecked` is only unsound if the argument is 0.
-const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
+const SQL_BATCH_SIZE: NonZeroU32 = NonZeroU32::new(1000).unwrap();
 
 impl DataStore {
     /// Store a complete inventory collection into the database

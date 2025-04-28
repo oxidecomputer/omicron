@@ -136,7 +136,10 @@ pub struct NestedDatasetLocation {
 }
 
 impl NestedDatasetLocation {
-    pub fn mountpoint(&self, root: &Utf8Path) -> Utf8PathBuf {
+    /// Returns the desired mountpoint of this dataset.
+    ///
+    /// Does not ensure that the dataset is mounted.
+    pub fn mountpoint(&self, mount_root: &Utf8Path) -> Utf8PathBuf {
         let mut path = Utf8Path::new(&self.path);
 
         // This path must be nested, so we need it to be relative to
@@ -152,9 +155,31 @@ impl NestedDatasetLocation {
                 .expect("Path is absolute, but we cannot strip '/' character");
         }
 
-        self.root.mountpoint(root).join(path)
+        // mount_root: Usually "/", but can be a tmp dir for tests
+        // self.root:  Parent dataset mountpoint
+        // path:       Path to nested dataset within parent dataset
+        self.root.mountpoint(mount_root).join(path)
     }
 
+    /// Access the mountpoint of this nested dataset, and ensure it's mounted.
+    ///
+    /// If it is not mounted, or cannot be mounted, return an error.
+    pub async fn ensure_mounted_and_get_mountpoint(
+        &self,
+        mount_root: &Utf8Path,
+    ) -> Result<Utf8PathBuf, Error> {
+        let mountpoint = self.mountpoint(mount_root);
+        Zfs::ensure_dataset_mounted_and_exists(
+            &self.full_name(),
+            &Mountpoint(mountpoint.clone()),
+        )?;
+
+        return Ok(mountpoint);
+    }
+
+    /// Returns the full name of the nested dataset.
+    ///
+    /// This is a combination of the parent and child dataset names.
     pub fn full_name(&self) -> String {
         if self.path.is_empty() {
             self.root.full_name().to_string()
@@ -400,6 +425,15 @@ impl StorageHandle {
         rx.await.unwrap()
     }
 
+    /// Ensures that a dataset exists, nested somewhere arbitrary within
+    /// a Nexus-controlled dataset.
+    ///
+    /// This function does mount the dataset according to `config`.
+    /// However, this dataset is not automatically mounted on reboot.
+    ///
+    /// If you're trying to access a nested dataset later, consider
+    /// using the [NestedDatasetLocation::ensure_mounted_and_get_mountpoint]
+    /// function.
     pub async fn nested_dataset_ensure(
         &self,
         config: NestedDatasetConfig,
@@ -1078,7 +1112,7 @@ impl StorageManager {
         let mountpoint_path = config.name.mountpoint(mountpoint_root);
         let details = DatasetCreationDetails {
             zoned: config.name.kind().zoned(),
-            mountpoint: Mountpoint::Path(mountpoint_path),
+            mountpoint: Mountpoint(mountpoint_path),
             full_name: config.name.full_name(),
         };
 
@@ -1167,7 +1201,7 @@ impl StorageManager {
 
         let details = DatasetCreationDetails {
             zoned: false,
-            mountpoint: Mountpoint::Path(mountpoint_path),
+            mountpoint: Mountpoint(mountpoint_path),
             full_name: config.name.full_name(),
         };
 
@@ -1209,6 +1243,8 @@ impl StorageManager {
         let log = self.log.new(o!("request" => "nested_dataset_list"));
         info!(log, "Listing nested datasets");
 
+        // Observe all propreties for this nested datasets, including
+        // children. We'll apply user-specified filters later.
         let full_name = name.full_name();
         let properties = Zfs::get_dataset_properties(
             &[full_name],
@@ -1524,7 +1560,7 @@ impl StorageManager {
         let size_details = None;
         Zfs::ensure_dataset(DatasetEnsureArgs {
             name: fs_name,
-            mountpoint: Mountpoint::Path(Utf8PathBuf::from("/data")),
+            mountpoint: Mountpoint(Utf8PathBuf::from("/data")),
             can_mount: CanMount::On,
             zoned,
             encryption_details,

@@ -9,6 +9,7 @@ use diesel::ExpressionMethods;
 use diesel::QueryDsl;
 use dropshot::test_util::ClientTestContext;
 use nexus_client::types::LastResult;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_model::ReadOnlyTargetReplacement;
 use nexus_db_model::RegionReplacementState;
@@ -16,7 +17,6 @@ use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::region_snapshot_replacement::*;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::background::*;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -24,7 +24,9 @@ use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_disk_from_snapshot;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_project_image_from_snapshot;
 use nexus_test_utils::resource_helpers::create_snapshot;
+use nexus_test_utils::resource_helpers::delete_snapshot;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -234,7 +236,7 @@ async fn test_region_replacement_does_not_create_freed_region(
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
 
     // Before expunging the physical disk, save the DB model
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -765,7 +767,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     .await;
 
     // Before deleting the disk, save the DB model
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -1998,7 +2000,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Before expunging the physical disk, save the DB model
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -2109,13 +2111,13 @@ async fn test_region_replacement_triple_sanity(
     .await;
 
     // Before expunging any physical disk, save some DB models
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
         .unwrap();
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -2235,13 +2237,13 @@ async fn test_region_replacement_triple_sanity_2(
     .await;
 
     // Before expunging any physical disk, save some DB models
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
         .unwrap();
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -2397,7 +2399,7 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
     // Manually create region snapshot replacement requests for each region
     // snapshot.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -2432,7 +2434,7 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
 
     // Now, do it again, except this time specifying the read-only regions
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -2504,7 +2506,7 @@ async fn test_read_only_replacement_sanity(
     // Manually create region snapshot replacement requests for each region
     // snapshot.
 
-    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk.identity.id)
         .fetch()
         .await
@@ -2539,7 +2541,7 @@ async fn test_read_only_replacement_sanity(
 
     // Now expunge a sled with read-only regions on it.
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+    let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
         .fetch()
         .await
@@ -2585,4 +2587,148 @@ async fn test_read_only_replacement_sanity(
             .unwrap()
             .is_empty()
     );
+}
+
+/// `test_replacement_sanity_twice`, but delete the snapshot before doing the
+/// expungements
+#[nexus_test(extra_sled_agents = 3)]
+async fn test_replacement_sanity_twice_after_snapshot_delete(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let internal_client = &cptestctx.internal_client;
+
+    // Create one zpool per sled, each with one dataset. This is required for
+    // region and region snapshot replacement to have somewhere to move the
+    // data.
+    DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(1)
+        .build()
+        .await;
+
+    // Any volumes sent to the Pantry for reconciliation should return active
+    // for this test
+    cptestctx
+        .first_sim_server()
+        .pantry_server
+        .as_ref()
+        .unwrap()
+        .pantry
+        .set_auto_activate_volumes();
+
+    // Create a disk and a snapshot and a disk from that snapshot
+    let client = &cptestctx.external_client;
+    let _project_id = create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+    let snapshot = create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
+
+    create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "snap-disk-1",
+        snapshot.identity.id,
+    )
+    .await;
+    create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "snap-disk-2",
+        snapshot.identity.id,
+    )
+    .await;
+    create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "snap-disk-3",
+        snapshot.identity.id,
+    )
+    .await;
+
+    create_project_image_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "image",
+        snapshot.identity.id,
+    )
+    .await;
+
+    // Delete the snapshot
+    delete_snapshot(&client, PROJECT_NAME, "snap").await;
+
+    // Assert snapshot volume is gone
+    let db_snapshot = datastore
+        .snapshot_get(&opctx, snapshot.identity.id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(
+        datastore.volume_get(db_snapshot.volume_id()).await.unwrap().is_none()
+    );
+
+    // Manually create region snapshot replacement requests for each region
+    // snapshot.
+
+    let (.., db_disk) = LookupPath::new(&opctx, datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    assert_eq!(db_disk.id(), disk.identity.id);
+
+    let disk_allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+
+    for (_, region) in &disk_allocated_regions {
+        let region_snapshot = datastore
+            .region_snapshot_get(
+                region.dataset_id(),
+                region.id(),
+                snapshot.identity.id,
+            )
+            .await
+            .expect("found region snapshot")
+            .unwrap();
+
+        datastore
+            .create_region_snapshot_replacement_request(
+                &opctx,
+                &region_snapshot,
+            )
+            .await
+            .unwrap();
+
+        wait_for_all_replacements(&datastore, &internal_client).await;
+    }
+
+    // Now, do it again, except this time specifying the read-only regions
+
+    let db_snapshot = datastore
+        .snapshot_get(&opctx, snapshot.identity.id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(db_snapshot.id(), snapshot.identity.id);
+
+    let snapshot_allocated_regions =
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
+
+    for (_, region) in &snapshot_allocated_regions {
+        let region =
+            datastore.get_region(region.id()).await.expect("found region");
+
+        datastore
+            .create_read_only_region_replacement_request(&opctx, region.id())
+            .await
+            .unwrap();
+
+        wait_for_all_replacements(&datastore, &internal_client).await;
+    }
 }

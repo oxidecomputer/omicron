@@ -8,15 +8,10 @@ use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::SERVICE_IP_POOL_NAME;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::identity::Resource;
-use crate::db::lookup::LookupPath;
 use crate::db::model::ExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
@@ -27,14 +22,19 @@ use crate::db::model::IpPoolUpdate;
 use crate::db::model::Name;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_errors::public_error_from_diesel_lookup;
+use nexus_db_lookup::DbConnection;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::InternetGateway;
 use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_model::Project;
@@ -527,7 +527,7 @@ impl DataStore {
         opctx: &OpContext,
         silo_id: Uuid,
         ip_pool_id: Uuid,
-        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> UpdateResult<()> {
         use nexus_db_schema::schema::internet_gateway::dsl as igw_dsl;
         use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as igw_ip_pool_dsl;
@@ -620,7 +620,7 @@ impl DataStore {
         opctx: &OpContext,
         silo_id: Uuid,
         ip_pool_id: Uuid,
-        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> UpdateResult<()> {
         use nexus_db_schema::schema::internet_gateway::dsl as igw_dsl;
         use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as igw_ip_pool_dsl;

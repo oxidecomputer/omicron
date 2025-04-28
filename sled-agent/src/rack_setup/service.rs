@@ -91,13 +91,15 @@ use nexus_client::{
 use nexus_sled_agent_shared::inventory::{
     OmicronSledConfig, OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
-use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintZoneType, CockroachDbPreserveDowngrade, blueprint_zone_type,
 };
+use nexus_types::deployment::{
+    BlueprintSledConfig, OximeterReadMode, PendingMgsUpdates,
+};
 use nexus_types::external_api::views::SledState;
-use omicron_common::address::get_sled_address;
+use omicron_common::address::{COCKROACH_ADMIN_PORT, get_sled_address};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
@@ -1056,20 +1058,19 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         // Now that datasets and zones have started for CockroachDB,
         // perform one-time initialization of the cluster.
-        let sled_address = service_plan
+        let crdb_admin_address = service_plan
             .services
-            .iter()
-            .find_map(|(sled_address, sled_config)| {
-                if sled_config.zones.iter().any(|zone_config| {
-                    matches!(
-                        &zone_config.zone_type,
-                        BlueprintZoneType::CockroachDb(_)
-                    )
-                }) {
-                    Some(sled_address)
-                } else {
-                    None
+            .values()
+            .flat_map(|sled_config| sled_config.zones.iter())
+            .find_map(|zone_config| match &zone_config.zone_type {
+                BlueprintZoneType::CockroachDb(cockroach_db) => {
+                    // The admin address is always the same IP but a different
+                    // port from cockroach itself. Patch that up here.
+                    let mut admin_addr = cockroach_db.address;
+                    admin_addr.set_port(COCKROACH_ADMIN_PORT);
+                    Some(admin_addr)
                 }
+                _ => None,
             })
             .expect("Should not create service plans without CockroachDb");
         let dur = std::time::Duration::from_secs(60);
@@ -1077,21 +1078,25 @@ impl ServiceInner {
             .connect_timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
-        let client = SledAgentClient::new_with_client(
-            &format!("http://{}", sled_address),
+        let client = cockroach_admin_client::Client::new_with_client(
+            &format!("http://{crdb_admin_address}"),
             client,
-            self.log.new(o!("SledAgentClient" => sled_address.to_string())),
+            self.log.new(
+                o!("CockroachAdminClient" => crdb_admin_address.to_string()),
+            ),
         );
         let initialize_db = || async {
-            client.cockroachdb_init().await.map_err(BackoffError::transient)?;
-            Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
+            use cockroach_admin_client::Error as ClientError;
+            use cockroach_admin_client::types::Error as TypesError;
+            client.cluster_init().await.map_err(BackoffError::transient)?;
+            Ok::<(), BackoffError<ClientError<TypesError>>>(())
         };
         let log_failure = |error, delay| {
             warn!(
                 self.log,
                 "Failed to initialize CockroachDB";
-                "error" => #%error,
-                "retry_after" => ?delay
+                "retry_after" => ?delay,
+                InlineErrorChain::new(&error),
             );
         };
         retry_notify(
@@ -1540,6 +1545,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     Ok(Blueprint {
         id: BlueprintUuid::new_v4(),
         sleds: blueprint_sleds,
+        pending_mgs_updates: PendingMgsUpdates::new(),
         parent_blueprint_id: None,
         internal_dns_version,
         // We don't configure external DNS during RSS, so set it to an initial
@@ -1553,6 +1559,10 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         // We do not create clickhouse clusters in RSS. We create them via
         // reconfigurator only.
         clickhouse_cluster_config: None,
+        // The oximeter read policy always defaults to single node. The
+        // initial generation of this policy in the DB is 1
+        oximeter_read_mode: OximeterReadMode::SingleNode,
+        oximeter_read_version: Generation::new(),
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),

@@ -22,7 +22,7 @@ use qorb::backend;
 use qorb::resolver::BoxedResolver;
 use qorb::resolvers::dns::DnsResolver;
 use qorb::resolvers::dns::DnsResolverConfig;
-use qorb::resolvers::single_host::SingleHostResolver;
+use qorb::resolvers::fixed::FixedResolver;
 use qorb::service;
 use serde::Deserialize;
 use serde::Serialize;
@@ -246,7 +246,7 @@ impl Oximeter {
         let make_resolver =
             |maybe_address, srv_name: ServiceName| -> BoxedResolver {
                 if let Some(address) = maybe_address {
-                    Box::new(SingleHostResolver::new(address))
+                    Box::new(FixedResolver::new([address]))
                 } else {
                     Box::new(DnsResolver::new(
                         service::Name(srv_name.srv_name()),
@@ -323,7 +323,7 @@ impl Oximeter {
         let nexus_pool = {
             let nexus_resolver: BoxedResolver =
                 if let Some(address) = config.nexus_address {
-                    Box::new(SingleHostResolver::new(address))
+                    Box::new(FixedResolver::new([address]))
                 } else {
                     Box::new(DnsResolver::new(
                         service::Name(ServiceName::Nexus.srv_name()),

@@ -1,0 +1,3 @@
+error: invalid value 'bogus-hash' for '<ARTIFACT_HASH>': Invalid string length
+
+For more information, try '--help'.

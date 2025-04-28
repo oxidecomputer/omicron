@@ -22,6 +22,8 @@ use crucible_agent_client::types::{
 };
 use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
+use illumos_utils::zfs::DatasetProperties;
+use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetManagementStatus;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::DatasetsConfig;
@@ -1360,6 +1362,54 @@ impl StorageInner {
             ));
         };
         Ok(config.clone())
+    }
+
+    pub fn dataset_get(
+        &self,
+        dataset_name: &String,
+    ) -> Result<DatasetProperties, HttpError> {
+        let Some(config) = self.dataset_config.as_ref() else {
+            return Err(HttpError::for_not_found(
+                None,
+                "No control plane datasets".into(),
+            ));
+        };
+
+        for (id, dataset) in config.datasets.iter() {
+            if dataset.name.full_name().as_str() == dataset_name {
+                return Ok(DatasetProperties {
+                    id: Some(*id),
+                    name: dataset_name.to_string(),
+                    mounted: true,
+                    avail: ByteCount::from_kibibytes_u32(1024),
+                    used: ByteCount::from_kibibytes_u32(1024),
+                    quota: dataset.inner.quota,
+                    reservation: dataset.inner.reservation,
+                    compression: dataset.inner.compression.to_string(),
+                });
+            }
+        }
+
+        for (nested_dataset_name, nested_dataset_storage) in
+            self.nested_datasets.iter()
+        {
+            if nested_dataset_name.full_name().as_str() == dataset_name {
+                let config = &nested_dataset_storage.config.inner;
+
+                return Ok(DatasetProperties {
+                    id: None,
+                    name: dataset_name.to_string(),
+                    mounted: true,
+                    avail: ByteCount::from_kibibytes_u32(1024),
+                    used: ByteCount::from_kibibytes_u32(1024),
+                    quota: config.quota,
+                    reservation: config.reservation,
+                    compression: config.compression.to_string(),
+                });
+            }
+        }
+
+        return Err(HttpError::for_not_found(None, "Dataset not found".into()));
     }
 
     pub fn datasets_ensure(

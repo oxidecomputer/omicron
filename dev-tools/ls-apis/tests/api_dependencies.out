@@ -13,6 +13,7 @@ Clickhouse Single-Node Cluster Admin (client: clickhouse-admin-single-client)
 
 CockroachDB Cluster Admin (client: cockroach-admin-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
+    consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
 
 Crucible Agent (client: crucible-agent-client)
     consumed by: omicron-nexus (omicron/nexus) via 1 path
@@ -45,7 +46,7 @@ Downstairs Controller (debugging only) (client: dsc-client)
 
 Management Gateway Service (client: gateway-client)
     consumed by: dpd (dendrite/dpd) via 1 path
-    consumed by: omicron-nexus (omicron/nexus) via 3 paths
+    consumed by: omicron-nexus (omicron/nexus) via 4 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
     consumed by: wicketd (omicron/wicketd) via 3 paths
 
@@ -80,6 +81,7 @@ Crucible Repair (client: repair-client)
     consumed by: crucible-downstairs (crucible/downstairs) via 1 path
 
 Repo Depot API (client: repo-depot-client)
+    consumed by: omicron-nexus (omicron/nexus) via 1 path
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
 
 Sled Agent (client: sled-agent-client)

@@ -8,17 +8,18 @@ use crate::external_api::params;
 use crate::internal_api::params::{
     PhysicalDiskPutRequest, SledAgentInfo, ZpoolPutRequest,
 };
+use nexus_db_lookup::LookupPath;
+use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::lookup;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -213,7 +214,7 @@ impl super::Nexus {
         disk_selector: &params::PhysicalDiskPath,
     ) -> Result<lookup::PhysicalDisk<'a>, Error> {
         // XXX how to do typed UUID as part of dropshot path?
-        Ok(lookup::LookupPath::new(&opctx, &self.db_datastore).physical_disk(
+        Ok(LookupPath::new(&opctx, &self.db_datastore).physical_disk(
             PhysicalDiskUuid::from_untyped_uuid(disk_selector.disk_id),
         ))
     }
@@ -330,6 +331,9 @@ impl super::Nexus {
             request.id,
             request.sled_id,
             request.physical_disk_id,
+            // This function is only called from tests, so it does not need a
+            // real value here.
+            ByteCount::from_gibibytes_u32(0).into(),
         );
         self.db_datastore.zpool_insert(&opctx, zpool).await?;
         Ok(())

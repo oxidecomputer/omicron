@@ -7,12 +7,12 @@
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::Nexus;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::{
     ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
     SledReservationConstraints, SledResourceVmm, VmmState,
 };
 use nexus_db_queries::authz;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
 use omicron_common::api::external::{Error, NameOrId};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
@@ -355,7 +355,7 @@ pub async fn instance_ip_add_nat(
 
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
-    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
+    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, datastore)
         .sled_id(sled_uuid.into_untyped_uuid())
         .fetch()
         .await

@@ -1,0 +1,38 @@
+[package]
+name = "nexus-db-lookup"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+async-bb8-diesel.workspace = true
+async-trait.workspace = true
+db-macros.workspace = true
+diesel.workspace = true
+diesel-dtrace.workspace = true
+nexus-auth.workspace = true
+nexus-db-errors.workspace = true
+nexus-db-model.workspace = true
+nexus-db-schema.workspace = true
+nexus-types.workspace = true
+ipnetwork.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+qorb.workspace = true
+slog.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+nexus-db-queries = { workspace = true, features = ["testing"] }
+omicron-test-utils.workspace = true
+tokio.workspace = true

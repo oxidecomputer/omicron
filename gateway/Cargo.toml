@@ -46,6 +46,7 @@ omicron-uuid-kinds.workspace = true
 oximeter.workspace = true
 oximeter-producer.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
+zip.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

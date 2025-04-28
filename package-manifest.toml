@@ -638,10 +638,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "8452936a53c3b16e53cbbf4e34e5e59899afc965"
+source.commit = "872aae7d76493f2a4f59711b24dde55523536b40"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "3974c5aab10946f909017bd70ba1e39848df7f36c79c22ac6650c5c97e69cb84"
+source.sha256 = "1b045d2d8868f4ff2f4d8b2d7b2832c90439048a7b7445cb683ce98dd6960e63"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "8452936a53c3b16e53cbbf4e34e5e59899afc965"
+source.commit = "872aae7d76493f2a4f59711b24dde55523536b40"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "ce3a5ede353e688b12171725d8b7253fabe83aa1a722700e03773ff7c1f56cd0"
+source.sha256 = "df6e08e78c2f593e52d5730d53442f4e179129e93bc3771fbc85c5643d9ad47f"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -669,10 +669,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "8452936a53c3b16e53cbbf4e34e5e59899afc965"
+source.commit = "872aae7d76493f2a4f59711b24dde55523536b40"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "2ecf7f9b5afa7880ac3a1a5612083cfe6da5f443379be35c692dd56de1dc8141"
+source.sha256 = "b917e4952f459fe8aae00736cf10f28ab75a71eac6d7df8b1835da5ddae794ba"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -680,8 +680,8 @@ output.intermediate_only = true
 service_name = "lldp"
 source.type = "prebuilt"
 source.repo = "lldp"
-source.commit = "2d7113e1d324b13cceae0518c2b52579f651579d"
-source.sha256 = "8520f1af4bcbe9233bc0714543c165981f3babcf8baf9ede3789d88552095889"
+source.commit = "82fbc8c9747eb9f74dde0f92ae77ec67f65652c4"
+source.sha256 = "59050782fa238bcf3c1234ac8262300db9eb98823c76a2188bff2994f3779857"
 output.type = "zone"
 output.intermediate_only = true
 

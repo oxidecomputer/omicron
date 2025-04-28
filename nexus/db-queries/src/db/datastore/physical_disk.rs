@@ -7,12 +7,8 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::InvPhysicalDisk;
 use crate::db::model::PhysicalDisk;
@@ -23,10 +19,14 @@ use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplyPhysicalDiskFilterExt;
 use nexus_types::deployment::{DiskFilter, SledFilter};
 use omicron_common::api::external::CreateResult;
@@ -115,7 +115,7 @@ impl DataStore {
     }
 
     pub async fn physical_disk_insert_on_connection(
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         disk: PhysicalDisk,
     ) -> Result<PhysicalDisk, TransactionError<Error>> {
@@ -333,11 +333,11 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::lookup::LookupPath;
     use crate::db::model::{PhysicalDiskKind, Sled};
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use dropshot::PaginationOrder;
+    use nexus_db_lookup::LookupPath;
     use nexus_sled_agent_shared::inventory::{
         Baseboard, Inventory, InventoryDisk, OmicronZonesConfig, SledRole,
     };
@@ -766,7 +766,12 @@ mod test {
             sled_id,
         );
 
-        let zpool = Zpool::new(Uuid::new_v4(), sled_id, disk.id());
+        let zpool = Zpool::new(
+            Uuid::new_v4(),
+            sled_id,
+            disk.id(),
+            ByteCount::from(0).into(),
+        );
         (disk, zpool)
     }
 
@@ -788,8 +793,7 @@ mod test {
             .unwrap();
 
         // Mark the sled as expunged
-        let sled_lookup =
-            LookupPath::new(&opctx, &datastore).sled_id(sled.id());
+        let sled_lookup = LookupPath::new(&opctx, datastore).sled_id(sled.id());
         let (authz_sled,) =
             sled_lookup.lookup_for(authz::Action::Modify).await.unwrap();
         datastore

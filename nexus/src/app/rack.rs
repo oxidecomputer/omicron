@@ -4,6 +4,7 @@
 
 //! Rack management
 
+use crate::app::CONTROL_PLANE_STORAGE_BUFFER;
 use crate::external_api::params;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
@@ -11,6 +12,7 @@ use crate::internal_api::params::RackInitializationRequest;
 use gateway_client::types::SpType;
 use internal_dns_types::names::DNS_ZONE;
 use ipnetwork::{IpNetwork, Ipv6Network};
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::INFRA_LOT;
 use nexus_db_model::InitialDnsGroup;
@@ -20,7 +22,6 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbClusterVersion;
@@ -136,6 +137,7 @@ impl super::Nexus {
                     pool.id,
                     pool.sled_id,
                     pool.physical_disk_id,
+                    CONTROL_PLANE_STORAGE_BUFFER.into(),
                 )
             })
             .collect();

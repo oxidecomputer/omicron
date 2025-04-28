@@ -764,13 +764,14 @@ async fn srrs_update_request_record(
 pub(crate) mod test {
     use crate::{
         app::RegionAllocationStrategy, app::db::DataStore,
-        app::db::lookup::LookupPath, app::saga::create_saga_dag,
+        app::saga::create_saga_dag,
         app::sagas::region_replacement_start::Params,
         app::sagas::region_replacement_start::SagaRegionReplacementStart,
         app::sagas::region_replacement_start::find_only_new_region,
         app::sagas::test_helpers::test_opctx,
     };
     use chrono::Utc;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::CrucibleDataset;
     use nexus_db_model::Region;
     use nexus_db_model::RegionReplacement;
@@ -791,6 +792,8 @@ pub(crate) mod test {
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
     type DiskTest<'a> =
         nexus_test_utils::resource_helpers::DiskTest<'a, crate::Server>;
+    type DiskTestBuilder<'a> =
+        nexus_test_utils::resource_helpers::DiskTestBuilder<'a, crate::Server>;
 
     const DISK_NAME: &str = "my-disk";
     const PROJECT_NAME: &str = "springfield-squidport";
@@ -799,8 +802,8 @@ pub(crate) mod test {
     async fn test_region_replacement_start_saga(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+        let _disk_test =
+            DiskTestBuilder::new(cptestctx).with_zpool_count(4).build().await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
@@ -816,7 +819,7 @@ pub(crate) mod test {
 
         // Assert disk has three allocated regions
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk_id)
             .fetch()
             .await
@@ -1025,15 +1028,11 @@ pub(crate) mod test {
         let mut count = 0;
 
         for zpool in test.zpools() {
-            for dataset in &zpool.datasets {
-                if datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap()
-                    != 0
-                {
-                    count += 1;
-                }
+            let dataset = zpool.crucible_dataset();
+            if datastore.regions_total_reserved_size(dataset.id).await.unwrap()
+                != 0
+            {
+                count += 1;
             }
         }
 
@@ -1118,8 +1117,8 @@ pub(crate) mod test {
     async fn test_action_failure_can_unwind_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+        let disk_test =
+            DiskTestBuilder::new(cptestctx).with_zpool_count(4).build().await;
 
         let log = &cptestctx.logctx.log;
 
@@ -1137,7 +1136,7 @@ pub(crate) mod test {
         let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk_id)
             .fetch()
             .await
@@ -1195,8 +1194,8 @@ pub(crate) mod test {
     async fn test_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+        let _disk_test =
+            DiskTestBuilder::new(cptestctx).with_zpool_count(4).build().await;
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
@@ -1212,7 +1211,7 @@ pub(crate) mod test {
         let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk_id)
             .fetch()
             .await
