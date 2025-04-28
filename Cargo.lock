@@ -11837,6 +11837,7 @@ dependencies = [
  "gateway-messages",
  "gateway-types",
  "hex",
+ "hubtools",
  "nix 0.29.0",
  "omicron-common",
  "omicron-workspace-hack",
