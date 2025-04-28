@@ -3591,7 +3591,7 @@ dependencies = [
  "gateway-messages",
  "hex",
  "hubpack",
- "hubtools",
+ "hubtools 0.4.6 (git+https://github.com/oxidecomputer/hubtools.git?branch=main)",
  "lru-cache",
  "lzss",
  "nix 0.27.1",
@@ -4273,7 +4273,28 @@ dependencies = [
 [[package]]
 name = "hubtools"
 version = "0.4.6"
-source = "git+ssh://git@github.com/oxidecomputer/hubtools?branch=dap%2Fread-caboose-from-image#79c8674da595200576ef9a5309aaf72afc8c4a9c"
+source = "git+https://github.com/oxidecomputer/hubtools.git?branch=dap%2Fread-caboose-from-image#79c8674da595200576ef9a5309aaf72afc8c4a9c"
+dependencies = [
+ "digest",
+ "hex",
+ "lpc55_areas",
+ "lpc55_sign",
+ "object 0.30.4",
+ "path-slash",
+ "rsa",
+ "thiserror 1.0.69",
+ "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc)",
+ "tlvc-text",
+ "toml 0.7.8",
+ "x509-cert",
+ "zerocopy 0.6.6",
+ "zip 0.6.6",
+]
+
+[[package]]
+name = "hubtools"
+version = "0.4.6"
+source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#6054a3c2ad89473e551a9a1d06cbd7845e100630"
 dependencies = [
  "digest",
  "hex",
@@ -6274,7 +6295,7 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
- "hubtools",
+ "hubtools 0.4.6 (git+https://github.com/oxidecomputer/hubtools.git?branch=dap%2Fread-caboose-from-image)",
  "id-map",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -7328,7 +7349,7 @@ dependencies = [
  "http-body-util",
  "httpmock",
  "httptest",
- "hubtools",
+ "hubtools 0.4.6 (git+https://github.com/oxidecomputer/hubtools.git?branch=dap%2Fread-caboose-from-image)",
  "hyper",
  "hyper-rustls 0.26.0",
  "hyper-staticfile",
@@ -11845,7 +11866,7 @@ dependencies = [
  "gateway-messages",
  "gateway-types",
  "hex",
- "hubtools",
+ "hubtools 0.4.6 (git+https://github.com/oxidecomputer/hubtools.git?branch=dap%2Fread-caboose-from-image)",
  "nix 0.29.0",
  "omicron-common",
  "omicron-workspace-hack",
@@ -13184,7 +13205,7 @@ dependencies = [
  "fs-err 2.11.0",
  "futures",
  "hex",
- "hubtools",
+ "hubtools 0.4.6 (git+https://github.com/oxidecomputer/hubtools.git?branch=main)",
  "indent_write",
  "itertools 0.13.0",
  "parse-size",
@@ -13520,7 +13541,7 @@ dependencies = [
  "fs-err 3.1.0",
  "futures",
  "hex",
- "hubtools",
+ "hubtools 0.4.6 (git+https://github.com/oxidecomputer/hubtools.git?branch=dap%2Fread-caboose-from-image)",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -14100,7 +14121,7 @@ dependencies = [
  "hickory-resolver",
  "http",
  "http-body-util",
- "hubtools",
+ "hubtools 0.4.6 (git+https://github.com/oxidecomputer/hubtools.git?branch=dap%2Fread-caboose-from-image)",
  "hyper",
  "illumos-utils",
  "installinator",

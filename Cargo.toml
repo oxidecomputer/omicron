@@ -460,7 +460,8 @@ http-body-util = "0.1.3"
 http-range = "0.1.5"
 httpmock = "0.8.0-alpha.1"
 httptest = "0.16.3"
-hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
+# XXX-dap
+hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "dap/read-caboose-from-image" }
 humantime = "2.1.0"
 hyper = "1.6.0"
 hyper-util = "0.1.11"
@@ -914,8 +915,6 @@ opt-level = 3
 # progenitor-client = { path = "../progenitor/progenitor-client" }
 # steno = { path = "../steno" }
 
-[patch."https://github.com/oxidecomputer/hubtools.git"]
-hubtools = { git = "ssh://git@github.com/oxidecomputer/hubtools", branch = "dap/read-caboose-from-image" }
 # [patch."https://github.com/oxidecomputer/crucible"]
 # crucible-agent-client = { path = "../crucible/agent-client" }
 # crucible-pantry-client = { path = "../crucible/pantry-client" }
