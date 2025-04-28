@@ -12,6 +12,7 @@ use crate::SIM_ROT_STAGE0_BOARD;
 use crate::SIM_SIDECAR_BOARD;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
+use gateway_messages::Fwid;
 use gateway_messages::RotSlotId;
 use gateway_messages::RotStateV3;
 use gateway_messages::SpComponent;
@@ -22,19 +23,38 @@ use gateway_messages::UpdateInProgressStatus;
 use hubtools::RawHubrisImage;
 
 pub(crate) struct SimSpUpdate {
+    /// tracks the state of any ongoing simulated update
+    ///
+    /// Both the hardware and this simulator enforce that only one update to any
+    /// SP-managed component can be in flight at a time.
     state: UpdateState,
+
+    /// data from the last completed SP update (exposed for testing)
     last_sp_update_data: Option<Box<[u8]>>,
+    /// data from the last completed RoT update (exposed for testing)
     last_rot_update_data: Option<Box<[u8]>>,
+    /// data from the last completed phase1 update for each slot (exposed for
+    /// testing)
     last_host_phase1_update_data: BTreeMap<u16, Box<[u8]>>,
     active_host_slot: Option<u16>,
+
+    /// records whether a change to the stage0 "active slot" has been requested
     pending_stage0_update: bool,
 
+    // XXX-dap review the lifecycle of all of these fields
+    /// current caboose for the SP active slot
     caboose_sp_active: CabooseValue,
+    /// current caboose for the SP inactive slot
     caboose_sp_inactive: CabooseValue,
+    /// current caboose for the RoT slot A
     caboose_rot_a: CabooseValue,
+    /// current caboose for the RoT slot B
     caboose_rot_b: CabooseValue,
+    /// current caboose for stage0
     caboose_stage0: CabooseValue,
+    /// current caboose for stage0next
     caboose_stage0next: CabooseValue,
+    /// current RoT boot and version information
     rot_state: RotStateV3,
 }
 
@@ -338,14 +358,16 @@ impl SimSpUpdate {
     }
 
     pub(crate) fn sp_reset(&mut self) {
+        // Check if an SP update completed since the last reset.
         match &self.state {
             UpdateState::Completed { data, component, .. } => {
                 if *component == SpComponent::SP_ITSELF {
+                    // Save the data that we received so that we can expose it
+                    // for tests.
                     self.last_sp_update_data = Some(data.clone());
 
-                    // Swap the cabooses to simulate what a real SP does in
-                    // terms of swapping the active slot upon reset after an
-                    // update.
+                    // Swap the cabooses to simulate the real SP behavior of
+                    // swapping which slot is active after an update.
                     std::mem::swap(
                         &mut self.caboose_sp_active,
                         &mut self.caboose_sp_inactive,
@@ -357,21 +379,32 @@ impl SimSpUpdate {
             | UpdateState::Aborted(_) => (),
         }
 
+        // Clear any in-progress update.
         self.state = UpdateState::NotPrepared;
     }
 
     pub(crate) fn rot_reset(&mut self) {
-        match &self.state {
+        // Check if an RoT update completed since the last reset.
+        let stage0next_data = match &self.state {
             UpdateState::Completed { data, component, .. } => {
                 if *component == SpComponent::ROT {
+                    // Save the data that we received so that we can expose it
+                    // for tests.
                     self.last_rot_update_data = Some(data.clone());
+                }
+
+                if *component == SpComponent::STAGE0 {
+                    Some(data.clone())
+                } else {
+                    None
                 }
             }
             UpdateState::NotPrepared
             | UpdateState::Prepared { .. }
-            | UpdateState::Aborted(_) => (),
-        }
+            | UpdateState::Aborted(_) => None,
+        };
 
+        // Clear any in-progress update.
         self.state = UpdateState::NotPrepared;
 
         // If there was a pending persistent boot preference set, apply that now
@@ -388,19 +421,26 @@ impl SimSpUpdate {
         self.rot_state.transient_boot_preference = None;
 
         if self.pending_stage0_update {
-            // If there was a pending stage0 update, apply that now.  All this
-            // means is changing the stage0 FWID and caboose to match the
-            // stage0next FWID and caboose.  We need something to put into the
-            // stage0next FWID and caboose, so we arbitrairly pick whatever was
-            // the stage0 one.
-            std::mem::swap(
-                &mut self.rot_state.stage0_fwid,
-                &mut self.rot_state.stage0next_fwid,
-            );
-            std::mem::swap(
-                &mut self.caboose_stage0,
-                &mut self.caboose_stage0next,
-            );
+            // If there was a pending stage0 update (i.e., a change to the
+            // stage0 "active slot"), apply that now.  All this means is
+            // changing the stage0 FWID and caboose to match the stage0next FWID
+            // and caboose.
+            self.rot_state.stage0_fwid = self.rot_state.stage0next_fwid;
+            self.caboose_stage0 = self.caboose_stage0next.clone();
+        }
+
+        // If stage0next was updated, compute a new digest for it and
+        // store that.  (We don't need to update the caboose here
+        // because we did that when we received the last packet.)
+        if let Some(_data) = stage0next_data {
+            // Note: this is NOT how the FWID is really computed by the
+            // RoT.  We cannot easily replicate that here.  But the
+            // consumer can't, either, so it doesn't really matter.
+            // What matters is that it changes when an update happens
+            // (and it's nice that it's the same for a given Hubris
+            // image).
+            // XXX-dap
+            self.rot_state.stage0next_fwid = Fwid::Sha3_256([0xee; 32]);
         }
     }
 
@@ -530,6 +570,7 @@ impl BaseboardKind {
 }
 
 /// Represents a simulated caboose
+#[derive(Clone)]
 enum CabooseValue {
     /// emulate an actual caboose
     Caboose(hubtools::Caboose),
