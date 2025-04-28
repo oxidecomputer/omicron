@@ -322,6 +322,8 @@ fn cmd_config(
                     expected_active_version, expected_inactive_version,
                 )?;
             }
+            // TODO-K: Print preconditions
+            PendingMgsUpdateDetails::RoT {} => todo!(),
         }
 
         writeln!(&mut s)?;

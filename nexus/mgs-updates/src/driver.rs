@@ -319,6 +319,12 @@ impl MgsUpdateDriver {
 
                 (sp_update, Box::new(ReconfiguratorSpUpdater {}))
             }
+            // TODO-K: fill in necessary component information
+            nexus_types::deployment::PendingMgsUpdateDetails::RoT {
+                ..
+            } => {
+                todo!()
+            }
         };
 
         let baseboard_id = baseboard_id.clone();

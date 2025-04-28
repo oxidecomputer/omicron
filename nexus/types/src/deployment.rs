@@ -1260,6 +1260,10 @@ pub enum PendingMgsUpdateDetails {
         /// expected contents of the inactive slot
         expected_inactive_version: ExpectedVersion,
     },
+    /// the RoT is being updated
+    RoT {
+        // TODO-K: Fill in fields
+    },
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
@@ -1283,6 +1287,8 @@ impl slog::KV for PendingMgsUpdateDetails {
                     &format!("{:?}", expected_inactive_version),
                 )
             }
+            // TODO-K: Set serialiser information
+            PendingMgsUpdateDetails::RoT {} => todo!(),
         }
     }
 }
