@@ -955,31 +955,42 @@ impl<'a> Planner<'a> {
     ) -> Result<(), Error> {
         let zone_kind = zone.zone_type.kind();
         let image_source = self.blueprint.zone_image_source(zone_kind);
-        match zone_kind {
-            ZoneKind::Crucible
-            | ZoneKind::CockroachDb
-            | ZoneKind::Clickhouse => {
-                info!(
-                    self.log, "updating zone image source in-place";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone.id,
-                    "kind" => ?zone.zone_type.kind(),
-                    "image_source" => %image_source,
-                );
-                self.blueprint.sled_set_zone_source(
-                    sled_id,
-                    zone.id,
-                    image_source,
-                )?;
-            }
-            _ => {
-                info!(
-                    self.log, "expunging out-of-date zone";
-                    "sled_id" => %sled_id,
-                    "zone_id" => %zone.id,
-                    "kind" => ?zone.zone_type.kind(),
-                );
-                self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
+        if zone.image_source == image_source {
+            // This should only happen in the event of a planning error above.
+            warn!(
+                self.log, "zone is already up-to-date";
+                "sled_id" => %sled_id,
+                "zone_id" => %zone.id,
+                "kind" => ?zone.zone_type.kind(),
+                "image_source" => %image_source,
+            );
+        } else {
+            match zone_kind {
+                ZoneKind::Crucible
+                | ZoneKind::CockroachDb
+                | ZoneKind::Clickhouse => {
+                    info!(
+                        self.log, "updating zone image source in-place";
+                        "sled_id" => %sled_id,
+                        "zone_id" => %zone.id,
+                        "kind" => ?zone.zone_type.kind(),
+                        "image_source" => %image_source,
+                    );
+                    self.blueprint.sled_set_zone_source(
+                        sled_id,
+                        zone.id,
+                        image_source,
+                    )?;
+                }
+                _ => {
+                    info!(
+                        self.log, "expunging out-of-date zone";
+                        "sled_id" => %sled_id,
+                        "zone_id" => %zone.id,
+                        "kind" => ?zone.zone_type.kind(),
+                    );
+                    self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
+                }
             }
         }
         Ok(())
