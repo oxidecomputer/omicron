@@ -49,9 +49,6 @@ pub enum LogError {
     #[error("ZFS dataset {0} is missing a mountpoint")]
     MissingMountpoint(String),
 
-    #[error("Log file is missing {zone} in path {logfile}")]
-    MissingZonePathComponent { zone: String, logfile: Utf8PathBuf },
-
     #[error(transparent)]
     Snapshot(#[from] CreateSnapshotError),
 
@@ -359,7 +356,6 @@ impl LogsHandle {
 
     fn find_log_in_snapshot(
         &self,
-        zone: &str,
         log_snapshots: &mut LogSnapshots,
         logfile: &Utf8Path,
     ) -> Result<Utf8PathBuf, LogError> {
@@ -373,35 +369,27 @@ impl LogsHandle {
             logfile;
         );
 
-        let filepath = match zone {
-            "global" => logfile.as_str(),
-            _ => {
-                logfile
-                    .as_str()
-                    .split_once(zone)
-                    .ok_or(LogError::MissingZonePathComponent {
-                        zone: zone.to_string(),
-                        logfile: logfile.to_path_buf(),
-                    })?
-                    .1
-            }
-        };
+        // We need to reconstruct where the log file will be based on the
+        // mount point of the snapshot. We do this by figuring out what the
+        // common prefix is between the two paths and then combining with the
+        // ".zfs/snapshot/<SNAP_NAME>" field in the right spot.
+        //
+        // Example:
+        // log file: "/pool/ext/110131b4-7bde-4866-b37e-bd9e3ebcbdf3/crypt/debug/oxz_switch/oxide-dendrite:default.log.1745518771"
+        // mount point: "/pool/ext/110131b4-7bde-4866-b37e-bd9e3ebcbdf3/crypt/debug/.zfs/snapshot/snapname"
+        //
+        // path_in_snapshot: "/pool/ext/110131b4-7bde-4866-b37e-bd9e3ebcbdf3/crypt/debug/.zfs/snapshot/snapname/oxz_switch/oxide-dendrite:default.log.1745518771"
 
-        let snapshot_logfile = diagnostics_snapshot
-            .snapshot_mountpoint()
-            // append the path to the log file itself
-            .join(
-                filepath
-                    .trim_start_matches("/")
-                    // Extra logs are often on delegated datasets so we need
-                    // to be sure we remove that as well.
-                    //
-                    // TODO: it would be nice to figure this out at runtime
-                    // rather than assume delegated datasets are always at
-                    // "/data".
-                    .trim_start_matches("root/data/"),
-            );
-        Ok(snapshot_logfile)
+        let mut path_in_snapshot =
+            diagnostics_snapshot.snapshot_mountpoint().clone();
+        let prefix_len = logfile
+            .iter()
+            .zip(path_in_snapshot.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        path_in_snapshot.extend(logfile.iter().skip(prefix_len));
+
+        Ok(path_in_snapshot)
     }
 
     /// For a given log file:
@@ -413,7 +401,6 @@ impl LogsHandle {
     ///   and service.
     fn process_logs<W: Write + Seek>(
         &self,
-        zone: &str,
         service: &str,
         zip: &mut zip::ZipWriter<W>,
         log_snapshots: &mut LogSnapshots,
@@ -421,7 +408,7 @@ impl LogsHandle {
         logtype: LogType,
     ) -> Result<(), LogError> {
         let snapshot_logfile =
-            self.find_log_in_snapshot(zone, log_snapshots, logfile)?;
+            self.find_log_in_snapshot(log_snapshots, logfile)?;
 
         if logtype == LogType::Current {
             // Since we are processing the current log files in a zone we need
@@ -544,7 +531,6 @@ impl LogsHandle {
             //  - Grab all of the service's SMF logs -
             if let Some(current) = service_logs.current {
                 self.process_logs(
-                    zone,
                     &service,
                     &mut zip,
                     &mut log_snapshots,
@@ -577,7 +563,6 @@ impl LogsHandle {
 
             for file in archived.iter().rev().take(max_rotated) {
                 self.process_logs(
-                    zone,
                     &service,
                     &mut zip,
                     &mut log_snapshots,
@@ -597,7 +582,6 @@ impl LogsHandle {
                     // We always want the most current log being written to.
                     if let Some(log) = extra_logs.current {
                         self.process_logs(
-                            zone,
                             &service,
                             &mut zip,
                             &mut log_snapshots,
@@ -610,7 +594,6 @@ impl LogsHandle {
                     for log in extra_logs.rotated.iter().rev().take(max_rotated)
                     {
                         self.process_logs(
-                            zone,
                             &service,
                             &mut zip,
                             &mut log_snapshots,
@@ -825,6 +808,7 @@ mod illumos_tests {
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
+    use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
     use zip::ZipArchive;
     use zip::ZipWriter;
@@ -1055,7 +1039,6 @@ mod illumos_tests {
 
             loghandle
                 .process_logs(
-                    "oxz_switch",
                     "mg-ddm",
                     &mut zip,
                     &mut log_snapshots,
@@ -1140,7 +1123,6 @@ mod illumos_tests {
 
             loghandle
                 .process_logs(
-                    "oxz_switch",
                     "mg-ddm",
                     &mut zip,
                     &mut log_snapshots,
@@ -1162,6 +1144,57 @@ mod illumos_tests {
             // Confirm we have the data in the snapshot and not the newly
             // written data.
             assert_eq!(contents.as_str(), data1, "log file data matches");
+        }
+
+        // Cleanup
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn log_paths_found_correctly_in_snapshot() {
+        let logctx = test_setup_log("log_collection_comes_from_snapshot");
+        let log = &logctx.log;
+
+        // Set up storage
+        let harness = SingleU2StorageHarness::new(log).await;
+
+        // Create a new zone dataset
+        let mountpoint = harness.configure_dataset(DatasetKind::Debug).await;
+
+        let dendrite_log = "oxide-dendrite:default.log.1745518771";
+        let data = "very important log data";
+
+        let logdir = mountpoint.join("oxz_switch");
+        fs_err::tokio::create_dir_all(&logdir).await.unwrap();
+
+        // Make sure an error in this block results in the correct drop ordering
+        // for test cleanup
+        {
+            // Write the log data before we take a snapshot
+            let logfile = logdir.join(dendrite_log);
+            let mut logfile_handle =
+                fs_err::tokio::File::create_new(&logfile).await.unwrap();
+            logfile_handle.write_all(data.as_bytes()).await.unwrap();
+
+            let mut log_snapshots = LogSnapshots::new();
+            let loghandle = LogsHandle::new(log.clone());
+
+            let snapshot_dendrite_log = loghandle
+                .find_log_in_snapshot(&mut log_snapshots, &logfile)
+                .unwrap();
+
+            assert!(
+                snapshot_dendrite_log.is_file(),
+                "found log file in snapshot"
+            );
+
+            let mut snapshot_dendrite_log =
+                tokio::fs::File::open(snapshot_dendrite_log).await.unwrap();
+
+            let mut contents = String::new();
+            snapshot_dendrite_log.read_to_string(&mut contents).await.unwrap();
+            assert_eq!(contents.as_str(), data, "log file data matches");
         }
 
         // Cleanup

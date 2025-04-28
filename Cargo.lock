@@ -4787,6 +4787,7 @@ dependencies = [
  "camino-tempfile",
  "cancel-safe-futures",
  "clap",
+ "daft",
  "display-error-chain",
  "futures",
  "hex",
