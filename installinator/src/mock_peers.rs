@@ -7,9 +7,10 @@
 #![allow(clippy::arc_with_non_send_sync)]
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fmt,
     net::{IpAddr, Ipv6Addr, SocketAddr},
+    sync::Mutex,
     time::Duration,
 };
 
@@ -18,16 +19,18 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use installinator_client::{ClientError, ResponseValue};
 use installinator_common::EventReport;
-use proptest::prelude::*;
+use proptest::{collection::vec_deque, prelude::*};
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
 use tokio::sync::mpsc;
 use tufaceous_artifact::ArtifactHashId;
+use update_engine::events::StepEventIsTerminal;
 use uuid::Uuid;
 
 use crate::{
     errors::{DiscoverPeersError, HttpError},
-    peers::{FetchArtifactImpl, FetchReceiver, PeerAddress},
+    fetch::{FetchArtifactImpl, FetchReceiver},
+    peers::{PeerAddress, PeerAddresses},
     reporter::ReportProgressImpl,
 };
 
@@ -142,10 +145,10 @@ impl MockPeersUniverse {
                                     .then(|| (*addr, peer.clone()))
                             })
                             .collect();
-                        Ok(MockFetchBackend {
-                            artifact: self.artifact.clone(),
+                        Ok(MockFetchBackend::new(
+                            self.artifact.clone(),
                             selected_peers,
-                        })
+                        ))
                     }
                     AttemptBitmap::Failure => {
                         bail!(
@@ -176,20 +179,27 @@ struct MockFetchBackend {
     artifact: Bytes,
     // Peers within the universe that have been selected
     selected_peers: BTreeMap<PeerAddress, MockPeer>,
+    // selected_peers keys stored in a suitable form for the
+    // FetchArtifactImpl trait
+    peer_addresses: PeerAddresses,
 }
 
 impl MockFetchBackend {
+    fn new(
+        artifact: Bytes,
+        selected_peers: BTreeMap<PeerAddress, MockPeer>,
+    ) -> Self {
+        let peer_addresses = selected_peers.keys().copied().collect();
+        Self { artifact, selected_peers, peer_addresses }
+    }
+
     fn get(&self, peer: PeerAddress) -> Option<&MockPeer> {
         self.selected_peers.get(&peer)
     }
 
-    fn peers(&self) -> impl Iterator<Item = (&PeerAddress, &MockPeer)> + '_ {
-        self.selected_peers.iter()
-    }
-
     /// Returns the peer that can return the entire dataset within the timeout.
     fn successful_peer(&self, timeout: Duration) -> Option<PeerAddress> {
-        self.peers()
+        self.selected_peers.iter()
             .filter_map(|(addr, peer)| {
                 if peer.artifact != self.artifact {
                     // We don't handle the case where the peer returns the wrong artifact yet.
@@ -234,12 +244,8 @@ impl MockFetchBackend {
 
 #[async_trait]
 impl FetchArtifactImpl for MockFetchBackend {
-    fn peers(&self) -> Box<dyn Iterator<Item = PeerAddress> + Send + '_> {
-        Box::new(self.selected_peers.keys().copied())
-    }
-
-    fn peer_count(&self) -> usize {
-        self.selected_peers.len()
+    fn peers(&self) -> &PeerAddresses {
+        &self.peer_addresses
     }
 
     async fn fetch_from_peer_impl(
@@ -453,7 +459,9 @@ impl ResponseAction_ {
 #[derive(Debug)]
 struct MockProgressBackend {
     update_id: Uuid,
-    report_sender: mpsc::Sender<EventReport>,
+    // Use an unbounded sender to avoid async code in handle_valid_peer_event.
+    report_sender: mpsc::UnboundedSender<EventReport>,
+    behaviors: Mutex<ReportBehaviors>,
 }
 
 impl MockProgressBackend {
@@ -471,14 +479,96 @@ impl MockProgressBackend {
         IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3)),
         2000,
     ));
+
+    fn new(
+        update_id: Uuid,
+        report_sender: mpsc::UnboundedSender<EventReport>,
+        behaviors: ReportBehaviors,
+    ) -> Self {
+        Self { update_id, report_sender, behaviors: Mutex::new(behaviors) }
+    }
+
+    fn handle_valid_peer_event(
+        &self,
+        report: EventReport,
+    ) -> Result<(), ClientError> {
+        let is_terminal = matches!(
+            report.step_events.last().map(|e| e.kind.is_terminal()),
+            Some(StepEventIsTerminal::Terminal { .. })
+        );
+
+        let mut lock = self.behaviors.lock().unwrap();
+        let next_behavior = lock.next_valid_peer_behavior(is_terminal);
+
+        match next_behavior {
+            ValidPeerBehavior::Accept => {
+                if lock.terminal_accepted {
+                    // Return Gone to indicate that the peer has accepted the
+                    // report in the past.
+                    Err(ClientError::ErrorResponse(ResponseValue::new(
+                        installinator_client::types::Error {
+                            error_code: None,
+                            message: "terminal message received => Gone"
+                                .to_owned(),
+                            request_id: "mock-request-id".to_owned(),
+                        },
+                        StatusCode::GONE,
+                        Default::default(),
+                    )))
+                } else {
+                    // Accept the report.
+                    _ = self.report_sender.send(report);
+                    if is_terminal {
+                        lock.terminal_accepted = true;
+                    }
+                    Ok(())
+                }
+            }
+            ValidPeerBehavior::AcceptError => {
+                // The real implementation generates a reqwest::Error, which can't be
+                // created outside of the reqwest library. Generate a different error.
+                Err(ClientError::InvalidRequest(
+                    "peer could not receive response".to_owned(),
+                ))
+            }
+            ValidPeerBehavior::ResponseError => {
+                // Accept the report but return an error.
+                if !lock.terminal_accepted {
+                    _ = self.report_sender.send(report);
+                    if is_terminal {
+                        lock.terminal_accepted = true;
+                    }
+                }
+
+                Err(ClientError::InvalidRequest(
+                    "peer received response, but failed to transmit \
+                     that back to installinator"
+                        .to_owned(),
+                ))
+            }
+        }
+    }
 }
 
 #[async_trait]
 impl ReportProgressImpl for MockProgressBackend {
     async fn discover_peers(
         &self,
-    ) -> Result<Vec<PeerAddress>, DiscoverPeersError> {
-        Ok(vec![Self::VALID_PEER, Self::INVALID_PEER, Self::UNRESPONSIVE_PEER])
+    ) -> Result<PeerAddresses, DiscoverPeersError> {
+        let mut lock = self.behaviors.lock().unwrap();
+        match lock.next_discovery_behavior() {
+            ReportDiscoveryBehavior::Retry => Err(DiscoverPeersError::Retry(
+                anyhow::anyhow!("simulated retry error"),
+            )),
+            // TODO: it would be nice to simulate some peers disappearing here.
+            ReportDiscoveryBehavior::Success => Ok([
+                Self::VALID_PEER,
+                Self::INVALID_PEER,
+                Self::UNRESPONSIVE_PEER,
+            ]
+            .into_iter()
+            .collect()),
+        }
     }
 
     async fn report_progress_impl(
@@ -489,8 +579,7 @@ impl ReportProgressImpl for MockProgressBackend {
     ) -> Result<(), ClientError> {
         assert_eq!(update_id, self.update_id, "update ID matches");
         if peer == Self::VALID_PEER {
-            _ = self.report_sender.send(report).await;
-            Ok(())
+            self.handle_valid_peer_event(report)
         } else if peer == Self::INVALID_PEER {
             Err(ClientError::ErrorResponse(ResponseValue::new(
                 installinator_client::types::Error {
@@ -511,11 +600,95 @@ impl ReportProgressImpl for MockProgressBackend {
     }
 }
 
+#[derive(Clone, Copy, Debug, Arbitrary)]
+enum ReportDiscoveryBehavior {
+    /// Return all peers successfully.
+    #[weight(4)]
+    Success,
+
+    /// Simulate a retry error.
+    #[weight(1)]
+    Retry,
+}
+
+/// For reporting results, controls how discovery and the valid peer should
+/// behave.
+///
+/// Used to simulate network flakiness while discovering peers and reporting
+/// results.
+#[derive(Clone, Debug)]
+struct ReportBehaviors {
+    discovery: VecDeque<ReportDiscoveryBehavior>,
+    progress: VecDeque<ValidPeerBehavior>,
+    terminal: VecDeque<ValidPeerBehavior>,
+    terminal_accepted: bool,
+}
+
+impl ReportBehaviors {
+    fn next_discovery_behavior(&mut self) -> ReportDiscoveryBehavior {
+        // Once the queue of behaviors is exhausted, always return success.
+        self.discovery.pop_front().unwrap_or(ReportDiscoveryBehavior::Success)
+    }
+
+    fn next_valid_peer_behavior(
+        &mut self,
+        is_terminal: bool,
+    ) -> ValidPeerBehavior {
+        // Once the queues of behaviors are exhausted, always accept.
+        if is_terminal {
+            self.terminal.pop_front().unwrap_or(ValidPeerBehavior::Accept)
+        } else {
+            self.progress.pop_front().unwrap_or(ValidPeerBehavior::Accept)
+        }
+    }
+}
+
+impl Arbitrary for ReportBehaviors {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        (
+            vec_deque(any::<ReportDiscoveryBehavior>(), 0..128),
+            vec_deque(any::<ValidPeerBehavior>(), 0..128),
+            vec_deque(any::<ValidPeerBehavior>(), 0..128),
+        )
+            .prop_map(|(discovery, progress, terminal)| ReportBehaviors {
+                discovery,
+                progress,
+                terminal,
+                terminal_accepted: false,
+            })
+            .boxed()
+    }
+}
+
+/// Model situations in which the peer that accepts the update misbehaves or
+/// has flakiness.
+///
+/// The AcceptError and ResponseError variants are low-probability ones in
+/// reality, but we set them to be higher probability here (1/3 each) to get
+/// better coverage for error conditions.
+#[derive(Clone, Copy, Debug, Arbitrary)]
+enum ValidPeerBehavior {
+    /// Accept the update and return Ok(()).
+    Accept,
+
+    /// Fail to accept the update, simulating situations where the server fails
+    /// to receive the report.
+    AcceptError,
+
+    /// Accept the update but return an error, simulating situations where the
+    /// server receives the report but is unable to transmit this fact back to
+    /// the client.
+    ResponseError,
+}
+
 mod tests {
     use super::*;
     use crate::{
         errors::DiscoverPeersError,
-        peers::{FetchArtifactBackend, FetchedArtifact},
+        fetch::{FetchArtifactBackend, FetchedArtifact},
         reporter::{ProgressReporter, ReportProgressBackend},
         test_helpers::{dummy_artifact_hash_id, with_test_runtime},
     };
@@ -529,7 +702,7 @@ mod tests {
     };
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
-    use tokio_stream::wrappers::ReceiverStream;
+    use tokio_stream::wrappers::UnboundedReceiverStream;
     use tufaceous_artifact::KnownArtifactKind;
 
     // The #[proptest] macro doesn't currently with with #[tokio::test] sadly.
@@ -541,6 +714,7 @@ mod tests {
         timeout: Duration,
         #[strategy(any::<[u8; 16]>().prop_map(Uuid::from_bytes))]
         update_id: Uuid,
+        valid_peer_behaviors: ReportBehaviors,
     ) {
         with_test_runtime(async move {
             let logctx = test_setup_log("proptest_fetch_artifact");
@@ -549,10 +723,12 @@ mod tests {
 
             let attempts = universe.attempts();
 
-            let (report_sender, report_receiver) = mpsc::channel(512);
+            let (report_sender, report_receiver) = mpsc::unbounded_channel();
 
             let receiver_handle = tokio::spawn(async move {
-                ReceiverStream::new(report_receiver).collect::<Vec<_>>().await
+                UnboundedReceiverStream::new(report_receiver)
+                    .collect::<Vec<_>>()
+                    .await
             });
 
             let (progress_reporter, event_sender) = ProgressReporter::new(
@@ -560,7 +736,11 @@ mod tests {
                 update_id,
                 ReportProgressBackend::new(
                     &logctx.log,
-                    MockProgressBackend { update_id, report_sender },
+                    MockProgressBackend::new(
+                        update_id,
+                        report_sender,
+                        valid_peer_behaviors,
+                    ),
                 ),
             );
             let progress_handle = progress_reporter.start();
@@ -576,11 +756,11 @@ mod tests {
                         let artifact =
                             fetch_artifact(&cx, &log, attempts, timeout)
                                 .await?;
-                        let address = artifact.peer.address();
+                        let peer = artifact.peer;
                         StepSuccess::new(artifact)
                             .with_metadata(
                                 InstallinatorCompletionMetadata::Download {
-                                    address,
+                                    address: peer.address(),
                                 },
                             )
                             .into()
@@ -602,8 +782,6 @@ mod tests {
             let reports = receiver_handle
                 .await
                 .expect("progress report receiver task exited successfully");
-
-            println!("finished receiving reports");
 
             match (expected_result, fetched_artifact) {
                 (
