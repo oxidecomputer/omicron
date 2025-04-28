@@ -13,7 +13,8 @@
 //! sled-agent can use to initialize a Propolis VM that exposes the necessary
 //! components.
 //!
-//! For more background on virtual platforms, see RFD 505.
+//! For more background on virtual platforms, see [RFD
+//! 505](https://505.rfd.oxide.computer/).
 //!
 //! # Component identification
 //!
@@ -128,7 +129,7 @@ impl std::fmt::Display for PciDeviceKind {
 /// storage and expect that those devices will always appear in the same places
 /// when the system is stopped and restarted. Changing these mappings for
 /// existing instances may break them!
-fn get_pci_bdf(
+fn slot_to_pci_bdf(
     logical_slot: u8,
     kind: PciDeviceKind,
 ) -> Result<PciPath, Error> {
@@ -206,12 +207,12 @@ impl DisksById {
                 }
             };
 
-            let pci_path = get_pci_bdf(slot, PciDeviceKind::Disk)?;
+            let pci_path = slot_to_pci_bdf(slot, PciDeviceKind::Disk)?;
             let device = ComponentV0::NvmeDisk(NvmeDisk {
                 backend_id: SpecKey::Uuid(disk.id()),
                 pci_path,
                 serial_number: zero_padded_nvme_serial_from_str(
-                    &disk.name().to_string(),
+                    disk.name().as_str(),
                 ),
             });
 
@@ -240,6 +241,9 @@ impl DisksById {
 }
 
 /// A list of named components to add to an instance's spec.
+//
+// This is a HashMap so that it can be moved directly into a sled-agent instance
+// spec (Progenitor generates HashMaps when it needs a map type).
 struct Components(HashMap<String, ComponentV0>);
 
 impl Default for Components {
@@ -314,6 +318,9 @@ impl Components {
     /// Adds the set of disks in the supplied disk list to this component
     /// list.
     fn add_disks(&mut self, disks: DisksById) -> Result<(), Error> {
+        // This operation will add a device and a backend for every disk in the
+        // input set.
+        self.0.reserve(disks.0.len() * 2);
         for (id, CrucibleDisk { device_name, device, backend }) in
             disks.0.into_iter()
         {
@@ -329,12 +336,15 @@ impl Components {
 
     /// Adds the supplied set of NICs to this component manifest.
     fn add_nics(&mut self, nics: &[NetworkInterface]) -> Result<(), Error> {
+        // This operation will add a device and a backend for every NIC in the
+        // input slice.
+        self.0.reserve(nics.len() * 2);
         for nic in nics.iter() {
             let device_name = component_names::device_name_from_id(&nic.id);
             let device = ComponentV0::VirtioNic(VirtioNic {
                 backend_id: SpecKey::Uuid(nic.id),
                 interface_id: nic.id,
-                pci_path: get_pci_bdf(nic.slot, PciDeviceKind::Nic)?,
+                pci_path: slot_to_pci_bdf(nic.slot, PciDeviceKind::Nic)?,
             });
 
             // Sled-agent creates OPTE ports during instance startup using its
@@ -373,7 +383,7 @@ impl Components {
             backend_id: SpecKey::Name(
                 component_names::CLOUD_INIT_BACKEND.to_string(),
             ),
-            pci_path: get_pci_bdf(0, PciDeviceKind::CloudInitDisk)
+            pci_path: slot_to_pci_bdf(0, PciDeviceKind::CloudInitDisk)
                 .expect("slot 0 is always valid for cloud-init disks"),
         });
 
@@ -409,7 +419,10 @@ impl super::Nexus {
 
         let mut components = Components::default();
 
-        let mut volumes = vec![];
+        // Get the volume information needed to fill in the disks' backends'
+        // volume construction requests. Calling `volume_checkout` bumps
+        // the volumes' generation numbers.
+        let mut volumes = Vec::with_capacity(disks.len());
         for disk in disks {
             use db::datastore::VolumeCheckoutReason;
             let volume = self
