@@ -1222,14 +1222,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     state omicron.public.instance_state_v2 NOT NULL,
 
     /*
-     * The intended state of the instance, as requested by the user.
-     *
-     * This may differ from its current state, and is used to determine what
-     * action should be taken when the instance's VMM state changes.
-     */
-    intended_state omicron.public.instance_intended_state NOT NULL,
-
-    /*
      * The time of the most recent auto-restart attempt, or NULL if the control
      * plane has never attempted to automatically restart this instance.
      */
@@ -1255,6 +1247,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * its boot-time fates.
      */
     boot_disk_id UUID,
+
+    /*
+     * The intended state of the instance, as requested by the user.
+     *
+     * This may differ from its current state, and is used to determine what
+     * action should be taken when the instance's VMM state changes.
+     */
+    intended_state omicron.public.instance_intended_state NOT NULL,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
