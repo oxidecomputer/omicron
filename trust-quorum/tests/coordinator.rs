@@ -6,6 +6,7 @@
 
 use assert_matches::assert_matches;
 use bcs::Result;
+use gfss::gf256::Gf256;
 use gfss::shamir::Share;
 use omicron_test_utils::dev::test_setup_log;
 use omicron_uuid_kinds::RackUuid;
@@ -17,8 +18,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 use test_strategy::{Arbitrary, proptest};
 use trust_quorum::{
-    Envelope, Epoch, Node, PeerMsg, PersistentState, PlatformId, PrepareMsg,
-    ReconfigureMsg, Threshold,
+    Configuration, EncryptedRackSecret, Envelope, Epoch, Node, PeerMsg,
+    PersistentState, PlatformId, PrepareMsg, PreviousConfiguration,
+    ReconfigureMsg, Salt, Sha3_256Digest, Threshold,
 };
 
 /// The system under test
@@ -120,6 +122,11 @@ impl Model {
                 cs.op.ack_prepare(from);
             }
         }
+    }
+
+    // Delete the coordinator state
+    pub fn stop_coordinating(&mut self) {
+        self.coordinator_state = None;
     }
 
     /// If we are currently waiting for shares in this epoch then record the
@@ -448,6 +455,9 @@ impl TestState {
                 Action::CoordinateReconfiguration(generated_config) => {
                     self.action_coordinate_reconfiguration(generated_config)?;
                 }
+                Action::SendPrepareToSut(generated_config) => {
+                    self.action_send_prepare_to_sut(generated_config)?;
+                }
             }
         }
         Ok(())
@@ -527,6 +537,97 @@ impl TestState {
 
         // Remove any nodes with zero delivered messages
         self.delivered_msgs.retain(|_, msgs| !msgs.is_empty());
+
+        Ok(())
+    }
+
+    fn action_send_prepare_to_sut(
+        &mut self,
+        generated_config: GeneratedConfiguration,
+    ) -> Result<(), TestCaseError> {
+        // It doesn't really matter what the configuration looks like, as long
+        // as the last committed epoch matches what the SUT has, and the epoch
+        // of the `Prepare` is greater than the largest seen epoch at the SUT.
+        // Therefore, we are able to use our existing config generation mechanism,
+        // as we do with the SUT.
+        let msg = self.generated_config_to_reconfigure_msg(generated_config);
+
+        // Choose a node to send to the SUT.
+        // Skip over the SUT which sorts first.
+        let coordinator = msg.members.iter().skip(1).next().cloned().unwrap();
+
+        // Since the test is never going to commit this Prepare, we just use
+        // dummy values where necessary (primarily when crypto is involved).
+        let config = Configuration {
+            rack_id: msg.rack_id,
+            epoch: msg.epoch,
+            coordinator: coordinator.clone(),
+            members: msg
+                .members
+                .into_iter()
+                .map(|id| (id, Sha3_256Digest([0u8; 32])))
+                .collect(),
+            threshold: msg.threshold,
+            previous_configuration: msg.last_committed_epoch.map(|epoch| {
+                PreviousConfiguration {
+                    epoch,
+                    is_lrtq: false,
+                    encrypted_last_committed_rack_secret: EncryptedRackSecret(
+                        vec![0u8; 32],
+                    ),
+                    encrypted_last_committed_rack_secret_salt: Salt::new(),
+                }
+            }),
+        };
+        // Generate a nonsense share for the SUT
+        let share = Share {
+            x_coordinate: Gf256::new(1),
+            y_coordinates: (0..32 as u8).into_iter().map(Gf256::new).collect(),
+        };
+
+        let prepare_msg = PrepareMsg { config, share };
+
+        // Put the model in the correct state
+        self.model.stop_coordinating();
+
+        // Handle the `PrepareMsg` at the SUT
+        let mut outbox = Vec::new();
+        let persistent_state = self
+            .sut
+            .node
+            .handle(
+                self.model.now,
+                &mut outbox,
+                coordinator.clone(),
+                PeerMsg::Prepare(prepare_msg.clone()),
+            )
+            .expect("persistent state");
+
+        // We should have gotten back a persistent state including the prepare
+        // received by the SUT.
+        prop_assert_eq!(
+            self.sut.persistent_state.prepares.len() + 1,
+            persistent_state.prepares.len()
+        );
+        prop_assert_eq!(
+            &prepare_msg.config,
+            &persistent_state.prepares.get(&msg.epoch).unwrap().config,
+        );
+
+        // The SUT should have replied with an ack
+        prop_assert_eq!(outbox.len(), 1);
+        let envelope = outbox.pop().expect("prepare ack");
+        prop_assert_eq!(envelope.to, coordinator);
+        prop_assert_eq!(&envelope.from, self.sut.node.platform_id());
+        assert_matches!(envelope.msg, PeerMsg::PrepareAck(epoch) => {
+            prop_assert_eq!(epoch, msg.epoch);
+        });
+
+        // The SUT should no longer be coordinating
+        prop_assert!(self.sut.node.get_coordinator_state().is_none());
+
+        // All our assertions passed. Update the SUT's persistent state.
+        self.sut.persistent_state = persistent_state.clone();
 
         Ok(())
     }
@@ -972,7 +1073,17 @@ pub enum Action {
     // described in RFD 238.
     //
     // `Index` is used to compute Z here.
+    #[weight(1)]
     Commit(Index),
+
+    // Send a `PrepareMsg` from a fake test node, indicating that Nexus has told
+    // that node to start coordinating a new reconfiguration . This should cause
+    // the the `SUT` to stop coordinating if it is currently coordinating.
+    //
+    // We always send a `PrepareMsg` with an epoch that is newer than the latest
+    // configuration, as the goal is for the request to be accepted by the SUT.
+    #[weight(1)]
+    SendPrepareToSut(GeneratedConfiguration),
 }
 
 /// Informnation about configurations used at test generation time

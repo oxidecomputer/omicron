@@ -8,12 +8,18 @@
 
 use crate::crypto::LrtqShare;
 use crate::messages::PrepareMsg;
-use crate::{Configuration, Epoch, PlatformId};
+use crate::{Alarm, Configuration, Epoch, PlatformId};
 use bootstore::schemes::v0::SharePkgCommon as LrtqShareData;
 use gfss::shamir::Share;
 use omicron_uuid_kinds::{GenericUuid, RackUuid};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+
+// We want to prevent the situation where invariant violations keep replaying
+// due to message receipt and we blow up memory / storage with them. In
+// practice, even one `Alarm` is a critical bug, but we leave room to track a
+// few more.
+const MAX_ALARMS: usize = 10;
 
 /// All the persistent state for this protocol
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -30,6 +36,14 @@ pub struct PersistentState {
     // node. The sled corresponding to the node must be factory reset by wiping
     // its storage.
     pub decommissioned: Option<DecommissionedMetadata>,
+
+    // We persist [`Alarm`]s so that they can't be lost
+    //
+    // During a support scenario, any existing alarms must be manually cleared
+    // as part of resolving the issue. In principal, there should be *no* alarms
+    // as they are only for protocol invariant violations, so this should never
+    // be necessary.
+    alarms: Vec<Alarm>,
 }
 
 impl PersistentState {
@@ -39,6 +53,7 @@ impl PersistentState {
             prepares: BTreeMap::new(),
             commits: BTreeSet::new(),
             decommissioned: None,
+            alarms: Vec::new(),
         }
     }
 
@@ -93,6 +108,13 @@ impl PersistentState {
             self.prepares.get(&epoch).expect("missing prepare").share.clone()
         })
     }
+
+    // Add an alarm, if we haven't already reached the max number of alarms.
+    pub fn add_alarm(&mut self, alarm: Alarm) {
+        if self.alarms.len() < MAX_ALARMS {
+            self.alarms.push(alarm)
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,6 +137,7 @@ pub struct PersistentStateSummary {
     pub last_prepared_epoch: Option<Epoch>,
     pub last_committed_epoch: Option<Epoch>,
     pub decommissioned: Option<DecommissionedMetadata>,
+    pub alarms: Vec<Alarm>,
 }
 
 impl From<&PersistentState> for PersistentStateSummary {
@@ -126,6 +149,7 @@ impl From<&PersistentState> for PersistentStateSummary {
             last_prepared_epoch: value.last_prepared_epoch(),
             last_committed_epoch: value.last_committed_epoch(),
             decommissioned: value.decommissioned.clone(),
+            alarms: value.alarms.clone(),
         }
     }
 }

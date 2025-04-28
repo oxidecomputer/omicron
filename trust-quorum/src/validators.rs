@@ -271,7 +271,8 @@ impl ValidatedReconfigureMsg {
                 error!(
                     log,
                     concat!(
-                        "Reconfiguration in progress for same epoch, ",
+                        "Protocol invariant violation: ",
+                        "reconfiguration in progress for same epoch, ",
                         "but messages differ");
                     "epoch" => new_msg.epoch.to_string(),
                 );
@@ -371,6 +372,7 @@ mod tests {
                 last_prepared_epoch: None,
                 last_committed_epoch: None,
                 decommissioned: None,
+                alarms: Vec::new(),
             };
             (persistent_state, None)
         } else {
@@ -381,6 +383,7 @@ mod tests {
                 last_prepared_epoch: msg.last_committed_epoch,
                 last_committed_epoch: msg.last_committed_epoch,
                 decommissioned: None,
+                alarms: Vec::new(),
             };
             let mut members = input.members.clone();
             members
@@ -441,6 +444,7 @@ mod tests {
                 last_prepared_epoch: None,
                 last_committed_epoch: None,
                 decommissioned: None,
+                alarms: Vec::new(),
             };
             (persistent_state, None)
         } else {
@@ -451,6 +455,7 @@ mod tests {
                 last_prepared_epoch: msg.last_committed_epoch,
                 last_committed_epoch: msg.last_committed_epoch,
                 decommissioned: None,
+                alarms: Vec::new(),
             };
             let mut members = input.members.clone();
             members

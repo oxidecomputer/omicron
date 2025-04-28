@@ -7,7 +7,8 @@
 use crate::errors::{CommitError, MismatchedRackIdError, ReconfigurationError};
 use crate::validators::ValidatedReconfigureMsg;
 use crate::{
-    CoordinatorState, Envelope, Epoch, PersistentState, PlatformId, messages::*,
+    Alarm, CoordinatorState, Envelope, Epoch, PersistentState, PlatformId,
+    messages::*,
 };
 use gfss::shamir::Share;
 use omicron_uuid_kinds::RackUuid;
@@ -110,10 +111,14 @@ impl Node {
         if last_prepared_epoch != Some(epoch) {
             error!(
                 self.log,
-                "Commit message occurred out of order";
+                "Protocol invariant violation: commit message out of order";
                 "epoch" => %epoch,
                 "last_prepared_epoch" => ?last_prepared_epoch
             );
+            self.persistent_state.add_alarm(Alarm::OutOfOrderCommit {
+                last_prepared_epoch,
+                commit_epoch: epoch,
+            });
             return Err(CommitError::OutOfOrderCommit);
         }
         if let Some(prepare) = self.persistent_state.prepares.get(&epoch) {
@@ -136,11 +141,19 @@ impl Node {
             //
             // Nexus should instead tell this node to retrieve a `Prepare`
             // from another node that has already committed.
-            error!(
-                self.log,
-                "tried to commit a configuration, but missing prepare msg";
-                "epoch" => %epoch
+            //
+            // This is a protocol bug because nexus must have seen an
+            // acknowledgement that this node had a `PrepareMsg` or erroneously
+            // sent a `Commit` anyway. This is a less serious error than other
+            // invariant violations since it can be recovered from. However, it
+            // is still worthy of an alarm, as the most likely case is a  disk/
+            // ledger failure.
+            let err_msg = concat!(
+                "Protocol invariant violation: triedi to ",
+                "commit a configuration, but missing prepare msg"
             );
+            error!(self.log, "{err_msg}"; "epoch" => %epoch);
+            self.persistent_state.add_alarm(Alarm::MissingPrepare { epoch });
             return Err(CommitError::MissingPrepare);
         }
 
@@ -178,6 +191,7 @@ impl Node {
         msg: PeerMsg,
     ) -> Option<PersistentState> {
         match msg {
+            PeerMsg::Prepare(msg) => self.handle_prepare(outbox, from, msg),
             PeerMsg::PrepareAck(epoch) => {
                 self.handle_prepare_ack(from, epoch);
                 None
@@ -194,6 +208,138 @@ impl Node {
     /// Return the current state of the coordinator
     pub fn get_coordinator_state(&self) -> Option<&CoordinatorState> {
         self.coordinator_state.as_ref()
+    }
+
+    fn handle_prepare(
+        &mut self,
+        outbox: &mut Vec<Envelope>,
+        from: PlatformId,
+        msg: PrepareMsg,
+    ) -> Option<PersistentState> {
+        // TODO: check rack_id
+        if let Some(last_prepared_epoch) =
+            self.persistent_state.last_prepared_epoch()
+        {
+            // Is this an old request?
+            if msg.config.epoch < last_prepared_epoch {
+                warn!(self.log, "Received stale prepare";
+                    "from" => %from,
+                    "msg_epoch" => %msg.config.epoch,
+                    "last_prepared_epoch" => %last_prepared_epoch
+                );
+                // TODO: Respond to sender?
+                return None;
+            }
+
+            // Idempotent request
+            if msg.config.epoch == last_prepared_epoch {
+                return None;
+            }
+
+            // Does the last committed epoch match what we have?
+            let msg_last_committed_epoch =
+                msg.config.previous_configuration.as_ref().map(|p| p.epoch);
+            let last_committed_epoch =
+                self.persistent_state.last_committed_epoch();
+            if msg_last_committed_epoch != last_committed_epoch {
+                // If the msg contains an older last_committed_epoch than what
+                // we have, then out of order commits have occurred, as we know
+                // this prepare is later than what we've seen. This is a critical
+                // protocol invariant that has been violated.
+                //
+                // If the msg contains a newer last_committed_epoch than what
+                // we have, then we have likely missed a commit and are behind
+                // by more than one reconfiguration. The protocol currently does
+                // not allow this. Future protocol implementations may provide a
+                // capability to "jump" configurations.
+                //
+                // If there is a `None`/`Some` mismatch, then again, an invariant
+                // has been violated somewhere. The coordinator should know
+                // whether this is a "new" node or not, which would have a "None"
+                // configuration.
+                let err_msg = concat!(
+                    "Protocol invariant violation: ",
+                    "PrepareMsg last_committed_epoch does not match ours"
+                );
+                error!(self.log, "{err_msg}";
+                    "msg_last_committed_epoch" => ?msg_last_committed_epoch,
+                    "last_committed_epoch" => ?last_committed_epoch
+                );
+                self.persistent_state.add_alarm(
+                    Alarm::PrepareLastCommittedEpochMismatch {
+                        prepare_last_committed_epoch: msg_last_committed_epoch,
+                        persisted_prepare_last_committed_epoch:
+                            last_committed_epoch,
+                    },
+                );
+                return Some(self.persistent_state.clone());
+            }
+
+            // The prepare is up-to-date with respect to our persistent state
+        };
+
+        // Are we currently trying to coordinate?
+        if let Some(cs) = &self.coordinator_state {
+            let coordinating_epoch = cs.reconfigure_msg().epoch();
+            if coordinating_epoch > msg.config.epoch {
+                warn!(self.log, "Received stale prepare while coordinating";
+                    "from" => %from,
+                    "msg_epoch" => %msg.config.epoch,
+                    "epoch" => %cs.reconfigure_msg().epoch()
+                );
+                return None;
+            }
+            if coordinating_epoch == msg.config.epoch {
+                // TODO: Track these in an "invariant violation alarm" struct
+                // that can be queried.
+                let err_msg = concat!(
+                    "Protocol invariant violation: Nexus has told different",
+                    "nodes to coordinate the same reconfiguration."
+                );
+                error!(self.log, "{err_msg}";
+                    "epoch" => %coordinating_epoch,
+                    "from" => %from,
+                    "id" => %self.platform_id
+
+                );
+                self.persistent_state.add_alarm(
+                    Alarm::DifferentNodesCoordinatingSameEpoch {
+                        epoch: coordinating_epoch,
+                        them: from,
+                        us: self.platform_id.clone(),
+                    },
+                );
+                return Some(self.persistent_state.clone());
+            }
+
+            // This prepare is for a newer configuration than the one we
+            // are currently coordinating. We must implicitly cancel our
+            // coordination as Nexus has moved on.
+            let cancel_msg = concat!(
+                "Received a prepare for newer configuration.",
+                "Cancelling our coordination."
+            );
+            info!(self.log, "{cancel_msg}";
+                "msg_epoch" => %msg.config.epoch,
+                "epoch" => %coordinating_epoch,
+                "from" => %from
+            );
+        }
+
+        // Acknowledge the PrepareMsg
+        outbox.push(Envelope {
+            to: from,
+            from: self.platform_id.clone(),
+            msg: PeerMsg::PrepareAck(msg.config.epoch),
+        });
+
+        // Add the prepare to our `PersistentState`
+        self.persistent_state.prepares.insert(msg.config.epoch, msg);
+
+        // Stop coordinating
+        self.coordinator_state = None;
+
+        Some(self.persistent_state.clone())
     }
 
     // Handle receipt of a `PrepareAck` message
