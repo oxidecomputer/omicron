@@ -15,6 +15,14 @@ bind_addr = "[::1]:33300"
 [simulated_sps.sidecar.network_config.simulated]
 bind_addr = "[::1]:33301"
 
+[[simulated_sps.sidecar.ereport_network_config]]
+[simulated_sps.sidecar.ereport_network_config.simulated]
+bind_addr = "[::1]:44400"
+
+[[simulated_sps.sidecar.ereport_network_config]]
+[simulated_sps.sidecar.ereport_network_config.simulated]
+bind_addr = "[::1]:44401"
+
 [[simulated_sps.gimlet]]
 serial_number = "SimGimlet0"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
@@ -27,6 +35,14 @@ bind_addr = "[::1]:33310"
 [[simulated_sps.gimlet.network_config]]
 [simulated_sps.gimlet.network_config.simulated]
 bind_addr = "[::1]:33311"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:44410"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:44411"
 
 [[simulated_sps.gimlet.components]]
 id = "sp3-host-cpu"
@@ -56,6 +72,47 @@ sensors = [
     { name = "CPU", kind = "Temperature", last_data.value = 64.5, last_data.timestamp = 1234 },
 ]
 
+[simulated_sps.gimlet.ereport_config]
+restart_id = "af1ebf85-36ba-4c31-bbec-b9825d6d9d8b"
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "task_apollo_server"
+task_gen = 13
+uptime = 1233
+class = "gov.nasa.apollo.o2_tanks.stir.begin"
+message = "stirring the tanks"
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "drv_ae35_server"
+task_gen = 1
+uptime = 1234
+class = "io.discovery.ae35.fault"
+message = "i've just picked up a fault in the AE-35 unit"
+de = { scheme = "fmd", authority = { product-id = "HAL-9000-series computer", server-id = "HAL 9000"}, mod-name = "ae35-diagnosis" }
+hours_to_failure = 72
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "task_apollo_server"
+task_gen = 13
+uptime = 1237
+class = "gov.nasa.apollo.fault"
+message = "houston, we have a problem"
+crew = ["Lovell", "Swigert", "Hayes"]
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "drv_thingy_server"
+task_gen = 2
+uptime = 1240
+class = "flagrant_error"
+computer = false
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "task_latex_server"
+task_gen = 1
+uptime = 1245
+class = "overfull_hbox"
+badness  = 10000
+
 [[simulated_sps.gimlet]]
 serial_number = "SimGimlet1"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
@@ -68,6 +125,14 @@ bind_addr = "[::1]:33320"
 [[simulated_sps.gimlet.network_config]]
 [simulated_sps.gimlet.network_config.simulated]
 bind_addr = "[::1]:33321"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:44420"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:44421"
 
 [[simulated_sps.gimlet.components]]
 id = "sp3-host-cpu"
@@ -98,6 +163,19 @@ sensors = [
 ]
 
 
+[simulated_sps.gimlet.ereport_config]
+restart_id = "55e30cc7-a109-492f-aca9-735ed725df3c"
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "task_thermal_server"
+task_gen = 1
+uptime = 1233
+class = "computer.oxide.gimlet.chassis_integrity.fault"
+nosub_class = "chassis_integrity.cat_hair_detected"
+message = "cat hair detected inside gimlet"
+de = { scheme = "fmd", mod-name = "hubris-thermal-diagnosis", mod-version = "1.0", authority = { "product-id" = "oxide", server-id = "SimGimlet1" }}
+certainty = 0x64
+cat_hair_amount = 10000
 
 [log]
 # Show log messages of this level and more severe
@@ -105,7 +183,6 @@ level = "debug"
 
 # Example output to a terminal (with colors)
 mode = "stderr-terminal"
-
 # Example output to a file, appending if it already exists.
 #mode = "file"
 #path = "logs/server.log"

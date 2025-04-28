@@ -44,9 +44,6 @@ Dendrite DPD (client: dpd-client)
 
 Downstairs Controller (debugging only) (client: dsc-client)
 
-ereport (client: ereport-client)
-    consumed by: omicron-nexus (omicron/nexus) via 1 path
-
 Management Gateway Service (client: gateway-client)
     consumed by: dpd (dendrite/dpd) via 1 path
     consumed by: omicron-nexus (omicron/nexus) via 4 paths

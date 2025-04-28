@@ -76,6 +76,9 @@ pub struct SpCommonConfig {
     /// Network config for the two (fake) KSZ8463 ports.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub network_config: Option<[NetworkConfig; 2]>,
+    /// Network config for the (fake) ereport UDP ports.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ereport_network_config: Option<[NetworkConfig; 2]>,
     /// Fake serial number
     pub serial_number: String,
     /// 32-byte seed to create a manufacturing root certificate.
@@ -94,6 +97,9 @@ pub struct SpCommonConfig {
     /// Simulate a RoT stage0 with no caboose
     #[serde(default)]
     pub no_stage0_caboose: bool,
+    /// Fake ereport configuration
+    #[serde(default)]
+    pub ereport_config: EreportConfig,
 }
 
 /// Configuration of a simulated SP component
@@ -213,4 +219,41 @@ impl GimletConfig {
             .map_err(|err| LoadError::Parse { path: path.into(), err })?;
         Ok(config)
     }
+}
+
+#[derive(
+    Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Default,
+)]
+pub struct EreportConfig {
+    #[serde(flatten, default)]
+    pub restart: EreportRestart,
+
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub ereports: Vec<Ereport>,
+}
+
+/// Represents a single simulated restart generation of the simulated SP's
+/// ereporter.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EreportRestart {
+    #[serde(default = "uuid::Uuid::new_v4")]
+    pub restart_id: uuid::Uuid,
+
+    #[serde(skip_serializing_if = "toml::map::Map::is_empty", default)]
+    pub metadata: toml::map::Map<String, toml::Value>,
+}
+
+impl Default for EreportRestart {
+    fn default() -> Self {
+        Self { restart_id: uuid::Uuid::new_v4(), metadata: Default::default() }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Ereport {
+    pub task_name: String,
+    pub task_gen: u32,
+    pub uptime: u64,
+    #[serde(flatten)]
+    pub data: toml::map::Map<String, toml::Value>,
 }

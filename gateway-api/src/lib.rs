@@ -496,6 +496,21 @@ pub trait GatewayApi {
     async fn sp_all_ids(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SpIdentifier>>, HttpError>;
+
+    /// Request ereports from the target service processor.
+    ///
+    /// Query parameters provide the ENAs of the initial ereport in the returned
+    /// tranche, the SP's restart ID that the control plane believes is current,
+    /// and the (optional) last committed ENA.
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/ereports"
+    }]
+    async fn sp_ereports_ingest(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSp>,
+        query: Query<ereport_types::EreportQuery>,
+    ) -> Result<HttpResponseOk<ereport_types::Ereports>, HttpError>;
 }
 
 #[derive(Deserialize, JsonSchema)]

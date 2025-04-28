@@ -18,7 +18,6 @@ cockroach-admin-api.workspace = true
 debug-ignore.workspace = true
 dns-server-api.workspace = true
 dropshot.workspace = true
-ereport-api.workspace = true
 hex.workspace = true
 fs-err.workspace = true
 gateway-api.workspace = true
