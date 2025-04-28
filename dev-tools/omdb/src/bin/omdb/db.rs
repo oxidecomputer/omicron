@@ -1154,6 +1154,7 @@ struct SetStorageBufferArgs {
     storage_buffer: i64,
 }
 
+#[derive(Debug, Args, Clone)]
 struct WebhookArgs {
     #[command(subcommand)]
     command: WebhookCommands,
