@@ -10,6 +10,7 @@ use crate::SIM_GIMLET_BOARD;
 use crate::SIM_ROT_BOARD;
 use crate::SIM_ROT_STAGE0_BOARD;
 use crate::SIM_SIDECAR_BOARD;
+use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
 use gateway_messages::RotSlotId;
 use gateway_messages::RotStateV3;
@@ -420,10 +421,10 @@ impl SimSpUpdate {
             SpComponent::ROT => {
                 if persist {
                     self.rot_state.pending_persistent_boot_preference =
-                        Some(rot_slot_id_from_u16(slot));
+                        Some(rot_slot_id_from_u16(slot)?);
                 } else {
                     self.rot_state.transient_boot_preference =
-                        Some(rot_slot_id_from_u16(slot));
+                        Some(rot_slot_id_from_u16(slot)?);
                 }
                 Ok(())
             }
@@ -453,9 +454,9 @@ impl SimSpUpdate {
         component: SpComponent,
     ) -> Result<u16, SpError> {
         match component {
-            SpComponent::ROT => {
-                rot_slot_id_to_u16(self.rot_state.persistent_boot_preference)
-            }
+            SpComponent::ROT => Ok(rot_slot_id_to_u16(
+                self.rot_state.persistent_boot_preference,
+            )),
             // The only active component is stage0
             SpComponent::STAGE0 => Ok(0),
             // The real SP returns `RequestUnsupportedForComponent` for anything
@@ -499,13 +500,12 @@ enum CabooseValue {
     /// emulate an actual caboose
     Caboose(hubtools::Caboose),
     /// emulate "the image does not include a caboose"
-    // This will be used shortly.
     #[allow(dead_code)]
     InvalidMissing,
     /// emulate "the image caboose does not contain 'KEY'"
     InvalidMissingAllKeys,
     /// emulate "failed to read data from the caboose" (erased)
-    // This will be used shortly.
+    // XXX-dap
     #[allow(dead_code)]
     InvalidFailedRead,
 }

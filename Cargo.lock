@@ -4273,6 +4273,7 @@ dependencies = [
 [[package]]
 name = "hubtools"
 version = "0.4.6"
+source = "git+ssh://git@github.com/oxidecomputer/hubtools?branch=dap%2Fread-caboose-from-image#79c8674da595200576ef9a5309aaf72afc8c4a9c"
 dependencies = [
  "digest",
  "hex",
