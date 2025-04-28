@@ -358,6 +358,8 @@ impl SimSpUpdate {
             | UpdateState::Aborted(_) => (),
         }
 
+        // If there was a pending persistent boot preference set, apply that now
+        // (and unset it).
         if let Some(new_boot_pref) =
             self.rot_state.pending_persistent_boot_preference.take()
         {
@@ -368,6 +370,22 @@ impl SimSpUpdate {
         // We do not currently simulate changes to the transient boot
         // preference.
         self.rot_state.transient_boot_preference = None;
+
+        if self.pending_stage0_update {
+            // If there was a pending stage0 update, apply that now.  All this
+            // means is changing the stage0 FWID and caboose to match the
+            // stage0next FWID and caboose.  We need something to put into the
+            // stage0next FWID and caboose, so we arbitrairly pick whatever was
+            // the stage0 one.
+            std::mem::swap(
+                &mut self.rot_state.stage0_fwid,
+                &mut self.rot_state.stage0next_fwid,
+            );
+            std::mem::swap(
+                &mut self.caboose_stage0,
+                &mut self.caboose_stage0next,
+            );
+        }
     }
 
     pub(crate) fn last_sp_update_data(&self) -> Option<Box<[u8]>> {
