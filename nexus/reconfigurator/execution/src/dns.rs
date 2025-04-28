@@ -1049,8 +1049,8 @@ mod test {
             String::from("oxide.test"),
         );
         assert_eq!(external_dns_zone.zone_name, "oxide.test");
-        // We'll only have external DNS nameserver records - the A/AAAA records for servers
-        // themselves, and NS records at the apex.
+        // We'll only have external DNS nameserver records - the A/AAAA records
+        // for servers themselves, and NS records at the apex.
         let baseline_external_dns_names = external_dns_count + 1;
         assert_eq!(
             external_dns_zone.records.len(),

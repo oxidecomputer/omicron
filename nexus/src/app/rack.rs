@@ -247,9 +247,10 @@ impl super::Nexus {
         let recovery_silo_fq_dns_name =
             format!("{silo_dns_name}.{}", request.external_dns_zone_name);
 
-        // sled-agent, in service of RSS, has configured internal DNS. We got its DNS configuration
-        // in `request.internal_dns_zone_config`
-        // and are appending to it before committing the initial RSS state to the database
+        // sled-agent, in service of RSS, has configured internal DNS. We got
+        // its DNS configuration in `request.internal_dns_zone_config` and are
+        // appending to it before committing the initial RSS state to the
+        // database
         let external_dns_config =
             nexus_types::deployment::execution::blueprint_external_dns_config(
                 &request.blueprint,

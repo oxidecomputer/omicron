@@ -1497,5 +1497,7 @@ mod test {
         expect(&tc.store, "zone1.internal", Expect::Record(&ns1_ns));
 
         expect(&tc.store, "zone1.internal", Expect::Record(&ns2_ns));
+
+        tc.cleanup_successful();
     }
 }
