@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Utilities to help insepct support bundles
+//! APIs to help access bundles
 
 use anyhow::Context as _;
 use anyhow::Result;
@@ -13,6 +13,7 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use futures::Future;
 use futures::Stream;
+use futures::StreamExt;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use std::io;
@@ -23,7 +24,6 @@ use tokio::io::AsyncRead;
 use tokio::io::ReadBuf;
 
 use crate::SupportBundleIndex;
-use crate::utf8_stream_to_string;
 
 /// An I/O source which can read to a buffer
 ///
@@ -237,4 +237,33 @@ impl AsyncRead for AsyncZipFile {
         self.copied += to_copy;
         Poll::Ready(Ok(()))
     }
+}
+
+async fn utf8_stream_to_string(
+    mut stream: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>>
+    + std::marker::Unpin,
+) -> Result<String> {
+    let mut result = String::new();
+
+    // When we read from the string, we might not read a whole UTF-8 sequence.
+    // Keep this "leftover" type here to concatenate this partially-read data
+    // when we read the next sequence.
+    let mut leftover: Option<bytes::Bytes> = None;
+    while let Some(data) = stream.next().await {
+        match data {
+            Err(err) => return Err(anyhow::anyhow!(err)),
+            Ok(data) => {
+                let combined = match leftover.take() {
+                    Some(old) => [old, data].concat(),
+                    None => data.to_vec(),
+                };
+
+                match std::str::from_utf8(&combined) {
+                    Ok(data) => result += data,
+                    Err(_) => leftover = Some(combined.into()),
+                }
+            }
+        }
+    }
+    Ok(result)
 }
