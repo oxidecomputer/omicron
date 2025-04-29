@@ -43,7 +43,6 @@ pub(crate) struct SimSpUpdate {
     /// records whether a change to the stage0 "active slot" has been requested
     pending_stage0_update: bool,
 
-    // XXX-dap review the lifecycle of all of these fields
     /// current caboose for the SP active slot
     caboose_sp_active: CabooseValue,
     /// current caboose for the SP inactive slot
@@ -225,7 +224,6 @@ impl SimSpUpdate {
             state @ UpdateState::Prepared { .. } => {
                 Err(SpError::UpdateInProgress(state.to_message()))
             }
-            // XXX-dap shouldn't we fail in some of these cases?
             UpdateState::NotPrepared
             | UpdateState::Aborted(_)
             | UpdateState::Completed { .. } => {
@@ -253,9 +251,6 @@ impl SimSpUpdate {
                 // right, but it's most important that consumers handle both
                 // cases, which they will if they test updates to both of these
                 // components.
-                // XXX-dap should we instead calculate the caboose on-demand
-                // from the data we've received?  (Will that be annoying for the
-                // initial condition?)
                 if let Some(caboose) = self.caboose_mut(component, slot) {
                     *caboose = if component == SpComponent::STAGE0 {
                         CabooseValue::InvalidFailedRead
@@ -340,7 +335,6 @@ impl SimSpUpdate {
                                 *caboose_value = CabooseValue::Caboose(caboose);
                             }
                             Err(_) => {
-                                // XXX-dap log error
                                 *caboose_value = CabooseValue::InvalidMissing;
                             }
                         };
