@@ -11840,7 +11840,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap",
- "digest",
  "dropshot 0.16.0",
  "futures",
  "gateway-messages",
