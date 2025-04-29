@@ -223,7 +223,7 @@ async fn cmd_db_webhook_rx_list(
 ) -> anyhow::Result<()> {
     let ctx = || {
         if let Some(starting_at) = args.start_at {
-            format!("listing webhook receivers (starting at {starting_at}")
+            format!("listing webhook receivers (starting at {starting_at})")
         } else {
             "listing webhook_receivers".to_string()
         }
