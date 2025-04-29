@@ -174,15 +174,28 @@ use omicron_uuid_kinds::WebhookDeliveryUuid;
 use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 use omicron_uuid_kinds::WebhookSecretUuid;
+use schemars::JsonSchema;
+use serde::Serialize;
 use sha2::Sha256;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
 
+/// Trait implemented by types that represent the payload of a webhook event.
+pub trait Event: Serialize + JsonSchema {
+    /// The event's event class.
+    const CLASS: WebhookEventClass;
+    /// The version number of the event's payload.
+    const VERSION: usize;
+}
+
 impl Nexus {
-    /// Publish a new webhook event, with the provided `id`, `event_class`, and
-    /// JSON data payload.
+    /// Publish a new webhook event.
+    ///
+    /// The event payload is represented by a type that implements the [`Event`]
+    /// trait defined in this module. Publishing the event converts it to a JSON
+    /// object that's stored in the database.
     ///
     /// If this method returns `Ok`, the event has been durably recorded in
     /// CockroachDB.  Once the new event record is inserted into the database,
@@ -190,22 +203,30 @@ impl Nexus {
     /// event to receivers.  However, if (for whatever reason) this Nexus fails
     /// to do that, the event remains durably in the database to be dispatched
     /// and delivered by someone else.
-    pub async fn webhook_event_publish(
+    pub async fn webhook_event_publish<E: Event>(
         &self,
         opctx: &OpContext,
         id: WebhookEventUuid,
-        event_class: WebhookEventClass,
-        event: serde_json::Value,
+        event: E,
     ) -> Result<WebhookEvent, Error> {
+        let json =
+            serde_json::to_value(event).map_err(|e| Error::InternalError {
+                internal_message: format!(
+                    "failed to convert {} (class: {}) to JSON: {e}",
+                    std::any::type_name::<E>(),
+                    E::CLASS
+                ),
+            })?;
         let event = self
             .datastore()
-            .webhook_event_create(opctx, id, event_class, event)
+            .webhook_event_create(opctx, id, E::CLASS, json)
             .await?;
         slog::debug!(
             &opctx.log,
             "enqueued webhook event";
             "event_id" => ?id,
-            "event_class" => %event.event_class,
+            "event_class" => %E::CLASS,
+            "event_version" => E::VERSION,
             "time_created" => ?event.identity.time_created,
         );
 

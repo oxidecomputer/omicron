@@ -33,6 +33,50 @@ const RECEIVERS_BASE_PATH: &str = "/v1/webhooks/receivers";
 const SECRETS_BASE_PATH: &str = "/v1/webhooks/secrets";
 const DELIVERIES_BASE_PATH: &str = "/v1/webhooks/deliveries";
 
+//
+// Define test event class types
+//
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+struct TestFoo {
+    hello_world: bool,
+}
+
+impl omicron_nexus::app::webhook::Event for TestFoo {
+    const CLASS: WebhookEventClass = WebhookEventClass::TestFoo;
+    const VERSION: usize = 1;
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+struct TestFooBar {
+    hello: &'static str,
+}
+
+impl omicron_nexus::app::webhook::Event for TestFooBar {
+    const CLASS: WebhookEventClass = WebhookEventClass::TestFooBar;
+    const VERSION: usize = 1;
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+struct TestFooBaz {
+    hello: &'static str,
+}
+
+impl omicron_nexus::app::webhook::Event for TestFooBaz {
+    const CLASS: WebhookEventClass = WebhookEventClass::TestFooBaz;
+    const VERSION: usize = 1;
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+struct TestQuuxBar {
+    a: bool,
+    b: usize,
+}
+
+impl omicron_nexus::app::webhook::Event for TestQuuxBar {
+    const CLASS: WebhookEventClass = WebhookEventClass::TestQuuxBar;
+    const VERSION: usize = 1;
+}
+
 async fn webhook_create(
     ctx: &ControlPlaneTestContext,
     params: &params::WebhookCreate,
@@ -533,12 +577,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
 
     // Publish an event
     let event = nexus
-        .webhook_event_publish(
-            &opctx,
-            id,
-            WebhookEventClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
-        )
+        .webhook_event_publish(&opctx, id, TestFoo { hello_world: true })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -655,12 +694,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
 
     // Publish an event
     let event = nexus
-        .webhook_event_publish(
-            &opctx,
-            id,
-            WebhookEventClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
-        )
+        .webhook_event_publish(&opctx, id, TestFoo { hello_world: true })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -819,8 +853,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
         .webhook_event_publish(
             &opctx,
             bar_event_id,
-            WebhookEventClass::TestFooBar,
-            serde_json::json!({"lol": "webhooked on phonics"}),
+            TestFooBar { hello: "emeryville" },
         )
         .await
         .expect("event should be published successfully");
@@ -830,8 +863,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
         .webhook_event_publish(
             &opctx,
             baz_event_id,
-            WebhookEventClass::TestFooBaz,
-            serde_json::json!({"lol": "webhook, line, and sinker"}),
+            TestFooBaz { hello: "san francisco" },
         )
         .await
         .expect("event should be published successfully");
@@ -898,12 +930,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
 
     // Publish an event
     let event = nexus
-        .webhook_event_publish(
-            &opctx,
-            id,
-            WebhookEventClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
-        )
+        .webhook_event_publish(&opctx, id, TestFoo { hello_world: true })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -1295,8 +1322,7 @@ async fn test_probe_resends_failed_deliveries(
             .webhook_event_publish(
                 &opctx,
                 event1_id,
-                WebhookEventClass::TestFoo,
-                serde_json::json!({"hello": "world"}),
+                TestFoo { hello_world: true }
             )
             .await
             .expect("event1 should be published successfully")
@@ -1306,8 +1332,7 @@ async fn test_probe_resends_failed_deliveries(
             .webhook_event_publish(
                 &opctx,
                 event2_id,
-                WebhookEventClass::TestFoo,
-                serde_json::json!({"hello": "emeryville"}),
+                TestFoo { hello_world: false }
             )
             .await
             .expect("event2 should be published successfully")
@@ -1448,12 +1473,7 @@ async fn test_api_resends_failed_deliveries(
 
     // Publish an event
     let event1 = nexus
-        .webhook_event_publish(
-            &opctx,
-            event1_id,
-            WebhookEventClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
-        )
+        .webhook_event_publish(&opctx, event1_id, TestFoo { hello_world: true })
         .await
         .expect("event should be published successfully");
     dbg!(event1);
@@ -1463,8 +1483,7 @@ async fn test_api_resends_failed_deliveries(
         .webhook_event_publish(
             &opctx,
             event2_id,
-            WebhookEventClass::TestQuuxBar,
-            serde_json::json!({"hello_world": true}),
+            TestQuuxBar { a: true, b: 42 },
         )
         .await
         .expect("event should be published successfully");
@@ -1567,7 +1586,7 @@ async fn subscription_add_test(
                     "event_class": "test.foo.bar",
                     "event_id": id2,
                     "data": {
-                        "hello_world": true,
+                        "hello": "emeryville",
                     }
                 })
                 .to_string();
@@ -1591,8 +1610,7 @@ async fn subscription_add_test(
         .webhook_event_publish(
             &opctx,
             id1,
-            WebhookEventClass::TestFooBar,
-            serde_json::json!({"hello_world": false}),
+            TestFooBar { hello: "san francisco" },
         )
         .await
         .expect("event should be published successfully");
@@ -1621,12 +1639,7 @@ async fn subscription_add_test(
 
     // Publish an event. This one should make it through.
     let event = nexus
-        .webhook_event_publish(
-            &opctx,
-            id2,
-            WebhookEventClass::TestFooBar,
-            serde_json::json!({"hello_world": true}),
-        )
+        .webhook_event_publish(&opctx, id2, TestFooBar { hello: "emeryville" })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -1699,7 +1712,7 @@ async fn subscription_remove_test(
                     "event_class": "test.foo.bar",
                     "event_id": id1,
                     "data": {
-                        "hello_world": true,
+                        "hello": "emeryville",
                     }
                 })
                 .to_string();
@@ -1720,12 +1733,7 @@ async fn subscription_remove_test(
     // Publish an event. This should be received, as it matches the subscription
     // we are about to delete.
     let event = nexus
-        .webhook_event_publish(
-            &opctx,
-            id1,
-            WebhookEventClass::TestFooBar,
-            serde_json::json!({"hello_world": true}),
-        )
+        .webhook_event_publish(&opctx, id1, TestFooBar { hello: "emeryville" })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -1755,8 +1763,7 @@ async fn subscription_remove_test(
         .webhook_event_publish(
             &opctx,
             id2,
-            WebhookEventClass::TestFooBar,
-            serde_json::json!({"hello_world": false}),
+            TestFooBar { hello: "san francisco" },
         )
         .await
         .expect("event should be published successfully");
@@ -1780,7 +1787,7 @@ async fn subscription_remove_test(
                     "event_class": "test.foo",
                     "event_id": id3,
                     "data": {
-                        "whatever": 1
+                        "hello_world": true,
                     }
                 })
                 .to_string();
@@ -1799,12 +1806,7 @@ async fn subscription_remove_test(
     };
 
     let event = nexus
-        .webhook_event_publish(
-            &opctx,
-            id3,
-            WebhookEventClass::TestFoo,
-            serde_json::json!({"whatever": 1}),
-        )
+        .webhook_event_publish(&opctx, id3, TestFoo { hello_world: true })
         .await
         .expect("event should be published successfully");
     dbg!(event);
