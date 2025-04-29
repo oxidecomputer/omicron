@@ -520,13 +520,13 @@ impl SimSpUpdate {
         component: SpComponent,
     ) -> Result<u16, SpError> {
         match component {
+            // The only active component for SP is slot 0.
+            SpComponent::SP_ITSELF => Ok(0),
             SpComponent::ROT => Ok(rot_slot_id_to_u16(
                 self.rot_state.persistent_boot_preference,
             )),
             // The only active component is stage0
             SpComponent::STAGE0 => Ok(0),
-            // The real SP returns `RequestUnsupportedForComponent` for anything
-            // other than the RoT, including SP_ITSELF.
             _ => Err(SpError::RequestUnsupportedForComponent),
         }
     }
