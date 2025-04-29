@@ -7448,6 +7448,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-bb8-diesel",
+ "bytes",
  "camino",
  "camino-tempfile",
  "chrono",
@@ -7498,6 +7499,7 @@ dependencies = [
  "pq-sys",
  "ratatui",
  "reedline",
+ "reqwest",
  "serde",
  "serde_json",
  "sled-agent-client",
