@@ -199,30 +199,43 @@ impl SimSpUpdate {
         }
     }
 
-    // TODO-completeness Split into `sp_prepare` and `component_prepare` when we
-    // need to simulate aux flash-related (SP update only) things.
-    pub(crate) fn prepare(
+    pub(crate) fn sp_update_prepare(
+        &mut self,
+        id: UpdateId,
+        total_size: usize,
+    ) -> Result<(), SpError> {
+        // SP updates always target slot 0.
+        let slot = 0;
+        self.component_update_prepare(
+            SpComponent::SP_ITSELF,
+            id,
+            total_size,
+            slot,
+        )
+    }
+
+    pub(crate) fn component_update_prepare(
         &mut self,
         component: SpComponent,
         id: UpdateId,
         total_size: usize,
+        slot: u16,
     ) -> Result<(), SpError> {
         match &self.state {
             state @ UpdateState::Prepared { .. } => {
                 Err(SpError::UpdateInProgress(state.to_message()))
             }
+            // XXX-dap shouldn't we fail in some of these cases?
             UpdateState::NotPrepared
             | UpdateState::Aborted(_)
             | UpdateState::Completed { .. } => {
-                // XXX-dap shouldn't we fail in some of these cases?
                 let slot = if component == SpComponent::HOST_CPU_BOOT_FLASH {
                     match self.active_host_slot {
                         Some(slot) => slot,
                         None => return Err(SpError::InvalidSlotForComponent),
                     }
                 } else {
-                    // We don't manage SP or RoT slots, so just use 0
-                    0
+                    slot
                 };
 
                 self.state = UpdateState::Prepared {

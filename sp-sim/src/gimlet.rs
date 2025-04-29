@@ -975,8 +975,7 @@ impl SpHandler for Handler {
             "received SP update prepare request";
             "update" => ?update,
         );
-        self.update_state.prepare(
-            SpComponent::SP_ITSELF,
+        self.update_state.sp_update_prepare(
             update.id,
             update.sp_image_size.try_into().unwrap(),
         )
@@ -992,10 +991,11 @@ impl SpHandler for Handler {
             "update" => ?update,
         );
 
-        self.update_state.prepare(
+        self.update_state.component_update_prepare(
             update.component,
             update.id,
             update.total_size.try_into().unwrap(),
+            update.slot,
         )
     }
 
