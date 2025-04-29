@@ -96,8 +96,9 @@ use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
 use hickory_proto::rr::LowerName;
 use hickory_resolver::Name;
-use internal_dns_types::config::{
-    DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord,
+use internal_dns_types::{
+    config::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord},
+    names::ZONE_APEX_NAME,
 };
 use omicron_common::api::external::Generation;
 use serde::{Deserialize, Serialize};
@@ -160,6 +161,12 @@ pub enum UpdateError {
         generation: Generation,
         req_id: String,
     },
+
+    #[error(
+        "update declares at least one SOA record, but updates \
+        may not provide SOA records"
+    )]
+    UpdateDefinesSoaRecord,
 
     #[error("internal error")]
     InternalError(#[from] anyhow::Error),
@@ -351,6 +358,22 @@ impl Store {
             "new_generation" => u64::from(config.generation),
         ));
 
+        // We disallow updates that provide SOA records because the only SOA
+        // records we should have are ones we define when we're told we're
+        // authoritative for zones. SOA records are in the API types here
+        // because they are included when reporting this server's records (such
+        // as via `dns_config_get()`).
+        for zone in config.zones.iter() {
+            if let Some(apex_records) = zone.records.get(ZONE_APEX_NAME) {
+                if apex_records
+                    .iter()
+                    .any(|record| matches!(record, DnsRecord::Soa(_)))
+                {
+                    return Err(UpdateError::UpdateDefinesSoaRecord);
+                }
+            }
+        }
+
         // Lock out concurrent updates.  We must not return until we've released
         // the "updating" lock.
         let update = self.begin_update(req_id, config.generation).await?;
@@ -399,6 +422,12 @@ impl Store {
 
         // For each zone in the config, create the corresponding tree.  Populate
         // it with the data from the config.
+        //
+        // We are authoritative for zones whose records we serve, so we also
+        // create an SOA record at this point.  This record is not provided by
+        // the control plane for simplicity; we can determine the serial from
+        // the generation we are updating to.
+        //
         // TODO-performance This would probably be a lot faster with a batch
         // operation.
         for zone_config in &config.zones {
@@ -411,6 +440,12 @@ impl Store {
                 .with_context(|| format!("creating tree {:?}", &tree_name))?;
 
             for (name, records) in &zone_config.records {
+                if name == ZONE_APEX_NAME {
+                    // If any records are present on the zone itself, we'll
+                    // handle those separately.
+                    continue;
+                }
+
                 if records.is_empty() {
                     // There's no distinction between in DNS between a name that
                     // doesn't exist at all and one with no records associated
@@ -418,6 +453,7 @@ impl Store {
                     // the name.
                     continue;
                 }
+
                 let records_json =
                     serde_json::to_vec(&records).with_context(|| {
                         format!(
@@ -431,6 +467,63 @@ impl Store {
                         zone_name, name
                     )
                 })?;
+            }
+
+            // We've gone through all non-apex names for this zone.  Now process
+            // records for the zone apex.  We should have NS records here, and
+            // we'll want to add an SOA record here as well.
+            let records: Option<Vec<DnsRecord>> =
+                zone_config.records.get(ZONE_APEX_NAME).map(|x| x.clone());
+            if let Some(mut apex_records) = records {
+                // Sort for a stable ordering of NS records.  We'll pick the first
+                // NS record we see for the SOA record we'll create later.  It
+                // really doesn't matter *which* NS record comes first, just that
+                // all DNS servers see the same NS record first.
+                apex_records.sort();
+
+                let mut representative_ns = None;
+                for record in &apex_records {
+                    if let DnsRecord::Ns(nsdname) = record {
+                        representative_ns = Some(nsdname.clone());
+                        break;
+                    }
+                }
+
+                if let Some(nsdname) = representative_ns {
+                    // The SOA serial number field is a 32-bit field, but we
+                    // want to use the 63-bit generation number here.  The only
+                    // issue with wrapping is, of course, that the serial number
+                    // will decrease to 0 when the generation gets high enough.
+                    // This will likely result in other systems consuming the
+                    // rack's SOA records needing to reset their expected serial
+                    // numbers, perhaps by dropping caches or other manual
+                    // intervention.
+                    //
+                    // Assuming one generation bump every minute, this overflow
+                    // would affect operations after 8,171 years.
+                    let soa_serial = config.generation.as_u64() as u32;
+                    apex_records.push(DnsRecord::Soa(
+                        internal_dns_types::config::Soa::new(
+                            nsdname, soa_serial,
+                        ),
+                    ));
+                }
+
+                let records_json = serde_json::to_vec(&apex_records)
+                    .with_context(|| {
+                        format!(
+                            "serializing records for zone {:?} apex",
+                            zone_name,
+                        )
+                    })?;
+                tree.insert(ZONE_APEX_NAME, records_json).with_context(
+                    || {
+                        format!(
+                            "inserting records for zone {:?} apex",
+                            zone_name,
+                        )
+                    },
+                )?;
             }
 
             // Flush this tree.  We do this here to make sure the tree is fully
@@ -649,7 +742,8 @@ impl Store {
             name_only.set_fqdn(false);
             let key = name_only.to_string().to_lowercase();
             assert!(!key.ends_with('.'));
-            key
+
+            if key.is_empty() { ZONE_APEX_NAME.to_string() } else { key }
         };
 
         debug!(&self.log, "query key"; "key" => &key);
@@ -793,6 +887,7 @@ mod test {
     use internal_dns_types::config::DnsConfigParams;
     use internal_dns_types::config::DnsConfigZone;
     use internal_dns_types::config::DnsRecord;
+    use internal_dns_types::names::ZONE_APEX_NAME;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
@@ -851,6 +946,7 @@ mod test {
     enum Expect<'a> {
         NoZone,
         NoName,
+        Only(&'a DnsRecord),
         Record(&'a DnsRecord),
     }
 
@@ -868,11 +964,12 @@ mod test {
         match (expect, result) {
             (Expect::NoZone, Err(QueryError::NoZone(n))) if n == name => (),
             (Expect::NoName, Err(QueryError::NoName(n))) if n == name => (),
-            (Expect::Record(r), Ok(records))
+            (Expect::Only(r), Ok(records))
                 if records.len() == 1 && records[0] == *r =>
             {
                 ()
             }
+            (Expect::Record(r), Ok(records)) if records.contains(r) => (),
             _ => panic!("did not get what we expected from DNS query"),
         }
     }
@@ -926,22 +1023,22 @@ mod test {
         expect(
             &tc.store,
             "gen1_name.zone1.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(
             &tc.store,
             "gen1_name.ZONE1.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(
             &tc.store,
             "Gen1_name.zone1.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(
             &tc.store,
             "shared_name.zone1.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(&tc.store, "enoent.zone1.internal", Expect::NoName);
         expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
@@ -980,12 +1077,12 @@ mod test {
         expect(
             &tc.store,
             "shared_name.zone1.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(
             &tc.store,
             "gen2_name.zone2.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(&tc.store, "gen8_name.zone8.internal", Expect::NoZone);
 
@@ -1016,7 +1113,7 @@ mod test {
         expect(
             &tc.store,
             "gen8_name.zone8.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
 
         // Updating to generation 8 again should be a no-op.  It should succeed
@@ -1036,7 +1133,7 @@ mod test {
         expect(
             &tc.store,
             "gen8_name.zone8.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
 
         // Failure: try a backwards update.
@@ -1151,7 +1248,7 @@ mod test {
         expect(
             &tc.store,
             "gen1_name.zone1.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
 
@@ -1166,7 +1263,7 @@ mod test {
         expect(
             &tc.store,
             "gen2_name.zone2.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
 
         // At this point, we want to drop the Store, but we need to keep around
@@ -1203,11 +1300,7 @@ mod test {
             generations_with_trees(&store)
         );
         // The rest of the behavior ought to be like generation 1.
-        expect(
-            &store,
-            "gen1_name.zone1.internal",
-            Expect::Record(&dummy_record),
-        );
+        expect(&store, "gen1_name.zone1.internal", Expect::Only(&dummy_record));
         expect(&store, "gen2_name.zone2.internal", Expect::NoZone);
 
         // Now we can do another update to generation 2.
@@ -1219,11 +1312,7 @@ mod test {
         let gen2_config = store.read_config().unwrap();
         assert_eq!(Generation::from_u32(2), gen2_config.generation);
         expect(&store, "gen1_name.zone1.internal", Expect::NoZone);
-        expect(
-            &store,
-            "gen2_name.zone2.internal",
-            Expect::Record(&dummy_record),
-        );
+        expect(&store, "gen2_name.zone2.internal", Expect::Only(&dummy_record));
 
         let tc = TestContext { logctx, tmpdir, store, db };
         tc.cleanup_successful();
@@ -1294,6 +1383,120 @@ mod test {
             .dns_config_update(&update2, "my request id")
             .await
             .expect("unexpected failure");
+
+        tc.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_zone_gets_soa_record() {
+        let tc = TestContext::new("test_zone_gets_soa_record");
+
+        let ns1_a = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
+        let ns1_ns = DnsRecord::Ns("ns1.zone1.internal".to_string());
+        let update = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: Generation::from_u32(1),
+            zones: vec![DnsConfigZone {
+                zone_name: "zone1.internal".to_string(),
+                records: HashMap::from([
+                    ("ns1".to_string(), vec![ns1_a.clone()]),
+                    (ZONE_APEX_NAME.to_string(), vec![ns1_ns.clone()]),
+                ]),
+            }],
+        };
+
+        tc.store
+            .dns_config_update(&update, "my request id")
+            .await
+            .expect("can apply update");
+
+        // These two records are ones we provided, they ought to be there.
+        expect(&tc.store, "ns1.zone1.internal", Expect::Only(&ns1_a));
+
+        expect(
+            &tc.store,
+            "zone1.internal",
+            Expect::Record(&DnsRecord::Ns("ns1.zone1.internal".to_string())),
+        );
+
+        let zone_soa = DnsRecord::Soa(internal_dns_types::config::Soa::new(
+            "ns1.zone1.internal".to_string(),
+            update.generation.as_u64() as u32,
+        ));
+
+        // The SOA record is created when the server is told it is serving
+        // records for a zone.
+        expect(&tc.store, "zone1.internal", Expect::Record(&zone_soa));
+
+        // The use of `@` as a name for labels
+        expect(&tc.store, "zone1.internal", Expect::Record(&zone_soa));
+
+        // We can update DNS to a configuration without NS records and the
+        // server will survive the encounter.  We won't have an SOA record
+        // without a nameserver to indicate as the primary source for this zone,
+        // though.
+
+        let update2 = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: Generation::from_u32(2),
+            zones: vec![DnsConfigZone {
+                zone_name: "zone1.internal".to_string(),
+                records: HashMap::from([(
+                    "ns1".to_string(),
+                    vec![ns1_a.clone()],
+                )]),
+            }],
+        };
+
+        tc.store
+            .dns_config_update(&update2, "my request id")
+            .await
+            .expect("can apply update");
+
+        // At this point we have a zone `zone1.internal`, but no records on the
+        // zone itself.
+        expect(&tc.store, "zone1.internal", Expect::NoName);
+
+        let ns2_a = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
+        let ns2_ns = DnsRecord::Ns("ns2.zone1.internal".to_string());
+
+        // Finally, even if the NS records are ordered in a strange way, we'll
+        // consistently reorder records in the update so that the
+        // lowest-numbered NS record is first and used as the SOA mname.
+        let update3 = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: Generation::from_u32(3),
+            zones: vec![DnsConfigZone {
+                zone_name: "zone1.internal".to_string(),
+                records: HashMap::from([
+                    ("ns2".to_string(), vec![ns2_a.clone()]),
+                    ("ns1".to_string(), vec![ns1_a.clone()]),
+                    (
+                        ZONE_APEX_NAME.to_string(),
+                        vec![ns1_ns.clone(), ns2_ns.clone()],
+                    ),
+                ]),
+            }],
+        };
+
+        tc.store
+            .dns_config_update(&update3, "my request id")
+            .await
+            .expect("can apply update");
+
+        let zone_soa = DnsRecord::Soa(internal_dns_types::config::Soa::new(
+            "ns1.zone1.internal".to_string(),
+            update3.generation.as_u64() as u32,
+        ));
+
+        // The SOA record is created when the server is told it is serving
+        // records for a zone.
+        expect(&tc.store, "zone1.internal", Expect::Record(&zone_soa));
+
+        // And both NS records *are* present at the zone apex.
+        expect(&tc.store, "zone1.internal", Expect::Record(&ns1_ns));
+
+        expect(&tc.store, "zone1.internal", Expect::Record(&ns2_ns));
 
         tc.cleanup_successful();
     }

@@ -7,7 +7,10 @@ use std::{
     net::IpAddr,
 };
 
-use internal_dns_types::{config::DnsConfigBuilder, names::ServiceName};
+use internal_dns_types::{
+    config::DnsConfigBuilder,
+    names::{ServiceName, ZONE_APEX_NAME},
+};
 use omicron_common::api::external::Name;
 use omicron_uuid_kinds::SledUuid;
 
@@ -20,7 +23,10 @@ use crate::{
     silo::{default_silo_name, silo_dns_name},
 };
 
-use super::{Overridables, Sled, blueprint_nexus_external_ips};
+use super::{
+    Overridables, Sled, blueprint_external_dns_resolver_ips,
+    blueprint_nexus_external_ips,
+};
 
 /// Returns the expected contents of internal DNS based on the given blueprint
 pub fn blueprint_internal_dns_config(
@@ -164,8 +170,9 @@ pub fn blueprint_external_dns_config<'a>(
     external_dns_zone_name: String,
 ) -> DnsConfigZone {
     let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
+    let dns_external_ips = blueprint_external_dns_resolver_ips(blueprint);
 
-    let dns_records: Vec<DnsRecord> = nexus_external_ips
+    let nexus_dns_records: Vec<DnsRecord> = nexus_external_ips
         .into_iter()
         .map(|addr| match addr {
             IpAddr::V4(addr) => DnsRecord::A(addr),
@@ -173,7 +180,26 @@ pub fn blueprint_external_dns_config<'a>(
         })
         .collect();
 
-    let records = silos
+    let mut zone_records: Vec<DnsRecord> = Vec::new();
+    let external_dns_records: Vec<(String, Vec<DnsRecord>)> = dns_external_ips
+        .into_iter()
+        .enumerate()
+        .map(|(idx, dns_ip)| {
+            let record = match dns_ip {
+                IpAddr::V4(addr) => DnsRecord::A(addr),
+                IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
+            };
+            // `idx` is 0-based, but nameservers start at `ns1` (1-based).
+            let name = format!("ns{}", idx + 1);
+            zone_records.push(DnsRecord::Ns(format!(
+                "{}.{}",
+                &name, external_dns_zone_name
+            )));
+            (name, vec![record])
+        })
+        .collect();
+
+    let mut records = silos
         .into_iter()
         // We do not generate a DNS name for the "default" Silo.
         //
@@ -185,9 +211,16 @@ pub fn blueprint_external_dns_config<'a>(
         // abstraction, such as it is, would be leakier).
         .filter_map(|silo_name| {
             (silo_name != default_silo_name())
-                .then(|| (silo_dns_name(&silo_name), dns_records.clone()))
+                .then(|| (silo_dns_name(&silo_name), nexus_dns_records.clone()))
         })
+        .chain(external_dns_records)
         .collect::<HashMap<String, Vec<DnsRecord>>>();
+
+    if !zone_records.is_empty() {
+        let prior_records =
+            records.insert(ZONE_APEX_NAME.to_string(), zone_records);
+        assert!(prior_records.is_none());
+    }
 
     DnsConfigZone {
         zone_name: external_dns_zone_name,

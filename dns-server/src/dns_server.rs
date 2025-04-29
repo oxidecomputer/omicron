@@ -26,6 +26,7 @@ use hickory_server::authority::MessageRequest;
 use hickory_server::authority::MessageResponse;
 use hickory_server::authority::MessageResponseBuilder;
 use internal_dns_types::config::DnsRecord;
+use internal_dns_types::config::Soa;
 use internal_dns_types::config::Srv;
 use pretty_hex::*;
 use serde::Deserialize;
@@ -254,6 +255,56 @@ fn dns_record_to_record(
                 .set_data(Some(RData::SRV(SRV::new(prio, weight, port, tgt))));
             Ok(srv)
         }
+
+        DnsRecord::Ns(nsdname) => {
+            let nsdname = Name::from_str(&nsdname).map_err(|error| {
+                RequestError::ServFail(anyhow!(
+                    "serialization failed due to bad NS dname {:?}: {:#}",
+                    &nsdname,
+                    error
+                ))
+            })?;
+            let mut ns = Record::new();
+            use hickory_proto::rr::rdata::NS;
+            ns.set_name(name.clone())
+                .set_rr_type(RecordType::NS)
+                .set_data(Some(RData::NS(NS(nsdname))));
+            Ok(ns)
+        }
+
+        DnsRecord::Soa(Soa {
+            mname,
+            rname,
+            serial,
+            refresh,
+            retry,
+            expire,
+            minimum,
+        }) => {
+            let mname = Name::from_str(&mname).map_err(|error| {
+                RequestError::ServFail(anyhow!(
+                    "serialization failed due to bad SOA mname {:?}: {:#}",
+                    &mname,
+                    error
+                ))
+            })?;
+            let rname = Name::from_str(&rname).map_err(|error| {
+                RequestError::ServFail(anyhow!(
+                    "serialization failed due to bad SOA rname {:?}: {:#}",
+                    &rname,
+                    error
+                ))
+            })?;
+            let mut record = Record::new();
+            use hickory_proto::rr::rdata::SOA;
+            record
+                .set_name(name.clone())
+                .set_rr_type(RecordType::SOA)
+                .set_data(Some(RData::SOA(SOA::new(
+                    mname, rname, serial, refresh, retry, expire, minimum,
+                ))));
+            Ok(record)
+        }
     }
 }
 
@@ -284,30 +335,38 @@ async fn handle_dns_message(
                 (RecordType::A, DnsRecord::A(_)) => true,
                 (RecordType::AAAA, DnsRecord::Aaaa(_)) => true,
                 (RecordType::SRV, DnsRecord::Srv(_)) => true,
+                (RecordType::NS, DnsRecord::Ns(_)) => true,
+                (RecordType::SOA, DnsRecord::Soa(_)) => true,
                 _ => false,
             }
         })
         .map(|record| {
             let record = dns_record_to_record(&name, record)?;
 
-            // DNS allows for the server to return additional records
-            // that weren't explicitly asked for by the client but that
-            // the server expects the client will want. The records
-            // corresponding to a lookup on a SRV target is one such case.
-            // We opportunistically attempt to resolve the target here
-            // and if successful return those additional records in the
-            // response.
-            // NOTE: we only do this one-layer deep.
-            if let Some(RData::SRV(srv)) = record.data() {
-                let target_records =
-                    store.query_name(srv.target()).map(|records| {
-                        records
-                            .into_iter()
-                            .map(|record| {
-                                dns_record_to_record(srv.target(), record)
-                            })
-                            .collect::<Result<Vec<_>, _>>()
-                    });
+            // DNS allows for the server to return additional records that
+            // weren't explicitly asked for by the client but that the server
+            // expects the client will want. SRV and NS records both use names
+            // for their referents (rather than IP addresses dierctly). If
+            // someone has queried for one of those kinds of records, they'll
+            // almost certainly be needing the IP addresses that go with them as
+            // well. We opportunistically attempt to resovle the target here and
+            // if successful return those additional records in the response.
+            //
+            // NOTE: we only do this one-layer deep. If the target of a SRV or
+            // NS is a CNAME instead of A/AAAA directly, it will be lost here.
+            let additionals_target = match record.data() {
+                Some(RData::SRV(srv)) => Some(srv.target()),
+                Some(RData::NS(ns)) => Some(&ns.0),
+                _ => None,
+            };
+
+            if let Some(target) = additionals_target {
+                let target_records = store.query_name(target).map(|records| {
+                    records
+                        .into_iter()
+                        .map(|record| dns_record_to_record(target, record))
+                        .collect::<Result<Vec<_>, _>>()
+                });
                 match target_records {
                     Ok(Ok(target_records)) => {
                         additional_records.extend(target_records);
@@ -321,7 +380,7 @@ async fn handle_dns_message(
                             &log,
                             "SRV target lookup failed";
                             "original_mr" => #?mr,
-                            "target" => ?srv.target(),
+                            "target" => ?target,
                             "error" => ?error,
                         );
                     }
@@ -330,7 +389,7 @@ async fn handle_dns_message(
                             &log,
                             "SRV target unexpected response";
                             "original_mr" => #?mr,
-                            "target" => ?srv.target(),
+                            "target" => ?target,
                             "error" => ?error,
                         );
                     }

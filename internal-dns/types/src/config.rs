@@ -66,10 +66,12 @@ use core::fmt;
 use omicron_common::address::{CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT};
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
+use std::collections::BTreeMap;
+use std::net::{Ipv6Addr, SocketAddrV6};
+
+// "v2" types are the most recent, so we re-export them here for dependents that
+// just want "latest".
+pub use crate::v2::config::*;
 
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -533,8 +535,8 @@ impl DnsConfigBuilder {
         )
     }
 
-    /// Construct a `DnsConfigZone` describing the control plane zone described
-    /// up to this point
+    /// Construct a `DnsConfigZone` describing the control plane DNS zone
+    /// described up to this point
     pub fn build_zone(self) -> DnsConfigZone {
         // Assemble the set of "AAAA" records for sleds.
         let sled_records = self.sleds.into_iter().map(|(sled, sled_ip)| {
@@ -629,111 +631,6 @@ impl DnsConfigBuilder {
             zones: vec![zone],
         }
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct DnsConfigParams {
-    pub generation: Generation,
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    pub zones: Vec<DnsConfigZone>,
-}
-
-impl DnsConfigParams {
-    /// Given a high-level DNS configuration, return a reference to its sole
-    /// DNS zone.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if there are 0 or more than one zones in this
-    /// configuration.
-    pub fn sole_zone(&self) -> Result<&DnsConfigZone, anyhow::Error> {
-        ensure!(
-            self.zones.len() == 1,
-            "expected exactly one DNS zone, but found {}",
-            self.zones.len()
-        );
-        Ok(&self.zones[0])
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct DnsConfig {
-    pub generation: Generation,
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    pub time_applied: chrono::DateTime<chrono::Utc>,
-    pub zones: Vec<DnsConfigZone>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct DnsConfigZone {
-    pub zone_name: String,
-    pub records: HashMap<String, Vec<DnsRecord>>,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-)]
-#[serde(tag = "type", content = "data")]
-pub enum DnsRecord {
-    A(Ipv4Addr),
-    // The renames are because openapi-lint complains about `Aaaa` and `Srv`
-    // not being in screaming snake case. `Aaaa` and `Srv` are the idiomatic
-    // Rust casings, though.
-    #[serde(rename = "AAAA")]
-    Aaaa(Ipv6Addr),
-    #[serde(rename = "SRV")]
-    Srv(Srv),
-}
-
-// The `From<Ipv4Addr>` and `From<Ipv6Addr>` implementations are very slightly
-// dubious, because a v4 or v6 address could also theoretically map to a DNS
-// PTR record
-// (https://www.cloudflare.com/learning/dns/dns-records/dns-ptr-record/).
-// However, we don't support PTR records at the moment, so this is fine. Would
-// certainly be worth revisiting if we do in the future, though.
-
-impl From<Ipv4Addr> for DnsRecord {
-    fn from(ip: Ipv4Addr) -> Self {
-        DnsRecord::A(ip)
-    }
-}
-
-impl From<Ipv6Addr> for DnsRecord {
-    fn from(ip: Ipv6Addr) -> Self {
-        DnsRecord::Aaaa(ip)
-    }
-}
-
-impl From<Srv> for DnsRecord {
-    fn from(srv: Srv) -> Self {
-        DnsRecord::Srv(srv)
-    }
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-)]
-pub struct Srv {
-    pub prio: u16,
-    pub weight: u16,
-    pub port: u16,
-    pub target: String,
 }
 
 #[cfg(test)]

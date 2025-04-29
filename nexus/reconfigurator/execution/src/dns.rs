@@ -1018,8 +1018,12 @@ mod test {
     async fn test_blueprint_external_dns_basic() {
         static TEST_NAME: &str = "test_blueprint_external_dns_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, mut blueprint) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(5).build();
+        let system_builder = ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+            .nsleds(5)
+            .external_dns_count(3)
+            .expect("can set external dns count");
+        let external_dns_count = system_builder.get_external_dns_zones();
+        let (_, mut blueprint) = system_builder.build();
         blueprint.internal_dns_version = Generation::new();
         blueprint.external_dns_version = Generation::new();
 
@@ -1045,7 +1049,33 @@ mod test {
             String::from("oxide.test"),
         );
         assert_eq!(external_dns_zone.zone_name, "oxide.test");
-        assert!(external_dns_zone.records.is_empty());
+        // We'll only have external DNS nameserver records - the A/AAAA records
+        // for servers themselves, and NS records at the apex.
+        let baseline_external_dns_names = external_dns_count + 1;
+        assert_eq!(
+            external_dns_zone.records.len(),
+            baseline_external_dns_names
+        );
+
+        use internal_dns_types::names::ZONE_APEX_NAME;
+        let apex_records = external_dns_zone
+            .records
+            .get(ZONE_APEX_NAME)
+            .expect("records are present for zone apex");
+        assert_eq!(apex_records.len(), external_dns_count);
+        for i in 0..external_dns_count {
+            // The nameserver records have 1-indexed numbering, but we iterate
+            // from 0. Add one to line up expectations for the test.
+            let ns_name = format!("ns{}", i + 1);
+            assert!(external_dns_zone.records.contains_key(&ns_name));
+            assert_eq!(
+                apex_records[i],
+                DnsRecord::Ns(format!(
+                    "{ns_name}.{}",
+                    external_dns_zone.zone_name
+                ))
+            );
+        }
 
         // Now check a more typical case.
         let external_dns_zone = blueprint_external_dns_config(
@@ -1055,7 +1085,9 @@ mod test {
         );
         assert_eq!(external_dns_zone.zone_name, String::from("oxide.test"));
         let records = &external_dns_zone.records;
-        assert_eq!(records.len(), 1);
+        // One name for the silo, three for the nameservers, and one more for the zone apex.
+        let expected_dns_names = 1 + baseline_external_dns_names;
+        assert_eq!(records.len(), expected_dns_names);
         let silo_records = records
             .get(&silo_dns_name(my_silo.name()))
             .expect("missing silo DNS records");
@@ -1067,7 +1099,9 @@ mod test {
                 .map(|record| match record {
                     DnsRecord::A(v) => IpAddr::V4(*v),
                     DnsRecord::Aaaa(v) => IpAddr::V6(*v),
-                    DnsRecord::Srv(_) => panic!("unexpected SRV record"),
+                    other => {
+                        panic!("unexpected DNS record for silo: {other:?}")
+                    }
                 })
                 .collect();
             ips.sort();
@@ -1679,10 +1713,18 @@ mod test {
         let (new_name, new_records) = added[0];
         assert_eq!(new_name, silo_dns_name(&silo.identity.name));
         // And it should have the same IP addresses as all of the other Silos.
-        assert_eq!(
-            new_records,
-            old_external.zones[0].records.values().next().unwrap()
-        );
+        for (prior_silo_name, prior_silo_records) in
+            old_external.zones[0].records.iter()
+        {
+            // Only some records in the external zone are for Silos, though.
+            if prior_silo_name.ends_with(".sys") {
+                assert_eq!(
+                    new_records, prior_silo_records,
+                    "new silo ({new_name}) DNS records differ from \
+                    another silo ({prior_silo_name})"
+                );
+            }
+        }
 
         // If we execute the blueprint, DNS should not be changed.
         _ = realize_blueprint_and_expect(
