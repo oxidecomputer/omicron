@@ -7909,6 +7909,7 @@ dependencies = [
  "getrandom 0.3.1",
  "group",
  "hashbrown 0.15.1",
+ "heck 0.4.1",
  "hickory-proto",
  "hmac",
  "hyper",
