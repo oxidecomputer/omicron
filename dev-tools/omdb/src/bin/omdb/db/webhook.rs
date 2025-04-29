@@ -23,11 +23,15 @@ use diesel::OptionalExtension;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
 use nexus_db_model::WebhookDelivery;
+use nexus_db_model::WebhookEvent;
 use nexus_db_model::WebhookEventClass;
 use nexus_db_model::WebhookReceiver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
+use nexus_db_schema::schema::webhook_delivery_attempt::dsl as attempt_dsl;
+use nexus_db_schema::schema::webhook_event::dsl as event_dsl;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::NameOrId;
@@ -52,7 +56,10 @@ enum Commands {
         command: RxCommands,
     },
     /// Get information on webhook events
-    Event,
+    Event {
+        #[command(subcommand)]
+        command: EventCommands,
+    },
     /// Get information on webhook delivieries
     Delivery {
         #[command(subcommand)]
@@ -64,19 +71,19 @@ enum Commands {
 enum RxCommands {
     /// List webhook receivers
     #[clap(alias = "ls")]
-    List(WebhookRxListArgs),
+    List(RxListArgs),
 
     #[clap(alias = "show")]
-    Info(WebhookRxInfoArgs),
+    Info(RxInfoArgs),
 }
 
 #[derive(Debug, Args, Clone)]
-struct WebhookRxInfoArgs {
+struct RxInfoArgs {
     receiver: NameOrId,
 }
 
 #[derive(Debug, Args, Clone)]
-struct WebhookRxListArgs {
+struct RxListArgs {
     #[clap(long, short = 'a')]
     start_at: Option<Uuid>,
 }
@@ -125,6 +132,40 @@ struct DeliveryInfoArgs {
     delivery_id: Uuid,
 }
 
+#[derive(Debug, Subcommand, Clone)]
+enum EventCommands {
+    /// List webhook events
+    #[clap(alias = "ls")]
+    List(EventListArgs),
+
+    /// Show details on a webhook event
+    #[clap(alias = "show")]
+    Info(EventInfoArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct EventListArgs {
+    /// If set, include event JSON payloads in the output.
+    ///
+    /// Note that this results in very wide output.
+    #[clap(long, short)]
+    payload: bool,
+
+    /// Include only events created before this timestamp
+    #[clap(long, short)]
+    before: Option<DateTime<Utc>>,
+
+    /// Include only events created after this timestamp
+    #[clap(long, short)]
+    after: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Args, Clone)]
+struct EventInfoArgs {
+    /// The ID of the event to show
+    event_id: WebhookEventUuid,
+}
+
 pub(super) async fn cmd_db_webhook(
     opctx: &OpContext,
     datastore: &DataStore,
@@ -144,15 +185,25 @@ pub(super) async fn cmd_db_webhook(
         Commands::Delivery { command: DeliveryCommands::Info(args) } => {
             cmd_db_webhook_delivery_info(datastore, fetch_opts, args).await
         }
-        Commands::Event => Err(anyhow::anyhow!("not yet implemented, sorry!")),
+        Commands::Event { command: EventCommands::Info(args) } => {
+            cmd_db_webhook_event_info(datastore, fetch_opts, args).await
+        }
+        Commands::Event { command: EventCommands::List(args) } => {
+            cmd_db_webhook_event_list(datastore, fetch_opts, args).await
+        }
     }
 }
+
+const ID: &'static str = "ID";
+const TIME_CREATED: &'static str = "created at";
+const TIME_DELETED: &'static str = "deleted at";
+const TIME_MODIFIED: &'static str = "modified at";
 
 async fn cmd_db_webhook_rx_list(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    args: &WebhookRxListArgs,
+    args: &RxListArgs,
 ) -> anyhow::Result<()> {
     let ctx = || {
         if let Some(starting_at) = args.start_at {
@@ -212,7 +263,7 @@ async fn cmd_db_webhook_rx_list(
 async fn cmd_db_webhook_rx_info(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    args: &WebhookRxInfoArgs,
+    args: &RxInfoArgs,
 ) -> anyhow::Result<()> {
     use nexus_db_schema::schema::webhook_rx_event_glob::dsl as glob_dsl;
     use nexus_db_schema::schema::webhook_rx_subscription::dsl as subscription_dsl;
@@ -226,13 +277,8 @@ async fn cmd_db_webhook_rx_info(
             anyhow::anyhow!("no webhook receiver {} exists", args.receiver)
         })?;
 
-    const ID: &'static str = "ID";
     const NAME: &'static str = "name";
-
     const DESCRIPTION: &'static str = "description";
-    const CREATED: &'static str = "created at";
-    const DELETED: &'static str = "deleted at";
-    const MODIFIED: &'static str = "modified at";
     const ENDPOINT: &'static str = "endpoint";
     const GEN: &'static str = "generation";
     const EXACT: &'static str = "exact subscriptions";
@@ -245,9 +291,9 @@ async fn cmd_db_webhook_rx_info(
         ID,
         NAME,
         DESCRIPTION,
-        CREATED,
-        DELETED,
-        MODIFIED,
+        TIME_CREATED,
+        TIME_DELETED,
+        TIME_MODIFIED,
         ENDPOINT,
         GEN,
         EXACT,
@@ -279,10 +325,10 @@ async fn cmd_db_webhook_rx_info(
     println!("    {DESCRIPTION:>WIDTH$}: {description}");
     println!("    {ENDPOINT:>WIDTH$}: {endpoint}");
     println!();
-    println!("    {CREATED:>WIDTH$}: {time_created}");
-    println!("    {MODIFIED:>WIDTH$}: {time_modified}");
+    println!("    {TIME_CREATED:>WIDTH$}: {time_created}");
+    println!("    {TIME_MODIFIED:>WIDTH$}: {time_modified}");
     if let Some(deleted) = time_deleted {
-        println!("    {DELETED:>WIDTH$}: {deleted}");
+        println!("    {TIME_DELETED:>WIDTH$}: {deleted}");
     }
 
     println!("\n{:=<80}", "== SECRETS ");
@@ -418,7 +464,6 @@ async fn cmd_db_webhook_delivery_list(
     fetch_opts: &DbFetchOptions,
     args: &DeliveryListArgs,
 ) -> anyhow::Result<()> {
-    use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
     let conn = datastore.pool_connection_for_tests().await?;
     let mut query = delivery_dsl::webhook_delivery
         .limit(fetch_opts.fetch_limit.get().into())
@@ -457,7 +502,7 @@ async fn cmd_db_webhook_delivery_list(
             .filter(delivery_dsl::triggered_by.eq_any(args.triggers.clone()));
     }
 
-    let ctx = || "listing webhook receivers";
+    let ctx = || "listing webhook deliveries";
 
     let deliveries = query
         .select(WebhookDelivery::as_select())
@@ -469,61 +514,10 @@ async fn cmd_db_webhook_delivery_list(
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct DeliveryRow {
-        id: Uuid,
-        trigger: nexus_db_model::WebhookDeliveryTrigger,
-        state: nexus_db_model::WebhookDeliveryState,
-        attempts: u8,
-        #[tabled(display_with = "datetime_rfc3339_concise")]
-        time_created: DateTime<Utc>,
-        #[tabled(display_with = "datetime_opt_rfc3339_concise")]
-        time_completed: Option<DateTime<Utc>>,
-    }
-
-    #[derive(Tabled)]
-    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct WithEventId<T: Tabled> {
         #[tabled(inline)]
         inner: T,
         event_id: Uuid,
-    }
-
-    #[derive(Tabled)]
-    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct WithRxId<T: Tabled> {
-        #[tabled(inline)]
-        inner: T,
-        receiver_id: Uuid,
-    }
-
-    impl From<&'_ WebhookDelivery> for DeliveryRow {
-        fn from(d: &WebhookDelivery) -> Self {
-            let WebhookDelivery {
-                id,
-                // event and receiver UUIDs are toggled on and off based on
-                // whether or not we are filtering by receiver and event, so
-                // ignore them here.
-                event_id: _,
-                rx_id: _,
-                attempts,
-                state,
-                time_created,
-                time_completed,
-                // ignore these as they are used for runtime coordination and
-                // aren't very useful for showing delivery history
-                deliverator_id: _,
-                time_leased: _,
-                triggered_by,
-            } = d;
-            Self {
-                id: id.into_untyped_uuid(),
-                trigger: *triggered_by,
-                state: *state,
-                attempts: attempts.0,
-                time_created: *time_created,
-                time_completed: *time_completed,
-            }
-        }
     }
 
     impl<'d, T> From<&'d WebhookDelivery> for WithEventId<T>
@@ -535,15 +529,6 @@ async fn cmd_db_webhook_delivery_list(
         }
     }
 
-    impl<'d, T> From<&'d WebhookDelivery> for WithRxId<T>
-    where
-        T: From<&'d WebhookDelivery> + Tabled,
-    {
-        fn from(d: &'d WebhookDelivery) -> Self {
-            Self { receiver_id: d.rx_id.into_untyped_uuid(), inner: T::from(d) }
-        }
-    }
-
     let mut table = match (args.receiver.as_ref(), args.event) {
         // Filtered by both receiver and event, so don't display either.
         (Some(_), Some(_)) => {
@@ -551,7 +536,9 @@ async fn cmd_db_webhook_delivery_list(
         }
         // Filtered by neither receiver nor event, so include both.
         (None, None) => tabled::Table::new(
-            deliveries.iter().map(WithRxId::<WithEventId<DeliveryRow>>::from),
+            deliveries
+                .iter()
+                .map(DeliveryRowWithRxId::<WithEventId<DeliveryRow>>::from),
         ),
         // Filtered by receiver ID only
         (Some(_), None) => tabled::Table::new(
@@ -559,7 +546,7 @@ async fn cmd_db_webhook_delivery_list(
         ),
         // Filtered by event ID only
         (None, Some(_)) => tabled::Table::new(
-            deliveries.iter().map(WithRxId::<DeliveryRow>::from),
+            deliveries.iter().map(DeliveryRowWithRxId::<DeliveryRow>::from),
         ),
     };
     table
@@ -568,6 +555,66 @@ async fn cmd_db_webhook_delivery_list(
 
     println!("{table}");
     Ok(())
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct DeliveryRow {
+    id: Uuid,
+    trigger: nexus_db_model::WebhookDeliveryTrigger,
+    state: nexus_db_model::WebhookDeliveryState,
+    attempts: u8,
+    #[tabled(display_with = "datetime_rfc3339_concise")]
+    time_created: DateTime<Utc>,
+    #[tabled(display_with = "datetime_opt_rfc3339_concise")]
+    time_completed: Option<DateTime<Utc>>,
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct DeliveryRowWithRxId<T: Tabled> {
+    #[tabled(inline)]
+    inner: T,
+    receiver_id: Uuid,
+}
+
+impl From<&'_ WebhookDelivery> for DeliveryRow {
+    fn from(d: &WebhookDelivery) -> Self {
+        let WebhookDelivery {
+            id,
+            // event and receiver UUIDs are toggled on and off based on
+            // whether or not we are filtering by receiver and event, so
+            // ignore them here.
+            event_id: _,
+            rx_id: _,
+            attempts,
+            state,
+            time_created,
+            time_completed,
+            // ignore these as they are used for runtime coordination and
+            // aren't very useful for showing delivery history
+            deliverator_id: _,
+            time_leased: _,
+            triggered_by,
+        } = d;
+        Self {
+            id: id.into_untyped_uuid(),
+            trigger: *triggered_by,
+            state: *state,
+            attempts: attempts.0,
+            time_created: *time_created,
+            time_completed: *time_completed,
+        }
+    }
+}
+
+impl<'d, T> From<&'d WebhookDelivery> for DeliveryRowWithRxId<T>
+where
+    T: From<&'d WebhookDelivery> + Tabled,
+{
+    fn from(d: &'d WebhookDelivery) -> Self {
+        Self { receiver_id: d.rx_id.into_untyped_uuid(), inner: T::from(d) }
+    }
 }
 
 /// Helper function to look up a webhook receiver with the given name or ID
@@ -606,13 +653,11 @@ async fn cmd_db_webhook_delivery_info(
     args: &DeliveryInfoArgs,
 ) -> anyhow::Result<()> {
     use db::model::WebhookDeliveryAttempt;
-    use nexus_db_schema::schema::webhook_delivery::dsl;
-    use nexus_db_schema::schema::webhook_delivery_attempt::dsl as attempt_dsl;
 
     let DeliveryInfoArgs { delivery_id } = args;
     let conn = datastore.pool_connection_for_tests().await?;
-    let delivery = dsl::webhook_delivery
-        .filter(dsl::id.eq(*delivery_id))
+    let delivery = delivery_dsl::webhook_delivery
+        .filter(delivery_dsl::id.eq(*delivery_id))
         .limit(1)
         .select(WebhookDelivery::as_select())
         .get_result_async(&*conn)
@@ -623,13 +668,11 @@ async fn cmd_db_webhook_delivery_info(
             anyhow::anyhow!("no webhook delivery {delivery_id} exists")
         })?;
 
-    const ID: &'static str = "ID";
     const EVENT_ID: &'static str = "event ID";
     const RECEIVER_ID: &'static str = "receiver ID";
     const STATE: &'static str = "state";
     const TRIGGER: &'static str = "triggered by";
     const ATTEMPTS: &'static str = "attempts";
-    const TIME_CREATED: &'static str = "created at";
     const TIME_COMPLETED: &'static str = "completed at";
 
     const DELIVERATOR_ID: &'static str = "by Nexus";
@@ -760,6 +803,100 @@ async fn cmd_db_webhook_delivery_info(
             .with(tabled::settings::Style::empty())
             .with(tabled::settings::Padding::new(0, 1, 0, 0));
         println!("{table}");
+    }
+
+    Ok(())
+}
+
+async fn cmd_db_webhook_event_list(
+    _datastore: &DataStore,
+    _fetch_opts: &DbFetchOptions,
+    _args: &EventListArgs,
+) -> anyhow::Result<()> {
+    anyhow::bail!("not yet implemented");
+}
+
+async fn cmd_db_webhook_event_info(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &EventInfoArgs,
+) -> anyhow::Result<()> {
+    let EventInfoArgs { event_id } = args;
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    let event = event_dsl::webhook_event
+        .filter(event_dsl::id.eq(event_id.into_untyped_uuid()))
+        .select(WebhookEvent::as_select())
+        .limit(1)
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading webhook event {event_id}"))?
+        .ok_or_else(|| anyhow::anyhow!("no webhook event {event_id} exists"))?;
+
+    let WebhookEvent {
+        identity:
+            db::model::WebhookEventIdentity { id, time_created, time_modified },
+        time_dispatched,
+        event_class,
+        event,
+        num_dispatched,
+    } = event;
+
+    const CLASS: &str = "class";
+    const TIME_DISPATCHED: &str = "fully dispatched at";
+    const NUM_DISPATCHED: &str = "deliveries dispatched";
+
+    const WIDTH: usize = const_max_len(&[
+        ID,
+        TIME_CREATED,
+        TIME_MODIFIED,
+        TIME_DISPATCHED,
+        NUM_DISPATCHED,
+        CLASS,
+    ]);
+
+    println!("\n{:=<80}", "== EVENT ");
+    println!("    {ID:>WIDTH$}: {id:?}");
+    println!("    {CLASS:>WIDTH$}: {event_class}");
+    println!("    {TIME_CREATED:>WIDTH$}: {time_created}");
+    println!("    {TIME_MODIFIED:>WIDTH$}: {time_modified}");
+    println!();
+    println!("    {NUM_DISPATCHED:>WIDTH$}: {num_dispatched}");
+    if let Some(t) = time_dispatched {
+        println!("    {TIME_DISPATCHED:>WIDTH$}: {t}")
+    }
+
+    println!("\n{:=<80}", "== EVENT PAYLOAD ");
+    serde_json::to_writer_pretty(std::io::stdout(), &event).with_context(
+        || format!("failed to serialize event payload: {event:?}"),
+    )?;
+
+    let ctx = || format!("listing deliveries for event {event_id:?}");
+    let deliveries = delivery_dsl::webhook_delivery
+        .limit(fetch_opts.fetch_limit.get().into())
+        .order_by(delivery_dsl::time_created.desc())
+        .select(WebhookDelivery::as_select())
+        .load_async(&*conn)
+        .await
+        .with_context(ctx)?;
+
+    check_limit(&deliveries, fetch_opts.fetch_limit, ctx);
+
+    if !deliveries.is_empty() {
+        println!("\n{:=<80}", "== DELIVERIES ");
+        let mut table = tabled::Table::new(
+            deliveries.iter().map(DeliveryRowWithRxId::<DeliveryRow>::from),
+        );
+        table
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0));
+        println!("{table}")
+    } else if num_dispatched > 0 {
+        println!(
+            "/!\\ WEIRD: event claims to have {num_dispatched} deliveries \
+             dispatched, but no delivery records were found"
+        )
     }
 
     Ok(())
