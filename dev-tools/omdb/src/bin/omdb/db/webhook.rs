@@ -480,28 +480,31 @@ async fn cmd_db_webhook_delivery_list(
     fetch_opts: &DbFetchOptions,
     args: &DeliveryListArgs,
 ) -> anyhow::Result<()> {
+    let DeliveryListArgs { before, after, receiver, states, triggers, event } =
+        args;
     let conn = datastore.pool_connection_for_tests().await?;
     let mut query = delivery_dsl::webhook_delivery
         .limit(fetch_opts.fetch_limit.get().into())
         .order_by(delivery_dsl::time_created.desc())
         .into_boxed();
 
-    if let (Some(before), Some(after)) = (args.before, args.after) {
+    if let (Some(before), Some(after)) = (before, after) {
         anyhow::ensure!(
             after < before,
-            "if both after and before are included, after must be earlier than before"
+            "if both `--after` and `--before` are included, after must be
+             earlier than before"
         );
     }
 
-    if let Some(before) = args.before {
+    if let Some(before) = *before {
         query = query.filter(delivery_dsl::time_created.lt(before));
     }
 
-    if let Some(after) = args.after {
+    if let Some(after) = *after {
         query = query.filter(delivery_dsl::time_created.gt(after));
     }
 
-    if let Some(ref receiver) = args.receiver {
+    if let Some(ref receiver) = receiver {
         let rx =
             lookup_webhook_rx(datastore, receiver).await?.ok_or_else(|| {
                 anyhow::anyhow!("no webhook receiver {receiver} found")
@@ -509,13 +512,17 @@ async fn cmd_db_webhook_delivery_list(
         query = query.filter(delivery_dsl::rx_id.eq(rx.identity.id));
     }
 
-    if !args.states.is_empty() {
-        query = query.filter(delivery_dsl::state.eq_any(args.states.clone()));
+    if !states.is_empty() {
+        query = query.filter(delivery_dsl::state.eq_any(states.clone()));
     }
 
-    if !args.triggers.is_empty() {
-        query = query
-            .filter(delivery_dsl::triggered_by.eq_any(args.triggers.clone()));
+    if !triggers.is_empty() {
+        query =
+            query.filter(delivery_dsl::triggered_by.eq_any(triggers.clone()));
+    }
+
+    if let Some(id) = event {
+        query = query.filter(delivery_dsl::event_id.eq(id.into_untyped_uuid()));
     }
 
     let ctx = || "listing webhook deliveries";
