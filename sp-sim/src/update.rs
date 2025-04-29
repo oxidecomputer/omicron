@@ -238,6 +238,9 @@ impl SimSpUpdate {
                 // right, but it's most important that consumers handle both
                 // cases, which they will if they test updates to both of these
                 // components.
+                // XXX-dap should we instead calculate the caboose on-demand
+                // from the data we've received?  (Will that be annoying for the
+                // initial condition?)
                 if let Some(caboose) = self.caboose_mut(component, slot) {
                     *caboose = if component == SpComponent::STAGE0 {
                         CabooseValue::InvalidFailedRead
@@ -328,7 +331,8 @@ impl SimSpUpdate {
                         };
                     }
 
-                    self.state = UpdateState::Completed { component, id, data };
+                    self.state =
+                        UpdateState::Completed { component, id, slot, data };
                 }
 
                 Ok(())
@@ -358,54 +362,55 @@ impl SimSpUpdate {
     }
 
     pub(crate) fn sp_reset(&mut self) {
+        // Clear any update, whatever state it was in.
+        let prev_state =
+            std::mem::replace(&mut self.state, UpdateState::NotPrepared);
+
         // Check if an SP update completed since the last reset.
-        match &self.state {
-            UpdateState::Completed { data, component, .. } => {
-                if *component == SpComponent::SP_ITSELF {
-                    // Save the data that we received so that we can expose it
-                    // for tests.
-                    self.last_sp_update_data = Some(data.clone());
+        if let UpdateState::Completed { data, component, .. } = prev_state {
+            if component == SpComponent::SP_ITSELF {
+                // Save the data that we received so that we can expose it
+                // for tests.
+                self.last_sp_update_data = Some(data.clone());
 
-                    // Swap the cabooses to simulate the real SP behavior of
-                    // swapping which slot is active after an update.
-                    std::mem::swap(
-                        &mut self.caboose_sp_active,
-                        &mut self.caboose_sp_inactive,
-                    );
-                }
+                // Swap the cabooses to simulate the real SP behavior of
+                // swapping which slot is active after an update.
+                std::mem::swap(
+                    &mut self.caboose_sp_active,
+                    &mut self.caboose_sp_inactive,
+                );
             }
-            UpdateState::NotPrepared
-            | UpdateState::Prepared { .. }
-            | UpdateState::Aborted(_) => (),
         }
-
-        // Clear any in-progress update.
-        self.state = UpdateState::NotPrepared;
     }
 
     pub(crate) fn rot_reset(&mut self) {
-        // Check if an RoT update completed since the last reset.
-        let stage0next_data = match &self.state {
-            UpdateState::Completed { data, component, .. } => {
-                if *component == SpComponent::ROT {
-                    // Save the data that we received so that we can expose it
-                    // for tests.
-                    self.last_rot_update_data = Some(data.clone());
-                }
+        // Clear any update, whatever state it was in.
+        let prev_state =
+            std::mem::replace(&mut self.state, UpdateState::NotPrepared);
 
-                if *component == SpComponent::STAGE0 {
-                    Some(data.clone())
-                } else {
-                    None
-                }
+        // Apply changes from a successfully-completed update.
+        if let UpdateState::Completed { data, component, slot, .. } = prev_state
+        {
+            if component == SpComponent::ROT {
+                // Compute a new FWID for the affected slot.
+                // unwrap(): we've already validated this.
+                let slot = rot_slot_id_from_u16(slot).unwrap();
+                let fwidp = match slot {
+                    RotSlotId::A => &mut self.rot_state.slot_a_fwid,
+                    RotSlotId::B => &mut self.rot_state.slot_b_fwid,
+                };
+                *fwidp = fake_fwid_compute(&data);
+
+                // For an RoT update, save the data that we received so that
+                // we can expose it for tests.
+                self.last_rot_update_data = Some(data);
+            } else if component == SpComponent::STAGE0 {
+                // Similarly, for a bootloader update, compute a new FWID
+                // for stage0next.
+                let fwid = fake_fwid_compute(&data);
+                self.rot_state.stage0next_fwid = fwid;
             }
-            UpdateState::NotPrepared
-            | UpdateState::Prepared { .. }
-            | UpdateState::Aborted(_) => None,
-        };
-
-        // Clear any in-progress update.
-        self.state = UpdateState::NotPrepared;
+        }
 
         // If there was a pending persistent boot preference set, apply that now
         // (and unset it).
@@ -420,27 +425,12 @@ impl SimSpUpdate {
         // preference.
         self.rot_state.transient_boot_preference = None;
 
+        // If there was a pending stage0 update (i.e., a change to the stage0
+        // "active slot"), apply that now.  All this means is changing the
+        // stage0 FWID and caboose to match the stage0next FWID and caboose.
         if self.pending_stage0_update {
-            // If there was a pending stage0 update (i.e., a change to the
-            // stage0 "active slot"), apply that now.  All this means is
-            // changing the stage0 FWID and caboose to match the stage0next FWID
-            // and caboose.
             self.rot_state.stage0_fwid = self.rot_state.stage0next_fwid;
             self.caboose_stage0 = self.caboose_stage0next.clone();
-        }
-
-        // If stage0next was updated, compute a new digest for it and
-        // store that.  (We don't need to update the caboose here
-        // because we did that when we received the last packet.)
-        if let Some(_data) = stage0next_data {
-            // Note: this is NOT how the FWID is really computed by the
-            // RoT.  We cannot easily replicate that here.  But the
-            // consumer can't, either, so it doesn't really matter.
-            // What matters is that it changes when an update happens
-            // (and it's nice that it's the same for a given Hubris
-            // image).
-            // XXX-dap
-            self.rot_state.stage0next_fwid = Fwid::Sha3_256([0xee; 32]);
         }
     }
 
@@ -633,6 +623,7 @@ enum UpdateState {
     Completed {
         component: SpComponent,
         id: UpdateId,
+        slot: u16,
         data: Box<[u8]>,
     },
 }
@@ -661,4 +652,13 @@ impl UpdateState {
             Self::Completed { id, .. } => UpdateStatus::Complete(*id),
         }
     }
+}
+
+/// Computes a FWID for the Hubris image contained in `data`
+// This is NOT the way real FWIDs are computed.  For our purposes, all we really
+// care about is that the value changes when the image changes, and maybe that
+// the value doesn't change when the image doesn't change.
+fn fake_fwid_compute(_data: &[u8]) -> Fwid {
+    // XXX-dap
+    Fwid::Sha3_256([0xee; 32])
 }
