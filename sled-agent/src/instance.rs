@@ -1029,9 +1029,6 @@ impl InstanceRunner {
         res.map(|_| ())
     }
 
-    /// Sends an instance ensure request to this instance's Propolis,
-    /// constructing its configuration from the fields in `self` that describe
-    /// the instance's virtual hardware configuration.
     /// Sends an instance ensure request to this instance's Propolis using the
     /// information contained in this instance's Propolis VM spec.
     async fn send_propolis_instance_ensure(
