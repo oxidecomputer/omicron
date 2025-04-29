@@ -11494,6 +11494,7 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
+ "omicron-workspace-hack",
  "sled-agent-api",
  "sled-agent-types",
  "sled-hardware",
