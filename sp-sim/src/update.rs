@@ -21,6 +21,8 @@ use gateway_messages::UpdateChunk;
 use gateway_messages::UpdateId;
 use gateway_messages::UpdateInProgressStatus;
 use hubtools::RawHubrisImage;
+use sha3::Digest;
+use sha3::Sha3_256;
 
 pub(crate) struct SimSpUpdate {
     /// tracks the state of any ongoing simulated update
@@ -654,11 +656,12 @@ impl UpdateState {
     }
 }
 
-/// Computes a FWID for the Hubris image contained in `data`
-// This is NOT the way real FWIDs are computed.  For our purposes, all we really
-// care about is that the value changes when the image changes, and maybe that
-// the value doesn't change when the image doesn't change.
-fn fake_fwid_compute(_data: &[u8]) -> Fwid {
-    // XXX-dap
-    Fwid::Sha3_256([0xee; 32])
+/// Computes a fake FWID for the Hubris image contained in `data`
+fn fake_fwid_compute(data: &[u8]) -> Fwid {
+    // This is NOT the way real FWIDs are computed.  For our purposes, all we
+    // really care about is that the value changes when the image changes, and
+    // maybe that the value doesn't change when the image doesn't change.
+    let mut digest = Sha3_256::default();
+    digest.update(data);
+    Fwid::Sha3_256(digest.finalize().into())
 }

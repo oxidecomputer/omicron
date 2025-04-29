@@ -11,6 +11,7 @@ workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 clap.workspace = true
+digest.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 gateway-messages.workspace = true
@@ -19,6 +20,7 @@ hex = { workspace = true, features = [ "serde" ] }
 hubtools.workspace = true
 omicron-common.workspace = true
 serde.workspace = true
+sha3.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
 thiserror.workspace = true
