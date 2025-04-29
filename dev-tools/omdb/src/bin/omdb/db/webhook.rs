@@ -158,6 +158,22 @@ struct EventListArgs {
     /// Include only events created after this timestamp
     #[clap(long, short)]
     after: Option<DateTime<Utc>>,
+
+    /// Include only events fully dispatched before this timestamp
+    #[clap(long)]
+    dispatched_before: Option<DateTime<Utc>>,
+
+    /// Include only events fully dispatched after this timestamp
+    #[clap(long)]
+    dispatched_after: Option<DateTime<Utc>>,
+
+    /// If `true`, include only events that have been fully dispatched.
+    /// If `false`, include only events that have not been fully dispatched.
+    ///
+    /// If this argument is not provided, both dispatched and un-dispatched
+    /// events are included.
+    #[clap(long, short)]
+    dispatched: Option<bool>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -809,11 +825,129 @@ async fn cmd_db_webhook_delivery_info(
 }
 
 async fn cmd_db_webhook_event_list(
-    _datastore: &DataStore,
-    _fetch_opts: &DbFetchOptions,
-    _args: &EventListArgs,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &EventListArgs,
 ) -> anyhow::Result<()> {
-    anyhow::bail!("not yet implemented");
+    let EventListArgs {
+        payload,
+        before,
+        after,
+        dispatched_before,
+        dispatched_after,
+        dispatched,
+    } = args;
+
+    if let (Some(before), Some(after)) = (before, after) {
+        anyhow::ensure!(
+            after < before,
+            "if both `--after` and `--before` are included, after must be
+             earlier than before"
+        );
+    }
+
+    if let (Some(before), Some(after)) = (dispatched_before, dispatched_after) {
+        anyhow::ensure!(
+            after < before,
+            "if both `--dispatched-after` and `--dispatched-before` are
+             included, after must be earlier than before"
+        );
+    }
+
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    let mut query = event_dsl::webhook_event
+        .limit(fetch_opts.fetch_limit.get().into())
+        .order_by(event_dsl::time_created.asc())
+        .select(WebhookEvent::as_select())
+        .into_boxed();
+
+    if let Some(before) = before {
+        query = query.filter(event_dsl::time_created.lt(*before));
+    }
+
+    if let Some(after) = after {
+        query = query.filter(event_dsl::time_created.gt(*after));
+    }
+
+    if let Some(before) = dispatched_before {
+        query = query.filter(event_dsl::time_dispatched.lt(*before));
+    }
+
+    if let Some(after) = dispatched_after {
+        query = query.filter(event_dsl::time_dispatched.gt(*after));
+    }
+
+    if let Some(dispatched) = dispatched {
+        if *dispatched {
+            query = query.filter(event_dsl::time_dispatched.is_not_null());
+        } else {
+            query = query.filter(event_dsl::time_dispatched.is_null());
+        }
+    }
+
+    let ctx = || "loading webhook events";
+    let events = query.load_async(&*conn).await.with_context(ctx)?;
+
+    check_limit(&events, fetch_opts.fetch_limit, ctx);
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct EventRow {
+        id: Uuid,
+        class: WebhookEventClass,
+        #[tabled(display_with = "datetime_rfc3339_concise")]
+        time_created: DateTime<Utc>,
+        #[tabled(display_with = "datetime_opt_rfc3339_concise")]
+        time_dispatched: Option<DateTime<Utc>>,
+        dispatched: i64,
+    }
+
+    impl From<&'_ WebhookEvent> for EventRow {
+        fn from(event: &'_ WebhookEvent) -> Self {
+            Self {
+                id: event.identity.id.into_untyped_uuid(),
+                class: event.event_class,
+                time_created: event.identity.time_created,
+                time_dispatched: event.time_dispatched,
+                dispatched: event.num_dispatched,
+            }
+        }
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct EventRowWithPayload {
+        #[tabled(inline)]
+        row: EventRow,
+        payload: String,
+    }
+
+    let mut table = if *payload {
+        let rows = events.iter().map(|event| {
+            let payload = match serde_json::to_string(&event.event) {
+                Ok(payload) => payload,
+                Err(e) => {
+                    eprintln!(
+                        "/!\\ failed to serialize payload for {:?}: {e}",
+                        event.identity.id
+                    );
+                    "<error>".to_string()
+                }
+            };
+            EventRowWithPayload { row: event.into(), payload }
+        });
+        tabled::Table::new(rows)
+    } else {
+        let rows = events.iter().map(EventRow::from);
+        tabled::Table::new(rows)
+    };
+    table
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0));
+    println!("{table}");
+
+    Ok(())
 }
 
 async fn cmd_db_webhook_event_info(
