@@ -514,7 +514,7 @@ impl SledAgent {
         &self.updates
     }
 
-    pub(super) fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {
+    pub fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {
         self.repo_depot.app_private()
     }
 
