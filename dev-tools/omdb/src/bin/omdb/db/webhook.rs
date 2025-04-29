@@ -497,7 +497,7 @@ async fn cmd_db_webhook_delivery_list(
         query = query.filter(delivery_dsl::time_created.lt(before));
     }
 
-    if let Some(after) = args.before {
+    if let Some(after) = args.after {
         query = query.filter(delivery_dsl::time_created.gt(after));
     }
 
