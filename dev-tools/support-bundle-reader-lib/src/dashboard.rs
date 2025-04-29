@@ -4,9 +4,11 @@
 
 //! Dashboard for inspecting bundles
 
-use crate::BoxedFileAccessor;
-use crate::SupportBundleAccessor;
-use crate::SupportBundleIndex;
+use crate::bundle_accessor::BoxedFileAccessor;
+use crate::bundle_accessor::InternalApiAccess;
+use crate::bundle_accessor::LocalFileAccess;
+use crate::bundle_accessor::SupportBundleAccessor;
+use crate::index::SupportBundleIndex;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
@@ -203,7 +205,7 @@ async fn wait_for_bundle_to_be_collected(
 async fn access_bundle_from_id(
     client: &nexus_client::Client,
     id: Option<SupportBundleUuid>,
-) -> Result<crate::InternalApiAccess<'_>, anyhow::Error> {
+) -> Result<InternalApiAccess<'_>, anyhow::Error> {
     let id = match id {
         Some(id) => {
             // Ensure the bundle has been collected
@@ -263,7 +265,7 @@ async fn access_bundle_from_id(
             SupportBundleUuid::from_untyped_uuid(sb.id.into_untyped_uuid())
         }
     };
-    Ok(crate::InternalApiAccess::new(client, id))
+    Ok(InternalApiAccess::new(client, id))
 }
 
 pub async fn run_dashboard(
@@ -272,7 +274,7 @@ pub async fn run_dashboard(
     path: Option<&Utf8PathBuf>,
 ) -> Result<(), anyhow::Error> {
     let accessor: Box<dyn SupportBundleAccessor> = match (id, &path) {
-        (None, Some(path)) => Box::new(crate::LocalFileAccess::new(path)?),
+        (None, Some(path)) => Box::new(LocalFileAccess::new(path)?),
         (maybe_id, None) => {
             Box::new(access_bundle_from_id(client, maybe_id).await?)
         }

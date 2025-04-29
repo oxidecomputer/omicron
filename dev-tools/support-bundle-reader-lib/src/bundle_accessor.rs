@@ -4,6 +4,7 @@
 
 //! APIs to help access bundles
 
+use crate::index::SupportBundleIndex;
 use anyhow::Context as _;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -22,8 +23,6 @@ use std::task::Context;
 use std::task::Poll;
 use tokio::io::AsyncRead;
 use tokio::io::ReadBuf;
-
-use crate::SupportBundleIndex;
 
 /// An I/O source which can read to a buffer
 ///
