@@ -145,6 +145,7 @@ fn parse_config_result(
 mod tests {
     use super::*;
     use id_map::IdMap;
+    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintDatasetConfig;
@@ -163,7 +164,9 @@ mod tests {
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::CompressionAlgorithm;
+    use omicron_common::disk::DatasetsConfig;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::disk::OmicronPhysicalDisksConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -328,9 +331,31 @@ mod tests {
 
         let in_service_config =
             sled_config.clone().into_in_service_sled_config();
-        assert_eq!(observed_disks, in_service_config.disks_config);
-        assert_eq!(observed_datasets, in_service_config.datasets_config);
-        assert_eq!(observed_zones, in_service_config.zones_config);
+        assert_eq!(
+            observed_disks,
+            OmicronPhysicalDisksConfig {
+                generation: in_service_config.generation,
+                disks: in_service_config.disks.into_iter().collect(),
+            }
+        );
+        assert_eq!(
+            observed_datasets,
+            DatasetsConfig {
+                generation: in_service_config.generation,
+                datasets: in_service_config
+                    .datasets
+                    .into_iter()
+                    .map(|d| (d.id, d))
+                    .collect(),
+            }
+        );
+        assert_eq!(
+            observed_zones,
+            OmicronZonesConfig {
+                generation: in_service_config.generation,
+                zones: in_service_config.zones.into_iter().collect(),
+            }
+        );
 
         // We expect to see each single in-service item we supplied as input.
         assert_eq!(observed_disks.disks.len(), 1);
