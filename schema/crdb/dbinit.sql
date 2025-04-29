@@ -3351,7 +3351,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.sw_caboose (
     sign TEXT -- nullable
 );
 CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
-    on omicron.public.sw_caboose (board, git_commit, name, version);
+    on omicron.public.sw_caboose (board, git_commit, name, version, sign);
 
 /* root of trust pages: this table assigns unique ids to distinct RoT CMPA
    and CFPA page contents, each of which is a 512-byte blob */
