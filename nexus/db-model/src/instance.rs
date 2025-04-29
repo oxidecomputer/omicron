@@ -175,7 +175,7 @@ impl Instance {
                     debug_assert_eq!(
                         state.propolis_id,
                         Some(vmm.id),
-                        "don't call `InstanceAutoRestart::status with a VMM \
+                        "don't call `Instance::auto_restart_status` with a VMM \
                          that isn't this instance's active VMM!?!?"
                     );
                     // Note that we *don't* reincarnate instances with `Failed` active
