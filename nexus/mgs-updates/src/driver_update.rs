@@ -15,6 +15,7 @@ use gateway_client::SpComponent;
 use gateway_client::types::UpdateAbortBody;
 use gateway_client::types::{SpType, SpUpdateStatus};
 use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
 use qorb::resolver::AllBackends;
@@ -47,7 +48,7 @@ const RESET_TIMEOUT: Duration = Duration::from_secs(60);
 ///
 /// This is similar in spirit to the `SpComponentUpdater` trait but uses a
 /// struct-based interface instead.
-pub (crate) struct SpComponentUpdate {
+pub(crate) struct SpComponentUpdate {
     pub log: slog::Logger,
     pub component: SpComponent,
     pub target_sp_type: SpType,
@@ -59,6 +60,27 @@ pub (crate) struct SpComponentUpdate {
 impl SpComponentUpdate {
     fn component(&self) -> &str {
         self.component.const_as_str()
+    }
+
+    pub fn from_request(
+        log: &slog::Logger,
+        request: &PendingMgsUpdate,
+        update_id: Uuid,
+    ) -> SpComponentUpdate {
+        match &request.details {
+            PendingMgsUpdateDetails::Sp { .. } => SpComponentUpdate {
+                log: log.clone(),
+                component: SpComponent::SP_ITSELF,
+                target_sp_type: request.sp_type,
+                target_sp_slot: request.slot_id,
+                // The SP has two firmware slots, but they're aren't
+                // individually labeled. We always request an update to slot
+                // 0, which (confusingly in this context) means "the
+                // inactive slot".
+                firmware_slot: 0,
+                update_id,
+            },
+        }
     }
 }
 
@@ -569,8 +591,23 @@ async fn wait_for_update_done(
 
 #[cfg(test)]
 mod test {
+    use crate::driver::UpdateAttemptStatusUpdater;
+    use crate::driver_update::SpComponentUpdate;
+    use crate::driver_update::apply_update;
+    use crate::sp_updater::ReconfiguratorSpUpdater;
+    use crate::test_util::cabooses_equal;
+    use crate::test_util::sp_test_state::SpTestState;
     use crate::test_util::test_artifacts::TestArtifacts;
+    use gateway_client::types::SpType;
     use gateway_messages::SpPort;
+    use nexus_types::deployment::PendingMgsUpdate;
+    use nexus_types::deployment::PendingMgsUpdateDetails;
+    use nexus_types::internal_api::views::InProgressUpdateStatus;
+    use nexus_types::internal_api::views::MgsUpdateDriverStatus;
+    use nexus_types::internal_api::views::UpdateAttemptStatus;
+    use nexus_types::internal_api::views::UpdateCompletedHow;
+    use std::sync::Arc;
+    use tokio::sync::watch;
 
     // XXX-dap
     // test cases:
@@ -578,6 +615,7 @@ mod test {
     //  - successful update: no changes needed
     //  - successful update: watched another finish
     //  - successful update: took over
+    //  - failure: wrong identity
     //  - failure: when initial conditions don't match
     //  - failure: failed to fetch artifact
     //  - failure: MGS failure
@@ -593,20 +631,150 @@ mod test {
         .await;
         let log = &gwtestctx.logctx.log;
         let artifacts = TestArtifacts::new(log).await.unwrap();
+        let mgs_client = gwtestctx.client();
+
+        // Fetch information about the device that we're going to udpate.
+        let sp_type = SpType::Sled;
+        let slot_id = 1;
+        let sp1 = SpTestState::load(&mgs_client, sp_type, slot_id)
+            .await
+            .expect("loading initial state");
 
         // Prepare an update.
-        // XXX-dap
-        // let sp_update = SpComponentUpdate {};
+        let update_id = "cab525b0-7156-4ac7-891e-b73ac92d7b90".parse().unwrap();
+        let baseboard_id = Arc::new(sp1.baseboard_id());
+        let sp_update_request = PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type,
+            slot_id,
+            details: PendingMgsUpdateDetails::Sp {
+                expected_active_version: sp1.expect_sp_active_version(),
+                expected_inactive_version: sp1.expect_sp_inactive_version(),
+            },
+            artifact_hash: artifacts.sp_artifact_hash,
+            artifact_version: std::str::from_utf8(
+                artifacts.sp_artifact_caboose.version().unwrap(),
+            )
+            .unwrap()
+            .parse()
+            .unwrap(),
+        };
 
-        // let fut = apply_update(
-        //     artifacts.artifact_cache.clone(),
-        //     &sp_update,
-        //     &sp_update_helper,
-        //     mgs_backends,
-        //     &sp_update_request,
-        //     status_updater,
-        // )
-        // .boxed();
+        let sp_update =
+            SpComponentUpdate::from_request(log, &sp_update_request, update_id);
+        let sp_update_helper = Box::new(ReconfiguratorSpUpdater {});
+        let mgs_backends = gwtestctx.mgs_backends();
+        let (status_tx, _) = watch::channel(MgsUpdateDriverStatus::default());
+        status_tx.send_modify(|status| {
+            status.in_progress.insert(
+                baseboard_id.clone(),
+                InProgressUpdateStatus {
+                    time_started: chrono::Utc::now(),
+                    status: UpdateAttemptStatus::NotStarted,
+                    nattempts_done: 0,
+                },
+            );
+        });
+        let status_updater = UpdateAttemptStatusUpdater::new(
+            status_tx.clone(),
+            baseboard_id.clone(),
+        );
+
+        // We're finally ready to do the update.
+        // Start with the basic case: normal application of the update.
+        let update_result = apply_update(
+            artifacts.artifact_cache.clone(),
+            &sp_update,
+            &*sp_update_helper,
+            mgs_backends.clone(),
+            &sp_update_request,
+            status_updater,
+        )
+        .await;
+        match update_result {
+            Ok(UpdateCompletedHow::CompletedUpdate) => (),
+            other => {
+                panic!("unexpected result from apply_update(): {:?}", other);
+            }
+        };
+
+        // Fetch and verify the updated SP state.
+        let sp2 = SpTestState::load(&mgs_client, sp_type, slot_id)
+            .await
+            .expect("SP state after update");
+        // The active slot should contain what we just updated to.
+        assert!(cabooses_equal(
+            &sp2.caboose_sp_active,
+            &artifacts.sp_artifact_caboose,
+        ));
+        // The inactive slot should contain what was in the active slot before.
+        assert_eq!(
+            sp1.expect_caboose_sp_active(),
+            sp2.expect_caboose_sp_inactive()
+        );
+        // RoT information should not have changed.
+        assert_eq!(sp1.sp_boot_info, sp2.sp_boot_info);
+        assert_eq!(sp1.expect_caboose_rot_a(), sp2.expect_caboose_rot_a());
+        assert_eq!(sp1.expect_caboose_rot_b(), sp2.expect_caboose_rot_b());
+
+        // Now, run through another identical update.  This should complete
+        // successfully without having done anything.
+
+        let update_id = "06d62827-752f-4db0-8a66-82f52f90abb7".parse().unwrap();
+        let baseboard_id = Arc::new(sp1.baseboard_id());
+        let sp_update_request = PendingMgsUpdate {
+            details: PendingMgsUpdateDetails::Sp {
+                expected_active_version: sp2.expect_sp_active_version(),
+                expected_inactive_version: sp2.expect_sp_inactive_version(),
+            },
+            ..sp_update_request
+        };
+        let sp_update =
+            SpComponentUpdate::from_request(log, &sp_update_request, update_id);
+        status_tx.send_modify(|status| {
+            status.in_progress.insert(
+                baseboard_id.clone(),
+                InProgressUpdateStatus {
+                    time_started: chrono::Utc::now(),
+                    status: UpdateAttemptStatus::NotStarted,
+                    nattempts_done: 0,
+                },
+            );
+        });
+        let status_updater =
+            UpdateAttemptStatusUpdater::new(status_tx, baseboard_id);
+        let update_result = apply_update(
+            artifacts.artifact_cache.clone(),
+            &sp_update,
+            &*sp_update_helper,
+            mgs_backends,
+            &sp_update_request,
+            status_updater,
+        )
+        .await;
+        match update_result {
+            Ok(UpdateCompletedHow::FoundNoChangesNeeded) => (),
+            other => {
+                panic!(
+                    "unexpected result from second apply_update(): {:?}",
+                    other
+                );
+            }
+        };
+
+        // Fetch and verify the SP state.  It should be unchanged.
+        let sp3 = SpTestState::load(&mgs_client, sp_type, slot_id)
+            .await
+            .expect("SP state after update");
+        assert_eq!(sp2.caboose_sp_active, sp3.caboose_sp_active);
+        assert_eq!(
+            sp2.expect_caboose_sp_inactive(),
+            sp3.expect_caboose_sp_inactive()
+        );
+        assert_eq!(sp2.expect_caboose_rot_a(), sp3.expect_caboose_rot_a());
+        assert_eq!(sp2.expect_caboose_rot_b(), sp3.expect_caboose_rot_b());
+        assert_eq!(sp2.sp_state, sp3.sp_state);
+        assert_eq!(sp2.sp_boot_info, sp3.sp_boot_info);
 
         artifacts.teardown().await;
         gwtestctx.teardown().await;

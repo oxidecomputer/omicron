@@ -3618,11 +3618,13 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "dropshot 0.16.0",
+ "gateway-client",
  "gateway-messages",
  "gateway-types",
  "omicron-gateway",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "qorb",
  "slog",
  "sp-sim",
  "tokio",

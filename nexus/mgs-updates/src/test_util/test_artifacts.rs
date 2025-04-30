@@ -20,7 +20,8 @@ type ArtifactData = BTreeMap<ArtifactHash, Vec<u8>>;
 type InMemoryRepoDepotServerContext = Arc<ArtifactData>;
 
 pub struct TestArtifacts {
-    pub caboose: hubtools::Caboose,
+    pub sp_artifact_caboose: hubtools::Caboose,
+    pub sp_artifact_hash: ArtifactHash,
     pub artifact_cache: Arc<ArtifactCache>,
     resolver: FixedResolver,
     repo_depot_server: HttpServer<InMemoryRepoDepotServerContext>,
@@ -28,7 +29,7 @@ pub struct TestArtifacts {
 
 impl TestArtifacts {
     pub async fn new(log: &slog::Logger) -> anyhow::Result<TestArtifacts> {
-        let caboose = CabooseBuilder::default()
+        let sp_artifact_caboose = CabooseBuilder::default()
             .git_commit("fake-git-commit")
             .board(SIM_GIMLET_BOARD)
             .version("0.0.0")
@@ -36,15 +37,15 @@ impl TestArtifacts {
             .build();
 
         let mut builder = HubrisArchiveBuilder::with_fake_image();
-        builder.write_caboose(caboose.as_slice()).unwrap();
-        let artifact = builder.build_to_vec().unwrap();
-        let artifact_hash = {
+        builder.write_caboose(sp_artifact_caboose.as_slice()).unwrap();
+        let sp_artifact = builder.build_to_vec().unwrap();
+        let sp_artifact_hash = {
             let mut digest = sha2::Sha256::default();
-            digest.update(&artifact);
+            digest.update(&sp_artifact);
             ArtifactHash(digest.finalize().into())
         };
         let artifact_data =
-            std::iter::once((artifact_hash, artifact)).collect();
+            std::iter::once((sp_artifact_hash.clone(), sp_artifact)).collect();
 
         let repo_depot_server = {
             let log = log.new(slog::o!("component" => "RepoDepotServer"));
@@ -66,7 +67,8 @@ impl TestArtifacts {
         ));
 
         Ok(TestArtifacts {
-            caboose,
+            sp_artifact_caboose,
+            sp_artifact_hash,
             artifact_cache,
             resolver,
             repo_depot_server,
