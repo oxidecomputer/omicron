@@ -13,6 +13,7 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-bb8-diesel.workspace = true
+bytes.workspace = true
 camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
@@ -50,6 +51,7 @@ oximeter-db = { workspace = true, default-features = false, features = [ "oxql" 
 pq-sys = "*"
 ratatui.workspace = true
 reedline.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sled-agent-client.workspace = true
