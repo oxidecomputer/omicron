@@ -554,7 +554,7 @@ impl TestState {
 
         // Choose a node to send to the SUT.
         // Skip over the SUT which sorts first.
-        let coordinator = msg.members.iter().skip(1).next().cloned().unwrap();
+        let coordinator = msg.members.iter().nth(1).cloned().unwrap();
 
         // Since the test is never going to commit this Prepare, we just use
         // dummy values where necessary (primarily when crypto is involved).
@@ -582,7 +582,7 @@ impl TestState {
         // Generate a nonsense share for the SUT
         let share = Share {
             x_coordinate: Gf256::new(1),
-            y_coordinates: (0..32 as u8).into_iter().map(Gf256::new).collect(),
+            y_coordinates: (0..32_u8).map(Gf256::new).collect(),
         };
 
         let prepare_msg = PrepareMsg { config, share };
