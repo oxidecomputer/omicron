@@ -2659,6 +2659,7 @@ impl ServiceManager {
                         )
                     })?;
                 let opte_ip = port.ip();
+                let opte_iface_name = port.name();
 
                 // Nexus takes a separate config file for parameters
                 // which cannot be known at packaging time.
@@ -2691,6 +2692,12 @@ impl ServiceManager {
                     },
                     database: nexus_config::Database::FromDns,
                     external_dns_servers: external_dns_servers.clone(),
+                    // TCP connections bound by HTTP clients of external services
+                    // should always be bound on our OPTE interface.
+                    external_http_clients:
+                        nexus_config::ExternalHttpClientConfig {
+                            interface: Some(opte_iface_name.to_string()),
+                        },
                 };
 
                 // Copy the partial config file to the expected

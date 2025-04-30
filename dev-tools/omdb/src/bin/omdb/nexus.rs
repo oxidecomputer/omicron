@@ -10,6 +10,7 @@ use crate::db::DbUrlOptions;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::ConfirmationPrompt;
 use crate::helpers::const_max_len;
+use crate::helpers::display_option_blank;
 use crate::helpers::should_colorize;
 use anyhow::Context;
 use anyhow::bail;
@@ -1107,6 +1108,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "tuf_artifact_replication" => {
             print_task_tuf_artifact_replication(details);
+        }
+        "webhook_dispatcher" => {
+            print_task_webhook_dispatcher(details);
+        }
+        "webhook_deliverator" => {
+            print_task_webhook_deliverator(details);
         }
         _ => {
             println!(
@@ -2403,6 +2410,296 @@ fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
             println!("    local repos: {}", status.local_repos);
         }
     }
+}
+
+fn print_task_webhook_dispatcher(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::WebhookDispatched;
+    use nexus_types::internal_api::background::WebhookDispatcherStatus;
+    use nexus_types::internal_api::background::WebhookGlobStatus;
+
+    let WebhookDispatcherStatus {
+        globs_reprocessed,
+        glob_version,
+        errors,
+        dispatched,
+        no_receivers,
+    } = match serde_json::from_value::<WebhookDispatcherStatus>(details.clone())
+    {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
+
+    if !errors.is_empty() {
+        println!(
+            "    task did not complete successfully! ({} errors)",
+            errors.len()
+        );
+        for line in &errors {
+            println!("    > {line}");
+        }
+    }
+
+    const DISPATCHED: &str = "events dispatched:";
+    const NO_RECEIVERS: &str = "events with no receivers subscribed:";
+    const OUTDATED_GLOBS: &str = "outdated glob subscriptions:";
+    const GLOBS_REPROCESSED: &str = "glob subscriptions reprocessed:";
+    const ALREADY_REPROCESSED: &str =
+        "globs already reprocessed by another Nexus:";
+    const GLOB_ERRORS: &str = "globs that failed to be reprocessed";
+    const WIDTH: usize = const_max_len(&[
+        DISPATCHED,
+        NO_RECEIVERS,
+        OUTDATED_GLOBS,
+        GLOBS_REPROCESSED,
+        ALREADY_REPROCESSED,
+        GLOB_ERRORS,
+    ]) + 1;
+    const NUM_WIDTH: usize = 3;
+
+    println!("    {DISPATCHED:<WIDTH$}{:>NUM_WIDTH$}", dispatched.len());
+    if !dispatched.is_empty() {
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct DispatchedRow {
+            // Don't include the typed UUID's kind in the table, which the
+            // TypedUuid fmt::Display impl will do...
+            event: Uuid,
+            subscribed: usize,
+            dispatched: usize,
+        }
+        let table_rows = dispatched.iter().map(
+            |&WebhookDispatched { event_id, subscribed, dispatched }| {
+                DispatchedRow {
+                    event: event_id.into_untyped_uuid(),
+                    subscribed,
+                    dispatched,
+                }
+            },
+        );
+        let table = tabled::Table::new(table_rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+        println!("{}", textwrap::indent(&table.to_string(), "      "));
+    }
+
+    println!("    {NO_RECEIVERS:<WIDTH$}{:>NUM_WIDTH$}", no_receivers.len());
+    for event in no_receivers {
+        println!("      {event:?}");
+    }
+
+    let total_globs: usize =
+        globs_reprocessed.values().map(|globs| globs.len()).sum();
+    if total_globs > 0 {
+        let mut reprocessed = 0;
+        let mut already_reprocessed = 0;
+        let mut glob_errors = 0;
+        println!("    {OUTDATED_GLOBS:<WIDTH$}{total_globs:>NUM_WIDTH$}");
+        println!("    current schema version: {glob_version}");
+        for (rx_id, globs) in globs_reprocessed {
+            if globs.is_empty() {
+                continue;
+            }
+            println!("      receiver {rx_id:?}:");
+            for (glob, status) in globs {
+                match status {
+                    Ok(WebhookGlobStatus::AlreadyReprocessed) => {
+                        println!("      > {glob:?}: already reprocessed");
+                        already_reprocessed += 1;
+                    }
+                    Ok(WebhookGlobStatus::Reprocessed {
+                        created,
+                        deleted,
+                        prev_version,
+                    }) => {
+                        println!(
+                            "      > {glob:?}: previously at \
+                             {prev_version:?}\n        \
+                             exact subscriptions: {created:>NUM_WIDTH$} \
+                             created, {deleted:>NUM_WIDTH$} deleted",
+                        );
+                        reprocessed += 1;
+                    }
+                    Err(e) => {
+                        println!("      > {glob:?}: FAILED: {e}");
+                        glob_errors += 1;
+                    }
+                }
+            }
+        }
+        println!("    {GLOBS_REPROCESSED:<WIDTH$}{reprocessed:>NUM_WIDTH$}");
+        println!(
+            "    {ALREADY_REPROCESSED:<WIDTH$}{:>NUM_WIDTH$}",
+            already_reprocessed
+        );
+        println!(
+            "{} {GLOB_ERRORS:<WIDTH$}{glob_errors:>NUM_WIDTH$}",
+            warn_if_nonzero(glob_errors),
+        );
+    }
+}
+fn print_task_webhook_deliverator(details: &serde_json::Value) {
+    use nexus_types::external_api::views::WebhookDeliveryAttemptResult;
+    use nexus_types::internal_api::background::WebhookDeliveratorStatus;
+    use nexus_types::internal_api::background::WebhookDeliveryFailure;
+    use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
+
+    let WebhookDeliveratorStatus { by_rx, error } = match serde_json::from_value::<
+        WebhookDeliveratorStatus,
+    >(details.clone())
+    {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
+
+    if let Some(error) = error {
+        println!("    task did not complete successfully:\n    {error}");
+    }
+    const RECEIVERS: &str = "receivers:";
+    const TOTAL_OK: &str = "successful deliveries:";
+    const TOTAL_FAILED: &str = "failed deliveries:";
+    const TOTAL_ALREADY_DELIVERED: &str = "already delivered by another Nexus:";
+    const TOTAL_IN_PROGRESS: &str = "in progress by another Nexus:";
+    const TOTAL_ERRORS: &str = "internal delivery errors:";
+    const WIDTH: usize = const_max_len(&[
+        RECEIVERS,
+        TOTAL_OK,
+        TOTAL_FAILED,
+        TOTAL_ALREADY_DELIVERED,
+        TOTAL_IN_PROGRESS,
+        TOTAL_ERRORS,
+    ]) + 1;
+    const NUM_WIDTH: usize = 3;
+
+    let mut total_ok = 0;
+    let mut total_already_delivered = 0;
+    let mut total_in_progress = 0;
+    let mut total_failed = 0;
+    let mut total_errors = 0;
+    println!("    {RECEIVERS:<WIDTH$}{:>NUM_WIDTH$}", by_rx.len());
+    for (rx_id, status) in by_rx {
+        let WebhookRxDeliveryStatus {
+            ready,
+            delivered_ok,
+            already_delivered,
+            in_progress,
+            failed_deliveries,
+            delivery_errors,
+            error,
+        } = status;
+        println!("    > {rx_id:?}:    {ready}");
+
+        const SUCCESSFUL: &str = "successfully delivered:";
+        const FAILED: &str = "failed:";
+        const IN_PROGRESS: &str = "in progress elsewhere:";
+        const ALREADY_DELIVERED: &str = "already delivered:";
+        const ERRORS: &str = "internal errors:";
+        const WIDTH: usize = const_max_len(&[
+            SUCCESSFUL,
+            FAILED,
+            IN_PROGRESS,
+            ALREADY_DELIVERED,
+            ERRORS,
+        ]) + 1;
+        const NUM_WIDTH: usize = 3;
+
+        println!("      {SUCCESSFUL:<WIDTH$}{delivered_ok:>NUM_WIDTH$}");
+        println!(
+            "      {ALREADY_DELIVERED:<WIDTH$}{:>NUM_WIDTH$}",
+            already_delivered,
+        );
+        println!("      {IN_PROGRESS:<WIDTH$}{in_progress:>NUM_WIDTH$}");
+        total_ok += delivered_ok;
+        total_already_delivered += total_already_delivered;
+        total_in_progress += in_progress;
+        let n_failed = failed_deliveries.len();
+        total_failed += n_failed;
+        println!("      {FAILED:<WIDTH$}{n_failed:>NUM_WIDTH$}");
+        if n_failed > 0 {
+            #[derive(Tabled)]
+            #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+            struct FailureRow {
+                event: Uuid,
+                delivery: Uuid,
+                #[tabled(rename = "#")]
+                attempt: usize,
+                result: WebhookDeliveryAttemptResult,
+                #[tabled(display_with = "display_option_blank")]
+                status: Option<u16>,
+                #[tabled(display_with = "display_option_blank")]
+                duration: Option<chrono::TimeDelta>,
+            }
+            let table_rows = failed_deliveries.into_iter().map(
+                |WebhookDeliveryFailure {
+                     delivery_id,
+                     event_id,
+                     attempt,
+                     result,
+                     response_status,
+                     response_duration,
+                 }| FailureRow {
+                    // Turn these into untyped `Uuid`s so that the Display impl
+                    // doesn't include the UUID kind in the table.
+                    delivery: delivery_id.into_untyped_uuid(),
+                    event: event_id.into_untyped_uuid(),
+                    attempt,
+                    result,
+                    status: response_status,
+                    duration: response_duration,
+                },
+            );
+            let table = tabled::Table::new(table_rows)
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+            println!("{}", textwrap::indent(&table.to_string(), "      "));
+        }
+        let n_internal_errors =
+            delivery_errors.len() + if error.is_some() { 1 } else { 0 };
+        if n_internal_errors > 0 {
+            total_errors += n_internal_errors;
+            println!(
+                "/!\\   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                n_internal_errors,
+            );
+            if let Some(error) = error {
+                println!("      > {error}")
+            }
+            for (id, error) in delivery_errors {
+                println!("      > {id:?}: {error}")
+            }
+        }
+    }
+    println!("    {TOTAL_OK:<WIDTH$}{total_ok:>NUM_WIDTH$}");
+    println!("    {TOTAL_FAILED:<WIDTH$}{total_failed:>NUM_WIDTH$}");
+    println!(
+        "{} {TOTAL_ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}",
+        warn_if_nonzero(total_errors),
+    );
+    println!(
+        "    {TOTAL_ALREADY_DELIVERED:<WIDTH$}{:>NUM_WIDTH$}",
+        total_already_delivered
+    );
+    println!(
+        "    {TOTAL_IN_PROGRESS:<WIDTH$}{:>NUM_WIDTH$}",
+        total_in_progress
+    );
+}
+
+fn warn_if_nonzero(n: usize) -> &'static str {
+    if n > 0 { "/!\\" } else { "   " }
 }
 
 /// Summarizes an `ActivationReason`

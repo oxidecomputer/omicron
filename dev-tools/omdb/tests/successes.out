@@ -399,6 +399,14 @@ task: "vpc_route_manager"
     propagates updated VPC routes to all OPTE ports
 
 
+task: "webhook_deliverator"
+    sends webhook delivery requests
+
+
+task: "webhook_dispatcher"
+    dispatches queued webhook events to receivers
+
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -774,6 +782,26 @@ task: "vpc_route_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
+
+task: "webhook_deliverator"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    receivers:                            0
+    successful deliveries:                0
+    failed deliveries:                    0
+    internal delivery errors:             0
+    already delivered by another Nexus:   0
+    in progress by another Nexus:         0
+
+task: "webhook_dispatcher"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    events dispatched:                            0
+    events with no receivers subscribed:          0
 
 ---------------------------------------------
 stderr:
@@ -1273,6 +1301,26 @@ task: "vpc_route_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
+
+task: "webhook_deliverator"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    receivers:                            0
+    successful deliveries:                0
+    failed deliveries:                    0
+    internal delivery errors:             0
+    already delivered by another Nexus:   0
+    in progress by another Nexus:         0
+
+task: "webhook_dispatcher"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    events dispatched:                            0
+    events with no receivers subscribed:          0
 
 ---------------------------------------------
 stderr:

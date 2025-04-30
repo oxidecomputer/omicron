@@ -370,6 +370,18 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             body: serde_json::to_value(()).unwrap(),
             id_routes: vec!["/experimental/v1/system/support-bundles/{id}"],
         },
+        // Create a webhook receiver
+        SetupReq::Post {
+            url: &WEBHOOK_RECEIVERS_URL,
+            body: serde_json::to_value(&*DEMO_WEBHOOK_RECEIVER_CREATE).unwrap(),
+            id_routes: vec![],
+        },
+        // Create a secret for that receiver
+        SetupReq::Post {
+            url: &DEMO_WEBHOOK_SECRETS_URL,
+            body: serde_json::to_value(&*DEMO_WEBHOOK_SECRET_CREATE).unwrap(),
+            id_routes: vec![&*DEMO_WEBHOOK_SECRET_DELETE_URL],
+        },
     ]
 });
 

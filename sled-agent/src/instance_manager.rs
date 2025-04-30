@@ -547,20 +547,22 @@ impl InstanceManagerRunner {
         sled_identifiers: SledIdentifiers,
     ) -> Result<SledVmmState, Error> {
         let InstanceEnsureBody {
+            vmm_spec,
+            local_config,
             instance_id,
             migration_id,
             propolis_addr,
-            hardware,
             vmm_runtime,
             metadata,
         } = instance;
         info!(
             &self.log,
             "ensuring instance is registered";
+            "propolis_spec" => ?vmm_spec,
             "instance_id" => %instance_id,
             "propolis_id" => %propolis_id,
             "migration_id" => ?migration_id,
-            "hardware" => ?hardware,
+            "local_config" => ?local_config,
             "vmm_runtime" => ?vmm_runtime,
             "propolis_addr" => ?propolis_addr,
             "metadata" => ?metadata,
@@ -612,7 +614,8 @@ impl InstanceManagerRunner {
                 };
 
                 let state = crate::instance::InstanceInitialState {
-                    hardware,
+                    vmm_spec,
+                    local_config,
                     vmm_runtime,
                     propolis_addr,
                     migration_id,
