@@ -51,11 +51,7 @@ use tokio::io::BufReader;
 const BUF_READER_CAPACITY: usize = 1 << 16;
 
 enum FileState<'a> {
-    Open {
-        // TODO; actually use bufreader, rather than manually buffering?
-        access: Option<BufReader<BoxedFileAccessor<'a>>>,
-        preview: BytesMut,
-    },
+    Open { access: Option<BufReader<BoxedFileAccessor<'a>>>, preview: BytesMut },
     Closed,
 }
 
@@ -114,8 +110,10 @@ impl<'a> SupportBundleDashboard<'a> {
     async fn open_file(&mut self) -> Result<()> {
         let path = &self.index.files()[self.selected];
         if path.as_str().ends_with("/") {
-            self.file =
-                FileState::Open { access: None, preview: BytesMut::new() };
+            self.file = FileState::Open {
+                access: None,
+                preview: BytesMut::from(&b"<directory>"[..]),
+            };
             return Ok(());
         }
 
@@ -158,10 +156,10 @@ impl<'a> SupportBundleDashboard<'a> {
         &mut self,
     ) -> Option<impl AsyncRead + use<'_, 'a>> {
         match &mut self.file {
-            FileState::Open { access, preview } => {
-                Some(preview.chain(access.as_mut().unwrap()))
+            FileState::Open { access: Some(access), preview } => {
+                Some(preview.chain(access))
             }
-            FileState::Closed => None,
+            _ => None,
         }
     }
 

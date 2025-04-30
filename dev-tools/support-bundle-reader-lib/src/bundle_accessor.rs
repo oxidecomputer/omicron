@@ -65,6 +65,8 @@ impl<'a> StreamedFile<'a> {
 
     // NOTE: This is a distinct method from "new", because ideally some day we could
     // use range requests to stream out portions of the file.
+    //
+    // This means that we would potentially want to restart the stream with a different position.
     async fn start_stream(&mut self) -> Result<()> {
         // TODO: Add range headers, for range requests? Though this
         // will require adding support to Progenitor + Nexus too.
