@@ -11429,7 +11429,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "derive_more",
- "dropshot 0.16.0",
+ "dropshot",
  "glob",
  "id-map",
  "illumos-utils",

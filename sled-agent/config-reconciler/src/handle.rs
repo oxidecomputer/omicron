@@ -84,7 +84,7 @@ impl ConfigReconcilerHandle {
     ///
     /// The config reconciler subsystem splits initialization into two phases:
     /// the main reconcilation task will not be spawned until
-    /// `spawn_reconciliation_task()` is called on the return handle.
+    /// `spawn_reconciliation_task()` is called on the returned handle.
     /// `spawn_reconciliation_task()` cannot be called by sled-agent proper
     /// until rack setup has occurred (or sled-agent has found its config from a
     /// prior rack setup, during a cold boot).
