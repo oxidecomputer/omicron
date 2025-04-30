@@ -10,6 +10,7 @@
 //! * During sled-agent startup, before trust quorum has unlocked
 
 use camino::Utf8PathBuf;
+use core::cmp;
 use id_map::IdMap;
 use id_map::IdMappable;
 use omicron_common::disk::DiskIdentity;
@@ -252,15 +253,13 @@ struct InternalDiskDetails {
 }
 
 impl IdMappable for InternalDiskDetails {
-    type Id = (bool, Arc<DiskIdentity>);
+    type Id = InternalDiskDetailsId;
 
     fn id(&self) -> Self::Id {
-        // Using `!self.is_boot_disk` as the first part of the ID allows us to
-        // guarantee we always iterate over the internal disks with the current
-        // boot disk first.
-        //
-        // TODO-cleanup add tests for this
-        (!self.is_boot_disk, Arc::clone(&self.identity))
+        InternalDiskDetailsId {
+            identity: Arc::clone(&self.identity),
+            is_boot_disk: self.is_boot_disk,
+        }
     }
 }
 
@@ -291,6 +290,36 @@ impl From<&'_ Disk> for InternalDiskDetails {
     }
 }
 
+// Special ID type for `InternalDiskDetails` that lets us guarantee we sort boot
+// disks ahead of non-boot disks. There's a whole set of thorny problems here
+// about what to do if we think both internal disks should have the same
+// contents but they disagree; we'll at least try to have callers prefer the
+// boot disk if they're performing a "check the first disk that succeeds" kind
+// of operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InternalDiskDetailsId {
+    is_boot_disk: bool,
+    identity: Arc<DiskIdentity>,
+}
+
+impl cmp::Ord for InternalDiskDetailsId {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        match self.is_boot_disk.cmp(&other.is_boot_disk) {
+            cmp::Ordering::Equal => {}
+            // `false` normally sorts before `true`, so intentionally reverse
+            // this so that we sort boot disks ahead of non-boot disks.
+            ord => return ord.reverse(),
+        }
+        self.identity.cmp(&other.identity)
+    }
+}
+
+impl cmp::PartialOrd for InternalDiskDetailsId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 struct InternalDisksTask {
     disks_tx: watch::Sender<Arc<IdMap<InternalDiskDetails>>>,
     raw_disks_rx: watch::Receiver<IdMap<RawDiskWithId>>,
@@ -305,5 +334,55 @@ struct InternalDisksTask {
 impl InternalDisksTask {
     async fn run(self) {
         unimplemented!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use proptest::sample::size_range;
+    use test_strategy::Arbitrary;
+    use test_strategy::proptest;
+
+    #[derive(Debug, Arbitrary)]
+    struct ArbitraryInternalDiskDetailsId {
+        is_boot_disk: bool,
+        vendor: String,
+        model: String,
+        serial: String,
+    }
+
+    #[proptest]
+    fn boot_disks_sort_ahead_of_non_boot_disks_in_id_map(
+        #[any(size_range(2..4).lift())] values: Vec<
+            ArbitraryInternalDiskDetailsId,
+        >,
+    ) {
+        let disk_map: IdMap<_> = values
+            .into_iter()
+            .map(|value| InternalDiskDetails {
+                identity: Arc::new(DiskIdentity {
+                    vendor: value.vendor,
+                    model: value.model,
+                    serial: value.serial,
+                }),
+                zpool_name: ZpoolName::new_internal(ZpoolUuid::new_v4()),
+                is_boot_disk: value.is_boot_disk,
+                slot: None,
+                raw_devfs_path: None,
+            })
+            .collect();
+
+        // When iterating over the contents, we should never see a boot disk
+        // after a non-boot disk.
+        let mut saw_non_boot_disk = false;
+        for disk in disk_map.iter() {
+            if disk.is_boot_disk {
+                assert!(!saw_non_boot_disk);
+            } else {
+                saw_non_boot_disk = true;
+            }
+        }
     }
 }
