@@ -53,9 +53,9 @@ use omicron_common::disk::M2Slot;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
 use sled_agent_config_reconciler::{
-    ConfigReconcilerHandle, InternalDisksReceiver, LedgerNewConfigError,
-    LedgerTaskError, ReconcilerInventory, SledAgentArtifactStore,
-    SledAgentFacilities, TimeSyncStatus,
+    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisksReceiver,
+    LedgerNewConfigError, LedgerTaskError, ReconcilerInventory,
+    SledAgentArtifactStore, SledAgentFacilities, TimeSyncStatus,
 };
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -403,6 +403,7 @@ impl SledAgent {
         request: StartSledAgentRequest,
         services: ServiceManager,
         long_running_task_handles: LongRunningTaskHandles,
+        config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -615,7 +616,7 @@ impl SledAgent {
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
             },
             SledAgentArtifactStoreWrapper(Arc::clone(&artifact_store)),
-            &parent_log,
+            config_reconciler_spawn_token,
         );
 
         services

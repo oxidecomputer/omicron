@@ -39,6 +39,7 @@ use omicron_ddm_admin_client::DdmError;
 use omicron_ddm_admin_client::types::EnableStatsRequest;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
+use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::rack_init::RackInitializeRequest;
 use sled_agent_types::sled::StartSledAgentRequest;
@@ -180,6 +181,7 @@ impl Server {
             service_manager,
             long_running_task_handles,
             sled_agent_started_tx,
+            config_reconciler_spawn_token,
         } = BootstrapAgentStartup::run(config).await?;
 
         // Do we have a StartSledAgentRequest stored in the ledger?
@@ -246,6 +248,7 @@ impl Server {
                 &config,
                 start_sled_agent_request,
                 long_running_task_handles.clone(),
+                config_reconciler_spawn_token,
                 service_manager.clone(),
                 &base_log,
                 &startup_log,
@@ -261,7 +264,10 @@ impl Server {
 
             SledAgentState::ServerStarted(sled_agent_server)
         } else {
-            SledAgentState::Bootstrapping(Some(sled_agent_started_tx))
+            SledAgentState::Bootstrapping(Some(BootstrappingDependencies {
+                sled_agent_started_tx,
+                config_reconciler_spawn_token,
+            }))
         };
 
         // Spawn our inner task that handles any future hardware updates and any
@@ -303,9 +309,14 @@ impl Server {
 // bootstrap server).
 enum SledAgentState {
     // We're still in the bootstrapping phase, waiting for a sled-agent request.
-    Bootstrapping(Option<oneshot::Sender<SledAgent>>),
+    Bootstrapping(Option<BootstrappingDependencies>),
     // ... or the sled agent server is running.
     ServerStarted(SledAgentServer),
+}
+
+struct BootstrappingDependencies {
+    sled_agent_started_tx: oneshot::Sender<SledAgent>,
+    config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -347,6 +358,7 @@ async fn start_sled_agent(
     config: &SledConfig,
     request: StartSledAgentRequest,
     long_running_task_handles: LongRunningTaskHandles,
+    config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
     service_manager: ServiceManager,
     base_log: &Logger,
     log: &Logger,
@@ -398,6 +410,7 @@ async fn start_sled_agent(
         base_log.clone(),
         request.clone(),
         long_running_task_handles.clone(),
+        config_reconciler_spawn_token,
         service_manager,
     )
     .await
@@ -531,7 +544,7 @@ impl Inner {
         log: &Logger,
     ) {
         match &mut self.state {
-            SledAgentState::Bootstrapping(sled_agent_started_tx) => {
+            SledAgentState::Bootstrapping(deps) => {
                 let request_id = request.body.id.into_untyped_uuid();
 
                 // Extract from options to satisfy the borrow checker.
@@ -540,13 +553,16 @@ impl Inner {
                 // we explicitly unwrap here, and panic on error below.
                 //
                 // See https://github.com/oxidecomputer/omicron/issues/4494
-                let sled_agent_started_tx =
-                    sled_agent_started_tx.take().unwrap();
+                let BootstrappingDependencies {
+                    sled_agent_started_tx,
+                    config_reconciler_spawn_token,
+                } = deps.take().unwrap();
 
                 let response = match start_sled_agent(
                     &self.config,
                     request,
                     self.long_running_task_handles.clone(),
+                    config_reconciler_spawn_token,
                     self.service_manager.clone(),
                     &self.base_log,
                     &log,
