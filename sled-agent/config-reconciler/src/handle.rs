@@ -153,7 +153,7 @@ impl ConfigReconcilerHandle {
     /// # Panics
     ///
     /// Panics if called multiple times, which is statically impossible outside
-    /// shenanigans to get a second `ConfigReconcilerHandleSpawnToken`.
+    /// shenanigans to get a second [`ConfigReconcilerSpawnToken`].
     pub fn spawn_reconciliation_task<
         T: SledAgentFacilities,
         U: SledAgentArtifactStore,
