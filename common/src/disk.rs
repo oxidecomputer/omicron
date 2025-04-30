@@ -43,6 +43,14 @@ pub struct OmicronPhysicalDiskConfig {
     pub pool_id: ZpoolUuid,
 }
 
+impl IdMappable for OmicronPhysicalDiskConfig {
+    type Id = PhysicalDiskUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
+}
+
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
