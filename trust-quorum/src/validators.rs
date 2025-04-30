@@ -268,6 +268,12 @@ impl ValidatedReconfigureMsg {
 
         if current_epoch == new_msg.epoch {
             if existing_msg != new_msg {
+                // TODO: This should be an `Alarm`, but I"m not sure how
+                // to handle that. We could include an `Alarm` variant inside
+                // `ReconfigurationError`, but that would require a match/method
+                // to check for an alarm and pull it out. We could also return either
+                // an `Alarm` or a `ReconfigurationError` inside `Result::Err`. This is
+                // probably the best approach, but I'm open to other structures.
                 error!(
                     log,
                     concat!(

@@ -234,7 +234,6 @@ impl Node {
                     "msg_epoch" => %msg.config.epoch,
                     "last_prepared_epoch" => %last_prepared_epoch
                 );
-                // TODO: Respond to sender?
                 return Ok(None);
             }
 

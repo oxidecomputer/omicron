@@ -63,7 +63,3 @@ pub struct PrepareMsg {
 pub struct CommitMsg {
     epoch: Epoch,
 }
-
-pub enum Error {
-    StalePrepare { received: Epoch, last_prepared_epoch: Epoch },
-}
