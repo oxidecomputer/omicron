@@ -24,7 +24,8 @@ use crate::zone_bundle::ZoneBundler;
 use bootstore::schemes::v0 as bootstore;
 use key_manager::{KeyManager, StorageKeyRequester};
 use sled_agent_config_reconciler::{
-    ConfigReconcilerHandle, RawDisksSender, TimeSyncConfig,
+    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, RawDisksSender,
+    TimeSyncConfig,
 };
 use sled_agent_types::zone_bundle::CleanupContext;
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
@@ -61,6 +62,7 @@ pub async fn spawn_all_longrunning_tasks(
     config: &Config,
 ) -> (
     LongRunningTaskHandles,
+    ConfigReconcilerSpawnToken,
     oneshot::Sender<SledAgent>,
     oneshot::Sender<ServiceManager>,
 ) {
@@ -71,12 +73,13 @@ pub async fn spawn_all_longrunning_tasks(
     } else {
         TimeSyncConfig::Normal
     };
-    let mut config_reconciler = ConfigReconcilerHandle::new(
-        MountConfig::default(),
-        storage_key_requester,
-        time_sync_config,
-        log,
-    );
+    let (mut config_reconciler, config_reconciler_spawn_token) =
+        ConfigReconcilerHandle::new(
+            MountConfig::default(),
+            storage_key_requester,
+            time_sync_config,
+            log,
+        );
 
     let nongimlet_observed_disks =
         config.nongimlet_observed_disks.clone().unwrap_or(vec![]);
@@ -114,6 +117,7 @@ pub async fn spawn_all_longrunning_tasks(
             bootstore,
             zone_bundler,
         },
+        config_reconciler_spawn_token,
         sled_agent_started_tx,
         service_manager_ready_tx,
     )
