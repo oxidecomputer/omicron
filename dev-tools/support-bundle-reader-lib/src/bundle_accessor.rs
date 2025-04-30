@@ -12,7 +12,6 @@ use bytes::Buf;
 use bytes::Bytes;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use futures::Future;
 use futures::Stream;
 use futures::StreamExt;
 use omicron_uuid_kinds::GenericUuid;
@@ -64,8 +63,11 @@ impl<'a> StreamedFile<'a> {
         Self { client, id, path, stream: None, buffer: Bytes::new() }
     }
 
+    // NOTE: This is a distinct method from "new", because ideally some day we could
+    // use range requests to stream out portions of the file.
     async fn start_stream(&mut self) -> Result<()> {
-        // TODO: Add range headers?
+        // TODO: Add range headers, for range requests? Though this
+        // will require adding support to Progenitor + Nexus too.
         let stream = self
             .client
             .support_bundle_download_file(
@@ -93,24 +95,12 @@ impl AsyncRead for StreamedFile<'_> {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         while self.buffer.is_empty() {
-            if self.stream.is_none() {
-                // NOTE: this is broken?
-                let fut = self.start_stream();
-                let mut fut = Box::pin(fut);
-
-                match futures::ready!(fut.as_mut().poll(cx)) {
-                    Ok(()) => {}
-                    Err(e) => {
-                        return Poll::Ready(Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            e,
-                        )));
-                    }
-                }
-            }
-
             match futures::ready!(
-                self.stream.as_mut().unwrap().as_mut().poll_next(cx)
+                self.stream
+                    .as_mut()
+                    .expect("Stream must be initialized before polling")
+                    .as_mut()
+                    .poll_next(cx)
             ) {
                 Some(Ok(bytes)) => {
                     self.buffer = bytes;

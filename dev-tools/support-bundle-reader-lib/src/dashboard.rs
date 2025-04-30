@@ -12,6 +12,7 @@ use crate::index::SupportBundleIndex;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use bytes::BytesMut;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use crossterm::{
@@ -42,12 +43,19 @@ use ratatui::widgets::ListState;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
 use std::io::Write;
-use std::pin::Pin;
 use std::time::Duration;
+use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
+use tokio::io::BufReader;
+
+const BUF_READER_CAPACITY: usize = 1 << 16;
 
 enum FileState<'a> {
-    Open { access: Option<Pin<BoxedFileAccessor<'a>>>, buffered: Vec<u8> },
+    Open {
+        // TODO; actually use bufreader, rather than manually buffering?
+        access: Option<BufReader<BoxedFileAccessor<'a>>>,
+        preview: BytesMut,
+    },
     Closed,
 }
 
@@ -60,9 +68,7 @@ pub struct SupportBundleDashboard<'a> {
 }
 
 impl<'a> SupportBundleDashboard<'a> {
-    pub async fn new(
-        access: Box<dyn SupportBundleAccessor + 'a>,
-    ) -> Result<Self> {
+    async fn new(access: Box<dyn SupportBundleAccessor + 'a>) -> Result<Self> {
         let index = access.get_index().await?;
         if index.files().is_empty() {
             bail!("No files found in support bundle");
@@ -70,11 +76,11 @@ impl<'a> SupportBundleDashboard<'a> {
         Ok(Self { access, index, selected: 0, file: FileState::Closed })
     }
 
-    pub fn index(&self) -> &SupportBundleIndex {
+    fn index(&self) -> &SupportBundleIndex {
         &self.index
     }
 
-    pub async fn select_up(&mut self, count: usize) -> Result<()> {
+    async fn select_up(&mut self, count: usize) -> Result<()> {
         self.selected = self.selected.saturating_sub(count);
         if matches!(self.file, FileState::Open { .. }) {
             self.open_and_buffer().await?;
@@ -82,7 +88,7 @@ impl<'a> SupportBundleDashboard<'a> {
         Ok(())
     }
 
-    pub async fn select_down(&mut self, count: usize) -> Result<()> {
+    async fn select_down(&mut self, count: usize) -> Result<()> {
         self.selected =
             std::cmp::min(self.selected + count, self.index.files().len() - 1);
         if matches!(self.file, FileState::Open { .. }) {
@@ -91,16 +97,15 @@ impl<'a> SupportBundleDashboard<'a> {
         Ok(())
     }
 
-    pub async fn toggle_file_open(&mut self) -> Result<()> {
-        if self.buffered_file_contents().is_none() {
-            self.open_and_buffer().await?;
-        } else {
-            self.close_file();
+    async fn toggle_file_open(&mut self) -> Result<()> {
+        match self.file {
+            FileState::Open { .. } => self.close_file(),
+            FileState::Closed => self.open_and_buffer().await?,
         }
         Ok(())
     }
 
-    pub async fn open_and_buffer(&mut self) -> Result<()> {
+    async fn open_and_buffer(&mut self) -> Result<()> {
         self.open_file().await?;
         self.read_to_buffer().await?;
         Ok(())
@@ -109,7 +114,8 @@ impl<'a> SupportBundleDashboard<'a> {
     async fn open_file(&mut self) -> Result<()> {
         let path = &self.index.files()[self.selected];
         if path.as_str().ends_with("/") {
-            self.file = FileState::Open { access: None, buffered: Vec::new() };
+            self.file =
+                FileState::Open { access: None, preview: BytesMut::new() };
             return Ok(());
         }
 
@@ -119,8 +125,8 @@ impl<'a> SupportBundleDashboard<'a> {
             .await
             .with_context(|| format!("Failed to access {path}"))?;
         self.file = FileState::Open {
-            access: Some(Box::pin(file)),
-            buffered: Vec::new(),
+            access: Some(BufReader::with_capacity(BUF_READER_CAPACITY, file)),
+            preview: BytesMut::new(),
         };
         Ok(())
     }
@@ -130,29 +136,40 @@ impl<'a> SupportBundleDashboard<'a> {
     }
 
     async fn read_to_buffer(&mut self) -> Result<()> {
-        let FileState::Open { access, ref mut buffered } = &mut self.file
-        else {
+        let FileState::Open { access, ref mut preview } = &mut self.file else {
             bail!("File cannot be buffered while closed");
         };
         let Some(file) = access.as_mut() else {
             return Ok(());
         };
-        file.read_to_end(buffered).await?;
+        preview.reserve(BUF_READER_CAPACITY);
+        file.read_buf(preview).await?;
         Ok(())
     }
 
-    pub fn buffered_file_contents(&self) -> Option<&[u8]> {
-        let FileState::Open { ref buffered, .. } = &self.file else {
+    fn buffered_file_preview(&self) -> Option<&[u8]> {
+        let FileState::Open { ref preview, .. } = &self.file else {
             return None;
         };
-        return Some(buffered);
+        return Some(preview);
     }
 
-    pub fn selected_file_index(&self) -> usize {
+    fn streaming_file_contents(
+        &mut self,
+    ) -> Option<impl AsyncRead + use<'_, 'a>> {
+        match &mut self.file {
+            FileState::Open { access, preview } => {
+                Some(preview.chain(access.as_mut().unwrap()))
+            }
+            FileState::Closed => None,
+        }
+    }
+
+    fn selected_file_index(&self) -> usize {
         self.selected
     }
 
-    pub fn selected_file_name(&self) -> &Utf8Path {
+    fn selected_file_name(&self) -> &Utf8Path {
         &self.index.files()[self.selected_file_index()]
     }
 }
@@ -324,11 +341,8 @@ pub async fn run_dashboard(
 
     match pipe_selected_file {
         Ok(true) => {
-            if let Some(contents) = dashboard.buffered_file_contents() {
-                std::io::copy(
-                    &mut std::io::Cursor::new(contents),
-                    &mut std::io::stdout(),
-                )?;
+            if let Some(mut stream) = dashboard.streaming_file_contents() {
+                tokio::io::copy(&mut stream, &mut tokio::io::stdout()).await?;
             }
         }
         Ok(false) => (),
@@ -387,10 +401,10 @@ fn create_file_list<'a>(dashboard: &'a SupportBundleDashboard<'_>) -> List<'a> {
         .block(Block::new().title("Files").borders(Borders::ALL))
 }
 
-fn create_file_contents<'a>(
+fn create_file_preview<'a>(
     dashboard: &'a SupportBundleDashboard<'_>,
 ) -> Option<Paragraph<'a>> {
-    dashboard.buffered_file_contents().map(|c| {
+    dashboard.buffered_file_preview().map(|c| {
         let c = std::str::from_utf8(c).unwrap_or("Not valid UTF-8");
 
         Paragraph::new(c).wrap(Wrap { trim: false }).block(
@@ -417,7 +431,7 @@ const FILE_VIEWER_USAGE: [&'static str; 4] = [
 
 fn draw(f: &mut Frame, dashboard: &mut SupportBundleDashboard<'_>) {
     let file_list = create_file_list(dashboard);
-    let file_contents = create_file_contents(dashboard);
+    let file_preview = create_file_preview(dashboard);
 
     let mut file_state = ListState::default()
         .with_offset(0)
@@ -427,11 +441,11 @@ fn draw(f: &mut Frame, dashboard: &mut SupportBundleDashboard<'_>) {
 
     let [main_display_rect, usage_rect] = layout.areas(f.area());
 
-    if let Some(file_contents) = file_contents {
+    if let Some(file_preview) = file_preview {
         let usage_list = List::new(FILE_VIEWER_USAGE)
             .block(Block::new().title("Usage").borders(Borders::ALL));
 
-        f.render_widget(file_contents, main_display_rect);
+        f.render_widget(file_preview, main_display_rect);
         f.render_widget(usage_list, usage_rect);
     } else {
         let usage_list = List::new(FILE_PICKER_USAGE)
