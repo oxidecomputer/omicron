@@ -601,6 +601,7 @@ impl TestState {
                 coordinator.clone(),
                 PeerMsg::Prepare(prepare_msg.clone()),
             )
+            .expect("no alarm")
             .expect("persistent state");
 
         // We should have gotten back a persistent state including the prepare
@@ -795,12 +796,12 @@ impl TestState {
         // to check this.
         let reply = PeerMsg::PrepareAck(msg.config.epoch);
         let mut outbox = Vec::new();
-        let output = self.sut.node.handle(
-            self.model.now,
-            &mut outbox,
-            from.clone(),
-            reply,
-        );
+        let output = self
+            .sut
+            .node
+            .handle(self.model.now, &mut outbox, from.clone(), reply)
+            .expect("no alarm");
+
         prop_assert!(output.is_none());
         prop_assert!(outbox.is_empty());
 
@@ -833,12 +834,11 @@ impl TestState {
         };
         let reply = PeerMsg::Share { epoch, share: share.clone() };
         let mut outbox = Vec::new();
-        let output = self.sut.node.handle(
-            self.model.now,
-            &mut outbox,
-            from.clone(),
-            reply,
-        );
+        let output = self
+            .sut
+            .node
+            .handle(self.model.now, &mut outbox, from.clone(), reply)
+            .expect("no alarm");
 
         // If we just received a threshold number of shares, we expect
         // reconstruction of the rack secret for the last committed

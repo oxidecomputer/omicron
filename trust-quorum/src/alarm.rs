@@ -46,14 +46,26 @@ pub enum Alarm {
     MissingPrepare { epoch: Epoch, latest_seen_epoch: Option<Epoch> },
 
     #[error(
-        "TQ Alarm: prepare received with mismatched last_committed_epoch: \
-        prepare's last committed epoch = {prepare_last_committed_epoch:?}, \
+        "TQ Alarm: prepare received from {from} with mismatched \
+        last_committed_epoch: prepare's last committed epoch = \
+        {prepare_last_committed_epoch:?}, \
         persisted prepare's last_committed_epoch = \
         {persisted_prepare_last_committed_epoch:?}"
     )]
     PrepareLastCommittedEpochMismatch {
+        from: PlatformId,
         prepare_last_committed_epoch: Option<Epoch>,
         persisted_prepare_last_committed_epoch: Option<Epoch>,
+    },
+
+    #[error(
+        "TQ Alarm: prepare received with invalid rack_id from {from}. \
+        Expected {expected}, got {got}."
+    )]
+    PrepareWithInvalidRackId {
+        from: PlatformId,
+        expected: RackUuid,
+        got: RackUuid,
     },
 
     #[error(

@@ -105,8 +105,7 @@ impl Node {
             let latest_seen_epoch = None;
             let alarm = Alarm::MissingPrepare { epoch, latest_seen_epoch };
             error!(self.log, "{alarm}");
-            self.persistent_state.add_alarm(alarm.clone());
-            return Err(alarm.into());
+            return Err(alarm);
         };
 
         if latest_prepare.config.epoch < epoch {
@@ -115,8 +114,7 @@ impl Node {
             let latest_seen_epoch = Some(latest_prepare.config.epoch);
             let alarm = Alarm::MissingPrepare { epoch, latest_seen_epoch };
             error!(self.log, "{alarm}");
-            self.persistent_state.add_alarm(alarm.clone());
-            return Err(alarm.into());
+            return Err(alarm);
         }
 
         if latest_prepare.config.epoch > epoch {
@@ -141,8 +139,7 @@ impl Node {
                 commit_epoch: epoch,
             };
             error!(self.log, "{alarm}");
-            self.persistent_state.add_alarm(alarm.clone());
-            return Err(alarm.into());
+            return Err(alarm);
         }
 
         // The epoch of the latest prepare matches the commit.
@@ -188,15 +185,15 @@ impl Node {
         outbox: &mut Vec<Envelope>,
         from: PlatformId,
         msg: PeerMsg,
-    ) -> Option<PersistentState> {
+    ) -> Result<Option<PersistentState>, Alarm> {
         match msg {
             PeerMsg::Prepare(msg) => self.handle_prepare(outbox, from, msg),
             PeerMsg::PrepareAck(epoch) => {
                 self.handle_prepare_ack(from, epoch);
-                None
+                Ok(None)
             }
             PeerMsg::Share { epoch, share } => {
-                self.handle_share(now, outbox, from, epoch, share)
+                Ok(self.handle_share(now, outbox, from, epoch, share))
             }
             _ => todo!(
                 "cannot handle message variant yet - not implemented: {msg:?}"
@@ -210,22 +207,21 @@ impl Node {
     }
 
     // Handle a `PrepareMsg` from a coordinator
-    // TODO: return an `Alarm` as an error? This would allow higher level code
-    // to stop handling messages except for status messages and prevent
-    // further damage.
     fn handle_prepare(
         &mut self,
         outbox: &mut Vec<Envelope>,
         from: PlatformId,
         msg: PrepareMsg,
-    ) -> Option<PersistentState> {
+    ) -> Result<Option<PersistentState>, Alarm> {
         if let Some(rack_id) = self.persistent_state.rack_id() {
             if rack_id != msg.config.rack_id {
-                error!(self.log, "received prepare with invalid rack_id";
-                    "expected" => %rack_id,
-                    "got" => %msg.config.rack_id
-                );
-                return None;
+                let alarm = Alarm::PrepareWithInvalidRackId {
+                    from,
+                    expected: rack_id,
+                    got: msg.config.rack_id,
+                };
+                error!(self.log, "{alarm}");
+                return Err(alarm);
             }
         }
         if let Some(last_prepared_epoch) =
@@ -239,12 +235,12 @@ impl Node {
                     "last_prepared_epoch" => %last_prepared_epoch
                 );
                 // TODO: Respond to sender?
-                return None;
+                return Ok(None);
             }
 
             // Idempotent request
             if msg.config.epoch == last_prepared_epoch {
-                return None;
+                return Ok(None);
             }
 
             // Does the last committed epoch match what we have?
@@ -268,22 +264,14 @@ impl Node {
                 // has been violated somewhere. The coordinator should know
                 // whether this is a "new" node or not, which would have a "None"
                 // configuration.
-                let err_msg = concat!(
-                    "Protocol invariant violation: ",
-                    "PrepareMsg last_committed_epoch does not match ours"
-                );
-                error!(self.log, "{err_msg}";
-                    "msg_last_committed_epoch" => ?msg_last_committed_epoch,
-                    "last_committed_epoch" => ?last_committed_epoch
-                );
-                self.persistent_state.add_alarm(
-                    Alarm::PrepareLastCommittedEpochMismatch {
-                        prepare_last_committed_epoch: msg_last_committed_epoch,
-                        persisted_prepare_last_committed_epoch:
-                            last_committed_epoch,
-                    },
-                );
-                return Some(self.persistent_state.clone());
+                let alarm = Alarm::PrepareLastCommittedEpochMismatch {
+                    from,
+                    prepare_last_committed_epoch: msg_last_committed_epoch,
+                    persisted_prepare_last_committed_epoch:
+                        last_committed_epoch,
+                };
+                error!(self.log, "{alarm}");
+                return Err(alarm);
             }
 
             // The prepare is up-to-date with respect to our persistent state
@@ -298,34 +286,21 @@ impl Node {
                     "msg_epoch" => %msg.config.epoch,
                     "epoch" => %cs.reconfigure_msg().epoch()
                 );
-                return None;
+                return Ok(None);
             }
             if coordinating_epoch == msg.config.epoch {
-                // TODO: Track these in an "invariant violation alarm" struct
-                // that can be queried.
-                let err_msg = concat!(
-                    "Protocol invariant violation: Nexus has told different",
-                    "nodes to coordinate the same reconfiguration."
-                );
-                error!(self.log, "{err_msg}";
-                    "epoch" => %coordinating_epoch,
-                    "from" => %from,
-                    "id" => %self.platform_id
-
-                );
-                self.persistent_state.add_alarm(
-                    Alarm::DifferentNodesCoordinatingSameEpoch {
-                        epoch: coordinating_epoch,
-                        them: from,
-                        us: self.platform_id.clone(),
-                    },
-                );
-                return Some(self.persistent_state.clone());
+                let alarm = Alarm::DifferentNodesCoordinatingSameEpoch {
+                    epoch: coordinating_epoch,
+                    them: from,
+                    us: self.platform_id.clone(),
+                };
+                error!(self.log, "{alarm}");
+                return Err(alarm);
             }
 
-            // This prepare is for a newer configuration than the one we
-            // are currently coordinating. We must implicitly cancel our
-            // coordination as Nexus has moved on.
+            // This prepare is for a newer configuration than the one we are
+            // currently coordinating. We must cancel our coordination as Nexus
+            // has moved on.
             let cancel_msg = concat!(
                 "Received a prepare for newer configuration.",
                 "Cancelling our coordination."
@@ -335,22 +310,16 @@ impl Node {
                 "epoch" => %coordinating_epoch,
                 "from" => %from
             );
+            self.coordinator_state = None;
         }
 
-        // Acknowledge the PrepareMsg
-        outbox.push(Envelope {
-            to: from,
-            from: self.platform_id.clone(),
-            msg: PeerMsg::PrepareAck(msg.config.epoch),
-        });
+        // Acknowledge the `PrepareMsg`
+        self.send(from, outbox, PeerMsg::PrepareAck(msg.config.epoch));
 
         // Add the prepare to our `PersistentState`
         self.persistent_state.prepares.insert(msg.config.epoch, msg);
 
-        // Stop coordinating
-        self.coordinator_state = None;
-
-        Some(self.persistent_state.clone())
+        Ok(Some(self.persistent_state.clone()))
     }
 
     // Handle receipt of a `PrepareAck` message
@@ -359,15 +328,14 @@ impl Node {
         if let Some(cs) = &mut self.coordinator_state {
             let current_epoch = cs.reconfigure_msg().epoch();
             if current_epoch == epoch {
-                // Store the ack in the coordinator state
-                cs.ack_prepare(from);
+                cs.record_prepare_ack(from);
             } else {
-                // Log and drop message
                 warn!(self.log, "Received prepare ack for wrong epoch";
                     "from" => %from,
                     "current_epoch" => %current_epoch,
                     "acked_epoch" => %epoch
                 );
+                // Ack is intentionally dropped here
             }
         } else {
             warn!(
@@ -376,6 +344,7 @@ impl Node {
                 "from" => %from,
                 "acked_epoch" => %epoch
             );
+            // Ack is intentionally dropped here
         }
     }
 
@@ -424,6 +393,11 @@ impl Node {
         if let Some(c) = self.coordinator_state.as_mut() {
             c.send_msgs(now, outbox);
         }
+    }
+
+    // Package a message in an envelope and put it in the outbox
+    fn send(&self, to: PlatformId, outbox: &mut Vec<Envelope>, msg: PeerMsg) {
+        outbox.push(Envelope { to, from: self.platform_id.clone(), msg });
     }
 
     /// Set the coordinator state and conditionally set and return the
