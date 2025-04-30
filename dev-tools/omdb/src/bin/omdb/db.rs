@@ -168,8 +168,11 @@ use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 use uuid::Uuid;
+use webhook::WebhookArgs;
+use webhook::cmd_db_webhook;
 
 mod saga;
+mod webhook;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
@@ -383,6 +386,8 @@ enum DbCommands {
     Vmms(VmmListArgs),
     /// Print information about the oximeter collector.
     Oximeter(OximeterArgs),
+    /// Print information about webhooks
+    Webhook(WebhookArgs),
     /// Commands for querying and interacting with pools
     Zpool(ZpoolArgs),
 }
@@ -1460,6 +1465,8 @@ impl DbArgs {
                     DbCommands::Oximeter(OximeterArgs {
                         command: OximeterCommands::ListProducers
                     }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
+
+                    DbCommands::Webhook(args) => cmd_db_webhook(&opctx, &datastore, &fetch_opts, &args).await,
                     DbCommands::Zpool(ZpoolArgs {
                         command: ZpoolCommands::List(args)
                     }) => cmd_db_zpool_list(&opctx, &datastore, &args).await,
