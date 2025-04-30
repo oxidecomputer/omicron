@@ -80,6 +80,11 @@ impl PersistentState {
         self.prepares.keys().last().map(|epoch| *epoch)
     }
 
+    /// Return the prepare with the highest epoch
+    pub fn latest_prepare(&self) -> Option<&PrepareMsg> {
+        self.prepares.last_key_value().map(|(_, v)| v)
+    }
+
     pub fn last_committed_epoch(&self) -> Option<Epoch> {
         self.commits.last().map(|epoch| *epoch)
     }

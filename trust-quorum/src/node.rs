@@ -4,7 +4,7 @@
 
 //! A trust quorum node that implements the trust quorum protocol
 
-use crate::errors::{CommitError, MismatchedRackIdError, ReconfigurationError};
+use crate::errors::ReconfigurationError;
 use crate::validators::ValidatedReconfigureMsg;
 use crate::{
     Alarm, CoordinatorState, Envelope, Epoch, PersistentState, PlatformId,
@@ -85,82 +85,81 @@ impl Node {
         &mut self,
         epoch: Epoch,
         rack_id: RackUuid,
-    ) -> Result<Option<PersistentState>, CommitError> {
+    ) -> Result<Option<PersistentState>, Alarm> {
         if self.persistent_state.last_committed_epoch() == Some(epoch) {
             // Idempotent request
             return Ok(None);
         }
 
-        // Only commit if we have a `PrepareMsg` and it's the latest `PrepareMsg`.
-        //
-        // This forces a global ordering of `PrepareMsg`s, because it's only
-        // possible to re-derive a key share in a `PrepareMsg` for the current
-        // configuration.
-        //
-        // In practice this check will always succeed if we have the
-        // `PrepareMsg` for this epoch, because later `Prepare` messages would
-        // not have been accepted before this commit arrived. This is because
-        // each `PrepareMsg` contains the `last_committed_epoch` that must have
-        // been seen in order to be accepted. If this commit hadn't occurred,
-        // then it wasn't part of the chain of `last_committed_epoch`s, and was
-        // abandonded/canceled. In that case, if we ended up getting a commit,
-        // then it would not inductively have been part of the existing chain
-        // and so would be a bug in the protocol execution. Because of this we
-        // check and error on this condition.
-        let last_prepared_epoch = self.persistent_state.last_prepared_epoch();
-        if last_prepared_epoch != Some(epoch) {
-            error!(
-                self.log,
-                "Protocol invariant violation: commit message out of order";
-                "epoch" => %epoch,
-                "last_prepared_epoch" => ?last_prepared_epoch
-            );
-            self.persistent_state.add_alarm(Alarm::OutOfOrderCommit {
-                last_prepared_epoch,
-                commit_epoch: epoch,
-            });
-            return Err(CommitError::OutOfOrderCommit);
-        }
-        if let Some(prepare) = self.persistent_state.prepares.get(&epoch) {
-            if prepare.config.rack_id != rack_id {
-                error!(
-                    self.log,
-                    "Commit attempted with invalid rack_id";
-                    "expected" => %prepare.config.rack_id,
-                    "got" => %rack_id
-                );
-                return Err(CommitError::InvalidRackId(
-                    MismatchedRackIdError {
-                        expected: prepare.config.rack_id,
-                        got: rack_id,
-                    },
-                ));
-            }
-        } else {
-            // This is an erroneous commit attempt from nexus. Log it.
+        let Some(latest_prepare) = self.persistent_state.latest_prepare()
+        else {
+            // This is an erroneous commit attempt from nexus. We don't have
+            // any prepares yet, but for some reason nexus thinks we do.
             //
             // Nexus should instead tell this node to retrieve a `Prepare`
             // from another node that has already committed.
             //
-            // This is a protocol bug because nexus must have seen an
-            // acknowledgement that this node had a `PrepareMsg` or erroneously
-            // sent a `Commit` anyway. This is a less serious error than other
-            // invariant violations since it can be recovered from. However, it
-            // is still worthy of an alarm, as the most likely case is a  disk/
-            // ledger failure.
-            let err_msg = concat!(
-                "Protocol invariant violation: triedi to ",
-                "commit a configuration, but missing prepare msg"
-            );
-            error!(self.log, "{err_msg}"; "epoch" => %epoch);
-            self.persistent_state.add_alarm(Alarm::MissingPrepare { epoch });
-            return Err(CommitError::MissingPrepare);
+            // This is a less serious error than other invariant violations
+            // since it can be recovered from. However, it is still worthy of an
+            // alarm, as the most likely case is a  disk/ ledger failure.
+            let latest_seen_epoch = None;
+            let alarm = Alarm::MissingPrepare { epoch, latest_seen_epoch };
+            error!(self.log, "{alarm}");
+            self.persistent_state.add_alarm(alarm.clone());
+            return Err(alarm.into());
+        };
+
+        if latest_prepare.config.epoch < epoch {
+            // We haven't seen this prepare yet, but Nexus thinks we have.
+            // This is essentially the same case as above.
+            let latest_seen_epoch = Some(latest_prepare.config.epoch);
+            let alarm = Alarm::MissingPrepare { epoch, latest_seen_epoch };
+            error!(self.log, "{alarm}");
+            self.persistent_state.add_alarm(alarm.clone());
+            return Err(alarm.into());
         }
 
+        if latest_prepare.config.epoch > epoch {
+            // Only commit if we have a `PrepareMsg` and it's the latest
+            // `PrepareMsg`.
+            //
+            // This forces a global ordering of `PrepareMsg`s, because it's
+            // only possible to re-derive a key share in a `PrepareMsg` for the
+            // current configuration.
+            //
+            // If we get a commit for an earlier prepare message, then we
+            // shouldn't have been able to accept any later prepare messages,
+            // because this commit hadn't been seen by this node yet. Prepare
+            // messages are only accepted if the last committed epoch in the
+            // message matches what the node has seen.
+            //
+            // If we get here, then it means that there is a bug in this code
+            // that allowed the later prepare to be accepted, and therefore we
+            // must raise an alarm.
+            let alarm = Alarm::OutOfOrderCommit {
+                last_prepared_epoch: latest_prepare.config.epoch,
+                commit_epoch: epoch,
+            };
+            error!(self.log, "{alarm}");
+            self.persistent_state.add_alarm(alarm.clone());
+            return Err(alarm.into());
+        }
+
+        // The epoch of the latest prepare matches the commit.
+        // Do the rack_ids match up?
+        if latest_prepare.config.rack_id != rack_id {
+            let alarm = Alarm::CommitWithInvalidRackId {
+                expected: latest_prepare.config.rack_id,
+                got: rack_id,
+            };
+            error!(self.log, "{alarm}");
+            return Err(alarm);
+        }
+
+        // Success!
         info!(self.log, "Committed configuration"; "epoch" => %epoch);
 
-        // Are we currently coordinating for this epoch?
-        // Stop coordinating if we are
+        // Are we currently coordinating for this epoch? Stop if so.
         if self.coordinator_state.is_some() {
             info!(
                 self.log,
@@ -210,13 +209,25 @@ impl Node {
         self.coordinator_state.as_ref()
     }
 
+    // Handle a `PrepareMsg` from a coordinator
+    // TODO: return an `Alarm` as an error? This would allow higher level code
+    // to stop handling messages except for status messages and prevent
+    // further damage.
     fn handle_prepare(
         &mut self,
         outbox: &mut Vec<Envelope>,
         from: PlatformId,
         msg: PrepareMsg,
     ) -> Option<PersistentState> {
-        // TODO: check rack_id
+        if let Some(rack_id) = self.persistent_state.rack_id() {
+            if rack_id != msg.config.rack_id {
+                error!(self.log, "received prepare with invalid rack_id";
+                    "expected" => %rack_id,
+                    "got" => %msg.config.rack_id
+                );
+                return None;
+            }
+        }
         if let Some(last_prepared_epoch) =
             self.persistent_state.last_prepared_epoch()
         {

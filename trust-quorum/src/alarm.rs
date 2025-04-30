@@ -12,6 +12,7 @@
 //! an alarm arose.
 
 use crate::{Epoch, PlatformId};
+use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 
 /// A critical invariant violation that should never occur.
@@ -28,19 +29,26 @@ use serde::{Deserialize, Serialize};
 )]
 pub enum Alarm {
     #[error(
-        "prepare for a later configuration exists: \
+        "TQ Alarm: commit attempted with invalid rack_id. Expected {expected}, got {got}."
+    )]
+    CommitWithInvalidRackId { expected: RackUuid, got: RackUuid },
+    #[error(
+        "TQ Alarm: prepare for a later configuration exists: \
         last_prepared_epoch = {last_prepared_epoch:?}, \
         commit_epoch = {commit_epoch}"
     )]
-    OutOfOrderCommit { last_prepared_epoch: Option<Epoch>, commit_epoch: Epoch },
-
-    #[error("commit attempted, but missing prepare message: epoch = {epoch}")]
-    MissingPrepare { epoch: Epoch },
+    OutOfOrderCommit { last_prepared_epoch: Epoch, commit_epoch: Epoch },
 
     #[error(
-        "prepare received with mismatched last_committed_epoch: prepare's last \
-        committed epoch = {prepare_last_committed_epoch:?}, persisted \
-        prepare's last_committed_epoch = \
+        "TQ Alarm: commit attempted, but missing prepare message: \
+        epoch = {epoch}. Latest seen epoch = {latest_seen_epoch:?}."
+    )]
+    MissingPrepare { epoch: Epoch, latest_seen_epoch: Option<Epoch> },
+
+    #[error(
+        "TQ Alarm: prepare received with mismatched last_committed_epoch: \
+        prepare's last committed epoch = {prepare_last_committed_epoch:?}, \
+        persisted prepare's last_committed_epoch = \
         {persisted_prepare_last_committed_epoch:?}"
     )]
     PrepareLastCommittedEpochMismatch {
@@ -49,7 +57,7 @@ pub enum Alarm {
     },
 
     #[error(
-        "different nodes coordinating same epoch = {epoch}: \
+        "TQ Alarm: different nodes coordinating same epoch = {epoch}: \
         them = {them}, us = {us}"
     )]
     DifferentNodesCoordinatingSameEpoch {
