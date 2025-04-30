@@ -141,6 +141,21 @@ impl LedgerTaskHandle {
         unimplemented!()
     }
 
+    /// Confirm that a new [`ArtifactConfig`] is valid given the contents of the
+    /// currently-ledgered [`OmicronSledConfig`].
+    ///
+    /// In particular, this confirms that a new artifact config does not
+    /// _remove_ any artifacts needed by zones described by the current sled
+    /// config.
+    ///
+    /// The artifact store in sled agent and this task need to coordinate with
+    /// each other whenever changes are made to either kind of config. This
+    /// method provides a path for the artifact store to validate its incoming
+    /// artifact configs against this task, and this task uses the
+    /// implementation of [`SledAgentArtifactStore`] to validate its incoming
+    /// sled configs against the artifact store. Validation is always performed
+    /// by this task, which enforces serialization of the checks in the event of
+    /// requests arriving concurrently to change both configs.
     pub async fn validate_artifact_config(
         &self,
         _new_config: ArtifactConfig,

@@ -20,8 +20,12 @@ pub trait SledAgentFacilities: Send + 'static {
     type MetricsUntrackZoneLinksError;
     type ZoneBundleCreateError;
 
-    /// Called once time is synchronized.
-    // TODO-cleanup should we do this work ourselves instead?
+    /// Called by the reconciler task to inform sled-agent that time is
+    /// sychronized. May be called multiple times.
+    // TODO-cleanup should we do this work ourselves instead? This is
+    // currently implemented by `ServiceManager` and does a couple one-time
+    // setup things (like rewrite the OS boot time). We could probably absorb
+    // that work and remove this callback.
     async fn on_time_sync(&self);
 
     /// Method to start a zone.
