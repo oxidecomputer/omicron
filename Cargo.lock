@@ -6269,7 +6269,9 @@ dependencies = [
 name = "nexus-mgs-updates"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
+ "dropshot 0.16.0",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -6283,6 +6285,7 @@ dependencies = [
  "omicron-workspace-hack",
  "qorb",
  "rand 0.8.5",
+ "repo-depot-api",
  "repo-depot-client",
  "reqwest",
  "sha2",

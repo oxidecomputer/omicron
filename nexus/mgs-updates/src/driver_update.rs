@@ -47,7 +47,7 @@ const RESET_TIMEOUT: Duration = Duration::from_secs(60);
 ///
 /// This is similar in spirit to the `SpComponentUpdater` trait but uses a
 /// struct-based interface instead.
-pub struct SpComponentUpdate {
+pub (crate) struct SpComponentUpdate {
     pub log: slog::Logger,
     pub component: SpComponent,
     pub target_sp_type: SpType,
@@ -564,5 +564,51 @@ async fn wait_for_update_done(
                 return Err(UpdateWaitError::Indeterminate(error));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::test_util::test_artifacts::TestArtifacts;
+    use gateway_messages::SpPort;
+
+    // XXX-dap
+    // test cases:
+    //  - successful update: updated SP
+    //  - successful update: no changes needed
+    //  - successful update: watched another finish
+    //  - successful update: took over
+    //  - failure: when initial conditions don't match
+    //  - failure: failed to fetch artifact
+    //  - failure: MGS failure
+    //  - failure: reset in the middle
+    //  - failure: stuck?
+
+    #[tokio::test]
+    async fn test_sp_update_basic() {
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_sp_update_basic",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let artifacts = TestArtifacts::new(log).await.unwrap();
+
+        // Prepare an update.
+        // XXX-dap
+        // let sp_update = SpComponentUpdate {};
+
+        // let fut = apply_update(
+        //     artifacts.artifact_cache.clone(),
+        //     &sp_update,
+        //     &sp_update_helper,
+        //     mgs_backends,
+        //     &sp_update_request,
+        //     status_updater,
+        // )
+        // .boxed();
+
+        artifacts.teardown().await;
+        gwtestctx.teardown().await;
     }
 }

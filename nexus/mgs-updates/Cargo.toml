@@ -31,8 +31,11 @@ uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
+dropshot.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 hubtools.workspace = true
 rand.workspace = true
+repo-depot-api.workspace = true
 sp-sim.workspace = true

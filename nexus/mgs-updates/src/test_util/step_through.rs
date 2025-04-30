@@ -58,7 +58,7 @@ impl<'a, T> StepThrough<'a, T> {
     }
 
     /// Run the future to completion.
-    pub async fn finish(mut self) -> T {
+    pub async fn finish(self) -> T {
         self.fut.await
     }
 }
