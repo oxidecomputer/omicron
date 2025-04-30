@@ -4521,6 +4521,24 @@
         ],
         "additionalProperties": false
       },
+      "IdMapDatasetConfig": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/DatasetConfig"
+        }
+      },
+      "IdMapOmicronPhysicalDiskConfig": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+        }
+      },
+      "IdMapOmicronZoneConfig": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/OmicronZoneConfig"
+        }
+      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -5440,20 +5458,24 @@
         "description": "Describes the set of Reconfigurator-managed configuration elements of a sled",
         "type": "object",
         "properties": {
-          "datasets_config": {
-            "$ref": "#/components/schemas/DatasetsConfig"
+          "datasets": {
+            "$ref": "#/components/schemas/IdMapDatasetConfig"
           },
-          "disks_config": {
-            "$ref": "#/components/schemas/OmicronPhysicalDisksConfig"
+          "disks": {
+            "$ref": "#/components/schemas/IdMapOmicronPhysicalDiskConfig"
           },
-          "zones_config": {
-            "$ref": "#/components/schemas/OmicronZonesConfig"
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "zones": {
+            "$ref": "#/components/schemas/IdMapOmicronZoneConfig"
           }
         },
         "required": [
-          "datasets_config",
-          "disks_config",
-          "zones_config"
+          "datasets",
+          "disks",
+          "generation",
+          "zones"
         ]
       },
       "OmicronSledConfigResult": {
