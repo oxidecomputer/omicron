@@ -8,13 +8,13 @@ cabooses:
     board "SimGimletSp" name "SimGimlet" version "0.0.1" git_commit "fefefefe" sign None
     board "SimGimletSp" name "SimGimlet" version "0.0.2" git_commit "ffffffff" sign None
     board "SimRot" name "SimGimletRot" version "0.0.3" git_commit "edededed" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
-    board "SimRot" name "SimSidecar" version "0.0.3" git_commit "edededed" sign Some("1432cc4cfe5688c51b55546fe37837c753cfbc89e8c3c6aabcf977fdf0c41e27")
+    board "SimRot" name "SimSidecarRot" version "0.0.3" git_commit "edededed" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
     board "SimRot" name "SimGimletRot" version "0.0.4" git_commit "eeeeeeee" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
-    board "SimRot" name "SimSidecar" version "0.0.4" git_commit "eeeeeeee" sign Some("1432cc4cfe5688c51b55546fe37837c753cfbc89e8c3c6aabcf977fdf0c41e27")
-    board "SimRotStage0" name "SimSidecar" version "0.0.200" git_commit "dadadada" sign Some("1432cc4cfe5688c51b55546fe37837c753cfbc89e8c3c6aabcf977fdf0c41e27")
+    board "SimRot" name "SimSidecarRot" version "0.0.4" git_commit "eeeeeeee" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
     board "SimRotStage0" name "SimGimletRot" version "0.0.200" git_commit "dadadadad" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
-    board "SimRotStage0" name "SimSidecar" version "0.0.200" git_commit "dddddddd" sign Some("1432cc4cfe5688c51b55546fe37837c753cfbc89e8c3c6aabcf977fdf0c41e27")
+    board "SimRotStage0" name "SimSidecarRot" version "0.0.200" git_commit "dadadadad" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
     board "SimRotStage0" name "SimGimletRot" version "0.0.200" git_commit "ddddddddd" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimRotStage0" name "SimSidecarRot" version "0.0.200" git_commit "ddddddddd" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
     board "SimSidecarSp" name "SimSidecar" version "0.0.1" git_commit "fefefefe" sign None
     board "SimSidecarSp" name "SimSidecar" version "0.0.2" git_commit "ffffffff" sign None
 
