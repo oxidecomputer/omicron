@@ -72,8 +72,9 @@ const RECOVERY_IMAGE_PACKAGES: [(&PackageName, InstallMethod); 2] = [
     (&PackageName::new_const("installinator"), InstallMethod::Install),
     (&PackageName::new_const("mg-ddm-gz"), InstallMethod::Install),
 ];
-const TUF_PACKAGES: [&PackageName; 11] = [
+const TUF_PACKAGES: [&PackageName; 12] = [
     &PackageName::new_const("clickhouse_keeper"),
+    &PackageName::new_const("clickhouse_server"),
     &PackageName::new_const("clickhouse"),
     &PackageName::new_const("cockroachdb"),
     &PackageName::new_const("crucible-pantry-zone"),

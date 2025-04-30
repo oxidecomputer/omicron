@@ -552,11 +552,8 @@ impl InformationSchema {
             other.statistics,
             "Statistics did not match. This often means that in dbinit.sql, a new \
             column was added into the middle of a table rather than to the end. \
-            If that is the case:\n\n \
-            \
-            * Change dbinit.sql to add the column to the end of the table.\n\
-            * Update nexus/db-model/src/schema.rs and the corresponding \
-            Queryable/Insertable struct with the new column ordering."
+            If that is the case, change dbinit.sql to add the column to the \
+            end of the table.\n"
         );
         similar_asserts::assert_eq!(self.sequences, other.sequences);
         similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
@@ -2044,6 +2041,58 @@ fn after_134_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        let probe_event_id: Uuid =
+            "001de000-7768-4000-8000-000000000001".parse().unwrap();
+        let rows = ctx
+            .client
+            .query(
+                // Don't select timestamps, as those are variable, and we don't
+                // want to assert that they always have a particular value.
+                // However, we *do* need to ensure that `time_dispatched` is
+                // set, so that the event is not eligible for dispatching ---
+                // include a WHERE clause ensuring it is not null.
+                r#"
+                SELECT
+                    id,
+                    event_class,
+                    event,
+                    num_dispatched
+                FROM webhook_event
+                WHERE time_dispatched IS NOT NULL
+                "#,
+                &[],
+            )
+            .await
+            .expect("loaded bp_omicron_zone rows");
+
+        let records = process_rows(&rows);
+
+        assert_eq!(
+            records.len(),
+            1,
+            "there should be exactly one singleton event in the webhook_event \
+             table"
+        );
+
+        assert_eq!(
+            records[0].values,
+            vec![
+                ColumnValue::new("id", probe_event_id),
+                ColumnValue::new(
+                    "event_class",
+                    SqlEnum::from(("webhook_event_class", "probe")),
+                ),
+                ColumnValue::new("event", serde_json::json!({})),
+                ColumnValue::new("num_dispatched", 0i64),
+            ],
+            "singleton liveness probe webhook event record must have the \
+             correct values",
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -2099,6 +2148,10 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(134, 0, 0),
         DataMigrationFns::new().before(before_134_0_0).after(after_134_0_0),
+    );
+    map.insert(
+        Version::new(139, 0, 0),
+        DataMigrationFns::new().after(after_139_0_0),
     );
 
     map

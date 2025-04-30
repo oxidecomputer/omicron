@@ -6,7 +6,7 @@
 
 use digest::Digest;
 use rand::{Rng, rngs::OsRng};
-use secrecy::Secret;
+use secrecy::SecretBox;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -134,7 +134,7 @@ impl std::fmt::Debug for Share {
 
 pub struct SecretShares {
     pub threshold: ValidThreshold,
-    pub shares: Secret<Vec<Share>>,
+    pub shares: SecretBox<Vec<Share>>,
 }
 
 /// Split a secret into `n` key shares with a threshold of `k` shares.
@@ -185,7 +185,7 @@ fn split_secret_impl<R: Rng>(
         })
         .collect();
 
-    Ok(SecretShares { threshold, shares: Secret::new(shares) })
+    Ok(SecretShares { threshold, shares: SecretBox::new(Box::new(shares)) })
 }
 
 /// Combine the shares to reconstruct the secret
@@ -193,10 +193,12 @@ fn split_secret_impl<R: Rng>(
 /// The secret is the concatenation of the y-coordinates at `x=0`.
 pub fn compute_secret(
     shares: &[Share],
-) -> Result<Secret<Box<[u8]>>, CombineError> {
+) -> Result<SecretBox<[u8]>, CombineError> {
     let shares = ValidShares::new(shares)?;
     let share = interpolate_polynomials(shares, gf256::ZERO);
-    Ok(Secret::new(share.y_coordinates.iter().map(|y| y.into_u8()).collect()))
+    let y_coordinates: Box<[u8]> =
+        share.y_coordinates.iter().map(|y| y.into_u8()).collect();
+    Ok(SecretBox::new(y_coordinates))
 }
 
 /// Combine the shares to compute an unknown share at the given x-coordinate.
@@ -281,15 +283,15 @@ mod tests {
                 // Combining at least k shares succeeds and returns our secret
                 let n = input.threshold as usize;
                 let k = shares.threshold.0 as usize;
-                let input_secret = input.secret.into_boxed_slice();
+                let input_secret = input.secret.as_slice();
                 let secret =
                     compute_secret(&shares.shares.expose_secret()[0..k])
                         .expect("combining succeeds");
-                assert_eq!(*secret.expose_secret(), input_secret);
+                assert_eq!(secret.expose_secret(), input_secret);
                 let secret =
                     compute_secret(&shares.shares.expose_secret()[n - k..])
                         .expect("combining succeeds");
-                assert_eq!(*secret.expose_secret(), input_secret);
+                assert_eq!(secret.expose_secret(), input_secret);
 
                 if k > 2 {
                     // Combining fewer than k shares returns nonsense
@@ -297,7 +299,7 @@ mod tests {
                         &shares.shares.expose_secret()[0..k - 1],
                     )
                     .expect("combining succeeds");
-                    assert_ne!(*secret.expose_secret(), input_secret);
+                    assert_ne!(secret.expose_secret(), input_secret);
                 } else {
                     // Attempting to combine too few shares fails
                     assert!(
@@ -353,6 +355,6 @@ mod tests {
         // Recompute secret from computed shares
         let computed_secret = compute_secret(&computed).unwrap();
 
-        assert_eq!(&secret[..], &computed_secret.expose_secret()[..]);
+        assert_eq!(&secret[..], computed_secret.expose_secret());
     }
 }

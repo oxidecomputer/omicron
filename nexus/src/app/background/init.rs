@@ -87,7 +87,6 @@
 //! It's not foolproof but hopefully these mechanisms will catch the easy
 //! mistakes.
 
-use super::Activator;
 use super::Driver;
 use super::driver::TaskDefinition;
 use super::tasks::abandoned_vmm_reaper;
@@ -125,9 +124,13 @@ use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
+use super::tasks::webhook_deliverator;
+use super::tasks::webhook_dispatcher::WebhookDispatcher;
 use crate::Nexus;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::saga::StartSaga;
+use nexus_background_task_interface::Activator;
+use nexus_background_task_interface::BackgroundTasks;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
@@ -143,68 +146,13 @@ use tokio::sync::watch;
 use update_common::artifacts::ArtifactsWithPlan;
 use uuid::Uuid;
 
-/// Interface for activating various background tasks and read data that they
-/// expose to Nexus at-large
-pub struct BackgroundTasks {
-    // Handles to activate specific background tasks
-    pub task_internal_dns_config: Activator,
-    pub task_internal_dns_servers: Activator,
-    pub task_external_dns_config: Activator,
-    pub task_external_dns_servers: Activator,
-    pub task_metrics_producer_gc: Activator,
-    pub task_external_endpoints: Activator,
-    pub task_nat_cleanup: Activator,
-    pub task_bfd_manager: Activator,
-    pub task_inventory_collection: Activator,
-    pub task_support_bundle_collector: Activator,
-    pub task_physical_disk_adoption: Activator,
-    pub task_decommissioned_disk_cleaner: Activator,
-    pub task_phantom_disks: Activator,
-    pub task_blueprint_loader: Activator,
-    pub task_blueprint_executor: Activator,
-    pub task_blueprint_rendezvous: Activator,
-    pub task_crdb_node_id_collector: Activator,
-    pub task_service_zone_nat_tracker: Activator,
-    pub task_switch_port_settings_manager: Activator,
-    pub task_v2p_manager: Activator,
-    pub task_region_replacement: Activator,
-    pub task_region_replacement_driver: Activator,
-    pub task_instance_watcher: Activator,
-    pub task_instance_updater: Activator,
-    pub task_instance_reincarnation: Activator,
-    pub task_service_firewall_propagation: Activator,
-    pub task_abandoned_vmm_reaper: Activator,
-    pub task_vpc_route_manager: Activator,
-    pub task_saga_recovery: Activator,
-    pub task_lookup_region_port: Activator,
-    pub task_region_snapshot_replacement_start: Activator,
-    pub task_region_snapshot_replacement_garbage_collection: Activator,
-    pub task_region_snapshot_replacement_step: Activator,
-    pub task_region_snapshot_replacement_finish: Activator,
-    pub task_tuf_artifact_replication: Activator,
-    pub task_read_only_region_replacement_start: Activator,
-
-    // Handles to activate background tasks that do not get used by Nexus
-    // at-large.  These background tasks are implementation details as far as
-    // the rest of Nexus is concerned.  These handles don't even really need to
-    // be here, but it's convenient.
-    task_internal_dns_propagation: Activator,
-    task_external_dns_propagation: Activator,
-
-    // Data exposed by various background tasks to the rest of Nexus
-    /// list of currently configured external endpoints
-    pub external_endpoints:
+/// Internal state for communication between Nexus and background tasks.
+///
+/// This is not part of the larger `BackgroundTask` type because it contains
+/// references to internal types.
+pub(crate) struct BackgroundTasksInternal {
+    pub(crate) external_endpoints:
         watch::Receiver<Option<external_endpoints::ExternalEndpoints>>,
-}
-
-impl BackgroundTasks {
-    /// Activate the specified background task
-    ///
-    /// If the task is currently running, it will be activated again when it
-    /// finishes.
-    pub fn activate(&self, task: &Activator) {
-        task.activate();
-    }
 }
 
 /// Initializes the background task subsystem
@@ -227,7 +175,9 @@ impl BackgroundTasksInitializer {
     ///   call `start()` to actually start the tasks
     /// * a long-lived `BackgroundTasks` object that you can use to activate any
     ///   of the tasks that will be started and read data that they provide
-    pub fn new() -> (BackgroundTasksInitializer, BackgroundTasks) {
+    pub fn new()
+    -> (BackgroundTasksInitializer, BackgroundTasks, BackgroundTasksInternal)
+    {
         let (external_endpoints_tx, external_endpoints_rx) =
             watch::channel(None);
 
@@ -274,14 +224,18 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_finish: Activator::new(),
             task_tuf_artifact_replication: Activator::new(),
             task_read_only_region_replacement_start: Activator::new(),
+            task_webhook_dispatcher: Activator::new(),
+            task_webhook_deliverator: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
+        };
 
+        let internal = BackgroundTasksInternal {
             external_endpoints: external_endpoints_rx,
         };
 
-        (initializer, background_tasks)
+        (initializer, background_tasks, internal)
     }
 
     /// Starts all the Nexus background tasks
@@ -344,13 +298,12 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_finish,
             task_tuf_artifact_replication,
             task_read_only_region_replacement_start,
+            task_webhook_dispatcher,
+            task_webhook_deliverator,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
 
-            // The following fields can be safely ignored here because they're
-            // already wired up as needed.
-            external_endpoints: _,
             // Do NOT add a `..` catch-all here!  See above.
         } = &background_tasks;
 
@@ -911,11 +864,66 @@ impl BackgroundTasksInitializer {
                 process",
             period: config.read_only_region_replacement_start.period_secs,
             task_impl: Box::new(ReadOnlyRegionReplacementDetector::new(
-                datastore,
+                datastore.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_read_only_region_replacement_start,
+        });
+
+        driver.register(TaskDefinition {
+            name: "webhook_dispatcher",
+            description: "dispatches queued webhook events to receivers",
+            period: config.webhook_dispatcher.period_secs,
+            task_impl: Box::new(WebhookDispatcher::new(
+                datastore.clone(),
+                task_webhook_deliverator.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_webhook_dispatcher,
+        });
+
+        driver.register({
+            let nexus_config::WebhookDeliveratorConfig {
+                lease_timeout_secs,
+                period_secs,
+                first_retry_backoff_secs,
+                second_retry_backoff_secs,
+            } = config.webhook_deliverator;
+            let cfg = webhook_deliverator::DeliveryConfig {
+                lease_timeout: chrono::TimeDelta::seconds(
+                    lease_timeout_secs.try_into().expect(
+                        "invalid webhook_deliverator.lease_timeout_secs",
+                    ),
+                ),
+                first_retry_backoff: chrono::TimeDelta::seconds(
+                    first_retry_backoff_secs.try_into().expect(
+                        "invalid webhook_deliverator.first_retry_backoff_secs",
+                    ),
+                ),
+                second_retry_backoff: chrono::TimeDelta::seconds(
+                    second_retry_backoff_secs.try_into().expect(
+                        "invalid webhook_deliverator.first_retry_backoff_secs",
+                    ),
+                ),
+            };
+            TaskDefinition {
+                name: "webhook_deliverator",
+                description: "sends webhook delivery requests",
+                period: period_secs,
+                task_impl: Box::new(
+                    webhook_deliverator::WebhookDeliverator::new(
+                        datastore,
+                        cfg,
+                        nexus_id,
+                        args.webhook_delivery_client,
+                    ),
+                ),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_webhook_deliverator,
+            }
         });
 
         driver
@@ -944,6 +952,11 @@ pub struct BackgroundTasksData {
     pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
     /// Channel for TUF repository artifacts to be replicated out to sleds
     pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
+    /// `reqwest::Client` for webhook delivery requests.
+    ///
+    /// This is shared with the external API as it's also used when sending
+    /// webhook liveness probe requests from the API.
+    pub webhook_delivery_client: reqwest::Client,
     /// Channel for configuring pending MGS updates
     pub mgs_updates_tx: watch::Sender<PendingMgsUpdates>,
 }

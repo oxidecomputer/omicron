@@ -1010,15 +1010,11 @@ pub(crate) mod test {
         test: &DiskTest<'_>,
     ) -> bool {
         for zpool in test.zpools() {
-            for dataset in &zpool.datasets {
-                if datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap()
-                    != 0
-                {
-                    return false;
-                }
+            let dataset = zpool.crucible_dataset();
+            if datastore.regions_total_reserved_size(dataset.id).await.unwrap()
+                != 0
+            {
+                return false;
             }
         }
         true
@@ -1026,12 +1022,11 @@ pub(crate) mod test {
 
     fn no_regions_ensured(sled_agent: &SledAgent, test: &DiskTest<'_>) -> bool {
         for zpool in test.zpools() {
-            for dataset in &zpool.datasets {
-                let crucible_dataset =
-                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
-                if !crucible_dataset.is_empty() {
-                    return false;
-                }
+            let dataset = zpool.crucible_dataset();
+            let crucible_dataset =
+                sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+            if !crucible_dataset.is_empty() {
+                return false;
             }
         }
         true

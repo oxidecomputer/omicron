@@ -999,16 +999,12 @@ async fn test_disk_backed_by_multiple_region_sets(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create three zpools, each with one dataset
-    let mut test = DiskTest::new(&cptestctx).await;
+    // Create six zpools, each with one crucible dataset
+    let _test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(6).build().await;
 
     // Assert default is still 16 GiB
     assert_eq!(16, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
-
-    // Create another three zpools, each with one dataset
-    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
-    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
-    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
 
     create_project_and_pool(client).await;
 
@@ -1338,7 +1334,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     // Set the third agent to fail when deleting regions
     let zpool =
         &disk_test.zpools().nth(2).expect("Expected at least three zpools");
-    let dataset = &zpool.datasets[0];
+    let dataset = zpool.crucible_dataset();
     cptestctx
         .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
@@ -1557,24 +1553,16 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Total occupied size should start at 0
     for zpool in test.zpools() {
-        for dataset in &zpool.datasets {
-            assert_eq!(
-                datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap(),
-                0
-            );
+        let dataset = zpool.crucible_dataset();
+        assert_eq!(
+            datastore.regions_total_reserved_size(dataset.id).await.unwrap(),
+            0
+        );
 
-            assert_eq!(
-                datastore
-                    .crucible_dataset_get(dataset.id)
-                    .await
-                    .unwrap()
-                    .size_used,
-                0,
-            );
-        }
+        assert_eq!(
+            datastore.crucible_dataset_get(dataset.id).await.unwrap().size_used,
+            0,
+        );
     }
 
     // Ask for a 7 gibibyte disk, this should succeed
@@ -1606,15 +1594,11 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     // regions to make a region set for an Upstairs, one region per dataset)
     // plus reservation overhead
     for zpool in test.zpools() {
-        for dataset in &zpool.datasets {
-            assert_eq!(
-                datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap(),
-                ByteCount::from_mebibytes_u32(8960).to_bytes(),
-            );
-        }
+        let dataset = zpool.crucible_dataset();
+        assert_eq!(
+            datastore.regions_total_reserved_size(dataset.id).await.unwrap(),
+            ByteCount::from_mebibytes_u32(8960).to_bytes(),
+        );
     }
 
     // Ask for a 6 gibibyte disk, this should fail because there isn't space
@@ -1643,15 +1627,11 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Total occupied size is still 7 GiB * 3 (plus overhead)
     for zpool in test.zpools() {
-        for dataset in &zpool.datasets {
-            assert_eq!(
-                datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap(),
-                ByteCount::from_mebibytes_u32(8960).to_bytes(),
-            );
-        }
+        let dataset = zpool.crucible_dataset();
+        assert_eq!(
+            datastore.regions_total_reserved_size(dataset.id).await.unwrap(),
+            ByteCount::from_mebibytes_u32(8960).to_bytes(),
+        );
     }
 
     // Delete the first disk, freeing up 7 gibibytes.
@@ -1667,15 +1647,11 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Total occupied size should be 0
     for zpool in test.zpools() {
-        for dataset in &zpool.datasets {
-            assert_eq!(
-                datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap(),
-                0,
-            );
-        }
+        let dataset = zpool.crucible_dataset();
+        assert_eq!(
+            datastore.regions_total_reserved_size(dataset.id).await.unwrap(),
+            0,
+        );
     }
 
     // Ask for a 10 gibibyte disk.
@@ -1703,15 +1679,11 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Total occupied size should be 10 GiB * 3 plus overhead
     for zpool in test.zpools() {
-        for dataset in &zpool.datasets {
-            assert_eq!(
-                datastore
-                    .regions_total_reserved_size(dataset.id)
-                    .await
-                    .unwrap(),
-                ByteCount::from_mebibytes_u32(12800).to_bytes(),
-            );
-        }
+        let dataset = zpool.crucible_dataset();
+        assert_eq!(
+            datastore.regions_total_reserved_size(dataset.id).await.unwrap(),
+            ByteCount::from_mebibytes_u32(12800).to_bytes(),
+        );
     }
 }
 
@@ -2136,19 +2108,16 @@ async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
     let mut number_of_matching_regions = 0;
 
     for zpool in disk_test.zpools() {
-        for dataset in &zpool.datasets {
-            let total_size = datastore
-                .regions_total_reserved_size(dataset.id)
-                .await
-                .unwrap();
+        let dataset = zpool.crucible_dataset();
+        let total_size =
+            datastore.regions_total_reserved_size(dataset.id).await.unwrap();
 
-            if total_size == allocated_region.reserved_size() {
-                number_of_matching_regions += 1;
-            } else if total_size == 0 {
-                // ok, unallocated
-            } else {
-                panic!("unexpected regions total size of {total_size}");
-            }
+        if total_size == allocated_region.reserved_size() {
+            number_of_matching_regions += 1;
+        } else if total_size == 0 {
+            // ok, unallocated
+        } else {
+            panic!("unexpected regions total size of {total_size}");
         }
     }
 
@@ -2490,7 +2459,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
 
     // Choose one of the datasets, and drop the simulated Crucible agent
     let zpool = disk_test.zpools().next().expect("Expected at least one zpool");
-    let dataset = &zpool.datasets[0];
+    let dataset = zpool.crucible_dataset();
 
     cptestctx.first_sled_agent().drop_dataset(zpool.id, dataset.id);
 
@@ -2610,7 +2579,7 @@ async fn test_do_not_provision_on_dataset(cptestctx: &ControlPlaneTestContext) {
         .await;
 
     // For one of the datasets, mark it as not provisionable
-    let dataset = &disk_test.zpools().next().unwrap().datasets[0];
+    let dataset = disk_test.zpools().next().unwrap().crucible_dataset();
 
     datastore
         .mark_crucible_dataset_not_provisionable(&opctx, dataset.id)
@@ -2656,7 +2625,7 @@ async fn test_do_not_provision_on_dataset_not_enough(
         .await;
 
     // For one of the datasets, mark it as not provisionable
-    let dataset = &disk_test.zpools().next().unwrap().datasets[0];
+    let dataset = disk_test.zpools().next().unwrap().crucible_dataset();
 
     datastore
         .mark_crucible_dataset_not_provisionable(&opctx, dataset.id)

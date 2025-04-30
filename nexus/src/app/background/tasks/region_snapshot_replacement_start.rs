@@ -451,20 +451,19 @@ mod test {
             BTreeMap::default();
 
         for zpool in disk_test.zpools() {
-            for dataset in &zpool.datasets {
-                dataset_to_zpool
-                    .insert(zpool.id.to_string(), dataset.id.to_string());
+            let dataset = zpool.crucible_dataset();
+            dataset_to_zpool
+                .insert(zpool.id.to_string(), dataset.id.to_string());
 
-                datastore
-                    .region_snapshot_create(RegionSnapshot::new(
-                        dataset.id,
-                        region_id,
-                        snapshot_id,
-                        String::from("[fd00:1122:3344::101]:12345"),
-                    ))
-                    .await
-                    .unwrap();
-            }
+            datastore
+                .region_snapshot_create(RegionSnapshot::new(
+                    dataset.id,
+                    region_id,
+                    snapshot_id,
+                    String::from("[fd00:1122:3344::101]:12345"),
+                ))
+                .await
+                .unwrap();
         }
 
         // Create the fake snapshot
@@ -631,7 +630,8 @@ mod test {
 
         let disk_test = DiskTest::new(cptestctx).await;
 
-        let dataset_id = disk_test.zpools().next().unwrap().datasets[0].id;
+        let dataset_id =
+            disk_test.zpools().next().unwrap().crucible_dataset().id;
 
         // Add a region snapshot replacement request for a fake region snapshot
 

@@ -19,6 +19,7 @@ use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
+use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
@@ -30,8 +31,6 @@ use dropshot::HttpError;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use illumos_utils::opte::PortManager;
-use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use illumos_utils::zone::ZONE_PREFIX;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
@@ -416,6 +415,12 @@ impl SledAgent {
         ));
         info!(&log, "SledAgent::new(..) starting");
 
+        // Cleanup any old sled-diagnostics ZFS snapshots
+        sled_diagnostics::LogsHandle::new(
+            log.new(o!("component" => "sled-diagnostics-cleanup")),
+        )
+        .cleanup_snapshots();
+
         let storage_manager = &long_running_task_handles.storage_manager;
         let boot_disk = storage_manager
             .get_latest_disks()
@@ -481,10 +486,19 @@ impl SledAgent {
 
         // Start tracking the underlay physical links.
         for link in underlay::find_chelsio_links(&config.data_links)? {
-            metrics_manager
+            match metrics_manager
                 .request_queue()
                 .track_physical("global", &link.0)
-                .await;
+            {
+                Ok(_) => {
+                    debug!(log, "started tracking global zone underlay links")
+                }
+                Err(e) => error!(
+                    log,
+                    "failed to track global zone underlay link";
+                    "error" => slog_error_chain::InlineErrorChain::new(&e),
+                ),
+            }
         }
 
         // Create the PortManager to manage all the OPTE ports on the sled.
@@ -586,10 +600,14 @@ impl SledAgent {
             )
             .await?;
 
-        let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
-            .await
-            .start(sled_address, &config.dropshot)
-            .await?;
+        let repo_depot = ArtifactStore::new(
+            &log,
+            storage_manager.clone(),
+            Some(services.clone()),
+        )
+        .await
+        .start(sled_address, &config.dropshot)
+        .await?;
 
         // Spawn a background task for managing notifications to nexus
         // about this sled-agent.
@@ -713,6 +731,11 @@ impl SledAgent {
         SupportBundleManager::new(&self.log, self.storage())
     }
 
+    /// Accesses the [SupportBundleLogs] API.
+    pub(crate) fn as_support_bundle_logs(&self) -> SupportBundleLogs<'_> {
+        SupportBundleLogs::new(&self.log, self.storage())
+    }
+
     pub(crate) fn switch_zone_underlay_info(
         &self,
     ) -> (Ipv6Addr, Option<&RackNetworkConfig>) {
@@ -769,28 +792,6 @@ impl SledAgent {
         name: &str,
     ) -> Result<Vec<ZoneBundleMetadata>, Error> {
         self.inner.zone_bundler.list_for_zone(name).await.map_err(Error::from)
-    }
-
-    /// Create a zone bundle for the provided zone.
-    pub async fn create_zone_bundle(
-        &self,
-        name: &str,
-    ) -> Result<ZoneBundleMetadata, Error> {
-        if name.starts_with(PROPOLIS_ZONE_PREFIX) {
-            self.inner
-                .instances
-                .create_zone_bundle(name)
-                .await
-                .map_err(Error::from)
-        } else if name.starts_with(ZONE_PREFIX) {
-            self.inner
-                .services
-                .create_zone_bundle(name)
-                .await
-                .map_err(Error::from)
-        } else {
-            Err(Error::from(BundleError::NoSuchZone { name: name.to_string() }))
-        }
     }
 
     /// Fetch the paths to all zone bundles with the provided name and ID.
@@ -1035,11 +1036,6 @@ impl SledAgent {
             .services
             .ensure_all_omicron_zones_persistent(requested_zones)
             .await?;
-        Ok(())
-    }
-
-    pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
-        self.inner.services.cockroachdb_initialize().await?;
         Ok(())
     }
 

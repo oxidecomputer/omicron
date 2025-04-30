@@ -209,15 +209,14 @@ mod test {
             datastore.clone(),
         );
 
-        // Record which datasets map to which zpools for later
+        // Record which crucible datasets map to which zpools for later
 
         let mut dataset_to_zpool: BTreeMap<ZpoolUuid, DatasetUuid> =
             BTreeMap::default();
 
         for zpool in disk_test.zpools() {
-            for dataset in &zpool.datasets {
-                dataset_to_zpool.insert(zpool.id, dataset.id);
-            }
+            let dataset = zpool.crucible_dataset();
+            dataset_to_zpool.insert(zpool.id, dataset.id);
         }
 
         let mut task =
