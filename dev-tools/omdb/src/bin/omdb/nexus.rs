@@ -495,19 +495,31 @@ enum SupportBundleCommands {
     Create,
     /// Delete a support bundle
     Delete(SupportBundleDeleteArgs),
+    /// Download an entire support bundle
+    Download(SupportBundleDownloadArgs),
     /// Download the index of a support bundle
     ///
     /// This is a "list of files", from which individual files can be accessed
     GetIndex(SupportBundleIndexArgs),
-    /// View a file within a support bundle
+    /// Download a single file within a support bundle
     GetFile(SupportBundleFileArgs),
-    /// Creates dashboard for viewing the contents of a support bundle
+    /// Run a dashboard for viewing the contents of a support bundle
     Inspect(SupportBundleInspectArgs),
 }
 
 #[derive(Debug, Args)]
 struct SupportBundleDeleteArgs {
     id: SupportBundleUuid,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleDownloadArgs {
+    id: SupportBundleUuid,
+
+    /// Optional output path where the file should be written,
+    /// instead of stdout.
+    #[arg(short, long)]
+    output: Option<Utf8PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -750,6 +762,9 @@ impl NexusArgs {
                 let token = omdb.check_allow_destructive()?;
                 cmd_nexus_support_bundles_delete(&client, args, token).await
             }
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Download(args),
+            }) => cmd_nexus_support_bundles_download(&client, args).await,
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::GetIndex(args),
             }) => cmd_nexus_support_bundles_get_index(&client, args).await,
@@ -3851,6 +3866,28 @@ async fn write_stream_to_sink(
             Ok(data) => sink.write_all(&data)?,
         }
     }
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles download`
+async fn cmd_nexus_support_bundles_download(
+    client: &nexus_client::Client,
+    args: &SupportBundleDownloadArgs,
+) -> Result<(), anyhow::Error> {
+    let stream = client
+        .support_bundle_download(args.id.as_untyped_uuid())
+        .await
+        .with_context(|| format!("downloading support bundle {}", args.id))?
+        .into_inner_stream();
+
+    let sink: Box<dyn std::io::Write> = match &args.output {
+        Some(path) => Box::new(std::fs::File::create(path)?),
+        None => Box::new(std::io::stdout()),
+    };
+
+    write_stream_to_sink(stream, sink)
+        .await
+        .with_context(|| format!("streaming support bundle {}", args.id))?;
     Ok(())
 }
 
