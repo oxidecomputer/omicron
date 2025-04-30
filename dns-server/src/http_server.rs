@@ -39,23 +39,47 @@ impl DnsServerApi for DnsServerApiImpl {
         dropshot::HttpResponseOk<v1::config::DnsConfig>,
         dropshot::HttpError,
     > {
-        let apictx = rqctx.context();
-        let config = apictx
-            .store
-            .dns_config()
-            .await
-            .map_err(|e| {
-                dropshot::HttpError::for_internal_error(format!(
-                    "internal error: {:?}",
-                    e
-                ))
-            })?
-            .try_into()
-            .unwrap();
-        Ok(dropshot::HttpResponseOk(config))
+        Self::dns_config_get(rqctx).await.map(|ok| {
+            dropshot::HttpResponseOk(ok.0.try_into().expect(
+                "can perform the lossy conversion of v2 DnsConfig to v1",
+            ))
+        })
     }
 
     async fn dns_config_get_v2(
+        rqctx: RequestContext<Context>,
+    ) -> Result<
+        dropshot::HttpResponseOk<v2::config::DnsConfig>,
+        dropshot::HttpError,
+    > {
+        Self::dns_config_get(rqctx).await
+    }
+
+    async fn dns_config_put_v1(
+        rqctx: RequestContext<Context>,
+        rq: dropshot::TypedBody<v1::config::DnsConfigParams>,
+    ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>
+    {
+        Self::dns_config_put(
+            rqctx,
+            rq.into_inner()
+                .try_into()
+                .expect("can convert v1 DnsCnofigParams to v2"),
+        )
+        .await
+    }
+
+    async fn dns_config_put_v2(
+        rqctx: RequestContext<Context>,
+        rq: dropshot::TypedBody<v2::config::DnsConfigParams>,
+    ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>
+    {
+        Self::dns_config_put(rqctx, rq.into_inner()).await
+    }
+}
+
+impl DnsServerApiImpl {
+    async fn dns_config_get(
         rqctx: RequestContext<Context>,
     ) -> Result<
         dropshot::HttpResponseOk<v2::config::DnsConfig>,
@@ -71,32 +95,13 @@ impl DnsServerApi for DnsServerApiImpl {
         Ok(dropshot::HttpResponseOk(config))
     }
 
-    async fn dns_config_put_v1(
+    async fn dns_config_put(
         rqctx: RequestContext<Context>,
-        rq: dropshot::TypedBody<v1::config::DnsConfigParams>,
+        params: v2::config::DnsConfigParams,
     ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>
     {
         let apictx = rqctx.context();
-        apictx
-            .store
-            .dns_config_update(
-                &rq.into_inner().try_into().unwrap(),
-                &rqctx.request_id,
-            )
-            .await?;
-        Ok(dropshot::HttpResponseUpdatedNoContent())
-    }
-
-    async fn dns_config_put_v2(
-        rqctx: RequestContext<Context>,
-        rq: dropshot::TypedBody<v2::config::DnsConfigParams>,
-    ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>
-    {
-        let apictx = rqctx.context();
-        apictx
-            .store
-            .dns_config_update(&rq.into_inner(), &rqctx.request_id)
-            .await?;
+        apictx.store.dns_config_update(&params, &rqctx.request_id).await?;
         Ok(dropshot::HttpResponseUpdatedNoContent())
     }
 }
