@@ -25,6 +25,7 @@ impl_enum_type!(
     // Enum values
     Running => b"running"
     Stopped => b"stopped"
+    GuestShutdown => b"guest_shutdown"
     Destroyed => b"destroyed"
 );
 
@@ -33,6 +34,7 @@ impl InstanceIntendedState {
         match self {
             Self::Running => "running",
             Self::Stopped => "stopped",
+            Self::GuestShutdown => "guest_shutdown",
             Self::Destroyed => "destroyed",
         }
     }
