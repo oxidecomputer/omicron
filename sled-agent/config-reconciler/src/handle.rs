@@ -17,9 +17,7 @@ use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::NestedDatasetLocation;
 use slog::Logger;
-use slog::warn;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::OnceLock;
 use tokio::sync::watch;
 
@@ -60,6 +58,16 @@ pub enum TimeSyncConfig {
 }
 
 #[derive(Debug)]
+pub struct ConfigReconcilerSpawnToken {
+    key_requester: StorageKeyRequester,
+    time_sync_config: TimeSyncConfig,
+    reconciler_result_tx: watch::Sender<ReconcilerResult>,
+    currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+    ledger_task_log: Logger,
+    reconciler_task_log: Logger,
+}
+
+#[derive(Debug)]
 pub struct ConfigReconcilerHandle {
     raw_disks_tx: RawDisksSender,
     internal_disks_rx: InternalDisksReceiver,
@@ -67,15 +75,8 @@ pub struct ConfigReconcilerHandle {
     reconciler_result_rx: watch::Receiver<ReconcilerResult>,
     currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
 
-    // `None` until `spawn_reconciliation_task()` is called.
+    // Empty until `spawn_reconciliation_task()` is called.
     ledger_task: OnceLock<LedgerTaskHandle>,
-
-    // We have a two-phase initialization: we get some of our dependencies when
-    // `Self::new()` is called and the rest when
-    // `Self::spawn_reconciliation_task()` is called. We hold the dependencies
-    // that are available in `new` but not needed until
-    // `spawn_reconciliation_task` in this field.
-    reconciler_task_dependencies: Mutex<Option<ReconcilerTaskDependencies>>,
 }
 
 impl ConfigReconcilerHandle {
@@ -93,7 +94,7 @@ impl ConfigReconcilerHandle {
         key_requester: StorageKeyRequester,
         time_sync_config: TimeSyncConfig,
         base_log: &Logger,
-    ) -> Self {
+    ) -> (Self, ConfigReconcilerSpawnToken) {
         let mount_config = Arc::new(mount_config);
 
         // Spawn the task that monitors our internal disks (M.2s).
@@ -111,14 +112,27 @@ impl ConfigReconcilerHandle {
             base_log,
         );
 
-        // Stash the dependencies the reconciler task will need in
-        // `spawn_reconciliation_task()`.
         let (reconciler_result_tx, reconciler_result_rx) =
             watch::channel(ReconcilerResult::default());
         let (currently_managed_zpools_tx, currently_managed_zpools_rx) =
             watch::channel(Arc::default());
-        let reconciler_task_dependencies =
-            Mutex::new(Some(ReconcilerTaskDependencies {
+
+        (
+            Self {
+                raw_disks_tx,
+                internal_disks_rx,
+                dataset_task,
+                ledger_task: OnceLock::new(),
+                reconciler_result_rx,
+                currently_managed_zpools_rx:
+                    CurrentlyManagedZpoolsReceiver::new(
+                        currently_managed_zpools_rx,
+                    ),
+            },
+            // Stash the dependencies the reconciler task will need in
+            // `spawn_reconciliation_task()` inside this token that the caller
+            // has to hold until it has the other outside dependencies ready.
+            ConfigReconcilerSpawnToken {
                 key_requester,
                 time_sync_config,
                 reconciler_result_tx,
@@ -127,25 +141,19 @@ impl ConfigReconcilerHandle {
                     .new(slog::o!("component" => "SledConfigLedgerTask")),
                 reconciler_task_log: base_log
                     .new(slog::o!("component" => "ConfigReconcilerTask")),
-            }));
-
-        Self {
-            raw_disks_tx,
-            internal_disks_rx,
-            dataset_task,
-            ledger_task: OnceLock::new(),
-            reconciler_result_rx,
-            currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver::new(
-                currently_managed_zpools_rx,
-            ),
-            reconciler_task_dependencies,
-        }
+            },
+        )
     }
 
     /// Spawn the primary config reconciliation task.
     ///
-    /// This method can effectively only be called once; any subsequent calls
-    /// will log a warning and do nothing.
+    /// This method can effectively only be called once, because the caller must
+    /// supply the `token` returned by `new()` when this handle was created.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called multiple times, which is statically impossible outside
+    /// shenanigans to get a second `ConfigReconcilerHandleSpawnToken`.
     pub fn spawn_reconciliation_task<
         T: SledAgentFacilities,
         U: SledAgentArtifactStore,
@@ -154,26 +162,16 @@ impl ConfigReconcilerHandle {
         underlay_vnic: EtherstubVnic,
         sled_agent_facilities: T,
         sled_agent_artifact_store: U,
-        log: &Logger,
+        token: ConfigReconcilerSpawnToken,
     ) {
-        let ReconcilerTaskDependencies {
+        let ConfigReconcilerSpawnToken {
             key_requester,
             time_sync_config,
             reconciler_result_tx,
             currently_managed_zpools_tx,
             ledger_task_log,
             reconciler_task_log,
-        } = match self.reconciler_task_dependencies.lock().unwrap().take() {
-            Some(dependencies) => dependencies,
-            None => {
-                warn!(
-                    log,
-                    "spawn_reconciliation_task() called multiple times \
-                         (ignored after first call)"
-                );
-                return;
-            }
-        };
+        } = token;
 
         // Spawn the task that manages our config ledger.
         let (ledger_task, current_config_rx) =
@@ -184,10 +182,13 @@ impl ConfigReconcilerHandle {
             );
         match self.ledger_task.set(ledger_task) {
             Ok(()) => (),
-            // We know via the `lock().take()` above that this only executes
-            // once, so `ledger_task` is always set here.
+            // We can only be called with the `token` we returned in `new()` and
+            // we document that we panic if called multiple times via some
+            // multi-token shenanigans.
             Err(_) => {
-                unreachable!("spawn_reconciliation_task() only executes once")
+                panic!(
+                    "spawn_reconciliation_task() called with multiple tokens"
+                )
             }
         }
 

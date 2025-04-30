@@ -65,6 +65,7 @@ pub mod dump_setup;
 pub use dataset_serialization_task::DatasetTaskError;
 pub use handle::AvailableDatasetsReceiver;
 pub use handle::ConfigReconcilerHandle;
+pub use handle::ConfigReconcilerSpawnToken;
 pub use handle::ReconcilerInventory;
 pub use handle::TimeSyncConfig;
 pub use internal_disks::InternalDisks;
