@@ -576,7 +576,7 @@ pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
     pub baseboard: Baseboard,
-    /// The rack to which this Sled is currently attached*
+    /// The rack to which this Sled is currently attached
     pub rack_id: Uuid,
     /// The operator-defined policy of a sled.
     pub policy: SledPolicy,
