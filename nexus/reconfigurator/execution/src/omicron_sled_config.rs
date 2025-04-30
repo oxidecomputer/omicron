@@ -192,6 +192,8 @@ mod tests {
             _ => panic!("Unexpected address type for sled agent (wanted IPv6)"),
         };
         let sim_sled_agent = &cptestctx.sled_agents[0].sled_agent();
+        let sim_sled_agent_config_generation =
+            sim_sled_agent.omicron_zones_list().generation;
 
         let sleds_by_id = BTreeMap::from([(
             sim_sled_agent.id,
@@ -309,7 +311,7 @@ mod tests {
 
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
-            sled_agent_generation: Generation::new().next(),
+            sled_agent_generation: sim_sled_agent_config_generation.next(),
             disks,
             datasets,
             zones,

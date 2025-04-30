@@ -1155,8 +1155,15 @@ mod test {
                     )
                 })
                 .collect();
+
+            // Read current sled config generation from zones (this will change
+            // slightly once the simulator knows how to keep the unified config
+            // and be a little less weird)
+            let current_generation =
+                cptestctx.first_sled_agent().omicron_zones_list().generation;
+
             let dataset_config = DatasetsConfig {
-                generation: Generation::new().next(),
+                generation: current_generation.next(),
                 datasets,
             };
 

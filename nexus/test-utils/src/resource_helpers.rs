@@ -1307,13 +1307,33 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 .collect(),
         };
 
+        // ControlPlaneTestContext sets up initial configs; find the max
+        // generation of all our sleds and use that as the base for any new
+        // configs we produce.
+        let generation = cptestctx
+            .all_sled_agents()
+            .filter_map(|agent| {
+                if input_sleds.contains(&agent.sled_agent.id) {
+                    Some(agent
+                    .sled_agent
+                    .datasets_config_list()
+                    .expect(
+                        "dataset config populated by ControlPlaneTestContext",
+                    )
+                    .generation)
+                } else {
+                    None
+                }
+            })
+            .max()
+            .expect("at least one sled specified");
+
         let mut sleds = BTreeMap::new();
         for sled_id in input_sleds {
             sleds.insert(sled_id, PerSledDiskState { zpools: vec![] });
         }
 
-        let mut disk_test =
-            Self { cptestctx, sleds, generation: Generation::new() };
+        let mut disk_test = Self { cptestctx, sleds, generation };
 
         for sled_id in
             disk_test.sleds.keys().cloned().collect::<Vec<SledUuid>>()
