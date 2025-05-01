@@ -68,6 +68,15 @@ pub enum StepResult<'a, T> {
     Done(T),
 }
 
+impl<'a, T> StepResult<'a, T> {
+    pub async fn step(self) -> Self {
+        match self {
+            StepResult::ReadyAgain(stepper) => stepper.step().await,
+            StepResult::Done(_) => self,
+        }
+    }
+}
+
 struct MyWaker(mpsc::Sender<()>);
 
 impl Wake for MyWaker {

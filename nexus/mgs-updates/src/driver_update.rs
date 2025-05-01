@@ -599,6 +599,7 @@ mod test {
     use crate::sp_updater::ReconfiguratorSpUpdater;
     use crate::test_util::cabooses_equal;
     use crate::test_util::sp_test_state::SpTestState;
+    use crate::test_util::step_through::StepResult;
     use crate::test_util::step_through::StepThrough;
     use crate::test_util::test_artifacts::TestArtifacts;
     use futures::FutureExt;
@@ -613,6 +614,7 @@ mod test {
     use nexus_types::internal_api::views::UpdateAttemptStatus;
     use nexus_types::internal_api::views::UpdateCompletedHow;
     use nexus_types::inventory::BaseboardId;
+    use slog::debug;
     use std::sync::Arc;
     use tokio::sync::watch;
     use tufaceous_artifact::ArtifactHash;
@@ -623,7 +625,7 @@ mod test {
     // test cases:
     //  - done: successful update: updated SP
     //  - done: successful update: no changes needed
-    //  - successful update: watched another finish
+    //  - done: successful update: watched another finish
     //  - successful update: took over
     //  - failure: wrong identity
     //  - failure: when initial conditions don't match
@@ -725,7 +727,70 @@ mod test {
         let log = &gwtestctx.logctx.log;
         let artifacts = TestArtifacts::new(log).await.unwrap();
 
-        // XXX-dap
+        // We're going to start two concurrent update attempts.  The sequence
+        // we want is:
+        //
+        // - update1 gets far enough along to have started the upload, but does
+        //   not actually finish
+        // - update2 gets far enough along to notice that update1 is running
+        // - then update1 finished
+        // - then update2 can finish
+        //
+        // It's a little tricky to orchestrate this with the tools we have
+        // available.  The most robust is actually have update2's precondition
+        // reflect that update1 has finished its upload.
+        let desc1 = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: None,
+        };
+
+        let desc2 = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: Some(ExpectedVersion::Version(
+                std::str::from_utf8(
+                    artifacts
+                        .deployed_caboose(&artifacts.sp_gimlet_artifact_hash)
+                        .expect("deployed caboose for generated artifact")
+                        .version()
+                        .expect("valid version"),
+                )
+                .expect("version is UTF-8")
+                .parse()
+                .expect("version is valid"),
+            )),
+        };
+
+        let attempt1 = desc1.load().await;
+        let attempt2 = desc2.load().await;
+
+        // Start one, but pause it while waiting for the update to upload.
+        let mut in_progress1 = attempt1.begin().await;
+        in_progress1.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
+
+        // Start the other.  Pause it at the point where it's also waiting for
+        // the upload to finish.
+        let mut in_progress2 = attempt2.begin().await;
+        in_progress2.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
+
+        // Finish the first update, then the second.
+        let finished1 = in_progress1.finish().await;
+        let finished2 = in_progress2.finish().await;
+
+        // Both should succeed, but with different codes.
+        finished1.expect_success(UpdateCompletedHow::CompletedUpdate);
+        finished2.expect_success(UpdateCompletedHow::WaitedForConcurrentUpdate);
 
         artifacts.teardown().await;
         gwtestctx.teardown().await;
@@ -756,7 +821,6 @@ mod test {
         /// Fetches live state about an SP in preparation to begin an update
         /// attempt
         pub async fn load(&self) -> UpdateAttempt<'a> {
-            let log = self.gwtestctx.logctx.log.clone();
             let mgs_client = self.gwtestctx.client();
 
             // Fetch information about the device that we're going to update.
@@ -784,7 +848,7 @@ mod test {
                 .deployed_caboose(self.artifact_hash)
                 .expect("caboose for generated artifact");
             let sp_update_request = PendingMgsUpdate {
-                baseboard_id,
+                baseboard_id: baseboard_id.clone(),
                 sp_type: self.sp_type,
                 slot_id: self.slot_id,
                 details: PendingMgsUpdateDetails::Sp {
@@ -799,6 +863,11 @@ mod test {
                 .parse()
                 .unwrap(),
             };
+            let log = self.gwtestctx.logctx.log.new(slog::o!(
+                "update_id" => update_id.to_string(),
+                baseboard_id,
+                sp_update_request.clone()
+            ));
 
             UpdateAttempt {
                 gwtestctx: self.gwtestctx,
@@ -882,9 +951,10 @@ mod test {
             .boxed();
 
             InProgressAttempt {
+                log: self.log,
                 baseboard_id,
                 status_rx,
-                stepper: StepThrough::new(future),
+                step: Some(StepResult::ReadyAgain(StepThrough::new(future))),
                 sp_type: self.sp_type,
                 slot_id: self.slot_id,
                 mgs_client: self.gwtestctx.client(),
@@ -895,9 +965,12 @@ mod test {
     }
 
     struct InProgressAttempt<'a> {
+        log: slog::Logger,
         baseboard_id: Arc<BaseboardId>,
         status_rx: watch::Receiver<MgsUpdateDriverStatus>,
-        stepper: StepThrough<'a, Result<UpdateCompletedHow, ApplyUpdateError>>,
+        step: Option<
+            StepResult<'a, Result<UpdateCompletedHow, ApplyUpdateError>>,
+        >,
         sp_type: SpType,
         slot_id: u32,
         mgs_client: gateway_client::Client,
@@ -905,9 +978,70 @@ mod test {
         deployed_caboose: hubtools::Caboose,
     }
 
+    #[derive(Debug, Eq, PartialEq)]
+    enum Paused {
+        Paused,
+        Done,
+    }
+
     impl<'a> InProgressAttempt<'a> {
+        async fn run_until_status(
+            &mut self,
+            status: UpdateAttemptStatus,
+        ) -> Paused {
+            loop {
+                assert!(self.step.is_some());
+
+                // If the condition is already true, return now.  If the actual
+                // status is missing, then this must have already finished but
+                // the future hasn't completed yet.  Ignore the condition and
+                // wait for the future to finish.
+                if let Some(current_status) =
+                    self.status_rx.borrow().in_progress.get(&self.baseboard_id)
+                {
+                    if current_status.status == status {
+                        debug!(
+                            &self.log,
+                            "run_until_status({:?}): pausing", status,
+                        );
+                        return Paused::Paused;
+                    }
+
+                    debug!(
+                        &self.log,
+                        "run_until_status({:?}): status = {:?}",
+                        status,
+                        current_status.status
+                    );
+                }
+
+                // If we're done, we're done.
+                if let Some(StepResult::Done(_)) = &self.step {
+                    debug!(
+                        &self.log,
+                        "run_until_status({:?}): done early", status,
+                    );
+                    return Paused::Done;
+                }
+
+                // Otherwise, take a step.
+                debug!(&self.log, "run_until_status({:?}): stepping", status);
+                let step =
+                    self.step.take().expect("self.step is always non-None");
+                self.step = Some(step.step().await);
+            }
+        }
+
         async fn finish(self) -> FinishedUpdateAttempt {
-            let result = self.stepper.finish().await;
+            debug!(&self.log, "finishing update");
+            let result = match self.step.expect("self.step is always non-None")
+            {
+                StepResult::ReadyAgain(step_through) => {
+                    step_through.finish().await
+                }
+                StepResult::Done(result) => result,
+            };
+
             FinishedUpdateAttempt::new(
                 self.sp_type,
                 self.slot_id,
