@@ -43,10 +43,17 @@ pub struct DnsConfig {
     pub zones: Vec<DnsConfigZone>,
 }
 
-impl TryInto<crate::v1::config::DnsConfig> for DnsConfig {
+impl TryInto<v1::config::DnsConfig> for DnsConfig {
     type Error = anyhow::Error;
-    fn try_into(self) -> Result<crate::v1::config::DnsConfig, Self::Error> {
-        panic!("lol")
+    fn try_into(self) -> Result<v1::config::DnsConfig, Self::Error> {
+        let DnsConfig { generation, time_created, time_applied, zones } = self;
+
+        Ok(v1::config::DnsConfig {
+            generation,
+            time_created,
+            time_applied,
+            zones: zones.into_iter().map(|zone| zone.into()).collect(),
+        })
     }
 }
 
@@ -63,6 +70,27 @@ impl TryInto<crate::v1::config::DnsConfig> for DnsConfig {
 pub struct DnsConfigZone {
     pub zone_name: String,
     pub records: HashMap<String, Vec<DnsRecord>>,
+}
+
+impl Into<v1::config::DnsConfigZone> for DnsConfigZone {
+    fn into(self) -> v1::config::DnsConfigZone {
+        let DnsConfigZone { zone_name, records } = self;
+
+        v1::config::DnsConfigZone {
+            zone_name,
+            records: records
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        k,
+                        v.into_iter()
+                            .filter_map(|rec| rec.try_into().ok())
+                            .collect(),
+                    )
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(
@@ -90,6 +118,21 @@ pub enum DnsRecord {
     Ns(String),
     #[serde(rename = "SOA")]
     Soa(Soa),
+}
+
+impl TryInto<v1::config::DnsRecord> for DnsRecord {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> Result<v1::config::DnsRecord, Self::Error> {
+        match self {
+            DnsRecord::A(ip) => Ok(v1::config::DnsRecord::A(ip)),
+            DnsRecord::Aaaa(ip) => Ok(v1::config::DnsRecord::Aaaa(ip)),
+            DnsRecord::Srv(srv) => Ok(v1::config::DnsRecord::Srv(srv.into())),
+            other @ DnsRecord::Ns(_) | other @ DnsRecord::Soa(_) => {
+                Err(anyhow::anyhow!("unrepresentable record: {:?}", other))
+            }
+        }
+    }
 }
 
 // The `From<Ipv4Addr>` and `From<Ipv6Addr>` implementations are very slightly

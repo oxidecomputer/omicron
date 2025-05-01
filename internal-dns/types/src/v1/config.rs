@@ -78,15 +78,7 @@ impl TryInto<v2::config::DnsConfigZone> for DnsConfigZone {
                     let converted_name_records: Vec<v2::config::DnsRecord> =
                         name_records
                             .into_iter()
-                            .map(|rec| match rec {
-                                DnsRecord::A(x) => v2::config::DnsRecord::A(x),
-                                DnsRecord::Aaaa(x) => {
-                                    v2::config::DnsRecord::Aaaa(x)
-                                }
-                                DnsRecord::Srv(x) => {
-                                    v2::config::DnsRecord::Srv(x.into())
-                                }
-                            })
+                            .map(|rec| rec.into())
                             .collect();
                     if converted_name_records.is_empty() {
                         None
@@ -123,6 +115,16 @@ pub enum DnsRecord {
     Aaaa(Ipv6Addr),
     #[serde(rename = "SRV")]
     Srv(Srv),
+}
+
+impl Into<v2::config::DnsRecord> for DnsRecord {
+    fn into(self) -> v2::config::DnsRecord {
+        match self {
+            DnsRecord::A(ip) => v2::config::DnsRecord::A(ip),
+            DnsRecord::Aaaa(ip) => v2::config::DnsRecord::Aaaa(ip),
+            DnsRecord::Srv(srv) => v2::config::DnsRecord::Srv(srv.into()),
+        }
+    }
 }
 
 // The `From<Ipv4Addr>` and `From<Ipv6Addr>` implementations are very slightly
@@ -166,4 +168,15 @@ pub struct Srv {
     pub weight: u16,
     pub port: u16,
     pub target: String,
+}
+
+impl From<v2::config::Srv> for Srv {
+    fn from(other: v2::config::Srv) -> Self {
+        Srv {
+            prio: other.prio,
+            weight: other.weight,
+            port: other.port,
+            target: other.target,
+        }
+    }
 }
