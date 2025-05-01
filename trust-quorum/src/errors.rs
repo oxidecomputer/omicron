@@ -9,22 +9,6 @@ use crate::{Epoch, PlatformId, Threshold};
 use omicron_uuid_kinds::RackUuid;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-pub enum CommitError {
-    #[error("invalid rack id")]
-    InvalidRackId(
-        #[from]
-        #[source]
-        MismatchedRackIdError,
-    ),
-
-    #[error("missing prepare msg")]
-    MissingPrepare,
-
-    #[error("prepare for a later configuration exists")]
-    OutOfOrderCommit,
-}
-
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 #[error(
     "sled was decommissioned on msg from {from:?} at epoch {epoch:?}: last prepared epoch = {last_prepared_epoch:?}"
 )]

@@ -12,6 +12,7 @@
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
+mod alarm;
 mod configuration;
 mod coordinator_state;
 pub(crate) mod crypto;
@@ -20,9 +21,10 @@ mod messages;
 mod node;
 mod persistent_state;
 mod validators;
-pub use configuration::Configuration;
+pub use alarm::Alarm;
+pub use configuration::{Configuration, PreviousConfiguration};
 pub(crate) use coordinator_state::CoordinatorState;
-pub use crypto::RackSecret;
+pub use crypto::{EncryptedRackSecret, RackSecret, Salt, Sha3_256Digest};
 pub use messages::*;
 pub use node::Node;
 pub use persistent_state::{PersistentState, PersistentStateSummary};

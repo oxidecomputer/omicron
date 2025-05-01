@@ -29,8 +29,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 const LRTQ_SHARE_SIZE: usize = 33;
 
 /// We don't distinguish whether this is an Ed25519 Scalar or set of GF(256)
-/// polynomials points with an x-coordinate of 0. Both can be treated as 32 byte
-/// blobs when decrypted, as they are immediately fed into HKDF.
+/// polynomials' points with an x-coordinate of 0. Both can be treated as 32
+/// byte blobs when decrypted, as they are immediately fed into HKDF.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]

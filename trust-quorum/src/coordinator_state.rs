@@ -211,7 +211,7 @@ impl CoordinatorState {
 
     /// Record a `PrepareAck` from another node as part of tracking
     /// quorum for the prepare phase of the trust quorum protocol.
-    pub fn ack_prepare(&mut self, from: PlatformId) {
+    pub fn record_prepare_ack(&mut self, from: PlatformId) {
         match &mut self.op {
             CoordinatorOperation::Prepare {
                 prepares, prepare_acks, ..
