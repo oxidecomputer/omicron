@@ -43,17 +43,33 @@ pub struct DnsConfig {
     pub zones: Vec<DnsConfigZone>,
 }
 
-impl TryInto<v1::config::DnsConfig> for DnsConfig {
-    type Error = anyhow::Error;
-    fn try_into(self) -> Result<v1::config::DnsConfig, Self::Error> {
+impl DnsConfig {
+    /// Perform a *lossy* conversion from the V2 [`DnsConfig`] to the V1
+    /// [`v1::config::DnsConfig`].  In particular, V2 adds NS and SOA records,
+    /// which did not exist in V1, so they are silently discarded when
+    /// converting down.
+    ///
+    /// If this conversion would leave an empty zone, the zone is omitted
+    /// entirely.
+    pub fn as_v1(self) -> v1::config::DnsConfig {
         let DnsConfig { generation, time_created, time_applied, zones } = self;
 
-        Ok(v1::config::DnsConfig {
+        v1::config::DnsConfig {
             generation,
             time_created,
             time_applied,
-            zones: zones.into_iter().map(|zone| zone.into()).collect(),
-        })
+            zones: zones
+                .into_iter()
+                .filter_map(|zone| {
+                    let converted_zone = zone.as_v1();
+                    if converted_zone.records.is_empty() {
+                        None
+                    } else {
+                        Some(converted_zone)
+                    }
+                })
+                .collect(),
+        }
     }
 }
 
@@ -72,8 +88,8 @@ pub struct DnsConfigZone {
     pub records: HashMap<String, Vec<DnsRecord>>,
 }
 
-impl Into<v1::config::DnsConfigZone> for DnsConfigZone {
-    fn into(self) -> v1::config::DnsConfigZone {
+impl DnsConfigZone {
+    fn as_v1(self) -> v1::config::DnsConfigZone {
         let DnsConfigZone { zone_name, records } = self;
 
         v1::config::DnsConfigZone {
@@ -82,9 +98,7 @@ impl Into<v1::config::DnsConfigZone> for DnsConfigZone {
                 .into_iter()
                 .filter_map(|(k, v)| {
                     let converted_records: Vec<v1::config::DnsRecord> =
-                        v.into_iter()
-                            .filter_map(|rec| rec.try_into().ok())
-                            .collect();
+                        v.into_iter().filter_map(|rec| rec.as_v1()).collect();
                     if converted_records.is_empty() {
                         None
                     } else {
@@ -123,16 +137,16 @@ pub enum DnsRecord {
     Soa(Soa),
 }
 
-impl TryInto<v1::config::DnsRecord> for DnsRecord {
-    type Error = anyhow::Error;
-
-    fn try_into(self) -> Result<v1::config::DnsRecord, Self::Error> {
+impl DnsRecord {
+    fn as_v1(self) -> Option<v1::config::DnsRecord> {
         match self {
-            DnsRecord::A(ip) => Ok(v1::config::DnsRecord::A(ip)),
-            DnsRecord::Aaaa(ip) => Ok(v1::config::DnsRecord::Aaaa(ip)),
-            DnsRecord::Srv(srv) => Ok(v1::config::DnsRecord::Srv(srv.into())),
-            other @ DnsRecord::Ns(_) | other @ DnsRecord::Soa(_) => {
-                Err(anyhow::anyhow!("unrepresentable record: {:?}", other))
+            DnsRecord::A(ip) => Some(v1::config::DnsRecord::A(ip)),
+            DnsRecord::Aaaa(ip) => Some(v1::config::DnsRecord::Aaaa(ip)),
+            DnsRecord::Srv(srv) => Some(v1::config::DnsRecord::Srv(srv.into())),
+            DnsRecord::Ns(_) | DnsRecord::Soa(_) => {
+                // V1 DNS records do not have variants for NS or SOA records, so
+                // we're lossy here.
+                None
             }
         }
     }

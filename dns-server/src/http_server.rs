@@ -39,11 +39,9 @@ impl DnsServerApi for DnsServerApiImpl {
         dropshot::HttpResponseOk<v1::config::DnsConfig>,
         dropshot::HttpError,
     > {
-        Self::dns_config_get(rqctx).await.map(|ok| {
-            dropshot::HttpResponseOk(ok.0.try_into().expect(
-                "can perform the lossy conversion of v2 DnsConfig to v1",
-            ))
-        })
+        Self::dns_config_get(rqctx)
+            .await
+            .map(|ok| dropshot::HttpResponseOk(ok.0.as_v1()))
     }
 
     async fn dns_config_get_v2(

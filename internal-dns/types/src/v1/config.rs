@@ -35,19 +35,18 @@ impl DnsConfigParams {
     }
 }
 
-impl TryInto<v2::config::DnsConfigParams> for DnsConfigParams {
-    type Error = anyhow::Error;
-    fn try_into(self) -> Result<v2::config::DnsConfigParams, Self::Error> {
+impl Into<v2::config::DnsConfigParams> for DnsConfigParams {
+    fn into(self) -> v2::config::DnsConfigParams {
         let mut converted_zones: Vec<v2::config::DnsConfigZone> = Vec::new();
         for zone in self.zones.into_iter() {
-            converted_zones.push(zone.try_into()?);
+            converted_zones.push(zone.into());
         }
 
-        Ok(v2::config::DnsConfigParams {
+        v2::config::DnsConfigParams {
             generation: self.generation,
             time_created: self.time_created,
             zones: converted_zones,
-        })
+        }
     }
 }
 
@@ -68,9 +67,8 @@ pub struct DnsConfigZone {
     pub records: HashMap<String, Vec<DnsRecord>>,
 }
 
-impl TryInto<v2::config::DnsConfigZone> for DnsConfigZone {
-    type Error = anyhow::Error;
-    fn try_into(self) -> Result<v2::config::DnsConfigZone, Self::Error> {
+impl Into<v2::config::DnsConfigZone> for DnsConfigZone {
+    fn into(self) -> v2::config::DnsConfigZone {
         let converted_records: HashMap<String, Vec<v2::config::DnsRecord>> =
             self.records
                 .into_iter()
@@ -87,10 +85,10 @@ impl TryInto<v2::config::DnsConfigZone> for DnsConfigZone {
                     }
                 })
                 .collect();
-        Ok(v2::config::DnsConfigZone {
+        v2::config::DnsConfigZone {
             zone_name: self.zone_name,
             records: converted_records,
-        })
+        }
     }
 }
 
