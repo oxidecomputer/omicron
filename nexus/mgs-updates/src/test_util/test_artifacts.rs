@@ -20,11 +20,10 @@ type ArtifactData = BTreeMap<ArtifactHash, Vec<u8>>;
 type InMemoryRepoDepotServerContext = Arc<ArtifactData>;
 
 pub struct TestArtifacts {
-    pub sp_gimlet_artifact_caboose: hubtools::Caboose,
     pub sp_gimlet_artifact_hash: ArtifactHash,
-    pub sp_sidecar_artifact_caboose: hubtools::Caboose,
     pub sp_sidecar_artifact_hash: ArtifactHash,
     pub artifact_cache: Arc<ArtifactCache>,
+    deployed_cabooses: BTreeMap<ArtifactHash, hubtools::Caboose>,
     resolver: FixedResolver,
     repo_depot_server: HttpServer<InMemoryRepoDepotServerContext>,
 }
@@ -70,6 +69,13 @@ impl TestArtifacts {
         .into_iter()
         .collect();
 
+        let deployed_cabooses = [
+            (sp_gimlet_artifact_hash.clone(), sp_gimlet_artifact_caboose),
+            (sp_sidecar_artifact_hash.clone(), sp_sidecar_artifact_caboose),
+        ]
+        .into_iter()
+        .collect();
+
         let repo_depot_server = {
             let log = log.new(slog::o!("component" => "RepoDepotServer"));
             let my_api = repo_depot_api::repo_depot_api_mod::api_description::<
@@ -90,14 +96,20 @@ impl TestArtifacts {
         ));
 
         Ok(TestArtifacts {
-            sp_gimlet_artifact_caboose,
             sp_gimlet_artifact_hash,
-            sp_sidecar_artifact_caboose,
             sp_sidecar_artifact_hash,
+            deployed_cabooses,
             artifact_cache,
             resolver,
             repo_depot_server,
         })
+    }
+
+    pub fn deployed_caboose(
+        &self,
+        hash: &ArtifactHash,
+    ) -> Option<&hubtools::Caboose> {
+        self.deployed_cabooses.get(hash)
     }
 
     pub async fn teardown(mut self) {
