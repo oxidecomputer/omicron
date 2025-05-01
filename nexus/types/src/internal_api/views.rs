@@ -426,7 +426,9 @@ pub struct CompletedAttempt {
     pub nattempts_done: u32,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateCompletedHow {
     FoundNoChangesNeeded,

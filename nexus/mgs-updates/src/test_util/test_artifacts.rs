@@ -11,7 +11,7 @@ use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
 use repo_depot_api::ArtifactPathParams;
 use sha2::Digest;
-use sp_sim::SIM_GIMLET_BOARD;
+use sp_sim::{SIM_GIMLET_BOARD, SIM_SIDECAR_BOARD};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
@@ -20,8 +20,10 @@ type ArtifactData = BTreeMap<ArtifactHash, Vec<u8>>;
 type InMemoryRepoDepotServerContext = Arc<ArtifactData>;
 
 pub struct TestArtifacts {
-    pub sp_artifact_caboose: hubtools::Caboose,
-    pub sp_artifact_hash: ArtifactHash,
+    pub sp_gimlet_artifact_caboose: hubtools::Caboose,
+    pub sp_gimlet_artifact_hash: ArtifactHash,
+    pub sp_sidecar_artifact_caboose: hubtools::Caboose,
+    pub sp_sidecar_artifact_hash: ArtifactHash,
     pub artifact_cache: Arc<ArtifactCache>,
     resolver: FixedResolver,
     repo_depot_server: HttpServer<InMemoryRepoDepotServerContext>,
@@ -29,23 +31,44 @@ pub struct TestArtifacts {
 
 impl TestArtifacts {
     pub async fn new(log: &slog::Logger) -> anyhow::Result<TestArtifacts> {
-        let sp_artifact_caboose = CabooseBuilder::default()
+        // Make an SP update artifact for SimGimlet.
+        let sp_gimlet_artifact_caboose = CabooseBuilder::default()
             .git_commit("fake-git-commit")
             .board(SIM_GIMLET_BOARD)
             .version("0.0.0")
             .name("fake-name")
             .build();
-
         let mut builder = HubrisArchiveBuilder::with_fake_image();
-        builder.write_caboose(sp_artifact_caboose.as_slice()).unwrap();
-        let sp_artifact = builder.build_to_vec().unwrap();
-        let sp_artifact_hash = {
+        builder.write_caboose(sp_gimlet_artifact_caboose.as_slice()).unwrap();
+        let sp_gimlet_artifact = builder.build_to_vec().unwrap();
+        let sp_gimlet_artifact_hash = {
             let mut digest = sha2::Sha256::default();
-            digest.update(&sp_artifact);
+            digest.update(&sp_gimlet_artifact);
             ArtifactHash(digest.finalize().into())
         };
-        let artifact_data =
-            std::iter::once((sp_artifact_hash.clone(), sp_artifact)).collect();
+
+        // Make an SP update artifact for SimSidecar
+        let sp_sidecar_artifact_caboose = CabooseBuilder::default()
+            .git_commit("fake-git-commit")
+            .board(SIM_SIDECAR_BOARD)
+            .version("0.0.0")
+            .name("fake-name")
+            .build();
+        let mut builder = HubrisArchiveBuilder::with_fake_image();
+        builder.write_caboose(sp_sidecar_artifact_caboose.as_slice()).unwrap();
+        let sp_sidecar_artifact = builder.build_to_vec().unwrap();
+        let sp_sidecar_artifact_hash = {
+            let mut digest = sha2::Sha256::default();
+            digest.update(&sp_sidecar_artifact);
+            ArtifactHash(digest.finalize().into())
+        };
+
+        let artifact_data = [
+            (sp_gimlet_artifact_hash.clone(), sp_gimlet_artifact),
+            (sp_sidecar_artifact_hash.clone(), sp_sidecar_artifact),
+        ]
+        .into_iter()
+        .collect();
 
         let repo_depot_server = {
             let log = log.new(slog::o!("component" => "RepoDepotServer"));
@@ -67,8 +90,10 @@ impl TestArtifacts {
         ));
 
         Ok(TestArtifacts {
-            sp_artifact_caboose,
-            sp_artifact_hash,
+            sp_gimlet_artifact_caboose,
+            sp_gimlet_artifact_hash,
+            sp_sidecar_artifact_caboose,
+            sp_sidecar_artifact_hash,
             artifact_cache,
             resolver,
             repo_depot_server,

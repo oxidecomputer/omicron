@@ -598,8 +598,10 @@ mod test {
     use crate::test_util::cabooses_equal;
     use crate::test_util::sp_test_state::SpTestState;
     use crate::test_util::test_artifacts::TestArtifacts;
+    use assert_matches::assert_matches;
     use gateway_client::types::SpType;
     use gateway_messages::SpPort;
+    use gateway_test_utils::setup::GatewayTestContext;
     use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::internal_api::views::InProgressUpdateStatus;
@@ -608,11 +610,12 @@ mod test {
     use nexus_types::internal_api::views::UpdateCompletedHow;
     use std::sync::Arc;
     use tokio::sync::watch;
+    use tufaceous_artifact::ArtifactHash;
 
     // XXX-dap
     // test cases:
-    //  - successful update: updated SP
-    //  - successful update: no changes needed
+    //  - done: successful update: updated SP
+    //  - done: successful update: no changes needed
     //  - successful update: watched another finish
     //  - successful update: took over
     //  - failure: wrong identity
@@ -631,17 +634,87 @@ mod test {
         .await;
         let log = &gwtestctx.logctx.log;
         let artifacts = TestArtifacts::new(log).await.unwrap();
+
+        // Basic case: normal update
+        let artifact_hash = &artifacts.sp_gimlet_artifact_hash;
+        let deployed_caboose = &artifacts.sp_gimlet_artifact_caboose;
+        assert_matches!(
+            run_one_successful_update(
+                &gwtestctx,
+                &artifacts,
+                SpType::Sled,
+                1,
+                artifact_hash,
+                deployed_caboose
+            )
+            .await,
+            UpdateCompletedHow::CompletedUpdate
+        );
+
+        // Basic case: attempted update, found no changes needed
+        assert_matches!(
+            run_one_successful_update(
+                &gwtestctx,
+                &artifacts,
+                SpType::Sled,
+                1,
+                artifact_hash,
+                deployed_caboose
+            )
+            .await,
+            UpdateCompletedHow::FoundNoChangesNeeded
+        );
+
+        // Run the same two tests for a switch SP.
+        let artifact_hash = &artifacts.sp_sidecar_artifact_hash;
+        let deployed_caboose = &artifacts.sp_sidecar_artifact_caboose;
+        assert_matches!(
+            run_one_successful_update(
+                &gwtestctx,
+                &artifacts,
+                SpType::Switch,
+                0,
+                artifact_hash,
+                deployed_caboose
+            )
+            .await,
+            UpdateCompletedHow::CompletedUpdate
+        );
+        assert_matches!(
+            run_one_successful_update(
+                &gwtestctx,
+                &artifacts,
+                SpType::Switch,
+                0,
+                artifact_hash,
+                deployed_caboose
+            )
+            .await,
+            UpdateCompletedHow::FoundNoChangesNeeded
+        );
+
+        artifacts.teardown().await;
+        gwtestctx.teardown().await;
+    }
+
+    async fn run_one_successful_update(
+        gwtestctx: &GatewayTestContext,
+        artifacts: &TestArtifacts,
+        sp_type: SpType,
+        slot_id: u32,
+        artifact_hash: &ArtifactHash,
+        deployed_caboose: &hubtools::Caboose,
+    ) -> UpdateCompletedHow {
+        let log = &gwtestctx.logctx.log;
         let mgs_client = gwtestctx.client();
 
-        // Fetch information about the device that we're going to udpate.
-        let sp_type = SpType::Sled;
-        let slot_id = 1;
+        // Fetch information about the device that we're going to update.
         let sp1 = SpTestState::load(&mgs_client, sp_type, slot_id)
             .await
             .expect("loading initial state");
 
         // Prepare an update.
-        let update_id = "cab525b0-7156-4ac7-891e-b73ac92d7b90".parse().unwrap();
+        let update_id = Uuid::new_v4();
         let baseboard_id = Arc::new(sp1.baseboard_id());
         let sp_update_request = PendingMgsUpdate {
             baseboard_id: baseboard_id.clone(),
@@ -651,9 +724,9 @@ mod test {
                 expected_active_version: sp1.expect_sp_active_version(),
                 expected_inactive_version: sp1.expect_sp_inactive_version(),
             },
-            artifact_hash: artifacts.sp_artifact_hash,
+            artifact_hash: artifact_hash.clone(),
             artifact_version: std::str::from_utf8(
-                artifacts.sp_artifact_caboose.version().unwrap(),
+                deployed_caboose.version().unwrap(),
             )
             .unwrap()
             .parse()
@@ -681,7 +754,6 @@ mod test {
         );
 
         // We're finally ready to do the update.
-        // Start with the basic case: normal application of the update.
         let update_result = apply_update(
             artifacts.artifact_cache.clone(),
             &sp_update,
@@ -691,11 +763,11 @@ mod test {
             status_updater,
         )
         .await;
-        match update_result {
-            Ok(UpdateCompletedHow::CompletedUpdate) => (),
-            other => {
-                panic!("unexpected result from apply_update(): {:?}", other);
-            }
+        let Ok(how) = update_result else {
+            panic!(
+                "unexpected result from apply_update(): {:?}",
+                update_result
+            );
         };
 
         // Fetch and verify the updated SP state.
@@ -703,78 +775,45 @@ mod test {
             .await
             .expect("SP state after update");
         // The active slot should contain what we just updated to.
-        assert!(cabooses_equal(
-            &sp2.caboose_sp_active,
-            &artifacts.sp_artifact_caboose,
-        ));
-        // The inactive slot should contain what was in the active slot before.
-        assert_eq!(
-            sp1.expect_caboose_sp_active(),
-            sp2.expect_caboose_sp_inactive()
-        );
+        assert!(cabooses_equal(&sp2.caboose_sp_active, &deployed_caboose,));
         // RoT information should not have changed.
         assert_eq!(sp1.sp_boot_info, sp2.sp_boot_info);
         assert_eq!(sp1.expect_caboose_rot_a(), sp2.expect_caboose_rot_a());
         assert_eq!(sp1.expect_caboose_rot_b(), sp2.expect_caboose_rot_b());
 
-        // Now, run through another identical update.  This should complete
-        // successfully without having done anything.
-
-        let update_id = "06d62827-752f-4db0-8a66-82f52f90abb7".parse().unwrap();
-        let baseboard_id = Arc::new(sp1.baseboard_id());
-        let sp_update_request = PendingMgsUpdate {
-            details: PendingMgsUpdateDetails::Sp {
-                expected_active_version: sp2.expect_sp_active_version(),
-                expected_inactive_version: sp2.expect_sp_inactive_version(),
-            },
-            ..sp_update_request
-        };
-        let sp_update =
-            SpComponentUpdate::from_request(log, &sp_update_request, update_id);
-        status_tx.send_modify(|status| {
-            status.in_progress.insert(
-                baseboard_id.clone(),
-                InProgressUpdateStatus {
-                    time_started: chrono::Utc::now(),
-                    status: UpdateAttemptStatus::NotStarted,
-                    nattempts_done: 0,
-                },
+        if how == UpdateCompletedHow::FoundNoChangesNeeded {
+            assert_eq!(sp1.caboose_sp_active, sp2.caboose_sp_active);
+            assert_eq!(
+                sp1.expect_caboose_sp_inactive(),
+                sp2.expect_caboose_sp_inactive()
             );
-        });
-        let status_updater =
-            UpdateAttemptStatusUpdater::new(status_tx, baseboard_id);
-        let update_result = apply_update(
-            artifacts.artifact_cache.clone(),
-            &sp_update,
-            &*sp_update_helper,
-            mgs_backends,
-            &sp_update_request,
-            status_updater,
+            assert_eq!(sp1.sp_state, sp2.sp_state);
+            assert_eq!(sp1.sp_boot_info, sp2.sp_boot_info);
+        } else {
+            // One way or another, an update was completed.  The inactive slot
+            // should contain what was in the active slot before.
+            assert_eq!(
+                sp1.expect_caboose_sp_active(),
+                sp2.expect_caboose_sp_inactive()
+            );
+        }
+
+        how
+    }
+
+    /// Tests the case where an update completed by watching another one
+    /// complete.
+    #[tokio::test]
+    async fn test_sp_update_watched() {
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_sp_update_watched",
+            SpPort::One,
         )
         .await;
-        match update_result {
-            Ok(UpdateCompletedHow::FoundNoChangesNeeded) => (),
-            other => {
-                panic!(
-                    "unexpected result from second apply_update(): {:?}",
-                    other
-                );
-            }
-        };
+        let log = &gwtestctx.logctx.log;
+        let artifacts = TestArtifacts::new(log).await.unwrap();
 
-        // Fetch and verify the SP state.  It should be unchanged.
-        let sp3 = SpTestState::load(&mgs_client, sp_type, slot_id)
-            .await
-            .expect("SP state after update");
-        assert_eq!(sp2.caboose_sp_active, sp3.caboose_sp_active);
-        assert_eq!(
-            sp2.expect_caboose_sp_inactive(),
-            sp3.expect_caboose_sp_inactive()
-        );
-        assert_eq!(sp2.expect_caboose_rot_a(), sp3.expect_caboose_rot_a());
-        assert_eq!(sp2.expect_caboose_rot_b(), sp3.expect_caboose_rot_b());
-        assert_eq!(sp2.sp_state, sp3.sp_state);
-        assert_eq!(sp2.sp_boot_info, sp3.sp_boot_info);
+        // XXX-dap
 
         artifacts.teardown().await;
         gwtestctx.teardown().await;
