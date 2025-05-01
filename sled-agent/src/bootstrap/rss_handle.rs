@@ -9,6 +9,7 @@ use crate::rack_setup::service::RackSetupService;
 use crate::rack_setup::service::SetupServiceError;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
 use bootstore::schemes::v0 as bootstore;
+use camino::Utf8PathBuf;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use omicron_common::backoff::BackoffError;
@@ -54,7 +55,15 @@ impl RssHandle {
         bootstore: bootstore::NodeHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) = rss_channel(our_bootstrap_address, sprockets);
+        // FIXME error
+        let corpus =
+            crate::bootstrap::measurements::sled_new_measurement_paths(
+                &storage_manager,
+            )
+            .await
+            .map_err(SetupServiceError::MeasurementError)?;
+
+        let (tx, rx) = rss_channel(our_bootstrap_address, sprockets, corpus);
 
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
@@ -74,8 +83,16 @@ impl RssHandle {
         log: &Logger,
         our_bootstrap_address: Ipv6Addr,
         sprockets: SprocketsConfig,
+        storage_manager: StorageHandle,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) = rss_channel(our_bootstrap_address, sprockets);
+        let corpus =
+            crate::bootstrap::measurements::sled_new_measurement_paths(
+                &storage_manager,
+            )
+            .await
+            .map_err(SetupServiceError::MeasurementError)?;
+
+        let (tx, rx) = rss_channel(our_bootstrap_address, sprockets, corpus);
 
         let rss = RackSetupService::new_reset_rack(
             log.new(o!("component" => "RSS")),
@@ -92,11 +109,13 @@ async fn initialize_sled_agent(
     log: &Logger,
     bootstrap_addr: SocketAddrV6,
     sprockets: SprocketsConfig,
+    corpus: Vec<Utf8PathBuf>,
     request: &StartSledAgentRequest,
 ) -> Result<(), bootstrap_agent_client::Error> {
     let client = bootstrap_agent_client::Client::new(
         bootstrap_addr,
         sprockets,
+        corpus,
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
@@ -128,11 +147,12 @@ async fn initialize_sled_agent(
 fn rss_channel(
     our_bootstrap_address: Ipv6Addr,
     sprockets: SprocketsConfig,
+    corpus: Vec<Utf8PathBuf>,
 ) -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
     let (tx, rx) = mpsc::channel(32);
     (
         BootstrapAgentHandle { inner: tx, our_bootstrap_address },
-        BootstrapAgentHandleReceiver { inner: rx, sprockets },
+        BootstrapAgentHandleReceiver { inner: rx, sprockets, corpus },
     )
 }
 
@@ -204,6 +224,7 @@ impl BootstrapAgentHandle {
 struct BootstrapAgentHandleReceiver {
     inner: mpsc::Receiver<Request>,
     sprockets: SprocketsConfig,
+    corpus: Vec<Utf8PathBuf>,
 }
 
 impl BootstrapAgentHandleReceiver {
@@ -224,10 +245,12 @@ impl BootstrapAgentHandleReceiver {
                 // of the initialization requests, allowing them to run concurrently.
 
                 let s = self.sprockets.clone();
+                let corp = self.corpus.clone();
                 let mut futs = requests
                     .into_iter()
                     .map(|(bootstrap_addr, request)| {
                         let value = s.clone();
+                        let corpus = corp.clone();
                         async move {
                             info!(
                                 log, "Received initialization request from RSS";
@@ -239,6 +262,7 @@ impl BootstrapAgentHandleReceiver {
                                 log,
                                 bootstrap_addr,
                                 value,
+                                corpus,
                                 &request,
                             )
                             .await

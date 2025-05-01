@@ -1492,12 +1492,15 @@ pub enum AddSledError {
         sled_id: Baseboard,
         err: crate::bootstrap::client::Error,
     },
+    #[error("Measurement error: {0}")]
+    MeasurementError(crate::bootstrap::measurements::MeasurementError),
 }
 
 /// Add a sled to an initialized rack.
 pub async fn sled_add(
     log: Logger,
     sprockets_config: SprocketsConfig,
+    storage: StorageHandle,
     sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
@@ -1555,9 +1558,14 @@ pub async fn sled_add(
         target_ip.ok_or_else(|| AddSledError::NotFound(sled_id.clone()))?;
     let bootstrap_addr =
         SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_RACK_INIT_PORT, 0, 0);
+    let corpus =
+        crate::bootstrap::measurements::sled_new_measurement_paths(&storage)
+            .await
+            .map_err(AddSledError::MeasurementError)?;
     let client = crate::bootstrap::client::Client::new(
         bootstrap_addr,
         sprockets_config,
+        corpus,
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
