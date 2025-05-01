@@ -414,7 +414,7 @@ pub fn update_saga_needed(
     // Currently, an instance-update saga is required if (and only if):
     //
     // - The instance's active VMM has transitioned to `Destroyed` or `Failed`.
-    //   We don'tactually know whether the VMM whose state was updated here was the
+    //   We don't actually know whether the VMM whose state was updated here was the
     //   active VMM or not, so we will always attempt to run an instance-update
     //   saga if the VMM was `Destroyed` (or `Failed`).
     let vmm_needs_update =
