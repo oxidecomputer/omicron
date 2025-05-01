@@ -80,13 +80,16 @@ impl Into<v1::config::DnsConfigZone> for DnsConfigZone {
             zone_name,
             records: records
                 .into_iter()
-                .map(|(k, v)| {
-                    (
-                        k,
+                .filter_map(|(k, v)| {
+                    let converted_records: Vec<v1::config::DnsRecord> =
                         v.into_iter()
                             .filter_map(|rec| rec.try_into().ok())
-                            .collect(),
-                    )
+                            .collect();
+                    if converted_records.is_empty() {
+                        None
+                    } else {
+                        Some((k, converted_records))
+                    }
                 })
                 .collect(),
         }
