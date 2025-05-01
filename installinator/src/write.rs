@@ -665,12 +665,30 @@ impl ControlPlaneZoneWriteContext<'_> {
                 .register();
         }
 
+        engine
+            .new_step(
+                WriteComponent::ControlPlane,
+                ControlPlaneZonesStepId::CreateMeasurementDir,
+                format!("Creating measurement directory"),
+                async move |_cx| {
+                    std::fs::create_dir(
+                        self.output_directory.join("measurements"),
+                    )
+                    .map_err(|error| WriteError::CreateDirError { error })?;
+                    StepSuccess::new(()).into()
+                },
+            )
+            .register();
+
         for (name, data) in &self.zones.measurement_corpus {
-            let out_path = self.output_directory.join(name);
+            let out_path =
+                self.output_directory.join("measurements").join(name);
             transport = engine
                 .new_step(
                     WriteComponent::ControlPlane,
-                    ControlPlaneZonesStepId::MeasurementCorpus { name: name.clone() },
+                    ControlPlaneZonesStepId::MeasurementCorpus {
+                        name: name.clone(),
+                    },
                     format!("Writing measurement corpus {name}"),
                     async move |cx| {
                         let transport = transport.into_value(cx.token()).await;
@@ -689,8 +707,6 @@ impl ControlPlaneZoneWriteContext<'_> {
                 )
                 .register();
         }
-
-
 
         // XXX here is where we can write the corpus
         // `fsync()` the directory to ensure the directory entries for all the

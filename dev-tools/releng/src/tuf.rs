@@ -115,9 +115,13 @@ pub(crate) async fn build_tuf_repo(
     // XXX fixme
     let measurement_corpus = vec![
         DeserializedControlPlaneZoneSource::File {
-            file_name: Some(format!("test_manifest.cbor")),
-            path: format!("/home/labbott/omicron/Cargo.toml").into(),
-        }
+            file_name: Some(format!("rot_staging.cbor")),
+            path: crate::WORKSPACE_DIR.join("corpus").join("rot_staging.cbor"),
+        },
+        DeserializedControlPlaneZoneSource::File {
+            file_name: Some(format!("sp.cbor")),
+            path: crate::WORKSPACE_DIR.join("corpus").join("sp.cbor"),
+        },
     ];
     manifest.artifacts.insert(
         KnownArtifactKind::ControlPlane,
