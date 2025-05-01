@@ -86,11 +86,6 @@ impl Node {
         epoch: Epoch,
         rack_id: RackUuid,
     ) -> Result<Option<PersistentState>, Alarm> {
-        if self.persistent_state.last_committed_epoch() == Some(epoch) {
-            // Idempotent request
-            return Ok(None);
-        }
-
         let Some(latest_prepare) = self.persistent_state.latest_prepare()
         else {
             // This is an erroneous commit attempt from nexus. We don't have
@@ -151,6 +146,15 @@ impl Node {
             };
             error!(self.log, "{alarm}");
             return Err(alarm);
+        }
+
+        if self.persistent_state.last_committed_epoch() == Some(epoch) {
+            info!(
+                self.log,
+                "Idempotent configuration - already committed";
+                "epoch" => %epoch
+            );
+            return Ok(None);
         }
 
         // Success!
@@ -224,21 +228,19 @@ impl Node {
                 return Err(alarm);
             }
         }
-        if let Some(last_prepared_epoch) =
-            self.persistent_state.last_prepared_epoch()
-        {
+        if let Some(latest_prepare) = self.persistent_state.latest_prepare() {
             // Is this an old request?
-            if msg.config.epoch < last_prepared_epoch {
+            if msg.config.epoch < latest_prepare.config.epoch {
                 warn!(self.log, "Received stale prepare";
                     "from" => %from,
                     "msg_epoch" => %msg.config.epoch,
-                    "last_prepared_epoch" => %last_prepared_epoch
+                    "last_prepared_epoch" => %latest_prepare.config.epoch
                 );
                 return Ok(None);
             }
 
             // Idempotent request
-            if msg.config.epoch == last_prepared_epoch {
+            if msg.config == latest_prepare.config {
                 return Ok(None);
             }
 
@@ -449,10 +451,11 @@ impl Node {
 mod tests {
     use std::time::Duration;
 
-    use crate::{Epoch, Threshold};
+    use crate::{Configuration, Epoch, Sha3_256Digest, Threshold};
 
     use super::*;
     use assert_matches::assert_matches;
+    use gfss::gf256::Gf256;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::RackUuid;
     use proptest::prelude::*;
@@ -545,6 +548,127 @@ mod tests {
             // `PersistentState` directly.
             assert_ne!(envelope.to, config.coordinator);
         }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    pub fn handle_alarms() {
+        let logctx = test_setup_log("handle_prepare_alarms");
+        // Initial config
+        let reconfig_msg = ReconfigureMsg {
+            rack_id: RackUuid::new_v4(),
+            epoch: Epoch(1),
+            last_committed_epoch: None,
+            members: (0..=5u8)
+                .map(|serial| {
+                    PlatformId::new("test".into(), serial.to_string())
+                })
+                .collect(),
+            threshold: Threshold(3),
+            retry_timeout: Duration::from_millis(100),
+        };
+
+        let my_platform_id = reconfig_msg.members.first().unwrap().clone();
+        let mut node = Node::new(
+            logctx.log.clone(),
+            my_platform_id.clone(),
+            PersistentState::empty(),
+        );
+
+        let mut outbox = Vec::new();
+        let _ = node
+            .coordinate_reconfiguration(
+                Instant::now(),
+                &mut outbox,
+                reconfig_msg.clone(),
+            )
+            .expect("success")
+            .expect("persistent state");
+
+        // Configuration for our `PrepareMsg`
+        let config = Configuration {
+            rack_id: RackUuid::new_v4(),
+            epoch: Epoch(1),
+            coordinator: PlatformId::new("test".to_string(), "999".to_string()),
+            members: (0..=5)
+                .map(|serial| {
+                    (
+                        PlatformId::new("test".into(), serial.to_string()),
+                        // Nonsense share
+                        Sha3_256Digest([0u8; 32]),
+                    )
+                })
+                .collect(),
+            threshold: Threshold(3),
+            previous_configuration: None,
+        };
+        let mut prepare_msg = PrepareMsg {
+            // Generate a nonsense share
+            share: Share {
+                x_coordinate: Gf256::new(1),
+                y_coordinates: (0..32_u8).map(Gf256::new).collect(),
+            },
+            config: config.clone(),
+        };
+
+        let alarm = node
+            .handle(
+                Instant::now(),
+                &mut outbox,
+                prepare_msg.config.coordinator.clone(),
+                PeerMsg::Prepare(prepare_msg.clone()),
+            )
+            .unwrap_err();
+
+        assert_matches!(
+            alarm,
+            Alarm::DifferentNodesCoordinatingSameEpoch { .. }
+        );
+
+        // Commit the initial configuration to better trigger alarms.
+        node.commit_reconfiguration(reconfig_msg.epoch, reconfig_msg.rack_id)
+            .unwrap();
+
+        let alarm = node
+            .handle(
+                Instant::now(),
+                &mut outbox,
+                prepare_msg.config.coordinator.clone(),
+                PeerMsg::Prepare(prepare_msg.clone()),
+            )
+            .unwrap_err();
+
+        assert_matches!(alarm, Alarm::PrepareWithInvalidRackId { .. });
+
+        // Set the rack_id to the correct one to allow other alarms to be
+        // triggered.
+        prepare_msg.config.rack_id = reconfig_msg.rack_id;
+        let alarm = node
+            .handle(
+                Instant::now(),
+                &mut outbox,
+                prepare_msg.config.coordinator.clone(),
+                PeerMsg::Prepare(prepare_msg.clone()),
+            )
+            .unwrap_err();
+
+        assert_matches!(alarm, Alarm::PrepareLastCommittedEpochMismatch { .. });
+
+        let alarm = node
+            .commit_reconfiguration(Epoch(1), RackUuid::new_v4())
+            .unwrap_err();
+        assert_matches!(alarm, Alarm::CommitWithInvalidRackId { .. });
+
+        let alarm = node
+            .commit_reconfiguration(Epoch(3), reconfig_msg.rack_id)
+            .unwrap_err();
+        assert_matches!(alarm, Alarm::MissingPrepare { .. });
+
+        let alarm = node
+            .commit_reconfiguration(Epoch(0), reconfig_msg.rack_id)
+            .unwrap_err();
+        assert_matches!(alarm, Alarm::OutOfOrderCommit { .. });
 
         logctx.cleanup_successful();
     }
