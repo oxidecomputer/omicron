@@ -124,6 +124,7 @@ members = [
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
+    "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-diagnostics",
@@ -275,6 +276,7 @@ default-members = [
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
+    "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-diagnostics",
@@ -662,6 +664,7 @@ similar-asserts = "1.7.0"
 sled = "=0.34.7"
 sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
+sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }

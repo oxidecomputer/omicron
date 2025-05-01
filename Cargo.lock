@@ -7715,6 +7715,7 @@ dependencies = [
  "sha3",
  "sled-agent-api",
  "sled-agent-client",
+ "sled-agent-config-reconciler",
  "sled-agent-types",
  "sled-diagnostics",
  "sled-hardware",
@@ -11417,6 +11418,40 @@ dependencies = [
  "sled-agent-types",
  "slog",
  "uuid",
+]
+
+[[package]]
+name = "sled-agent-config-reconciler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "derive_more",
+ "dropshot",
+ "glob",
+ "id-map",
+ "illumos-utils",
+ "key-manager",
+ "nexus-sled-agent-shared",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "proptest",
+ "sled-agent-api",
+ "sled-agent-types",
+ "sled-hardware",
+ "sled-storage",
+ "slog",
+ "slog-error-chain",
+ "test-strategy",
+ "thiserror 1.0.69",
+ "tokio",
+ "tufaceous-artifact",
+ "zone 0.3.1",
 ]
 
 [[package]]
