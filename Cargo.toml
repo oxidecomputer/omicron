@@ -673,8 +673,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-#sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", branch = "measurement_wip" }
-sprockets-tls = { path = "/home/labbott/sprockets/tls" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", branch = "measurement_wip" }
+#sprockets-tls = { path = "/home/labbott/sprockets/tls" }
 sqlformat = "0.2.6"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"

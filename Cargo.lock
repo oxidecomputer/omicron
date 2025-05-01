@@ -11858,6 +11858,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/sprockets.git?branch=measurement_wip#e8e9599d5eee18706798c8961f6db7ec50bd9751"
 dependencies = [
  "anyhow",
  "attest-data",
