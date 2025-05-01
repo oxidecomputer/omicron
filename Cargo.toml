@@ -401,7 +401,7 @@ display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
-derive_more = "0.99.19"
+derive_more = "0.99.20"
 derive-where = "1.2.7"
 dev-tools-common = { path = "dev-tools/common" }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
