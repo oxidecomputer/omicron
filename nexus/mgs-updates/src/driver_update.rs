@@ -96,7 +96,7 @@ pub enum ApplyUpdateError {
     SpUpdateAborted(Uuid),
     #[error("SP reports update {0} failed: {1:?}")]
     SpUpdateFailed(Uuid, String),
-    #[error("SP not knowing about our update attempt")]
+    #[error("SP reports not knowing about our update attempt")]
     SpUpdateLost,
     #[error(
         "gave up after {}ms waiting for update {0} to finish",
@@ -611,9 +611,6 @@ mod test {
     //  - success: add test that precondition passes when expecting invalid
     //    inactive version and it really is inactive
     //  - failure: failed to fetch artifact
-    //  - failure: MGS failure
-    //  - failure: reset in the middle
-    //  - failure: stuck?
 
     #[tokio::test]
     async fn test_sp_update_basic() {
@@ -840,10 +837,22 @@ mod test {
             attempt2.begin(std::time::Duration::from_secs(10)).await;
         in_progress2.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
 
-        // This time, we'll stop running the first update altogether.
-        // The second should eventually finish, having taken over the update.
+        // This time, resume the second update first.  It will take over the
+        // first one.
         let finished2 = in_progress2.finish().await;
         finished2.expect_success(UpdateCompletedHow::TookOverConcurrentUpdate);
+
+        // Now if we resume the first update, it will find that the SP has been
+        // reset out from under it.  This is the closest thing we have to a test
+        // where the SP gets reset during the update.  This does verify that if
+        // the SP gets reset during this phase, the code detects that and
+        // doesn't get stuck.  With more control over the simulated SP (e.g.,
+        // the ability to pause the upload on the SP side), we could more
+        // exhaustively test what happens if the SP gets reset at each step in
+        // the update process.
+        in_progress1.finish().await.expect_failure(&|error, _sp1, _sp2| {
+            assert_matches!(error, ApplyUpdateError::SpUpdateLost);
+        });
 
         artifacts.teardown().await;
         gwtestctx.teardown().await;
