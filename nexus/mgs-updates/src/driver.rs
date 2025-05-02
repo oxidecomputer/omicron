@@ -6,13 +6,13 @@
 
 use crate::ArtifactCache;
 use crate::driver_update::ApplyUpdateError;
+use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
 use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
-use gateway_client::SpComponent;
 use id_map::IdMap;
 use id_map::IdMappable;
 use nexus_types::deployment::PendingMgsUpdate;
@@ -304,18 +304,8 @@ impl MgsUpdateDriver {
 
         let (sp_update, updater) = match &request.details {
             nexus_types::deployment::PendingMgsUpdateDetails::Sp { .. } => {
-                let sp_update = SpComponentUpdate {
-                    log: log.clone(),
-                    component: SpComponent::SP_ITSELF,
-                    target_sp_type: request.sp_type,
-                    target_sp_slot: request.slot_id,
-                    // The SP has two firmware slots, but they're aren't
-                    // individually labeled. We always request an update to slot
-                    // 0, which (confusingly in this context) means "the
-                    // inactive slot".
-                    firmware_slot: 0,
-                    update_id,
-                };
+                let sp_update =
+                    SpComponentUpdate::from_request(&log, &request, update_id);
 
                 (sp_update, Box::new(ReconfiguratorSpUpdater {}))
             }
@@ -344,10 +334,10 @@ impl MgsUpdateDriver {
             );
         });
 
-        let status_updater = UpdateAttemptStatusUpdater {
-            tx: self.status_tx.clone(),
-            baseboard_id: baseboard_id.clone(),
-        };
+        let status_updater = UpdateAttemptStatusUpdater::new(
+            self.status_tx.clone(),
+            baseboard_id.clone(),
+        );
         let artifacts = self.artifacts.clone();
         let mgs_rx = self.mgs_rx.clone();
         let future = async move {
@@ -358,6 +348,7 @@ impl MgsUpdateDriver {
                 mgs_rx,
                 &request,
                 status_updater,
+                PROGRESS_TIMEOUT,
             )
             .await;
             UpdateAttemptResult { baseboard_id: request.baseboard_id, result }
@@ -551,6 +542,13 @@ pub(crate) struct UpdateAttemptStatusUpdater {
 }
 
 impl UpdateAttemptStatusUpdater {
+    pub(crate) fn new(
+        tx: watch::Sender<MgsUpdateDriverStatus>,
+        baseboard_id: Arc<BaseboardId>,
+    ) -> Self {
+        UpdateAttemptStatusUpdater { tx, baseboard_id }
+    }
+
     pub(crate) fn update(&self, new_status: UpdateAttemptStatus) {
         self.tx.send_modify(|driver_status| {
             // unwrap(): this UpdateAttemptStatusUpdater's lifetime is bound by

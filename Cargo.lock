@@ -3556,11 +3556,13 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "dropshot",
+ "gateway-client",
  "gateway-messages",
  "gateway-types",
  "omicron-gateway",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "qorb",
  "slog",
  "sp-sim",
  "tokio",
@@ -6209,7 +6211,10 @@ dependencies = [
 name = "nexus-mgs-updates"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "assert_matches",
  "chrono",
+ "dropshot",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -6223,6 +6228,7 @@ dependencies = [
  "omicron-workspace-hack",
  "qorb",
  "rand 0.8.5",
+ "repo-depot-api",
  "repo-depot-client",
  "reqwest",
  "sha2",

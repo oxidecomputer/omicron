@@ -224,6 +224,16 @@ impl SimSpUpdate {
             state @ UpdateState::Prepared { .. } => {
                 Err(SpError::UpdateInProgress(state.to_message()))
             }
+            state @ UpdateState::Completed {
+                component: update_component,
+                ..
+            } if component == SpComponent::SP_ITSELF
+                && component == *update_component =>
+            {
+                // The SP will not allow you to start another update of itself
+                // while one is completed.
+                Err(SpError::UpdateInProgress(state.to_message()))
+            }
             UpdateState::NotPrepared
             | UpdateState::Aborted(_)
             | UpdateState::Completed { .. } => {
