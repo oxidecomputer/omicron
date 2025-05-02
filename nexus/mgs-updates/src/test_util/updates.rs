@@ -7,9 +7,9 @@
 //! These are factored to make it easy to write a variety of different kinds of
 //! tests without having to put together too much boilerplate in each test.
 
-use crate::ArtifactCache;
 use crate::driver::UpdateAttemptStatusUpdater;
 use crate::driver_update::ApplyUpdateError;
+use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
 use crate::sp_updater::ReconfiguratorSpUpdater;
@@ -55,20 +55,23 @@ pub struct UpdateDescription<'a> {
     pub override_baseboard_id: Option<BaseboardId>,
     pub override_expected_active: Option<ArtifactVersion>,
     pub override_expected_inactive: Option<ExpectedVersion>,
+    pub override_progress_timeout: Option<Duration>,
 }
 
-impl<'a> UpdateDescription<'a> {
-    /// Fetches live state about an SP in preparation to begin an update
-    /// attempt
-    pub async fn load(&self) -> UpdateAttempt<'a> {
+impl UpdateDescription<'_> {
+    /// Sets up a single attempt to execute the update described by `self`
+    ///
+    /// Execution does not start until you call `run_until_status()` or
+    /// `finish()`on the returned value.
+    pub async fn setup(&self) -> InProgressAttempt {
         let mgs_client = self.gwtestctx.client();
 
         // Fetch information about the device that we're going to update.
+        // This will be used to configure the preconditions (expected baseboard
+        // id and expected active/inactive slot contents).
         let sp1 = SpTestState::load(&mgs_client, self.sp_type, self.slot_id)
             .await
             .expect("loading initial state");
-
-        let update_id = Uuid::new_v4();
         let baseboard_id = Arc::new(
             self.override_baseboard_id
                 .clone()
@@ -86,6 +89,9 @@ impl<'a> UpdateDescription<'a> {
             .artifacts
             .deployed_caboose(self.artifact_hash)
             .expect("caboose for generated artifact");
+
+        // Assemble the driver-level update request.
+        let mgs_backends = self.gwtestctx.mgs_backends();
         let sp_update_request = PendingMgsUpdate {
             baseboard_id: baseboard_id.clone(),
             sp_type: self.sp_type,
@@ -102,59 +108,18 @@ impl<'a> UpdateDescription<'a> {
             .parse()
             .unwrap(),
         };
+
+        let request = sp_update_request.clone();
+        let update_id = Uuid::new_v4();
         let log = self.gwtestctx.logctx.log.new(slog::o!(
             "update_id" => update_id.to_string(),
-            baseboard_id,
+            baseboard_id.clone(),
             sp_update_request.clone()
         ));
+        let progress_timeout =
+            self.override_progress_timeout.unwrap_or(PROGRESS_TIMEOUT);
 
-        UpdateAttempt {
-            gwtestctx: self.gwtestctx,
-            artifact_cache: self.artifacts.artifact_cache.clone(),
-            log,
-            sp_type: self.sp_type,
-            slot_id: self.slot_id,
-            deployed_caboose: deployed_caboose.clone(),
-            update_id,
-            sp_update_request,
-            sp1,
-        }
-    }
-}
-
-/// Describes an attempt to complete one update operation
-// It's important that this not keep a reference to an `UpdateDescription`
-// or its associated `TestArtifacts` because some tests will want to drop
-// the `TestArtifacts`.
-pub struct UpdateAttempt<'a> {
-    // Execution information
-    gwtestctx: &'a GatewayTestContext,
-    artifact_cache: Arc<ArtifactCache>,
-    log: slog::Logger,
-
-    // Update parameters
-    sp_type: SpType,
-    slot_id: u32,
-    deployed_caboose: hubtools::Caboose,
-    update_id: Uuid,
-    sp_update_request: PendingMgsUpdate,
-
-    // Initial state
-    sp1: SpTestState,
-}
-
-impl<'a> UpdateAttempt<'a> {
-    pub async fn begin<'b>(
-        self,
-        progress_timeout: Duration,
-    ) -> InProgressAttempt<'b>
-    where
-        'b: 'a,
-    {
-        let log = self.log.clone();
-        let request = self.sp_update_request.clone();
-        let baseboard_id = request.baseboard_id.clone();
-        let mgs_backends = self.gwtestctx.mgs_backends();
+        // Assemble the initial status object.
         let (status_tx, status_rx) =
             watch::channel(MgsUpdateDriverStatus::default());
         status_tx.send_modify(|status| {
@@ -167,15 +132,18 @@ impl<'a> UpdateAttempt<'a> {
                 },
             );
         });
-        let status_updater = UpdateAttemptStatusUpdater::new(
-            status_tx.clone(),
-            baseboard_id.clone(),
-        );
+        let status_updater =
+            UpdateAttemptStatusUpdater::new(status_tx.clone(), baseboard_id);
 
+        // Create a future to actually do the update.
+        let artifact_cache = self.artifacts.artifact_cache.clone();
+        let future_log = log.clone();
         let future = async move {
-            let artifact_cache = self.artifact_cache.clone();
-            let sp_update =
-                SpComponentUpdate::from_request(&log, &request, self.update_id);
+            let sp_update = SpComponentUpdate::from_request(
+                &future_log,
+                &request,
+                update_id,
+            );
             let sp_update_helper = Box::new(ReconfiguratorSpUpdater {});
             apply_update(
                 artifact_cache,
@@ -191,38 +159,68 @@ impl<'a> UpdateAttempt<'a> {
         .boxed();
 
         InProgressAttempt {
-            log: self.log,
-            baseboard_id,
+            log,
             status_rx,
             step: Some(StepResult::ReadyAgain(StepThrough::new(future))),
             sp_type: self.sp_type,
             slot_id: self.slot_id,
             mgs_client: self.gwtestctx.client(),
-            sp1: self.sp1,
-            deployed_caboose: self.deployed_caboose,
+            sp1,
+            deployed_caboose: deployed_caboose.clone(),
         }
     }
 }
 
-pub struct InProgressAttempt<'a> {
+/// Describes the state of an in-progress attempt to perform an SP update
+pub struct InProgressAttempt {
+    // Execution state
     log: slog::Logger,
-    baseboard_id: Arc<BaseboardId>,
-    status_rx: watch::Receiver<MgsUpdateDriverStatus>,
-    step: Option<StepResult<'a, Result<UpdateCompletedHow, ApplyUpdateError>>>,
+    mgs_client: gateway_client::Client,
+
+    // `step` contains the future that actually applies the update, wrapped in a
+    // `StepResult` that allows us to step through execution of that future.
+    // This is non-None except inside `run_until_status()`.
+    step: Option<
+        StepResult<'static, Result<UpdateCompletedHow, ApplyUpdateError>>,
+    >,
+
+    // Parameters of the update itself
     sp_type: SpType,
     slot_id: u32,
-    mgs_client: gateway_client::Client,
-    sp1: SpTestState,
     deployed_caboose: hubtools::Caboose,
+
+    // Status of the driver
+    // (allows us to run until we get to a specific "status")
+    status_rx: watch::Receiver<MgsUpdateDriverStatus>,
+
+    /// SP state before the update began
+    // (used to verify behavior at the end)
+    sp1: SpTestState,
 }
 
+/// Describes whether an in-progress update attempt is paused or finished after
+/// `run_until_status()` returns.
 #[derive(Debug, Eq, PartialEq)]
 pub enum Paused {
     Paused,
     Done,
 }
 
-impl InProgressAttempt<'_> {
+impl InProgressAttempt {
+    /// Proceeds with execution of the update attempt but pauses execution once
+    /// the status reaches `status`.
+    ///
+    /// If the future returns before being paused, this function returns.  You
+    /// can look at the return value to figure out if the future was paused or
+    /// if it finished early.  If it finishes early, you still have to use
+    /// `finished()` to get a `FinishedUpdateAttempt` that lets you verify the
+    /// end state.
+    ///
+    /// The pausing mechanism is somewhat approximate.  The current
+    /// implementation will return as soon as the future wakes up from having
+    /// blocked and the status matches `status`.  That means if the future sets
+    /// the requested status but doesn't block, it won't be caught.  (Instead,
+    /// this function will wind up running it until it finishes.)
     pub async fn run_until_status(
         &mut self,
         status: UpdateAttemptStatus,
@@ -230,13 +228,18 @@ impl InProgressAttempt<'_> {
         loop {
             assert!(self.step.is_some());
 
-            // If the condition is already true, return now.  If the actual
-            // status is missing, then this must have already finished but
-            // the future hasn't completed yet.  Ignore the condition and
-            // wait for the future to finish.
-            if let Some(current_status) =
-                self.status_rx.borrow().in_progress.get(&self.baseboard_id)
-            {
+            // Check the current status of the update so that we can return
+            // immediately if the status has reached the requested one.
+            //
+            // There is at most one entry in `in_progress` here.  If there's no
+            // status here at all, that means the update already finished.
+            // We won't return early in this case.  Instead, we'll wait for the
+            // future itself to finish and then return indicating that it's
+            // done.
+            let overall_status = self.status_rx.borrow();
+            let maybe_current_status =
+                overall_status.in_progress.values().next();
+            if let Some(current_status) = maybe_current_status {
                 if current_status.status == status {
                     debug!(
                         &self.log,
@@ -252,10 +255,12 @@ impl InProgressAttempt<'_> {
                     current_status.status
                 );
             }
+            // Drop `overall_status` to avoid blocking the watch channel.
+            drop(overall_status);
 
-            // If we're done, we're done.
+            // If the future is done, we're done.
             if let Some(StepResult::Done(_)) = &self.step {
-                debug!(&self.log, "run_until_status({:?}): done early", status,);
+                debug!(&self.log, "run_until_status({:?}): done early", status);
                 return Paused::Done;
             }
 
@@ -266,6 +271,8 @@ impl InProgressAttempt<'_> {
         }
     }
 
+    /// Runs the future to completion, if it hasn't already finished, and
+    /// returns a `FinishedUpdateAttempt` that lets you verify the final state.
     pub async fn finish(self) -> FinishedUpdateAttempt {
         debug!(&self.log, "finishing update");
         let result = match self.step.expect("self.step is always non-None") {
@@ -286,6 +293,8 @@ impl InProgressAttempt<'_> {
     }
 }
 
+/// Describes the final state of an update attempt and provides helpers for
+/// verifying the result
 #[must_use]
 pub struct FinishedUpdateAttempt {
     result: Result<UpdateCompletedHow, ApplyUpdateError>,
@@ -309,6 +318,7 @@ impl FinishedUpdateAttempt {
         FinishedUpdateAttempt { result, deployed_caboose, sp1, sp2 }
     }
 
+    /// Asserts various conditions associated with successful updates.
     pub fn expect_success(&self, expected_result: UpdateCompletedHow) {
         let how = match self.result {
             Ok(how) if how == expected_result => how,
@@ -350,6 +360,9 @@ impl FinishedUpdateAttempt {
         }
     }
 
+    /// Asserts that the update failed and invokes `assert_error(error,
+    /// initial_sp_state, final_sp_state)` for you to make your own assertions
+    /// about why it failed and what state things were left in.
     pub fn expect_failure(
         &self,
         assert_error: &dyn Fn(&ApplyUpdateError, &SpTestState, &SpTestState),

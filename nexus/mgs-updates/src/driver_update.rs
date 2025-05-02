@@ -593,7 +593,6 @@ async fn wait_for_update_done(
 #[cfg(test)]
 mod test {
     use super::ApplyUpdateError;
-    use crate::driver_update::PROGRESS_TIMEOUT;
     use crate::test_util::test_artifacts::TestArtifacts;
     use crate::test_util::updates::UpdateDescription;
     use assert_matches::assert_matches;
@@ -605,8 +604,10 @@ mod test {
     use nexus_types::internal_api::views::UpdateCompletedHow;
     use nexus_types::inventory::BaseboardId;
     use slog_error_chain::InlineErrorChain;
+    use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;
 
+    /// Tests several happy-path cases of updating an SP
     #[tokio::test]
     async fn test_sp_update_basic() {
         let gwtestctx = gateway_test_utils::setup::test_setup(
@@ -680,16 +681,16 @@ mod test {
             override_baseboard_id: None,
             override_expected_active: None,
             override_expected_inactive: None,
+            override_progress_timeout: None,
         };
 
-        let attempt = desc.load().await;
-        let in_progress = attempt.begin(PROGRESS_TIMEOUT).await;
+        let in_progress = desc.setup().await;
         let finished = in_progress.finish().await;
         finished.expect_success(expected_result);
     }
 
-    /// Tests the case where an update completed by watching another one
-    /// complete.
+    /// Tests the case where two updates run concurrently.  One notices another
+    /// is running and waits for it to complete.
     #[tokio::test]
     async fn test_sp_update_watched() {
         let gwtestctx = gateway_test_utils::setup::test_setup(
@@ -721,6 +722,7 @@ mod test {
             override_baseboard_id: None,
             override_expected_active: None,
             override_expected_inactive: None,
+            override_progress_timeout: None,
         };
 
         let desc2 = UpdateDescription {
@@ -743,18 +745,17 @@ mod test {
                 .parse()
                 .expect("version is valid"),
             )),
+            override_progress_timeout: None,
         };
 
-        let attempt1 = desc1.load().await;
-        let attempt2 = desc2.load().await;
+        let mut in_progress1 = desc1.setup().await;
+        let mut in_progress2 = desc2.setup().await;
 
         // Start one, but pause it while waiting for the update to upload.
-        let mut in_progress1 = attempt1.begin(PROGRESS_TIMEOUT).await;
         in_progress1.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
 
         // Start the other.  Pause it at the point where it's also waiting for
         // the upload to finish.
-        let mut in_progress2 = attempt2.begin(PROGRESS_TIMEOUT).await;
         in_progress2.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
 
         // Finish the first update, then the second.
@@ -790,6 +791,7 @@ mod test {
             override_baseboard_id: None,
             override_expected_active: None,
             override_expected_inactive: None,
+            override_progress_timeout: None,
         };
 
         let desc2 = UpdateDescription {
@@ -812,24 +814,21 @@ mod test {
                 .parse()
                 .expect("version is valid"),
             )),
+            // This timeout (10 seconds) seeks to balance being long enough to
+            // be relevant without making the tests take too long.  (It's
+            // assumed that 10 seconds here is not a huge deal because this is
+            // mostly idle time and this test is unlikely to be the long pole.)
+            override_progress_timeout: Some(Duration::from_secs(10)),
         };
 
-        let attempt1 = desc1.load().await;
-        let attempt2 = desc2.load().await;
+        let mut in_progress1 = desc1.setup().await;
+        let mut in_progress2 = desc2.setup().await;
 
         // Start one, but pause it while waiting for the update to upload.
-        let mut in_progress1 = attempt1.begin(PROGRESS_TIMEOUT).await;
         in_progress1.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
 
         // Start the other.  Pause it at the point where it's also waiting for
         // the upload to finish.
-        //
-        // This timeout (10 seconds) seeks to balance being long enough to be
-        // relevant without making the tests take too long.  (It's assumed that
-        // 10 seconds here is not a huge deal because this is mostly idle time
-        // and this test is unlikely to be the long pole.)
-        let mut in_progress2 =
-            attempt2.begin(std::time::Duration::from_secs(10)).await;
         in_progress2.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
 
         // This time, resume the second update first.  It will take over the
@@ -853,7 +852,7 @@ mod test {
         gwtestctx.teardown().await;
     }
 
-    /// Tests the case where an update takes over from a previously-started one.
+    /// Tests a bunch of easy fast-failure cases.
     #[tokio::test]
     async fn test_sp_basic_failures() {
         let gwtestctx = gateway_test_utils::setup::test_setup(
@@ -864,7 +863,8 @@ mod test {
         let log = &gwtestctx.logctx.log;
         let artifacts = TestArtifacts::new(log).await.unwrap();
 
-        // Test a case of mistaken identity.
+        // Test a case of mistaken identity (reported baseboard does not match
+        // the one that we expect).
         let desc = UpdateDescription {
             gwtestctx: &gwtestctx,
             artifacts: &artifacts,
@@ -877,33 +877,24 @@ mod test {
             }),
             override_expected_active: None,
             override_expected_inactive: None,
+            override_progress_timeout: None,
         };
 
-        desc.load()
-            .await
-            .begin(PROGRESS_TIMEOUT)
-            .await
-            .finish()
-            .await
-            .expect_failure(&|error, sp1, sp2| {
-                assert_matches!(
-                    error,
-                    ApplyUpdateError::PreconditionFailed(..)
-                );
-                let message = InlineErrorChain::new(error).to_string();
-                eprintln!("{}", message);
-                assert!(message.contains(
-                    "in sled slot 1, expected to find part \"i86pc\" serial \
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "in sled slot 1, expected to find part \"i86pc\" serial \
                      \"SimGimlet0\", but found part \"i86pc\" serial \
                      \"SimGimlet01\"",
-                ));
+            ));
 
-                // No changes should have been made in this case.
-                assert_eq!(sp1, sp2);
-            });
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
 
-        // Now test a case where the active version doesn't match what it
-        // should.
+        // Test a case where the active version doesn't match what we expect.
         let desc = UpdateDescription {
             gwtestctx: &gwtestctx,
             artifacts: &artifacts,
@@ -913,32 +904,24 @@ mod test {
             override_baseboard_id: None,
             override_expected_active: Some("not-right".parse().unwrap()),
             override_expected_inactive: None,
+            override_progress_timeout: None,
         };
 
-        desc.load()
-            .await
-            .begin(PROGRESS_TIMEOUT)
-            .await
-            .finish()
-            .await
-            .expect_failure(&|error, sp1, sp2| {
-                assert_matches!(
-                    error,
-                    ApplyUpdateError::PreconditionFailed(..)
-                );
-                let message = InlineErrorChain::new(error).to_string();
-                eprintln!("{}", message);
-                assert!(message.contains(
-                    "expected to find active version \"not-right\", but \
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "expected to find active version \"not-right\", but \
                      found \"0.0.2\""
-                ));
+            ));
 
-                // No changes should have been made in this case.
-                assert_eq!(sp1, sp2);
-            });
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
 
-        // Now test a case where the inactive version doesn't match what it
-        // should (expected invalid, found something else).
+        // Test a case where the inactive version doesn't match what it should
+        // (expected invalid, found something else).
         let desc = UpdateDescription {
             gwtestctx: &gwtestctx,
             artifacts: &artifacts,
@@ -948,29 +931,21 @@ mod test {
             override_baseboard_id: None,
             override_expected_active: None,
             override_expected_inactive: Some(ExpectedVersion::NoValidVersion),
+            override_progress_timeout: None,
         };
 
-        desc.load()
-            .await
-            .begin(PROGRESS_TIMEOUT)
-            .await
-            .finish()
-            .await
-            .expect_failure(&|error, sp1, sp2| {
-                assert_matches!(
-                    error,
-                    ApplyUpdateError::PreconditionFailed(..)
-                );
-                let message = InlineErrorChain::new(error).to_string();
-                eprintln!("{}", message);
-                assert!(message.contains(
-                    "expected to find inactive version NoValidVersion, \
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "expected to find inactive version NoValidVersion, \
                      but found Version(\"0.0.1\")"
-                ));
+            ));
 
-                // No changes should have been made in this case.
-                assert_eq!(sp1, sp2);
-            });
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
 
         // Now test a case where the inactive version doesn't match what it
         // should (expected a different valid version).
@@ -985,32 +960,25 @@ mod test {
             override_expected_inactive: Some(ExpectedVersion::Version(
                 "something-else".parse().unwrap(),
             )),
+            override_progress_timeout: None,
         };
 
-        desc.load()
-            .await
-            .begin(PROGRESS_TIMEOUT)
-            .await
-            .finish()
-            .await
-            .expect_failure(&|error, sp1, sp2| {
-                assert_matches!(
-                    error,
-                    ApplyUpdateError::PreconditionFailed(..)
-                );
-                let message = InlineErrorChain::new(error).to_string();
-                eprintln!("{}", message);
-                assert!(message.contains(
-                    "expected to find inactive version \
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "expected to find inactive version \
                      Version(ArtifactVersion(\"something-else\")), but found \
                      Version(\"0.0.1\")"
-                ));
+            ));
 
-                // No changes should have been made in this case.
-                assert_eq!(sp1, sp2);
-            });
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
 
-        // Now test a case where we fail to fetch the artifact.
+        // Test a case where we fail to fetch the artifact.  We simulate this by
+        // tearing down our artifact server before the update starts.
         let desc = UpdateDescription {
             gwtestctx: &gwtestctx,
             artifacts: &artifacts,
@@ -1020,8 +988,9 @@ mod test {
             override_baseboard_id: None,
             override_expected_active: None,
             override_expected_inactive: None,
+            override_progress_timeout: None,
         };
-        let in_progress = desc.load().await.begin(PROGRESS_TIMEOUT).await;
+        let in_progress = desc.setup().await;
         artifacts.teardown().await;
         in_progress.finish().await.expect_failure(&|error, sp1, sp2| {
             assert_matches!(error, ApplyUpdateError::FetchArtifact(..));

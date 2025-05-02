@@ -18,17 +18,39 @@ use tufaceous_artifact::ArtifactVersion;
 pub type GatewayClientError =
     gateway_client::Error<gateway_client::types::Error>;
 
-#[derive(Debug)]
+/// Combines all the state we'd like to fetch from the SP to verify its behavior
+/// across an update
+#[derive(Debug, Eq, PartialEq)]
 pub struct SpTestState {
+    /// caboose read from the SP active slot
+    ///
+    /// This is not an `Option` because we never expect to fail to read this.
     pub caboose_sp_active: SpComponentCaboose,
-    pub caboose_sp_inactive: Result<SpComponentCaboose, GatewayClientError>,
-    pub caboose_rot_a: Result<SpComponentCaboose, GatewayClientError>,
-    pub caboose_rot_b: Result<SpComponentCaboose, GatewayClientError>,
+
+    /// caboose read from the SP inactive slot
+    ///
+    /// This can be None if the caboose contents were not valid.
+    pub caboose_sp_inactive: Option<SpComponentCaboose>,
+
+    /// caboose read from RoT slot A
+    ///
+    /// This can be None if the caboose contents were not valid.
+    pub caboose_rot_a: Option<SpComponentCaboose>,
+
+    /// caboose read from RoT slot B
+    ///
+    /// This can be None if the caboose contents were not valid.
+    pub caboose_rot_b: Option<SpComponentCaboose>,
+
+    /// Overall SP state
     pub sp_state: SpState,
+
+    /// RoT boot information
     pub sp_boot_info: RotState,
 }
 
 impl SpTestState {
+    /// Load all the state we care about from the given SP
     pub async fn load(
         mgs_client: &gateway_client::Client,
         sp_type: SpType,
@@ -84,9 +106,11 @@ impl SpTestState {
             .into_inner();
         Ok(SpTestState {
             caboose_sp_active,
-            caboose_sp_inactive,
-            caboose_rot_a,
-            caboose_rot_b,
+            caboose_sp_inactive: ignore_invalid_caboose_error(
+                caboose_sp_inactive,
+            ),
+            caboose_rot_a: ignore_invalid_caboose_error(caboose_rot_a),
+            caboose_rot_b: ignore_invalid_caboose_error(caboose_rot_b),
             sp_state: sp_info,
             sp_boot_info,
         })
@@ -124,56 +148,25 @@ impl SpTestState {
 
     pub fn expect_sp_inactive_version(&self) -> ExpectedVersion {
         match &self.caboose_sp_inactive {
-            Ok(v) => ExpectedVersion::Version(
+            Some(v) => ExpectedVersion::Version(
                 v.version.parse().expect("valid SP inactive slot version"),
             ),
-            Err(e) if error_means_caboose_is_invalid(e) => {
-                ExpectedVersion::NoValidVersion
-            }
-            Err(e) => panic!(
-                "unexpected error reading caboose: {}",
-                InlineErrorChain::new(e)
-            ),
+            None => ExpectedVersion::NoValidVersion,
         }
     }
 }
 
-impl Eq for SpTestState {}
-impl PartialEq for SpTestState {
-    fn eq(&self, other: &Self) -> bool {
-        let Self {
-            caboose_sp_active,
-            caboose_sp_inactive,
-            caboose_rot_a,
-            caboose_rot_b,
-            sp_state,
-            sp_boot_info,
-        } = self;
-
-        // The basic fields are easy.
-        if *caboose_sp_active != other.caboose_sp_active
-            || *sp_state != other.sp_state
-            || *sp_boot_info != other.sp_boot_info
-        {
-            return false;
+fn ignore_invalid_caboose_error(
+    result: Result<SpComponentCaboose, GatewayClientError>,
+) -> Option<SpComponentCaboose> {
+    match result {
+        Ok(caboose) => Some(caboose),
+        Err(error) if error_means_caboose_is_invalid(&error) => None,
+        Err(error) => {
+            panic!(
+                "unexpected error reading caboose: {}",
+                InlineErrorChain::new(&error)
+            );
         }
-
-        // The cabooses are a little trickier because they might be missing and
-        // the errors don't impl Eq.  For our purposes, we can consider errors
-        // equivalent if they stringify the same.  (This case seems unlikely to
-        // come up.)
-        for (mine, other) in [
-            (caboose_sp_inactive, &other.caboose_sp_inactive),
-            (caboose_rot_a, &other.caboose_rot_a),
-            (caboose_rot_b, &other.caboose_rot_b),
-        ] {
-            let mine = mine.as_ref().map_err(|e| e.to_string());
-            let other = other.as_ref().map_err(|e| e.to_string());
-            if mine != other {
-                return false;
-            }
-        }
-
-        true
     }
 }

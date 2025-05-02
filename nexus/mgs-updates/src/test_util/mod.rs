@@ -10,6 +10,8 @@ pub mod step_through;
 pub mod test_artifacts;
 pub mod updates;
 
+/// Returns whether caboose `c1` (reported by an SP via MGS) matches caboose
+/// `c2` (constructed or read via `hubtools`)
 pub fn cabooses_equal(c1: &SpComponentCaboose, c2: &hubtools::Caboose) -> bool {
     let (Ok(name), Ok(board), Ok(version), Ok(git_commit)) =
         (c2.name(), c2.board(), c2.version(), c2.git_commit())

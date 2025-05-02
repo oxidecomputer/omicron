@@ -19,6 +19,18 @@ use tufaceous_artifact::ArtifactHash;
 type ArtifactData = BTreeMap<ArtifactHash, Vec<u8>>;
 type InMemoryRepoDepotServerContext = Arc<ArtifactData>;
 
+/// Facilities for working with the artifacts needed when running SP update
+/// tests
+///
+/// `TestArtifacts` does a few things:
+///
+/// - it creates some specific useful test artifacts: SP images for SimGimlet
+///   and SimSidecar
+/// - it provides the hashes and cabooses used for these images
+/// - it serves these images via an in-memory Repo Depot server
+///
+/// Together, this makes it easy to write SP update tests that use these
+/// artifacts.
 pub struct TestArtifacts {
     pub sp_gimlet_artifact_hash: ArtifactHash,
     pub sp_sidecar_artifact_hash: ArtifactHash,
@@ -62,6 +74,7 @@ impl TestArtifacts {
             ArtifactHash(digest.finalize().into())
         };
 
+        // Assemble a map of artifact hash to artifact contents.
         let artifact_data = [
             (sp_gimlet_artifact_hash, sp_gimlet_artifact),
             (sp_sidecar_artifact_hash, sp_sidecar_artifact),
@@ -69,6 +82,7 @@ impl TestArtifacts {
         .into_iter()
         .collect();
 
+        // Assemble a map of artifact hash to generated caboose.
         let deployed_cabooses = [
             (sp_gimlet_artifact_hash, sp_gimlet_artifact_caboose),
             (sp_sidecar_artifact_hash, sp_sidecar_artifact_caboose),
@@ -76,6 +90,7 @@ impl TestArtifacts {
         .into_iter()
         .collect();
 
+        // Start a Repo Depot server that will serve these artifacts.
         let repo_depot_server = {
             let log = log.new(slog::o!("component" => "RepoDepotServer"));
             let my_api = repo_depot_api::repo_depot_api_mod::api_description::<
@@ -88,6 +103,8 @@ impl TestArtifacts {
                 .context("failed to create server")?
         };
 
+        // Create an ArtifactCache pointed at our Repo Depot server.
+        // This can be used directly by the caller for doing SP updates.
         let mut resolver =
             FixedResolver::new(std::iter::once(repo_depot_server.local_addr()));
         let artifact_cache = Arc::new(ArtifactCache::new(
@@ -105,6 +122,11 @@ impl TestArtifacts {
         })
     }
 
+    /// Return the caboose that was used to generate the given artifact
+    ///
+    /// # Panics
+    ///
+    /// If no such artifact was generated.
     pub fn deployed_caboose(
         &self,
         hash: &ArtifactHash,

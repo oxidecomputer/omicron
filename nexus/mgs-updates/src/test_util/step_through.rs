@@ -26,7 +26,7 @@ impl<'a, T> StepThrough<'a, T> {
     /// next time the function does block.
     pub async fn step(mut self) -> StepResult<'a, T> {
         let (tx, mut rx) = mpsc::channel(16);
-        let my_waker = MyWaker(tx);
+        let my_waker = StepThroughWaker(tx);
         let waker = Waker::from(Arc::new(my_waker));
         let mut context = Context::from_waker(&waker);
 
@@ -77,9 +77,8 @@ impl<T> StepResult<'_, T> {
     }
 }
 
-struct MyWaker(mpsc::Sender<()>);
-
-impl Wake for MyWaker {
+struct StepThroughWaker(mpsc::Sender<()>);
+impl Wake for StepThroughWaker {
     fn wake(self: Arc<Self>) {
         // `send()` will only fail if the other side of the channel has been
         // dropped.  There's nothing for us to do in that case.
