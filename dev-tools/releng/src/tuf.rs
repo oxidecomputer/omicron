@@ -115,11 +115,11 @@ pub(crate) async fn build_tuf_repo(
     // XXX fixme
     let measurement_corpus = vec![
         DeserializedControlPlaneZoneSource::File {
-            file_name: Some(format!("rot_staging.cbor")),
+            file_name: Some("rot_staging.cbor".to_string()),
             path: crate::WORKSPACE_DIR.join("corpus").join("rot_staging.cbor"),
         },
         DeserializedControlPlaneZoneSource::File {
-            file_name: Some(format!("sp.cbor")),
+            file_name: Some("sp.cbor".to_string()),
             path: crate::WORKSPACE_DIR.join("corpus").join("sp.cbor"),
         },
     ];
