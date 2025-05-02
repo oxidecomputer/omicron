@@ -265,10 +265,6 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
         // state. We need to wait for at least one M.2 before we can do
         // anything, and `wait_for_m2_disks` should not return until we've seen
         // one.
-        assert_eq!(
-            *self.current_config_tx.borrow(),
-            CurrentSledConfig::WaitingForInternalDisks
-        );
         if let Err(err) = self.wait_for_m2_disks().await {
             return Err((self.log, err));
         }
@@ -503,7 +499,21 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
         }
     }
 
+    // Wait for at least one M.2 disk to be available.
+    //
+    // # Panics
+    //
+    // This method panics if called when the current config state is anything
+    // other than `CurrentSledConfig::WaitingForInternalDisks`, and is
+    // guaranteed to set the state to something _other_ than
+    // `CurrentSledConfig::WaitingForInternalDisks` on a successful return. It
+    // should only be called once, at the beginning of the execution of this
+    // task.
     async fn wait_for_m2_disks(&mut self) -> Result<(), LedgerTaskExit> {
+        assert_eq!(
+            *self.current_config_tx.borrow(),
+            CurrentSledConfig::WaitingForInternalDisks
+        );
         loop {
             let internal_disks = self.internal_disks_rx.current_and_update();
             let config_datasets =
