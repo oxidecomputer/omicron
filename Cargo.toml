@@ -124,6 +124,7 @@ members = [
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
+    "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-diagnostics",
@@ -275,6 +276,7 @@ default-members = [
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
+    "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-diagnostics",
@@ -399,7 +401,7 @@ display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
-derive_more = "0.99.19"
+derive_more = "0.99.20"
 derive-where = "1.2.7"
 dev-tools-common = { path = "dev-tools/common" }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
@@ -662,6 +664,7 @@ similar-asserts = "1.7.0"
 sled = "=0.34.7"
 sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
+sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }

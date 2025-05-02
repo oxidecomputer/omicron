@@ -6,12 +6,13 @@
 //! and dispatches them to other parts of the bootstrap agent and sled agent
 //! code.
 
-use crate::dump_setup::DumpSetup;
 use omicron_common::api::external::Generation;
+use sled_agent_config_reconciler::dump_setup::DumpSetup;
 use sled_storage::config::MountConfig;
 use sled_storage::manager::StorageHandle;
 use sled_storage::resources::AllDisks;
 use slog::Logger;
+use std::sync::Arc;
 use tokio::sync::watch;
 
 #[derive(thiserror::Error, Debug)]
@@ -74,7 +75,7 @@ impl StorageMonitor {
         mount_config: MountConfig,
         storage_manager: StorageHandle,
     ) -> (StorageMonitor, StorageMonitorHandle) {
-        let dump_setup = DumpSetup::new(&log, mount_config);
+        let dump_setup = DumpSetup::new(&log, Arc::new(mount_config));
         let log = log.new(o!("component" => "StorageMonitor"));
         let (tx, rx) = watch::channel(StorageMonitorStatus::new());
         (
