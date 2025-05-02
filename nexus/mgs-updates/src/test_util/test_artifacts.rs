@@ -123,10 +123,6 @@ impl TestArtifacts {
     }
 
     /// Return the caboose that was used to generate the given artifact
-    ///
-    /// # Panics
-    ///
-    /// If no such artifact was generated.
     pub fn deployed_caboose(
         &self,
         hash: &ArtifactHash,

@@ -46,11 +46,11 @@ impl<'a, T> StepThrough<'a, T> {
                 // when it gets woken up.  We gave its `poll()` a waker that
                 // will send a message on this channel when that happens.
                 //
-                // This only fails if the tx side has been dropped, which means
-                // the waker was dropped.  It's not clear how this could happen
-                // unless the future was being dropped, in which case this
-                // object must also be dropped.
-                let _ = rx.recv().await;
+                // unwrap(): this only fails if the tx side has been dropped,
+                // which means the waker was dropped.  It's not clear how this
+                // could happen unless the future was being dropped, in which
+                // case this object must also be dropped.
+                rx.recv().await.unwrap();
                 StepResult::ReadyAgain(StepThrough { fut: self.fut })
             }
             Poll::Ready(v) => StepResult::Done(v),
