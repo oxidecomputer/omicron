@@ -887,27 +887,23 @@ impl<'a> Planner<'a> {
             .map(|(id, _details)| id)
             .collect::<Vec<_>>();
 
-        // Wait for all current zones to become up-to-date.
+        // Wait for all current zones to appear in the inventory.
+        // It would be nice if we could check their image source,
+        // but the inventory doesn't report that correctly: see
+        // <https://github.com/oxidecomputer/omicron/issues/8084>.
         let inventory_zones = self
             .inventory
             .all_omicron_zones()
             .map(|z| (z.id, z))
             .collect::<BTreeMap<_, _>>();
         for sled_id in sleds.iter().cloned() {
-            if self
+            if !self
                 .blueprint
                 .current_sled_zones(
                     sled_id,
                     BlueprintZoneDisposition::is_in_service,
                 )
-                .any(|zone| {
-                    inventory_zones
-                        .get(&zone.id)
-                        .map(|z| {
-                            z.image_source != zone.image_source.clone().into()
-                        })
-                        .unwrap_or(false)
-                })
+                .all(|zone| inventory_zones.contains_key(&zone.id))
             {
                 info!(
                     self.log, "zones not yet up-to-date";

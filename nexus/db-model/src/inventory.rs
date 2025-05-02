@@ -1632,6 +1632,7 @@ impl InvOmicronZone {
                 .filesystem_pool
                 .map(|id| ZpoolName::new_external(id.into())),
             zone_type,
+            // FIXME <https://github.com/oxidecomputer/omicron/issues/8084>
             image_source: OmicronZoneImageSource::InstallDataset,
         })
     }
