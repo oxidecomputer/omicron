@@ -20,8 +20,8 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Asset;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
-use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
+use crucible_agent_client::progenitor_operation_retry::ProgenitorOperationRetry;
+use crucible_agent_client::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 
