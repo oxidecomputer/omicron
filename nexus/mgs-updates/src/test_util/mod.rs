@@ -8,6 +8,7 @@ use hubtools::CabooseError;
 pub mod sp_test_state;
 pub mod step_through;
 pub mod test_artifacts;
+pub mod updates;
 
 pub fn cabooses_equal(c1: &SpComponentCaboose, c2: &hubtools::Caboose) -> bool {
     let (Ok(name), Ok(board), Ok(version), Ok(git_commit)) =

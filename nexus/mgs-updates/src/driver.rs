@@ -6,6 +6,7 @@
 
 use crate::ArtifactCache;
 use crate::driver_update::ApplyUpdateError;
+use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
 use crate::sp_updater::ReconfiguratorSpUpdater;
@@ -347,6 +348,7 @@ impl MgsUpdateDriver {
                 mgs_rx,
                 &request,
                 status_updater,
+                PROGRESS_TIMEOUT,
             )
             .await;
             UpdateAttemptResult { baseboard_id: request.baseboard_id, result }
