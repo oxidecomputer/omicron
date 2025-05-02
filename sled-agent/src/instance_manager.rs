@@ -17,15 +17,14 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::PropolisUuid;
+use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
 use sled_agent_types::instance::*;
-use sled_storage::manager::StorageHandle;
-use sled_storage::resources::AllDisks;
 use slog::Logger;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -66,10 +65,10 @@ pub(crate) struct InstanceManagerServices {
     pub nexus_client: NexusClient,
     pub vnic_allocator: VnicAllocator<Etherstub>,
     pub port_manager: PortManager,
-    pub storage: StorageHandle,
     pub zone_bundler: ZoneBundler,
     pub zone_builder_factory: ZoneBuilderFactory,
     pub metrics_queue: MetricsRequestQueue,
+    pub available_datasets_rx: AvailableDatasetsReceiver,
 }
 
 // Describes the internals of the "InstanceManager", though most of the
@@ -95,7 +94,8 @@ impl InstanceManager {
         nexus_client: NexusClient,
         vnic_allocator: VnicAllocator<Etherstub>,
         port_manager: PortManager,
-        storage: StorageHandle,
+        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+        available_datasets_rx: AvailableDatasetsReceiver,
         zone_bundler: ZoneBundler,
         vmm_reservoir_manager: VmmReservoirManagerHandle,
         metrics_queue: MetricsRequestQueue,
@@ -105,7 +105,8 @@ impl InstanceManager {
             nexus_client,
             vnic_allocator,
             port_manager,
-            storage,
+            currently_managed_zpools_rx,
+            available_datasets_rx,
             zone_bundler,
             ZoneBuilderFactory::new(),
             vmm_reservoir_manager,
@@ -123,7 +124,8 @@ impl InstanceManager {
         nexus_client: NexusClient,
         vnic_allocator: VnicAllocator<Etherstub>,
         port_manager: PortManager,
-        storage: StorageHandle,
+        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+        available_datasets_rx: AvailableDatasetsReceiver,
         zone_bundler: ZoneBundler,
         zone_builder_factory: ZoneBuilderFactory,
         vmm_reservoir_manager: VmmReservoirManagerHandle,
@@ -142,8 +144,8 @@ impl InstanceManager {
             jobs: BTreeMap::new(),
             vnic_allocator,
             port_manager,
-            storage_generation: None,
-            storage,
+            currently_managed_zpools_rx,
+            available_datasets_rx,
             zone_bundler,
             zone_builder_factory,
             metrics_queue,
@@ -315,23 +317,6 @@ impl InstanceManager {
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
     }
-
-    /// Marks instances failed unless they're using storage from `disks`.
-    ///
-    /// This function looks for transient zone filesystem usage on expunged
-    /// zpools.
-    pub async fn use_only_these_disks(
-        &self,
-        disks: AllDisks,
-    ) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        self.inner
-            .tx
-            .send(InstanceManagerRequest::OnlyUseDisks { disks, tx })
-            .await
-            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
-        rx.await?
-    }
 }
 
 // Most requests that can be sent to the "InstanceManagerRunner" task.
@@ -386,10 +371,6 @@ enum InstanceManagerRequest {
         propolis_id: PropolisUuid,
         tx: oneshot::Sender<Result<SledVmmState, Error>>,
     },
-    OnlyUseDisks {
-        disks: AllDisks,
-        tx: oneshot::Sender<Result<(), Error>>,
-    },
 }
 
 // Requests that the instance manager stop processing information about a
@@ -426,8 +407,8 @@ struct InstanceManagerRunner {
 
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
-    storage_generation: Option<Generation>,
-    storage: StorageHandle,
+    currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+    available_datasets_rx: AvailableDatasetsReceiver,
     zone_bundler: ZoneBundler,
     zone_builder_factory: ZoneBuilderFactory,
     metrics_queue: MetricsRequestQueue,
@@ -458,6 +439,24 @@ impl InstanceManagerRunner {
                         },
                     }
                 },
+                // If the set of currently-managed zpools has changed, shut down
+                // any instances due to disks that have disappeared out from
+                // under them.
+                result = self.currently_managed_zpools_rx.changed() => {
+                    match result {
+                        Ok(()) => {
+                            self.use_only_currently_managed_zpools().await;
+                        }
+                        Err(_) => {
+                            warn!(
+                                self.log,
+                                "InstanceManager's 'current zpools' channel \
+                                 closed; shutting down",
+                            );
+                            break;
+                        }
+                    }
+                }
                 request = self.rx.recv() => {
                     let request_variant = request.as_ref().map(|r| r.to_string());
                     let result = match request {
@@ -494,10 +493,6 @@ impl InstanceManagerRunner {
                             // serialize with the requests that actually update
                             // the state...
                             self.get_instance_state(tx, propolis_id)
-                        },
-                        Some(OnlyUseDisks { disks, tx } ) => {
-                            self.use_only_these_disks(disks).await;
-                            tx.send(Ok(())).map_err(|_| Error::FailedSendClientClosed)
                         },
                         None => {
                             warn!(self.log, "InstanceManager's request channel closed; shutting down");
@@ -607,10 +602,10 @@ impl InstanceManagerRunner {
                     nexus_client: self.nexus_client.clone(),
                     vnic_allocator: self.vnic_allocator.clone(),
                     port_manager: self.port_manager.clone(),
-                    storage: self.storage.clone(),
                     zone_bundler: self.zone_bundler.clone(),
                     zone_builder_factory: self.zone_builder_factory.clone(),
                     metrics_queue: self.metrics_queue.clone(),
+                    available_datasets_rx: self.available_datasets_rx.clone(),
                 };
 
                 let state = crate::instance::InstanceInitialState {
@@ -760,24 +755,9 @@ impl InstanceManagerRunner {
         Ok(())
     }
 
-    async fn use_only_these_disks(&mut self, disks: AllDisks) {
-        // Consider the generation number on the incoming request to avoid
-        // applying old requests.
-        let requested_generation = *disks.generation();
-        if let Some(last_gen) = self.storage_generation {
-            if last_gen >= requested_generation {
-                // This request looks old, ignore it.
-                info!(self.log, "use_only_these_disks: Ignoring request";
-                    "last_gen" => ?last_gen, "requested_gen" => ?requested_generation);
-                return;
-            }
-        }
-        self.storage_generation = Some(requested_generation);
-        info!(self.log, "use_only_these_disks: Processing new request";
-            "gen" => ?requested_generation);
-
-        let u2_set: HashSet<_> = disks.all_u2_zpools().into_iter().collect();
-
+    async fn use_only_currently_managed_zpools(&mut self) {
+        let current_zpools =
+            self.currently_managed_zpools_rx.current_and_update();
         let mut to_remove = vec![];
         for (id, instance) in self.jobs.iter() {
             // If we can read the filesystem pool, consider it. Otherwise, move
@@ -792,7 +772,7 @@ impl InstanceManagerRunner {
                 info!(self.log, "use_only_these_disks: Cannot read filesystem pool"; "instance_id" => ?id);
                 continue;
             };
-            if !u2_set.contains(&filesystem_pool) {
+            if !current_zpools.contains(&filesystem_pool) {
                 to_remove.push(*id);
             }
         }

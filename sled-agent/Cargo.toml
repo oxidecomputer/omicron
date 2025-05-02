@@ -138,6 +138,7 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 
 illumos-utils = { workspace = true, features = ["testing"] }
+sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
 sled-storage = { workspace = true, features = ["testing"] }
 
 #

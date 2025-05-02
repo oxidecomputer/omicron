@@ -15,7 +15,6 @@ use omicron_ddm_admin_client::Client as DdmAdminClient;
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::dataset::CLUSTER_DATASET;
-use sled_storage::resources::AllDisks;
 use slog::Logger;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
@@ -26,7 +25,7 @@ const BOOTSTORE_FSM_STATE_FILE: &str = "bootstore-fsm-state.json";
 const BOOTSTORE_NETWORK_CONFIG_FILE: &str = "bootstore-network-config.json";
 
 pub fn new_bootstore_config(
-    all_disks: &AllDisks,
+    cluster_dataset_paths: &[Utf8PathBuf],
     baseboard: Baseboard,
     global_zone_bootstrap_ip: Ipv6Addr,
 ) -> Result<bootstore::Config, StartError> {
@@ -37,19 +36,20 @@ pub fn new_bootstore_config(
         learn_timeout: Duration::from_secs(5),
         rack_init_timeout: Duration::from_secs(300),
         rack_secret_request_timeout: Duration::from_secs(5),
-        fsm_state_ledger_paths: bootstore_fsm_state_paths(&all_disks)?,
+        fsm_state_ledger_paths: bootstore_fsm_state_paths(
+            cluster_dataset_paths,
+        )?,
         network_config_ledger_paths: bootstore_network_config_paths(
-            &all_disks,
+            cluster_dataset_paths,
         )?,
     })
 }
 
 fn bootstore_fsm_state_paths(
-    all_disks: &AllDisks,
+    cluster_dataset_paths: &[Utf8PathBuf],
 ) -> Result<Vec<Utf8PathBuf>, StartError> {
-    let paths: Vec<_> = all_disks
-        .all_m2_mountpoints(CLUSTER_DATASET)
-        .into_iter()
+    let paths: Vec<_> = cluster_dataset_paths
+        .iter()
         .map(|p| p.join(BOOTSTORE_FSM_STATE_FILE))
         .collect();
 
@@ -60,11 +60,10 @@ fn bootstore_fsm_state_paths(
 }
 
 fn bootstore_network_config_paths(
-    all_disks: &AllDisks,
+    cluster_dataset_paths: &[Utf8PathBuf],
 ) -> Result<Vec<Utf8PathBuf>, StartError> {
-    let paths: Vec<_> = all_disks
-        .all_m2_mountpoints(CLUSTER_DATASET)
-        .into_iter()
+    let paths: Vec<_> = cluster_dataset_paths
+        .iter()
         .map(|p| p.join(BOOTSTORE_NETWORK_CONFIG_FILE))
         .collect();
 

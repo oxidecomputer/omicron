@@ -14,7 +14,6 @@ use crate::planner::rng::PlannerRng;
 use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_inventory::CollectionBuilderRng;
-use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -486,15 +485,7 @@ impl ExampleSystemBuilder {
 
         for (sled_id, sled_cfg) in &blueprint.sleds {
             let sled_cfg = sled_cfg.clone().into_in_service_sled_config();
-            system
-                .sled_set_omicron_zones(
-                    *sled_id,
-                    OmicronZonesConfig {
-                        generation: sled_cfg.generation,
-                        zones: sled_cfg.zones.into_iter().collect(),
-                    },
-                )
-                .unwrap();
+            system.sled_set_omicron_config(*sled_id, sled_cfg).unwrap();
         }
 
         // We just ensured that a handful of datasets should exist in

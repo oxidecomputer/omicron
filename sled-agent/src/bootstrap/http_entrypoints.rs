@@ -23,10 +23,10 @@ use dropshot::{
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
+use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::rack_init::RackInitializeRequest;
 use sled_agent_types::rack_ops::RackOperationStatus;
 use sled_hardware_types::Baseboard;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use sprockets_tls::keys::SprocketsConfig;
@@ -37,7 +37,7 @@ use tokio::sync::{mpsc, oneshot};
 pub(crate) struct BootstrapServerContext {
     pub(crate) base_log: Logger,
     pub(crate) global_zone_bootstrap_ip: Ipv6Addr,
-    pub(crate) storage_manager: StorageHandle,
+    pub(crate) internal_disks_rx: InternalDisksReceiver,
     pub(crate) bootstore_node_handle: bootstore::NodeHandle,
     pub(crate) baseboard: Baseboard,
     pub(crate) rss_access: RssAccess,
@@ -56,7 +56,7 @@ impl BootstrapServerContext {
             &self.base_log,
             self.sprockets.clone(),
             self.global_zone_bootstrap_ip,
-            &self.storage_manager,
+            &self.internal_disks_rx,
             &self.bootstore_node_handle,
             request,
         )
