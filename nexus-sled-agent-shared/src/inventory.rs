@@ -7,14 +7,16 @@
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 
 use daft::Diffable;
+use id_map::IdMap;
+use id_map::IdMappable;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
     disk::{
-        DatasetManagementStatus, DatasetsConfig, DiskManagementStatus,
-        DiskVariant, OmicronPhysicalDisksConfig,
+        DatasetConfig, DatasetManagementStatus, DiskManagementStatus,
+        DiskVariant, OmicronPhysicalDiskConfig,
     },
     zpool_name::ZpoolName,
 };
@@ -130,13 +132,12 @@ pub enum SledRole {
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
 // TODO this struct should have a generation number; at the moment, each of
 // the fields has a separete one internally.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct OmicronSledConfig {
-    pub disks_config: OmicronPhysicalDisksConfig,
-    pub datasets_config: DatasetsConfig,
-    pub zones_config: OmicronZonesConfig,
+    pub generation: Generation,
+    pub disks: IdMap<OmicronPhysicalDiskConfig>,
+    pub datasets: IdMap<DatasetConfig>,
+    pub zones: IdMap<OmicronZoneConfig>,
 }
 
 /// Result of the currently-synchronous `omicron_config_put` endpoint.
@@ -188,6 +189,14 @@ pub struct OmicronZoneConfig {
     // blueprint or ledger.
     #[serde(default = "deserialize_image_source_default")]
     pub image_source: OmicronZoneImageSource,
+}
+
+impl IdMappable for OmicronZoneConfig {
+    type Id = OmicronZoneUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
 }
 
 impl OmicronZoneConfig {
@@ -652,6 +661,18 @@ pub enum OmicronZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     Artifact { hash: ArtifactHash },
+}
+
+impl OmicronZoneImageSource {
+    /// Return the artifact hash used for the zone image, if the zone's image
+    /// source is from the artifact store.
+    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
+        if let OmicronZoneImageSource::Artifact { hash } = self {
+            Some(*hash)
+        } else {
+            None
+        }
+    }
 }
 
 // See `OmicronZoneConfig`. This is a separate function instead of being `impl

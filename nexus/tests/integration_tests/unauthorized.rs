@@ -62,7 +62,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
     let mut disk_test = DiskTest::new(cptestctx).await;
     let sled_id = cptestctx.first_sled_id();
     disk_test
-        .add_zpool_with_dataset_ext(
+        .add_zpool_with_datasets_ext(
             sled_id,
             nexus_test_utils::PHYSICAL_DISK_UUID.parse().unwrap(),
             ZpoolUuid::new_v4(),
@@ -369,6 +369,18 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             url: &SUPPORT_BUNDLES_URL,
             body: serde_json::to_value(()).unwrap(),
             id_routes: vec!["/experimental/v1/system/support-bundles/{id}"],
+        },
+        // Create a webhook receiver
+        SetupReq::Post {
+            url: &WEBHOOK_RECEIVERS_URL,
+            body: serde_json::to_value(&*DEMO_WEBHOOK_RECEIVER_CREATE).unwrap(),
+            id_routes: vec![],
+        },
+        // Create a secret for that receiver
+        SetupReq::Post {
+            url: &DEMO_WEBHOOK_SECRETS_URL,
+            body: serde_json::to_value(&*DEMO_WEBHOOK_SECRET_CREATE).unwrap(),
+            id_routes: vec![&*DEMO_WEBHOOK_SECRET_DELETE_URL],
         },
     ]
 });

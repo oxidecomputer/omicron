@@ -22,6 +22,7 @@ use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
+use crate::helpers::display_option_blank;
 use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -167,8 +168,11 @@ use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 use uuid::Uuid;
+use webhook::WebhookArgs;
+use webhook::cmd_db_webhook;
 
 mod saga;
+mod webhook;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
@@ -382,6 +386,8 @@ enum DbCommands {
     Vmms(VmmListArgs),
     /// Print information about the oximeter collector.
     Oximeter(OximeterArgs),
+    /// Print information about webhooks
+    Webhook(WebhookArgs),
     /// Commands for querying and interacting with pools
     Zpool(ZpoolArgs),
 }
@@ -1459,6 +1465,8 @@ impl DbArgs {
                     DbCommands::Oximeter(OximeterArgs {
                         command: OximeterCommands::ListProducers
                     }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
+
+                    DbCommands::Webhook(args) => cmd_db_webhook(&opctx, &datastore, &fetch_opts, &args).await,
                     DbCommands::Zpool(ZpoolArgs {
                         command: ZpoolCommands::List(args)
                     }) => cmd_db_zpool_list(&opctx, &datastore, &args).await,
@@ -8023,11 +8031,6 @@ async fn cmd_db_oximeter_list_producers(
     println!("{}", table);
 
     Ok(())
-}
-
-// Display an empty cell for an Option<T> if it's None.
-fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
-    opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
 }
 
 // Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using
