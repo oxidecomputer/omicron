@@ -10,7 +10,7 @@ use std::fs;
 use std::fs::FileType;
 use std::sync::Arc;
 
-use crate::ZoneImageSourceResolverBuilder;
+use crate::ZoneImageZpools;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use id_map::IdMap;
@@ -57,11 +57,10 @@ impl AllMupdateOverrides {
     /// be authoritative). Consider extracting this out into something generic.
     pub(crate) fn read_all(
         log: &slog::Logger,
-        builder: &ZoneImageSourceResolverBuilder<'_>,
+        zpools: &ZoneImageZpools<'_>,
     ) -> Self {
-        let dataset = builder
-            .boot_zpool
-            .dataset_mountpoint(builder.root, INSTALL_DATASET);
+        let dataset =
+            zpools.boot_zpool.dataset_mountpoint(zpools.root, INSTALL_DATASET);
 
         let (boot_disk_path, boot_disk_res) =
             read_mupdate_override(log, &dataset);
@@ -69,14 +68,14 @@ impl AllMupdateOverrides {
         // Now read the file from all other disks. We attempt to make sure they
         // match up and will log a warning if they don't, though (until we have
         // a better story on transient failures) it's not fatal.
-        let non_boot_zpools = builder
+        let non_boot_zpools = zpools
             .all_m2_zpools
             .iter()
-            .filter(|&zpool_name| zpool_name != builder.boot_zpool);
+            .filter(|&zpool_name| zpool_name != zpools.boot_zpool);
         let non_boot_disks_overrides = non_boot_zpools
             .map(|zpool_name| {
-                let dataset = zpool_name
-                    .dataset_mountpoint(builder.root, INSTALL_DATASET);
+                let dataset =
+                    zpool_name.dataset_mountpoint(zpools.root, INSTALL_DATASET);
 
                 let (path, res) = read_mupdate_override(log, &dataset);
                 MupdateOverrideNonBootInfo {
@@ -91,7 +90,7 @@ impl AllMupdateOverrides {
             .collect();
 
         Self {
-            boot_zpool: builder.boot_zpool.clone(),
+            boot_zpool: zpools.boot_zpool.clone(),
             boot_disk_path,
             boot_disk_override: boot_disk_res,
             non_boot_disk_overrides: non_boot_disks_overrides,
@@ -561,12 +560,12 @@ mod tests {
             .write_str(&serde_json::to_string(&override_info).unwrap())
             .unwrap();
 
-        let builder = ZoneImageSourceResolverBuilder {
+        let zpools = ZoneImageZpools {
             root: dir.path().try_into().unwrap(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL],
         };
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &builder);
+        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&override_info)
@@ -594,13 +593,13 @@ mod tests {
             .write_str(&serde_json::to_string(&override_info).unwrap())
             .unwrap();
 
-        let builder = ZoneImageSourceResolverBuilder {
+        let zpools = ZoneImageZpools {
             root: dir.path().try_into().unwrap(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
 
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &builder);
+        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&override_info)
@@ -633,13 +632,13 @@ mod tests {
         dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
         dir.child(&NON_BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
-        let builder = ZoneImageSourceResolverBuilder {
+        let zpools = ZoneImageZpools {
             root: dir.path().try_into().unwrap(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
 
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &builder);
+        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             None,
@@ -675,13 +674,13 @@ mod tests {
         // Create the directory, but not the override JSON within it.
         dir.child(&NON_BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
-        let builder = ZoneImageSourceResolverBuilder {
+        let zpools = ZoneImageZpools {
             root: dir.path().try_into().unwrap(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
 
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &builder);
+        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&override_info)
@@ -720,12 +719,12 @@ mod tests {
             .write_str(&serde_json::to_string(&override_info).unwrap())
             .unwrap();
 
-        let builder = ZoneImageSourceResolverBuilder {
+        let zpools = ZoneImageZpools {
             root: dir.path().try_into().unwrap(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &builder);
+        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             None,
@@ -767,12 +766,12 @@ mod tests {
             .write_str(&serde_json::to_string(&override_info_2).unwrap())
             .expect("failed to write override json");
 
-        let builder = ZoneImageSourceResolverBuilder {
+        let zpools = ZoneImageZpools {
             root: dir.path().try_into().unwrap(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &builder);
+        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&override_info),
@@ -814,12 +813,12 @@ mod tests {
             .create_dir_all()
             .unwrap();
 
-        let builder = ZoneImageSourceResolverBuilder {
+        let zpools = ZoneImageZpools {
             root: dir.path().try_into().unwrap(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &builder);
+        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
             &dataset_missing_error(&dir_path.join(&BOOT_PATHS.install_dataset))
@@ -856,12 +855,12 @@ mod tests {
         dir.child(&BOOT_PATHS.install_dataset).touch().unwrap();
         dir.child(&NON_BOOT_PATHS.install_dataset).touch().unwrap();
 
-        let builder = ZoneImageSourceResolverBuilder {
+        let zpools = ZoneImageZpools {
             root: dir.path().try_into().unwrap(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &builder);
+        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
             &dataset_not_dir_error(&dir_path.join(&BOOT_PATHS.install_dataset))
@@ -906,7 +905,7 @@ mod tests {
         // Read error (empty file).
         dir.child(&NON_BOOT_3_PATHS.override_json).touch().unwrap();
 
-        let builder = ZoneImageSourceResolverBuilder {
+        let zpools = ZoneImageZpools {
             root: dir.path().try_into().unwrap(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![
@@ -916,7 +915,7 @@ mod tests {
                 NON_BOOT_3_ZPOOL,
             ],
         };
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &builder);
+        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
             &deserialize_error(dir_path, &BOOT_PATHS.override_json, "",),

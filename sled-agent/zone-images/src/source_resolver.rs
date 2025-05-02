@@ -30,7 +30,8 @@ pub struct ZoneImageFileSource {
     pub search_paths: Vec<Utf8PathBuf>,
 }
 
-pub struct ZoneImageSourceResolverBuilder<'a> {
+/// A description of zpools to examine for zone images.
+pub struct ZoneImageZpools<'a> {
     /// The root directory, typically `/`.
     pub root: &'a Utf8Path,
 
@@ -42,21 +43,7 @@ pub struct ZoneImageSourceResolverBuilder<'a> {
     pub all_m2_zpools: Vec<ZpoolName>,
 }
 
-impl ZoneImageSourceResolverBuilder<'_> {
-    /// Converts self into a resolver for zone image sources.
-    ///
-    /// This is infallible: any errors that occur are part of the returned
-    /// `ZoneImageSourceResolver`. This helps ensure that issues creating the
-    /// resolver don't bring down sled-agent (though they may prevent the
-    /// creation of zones).
-    #[inline]
-    pub fn build(&self, log: &slog::Logger) -> ZoneImageSourceResolver {
-        ZoneImageSourceResolver::new(log, self)
-    }
-}
-
-/// Resolves [`OmicronZoneImageSource`] instances into file names and search
-/// paths.
+/// Turns [`OmicronZoneImageSource`] instances into file names and search paths.
 #[derive(Clone)]
 pub struct ZoneImageSourceResolver {
     // Inner state, guarded by a mutex.
@@ -67,11 +54,9 @@ pub struct ZoneImageSourceResolver {
 }
 
 impl ZoneImageSourceResolver {
-    fn new(
-        log: &slog::Logger,
-        builder: &ZoneImageSourceResolverBuilder<'_>,
-    ) -> Self {
-        Self { inner: Arc::new(Mutex::new(ResolverInner::new(log, builder))) }
+    /// Creates a new `ZoneImageSourceResolver`.
+    pub fn new(log: &slog::Logger, zpools: &ZoneImageZpools<'_>) -> Self {
+        Self { inner: Arc::new(Mutex::new(ResolverInner::new(log, zpools))) }
     }
 
     pub fn override_image_directory(&self, path: Utf8PathBuf) {
@@ -104,13 +89,10 @@ struct ResolverInner {
 }
 
 impl ResolverInner {
-    fn new(
-        log: &slog::Logger,
-        builder: &ZoneImageSourceResolverBuilder<'_>,
-    ) -> Self {
+    fn new(log: &slog::Logger, zpools: &ZoneImageZpools<'_>) -> Self {
         let log = log.new(o!("component" => "ZoneImageSourceResolver"));
 
-        let mupdate_overrides = AllMupdateOverrides::read_all(&log, builder);
+        let mupdate_overrides = AllMupdateOverrides::read_all(&log, zpools);
 
         // Log the results.
         mupdate_overrides.log_results(&log);

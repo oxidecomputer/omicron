@@ -26,9 +26,7 @@ use bootstore::schemes::v0 as bootstore;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::{KeyManager, StorageKeyRequester};
 use sled_agent_types::zone_bundle::CleanupContext;
-use sled_agent_zone_images::{
-    ZoneImageSourceResolver, ZoneImageSourceResolverBuilder,
-};
+use sled_agent_zone_images::{ZoneImageSourceResolver, ZoneImageZpools};
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
@@ -253,12 +251,12 @@ fn make_zone_image_resolver(
     all_disks: &AllDisks,
     boot_zpool: &ZpoolName,
 ) -> ZoneImageSourceResolver {
-    let builder = ZoneImageSourceResolverBuilder {
+    let zpools = ZoneImageZpools {
         root: &all_disks.mount_config().root,
         boot_zpool,
         all_m2_zpools: all_disks.all_m2_zpools(),
     };
-    builder.build(log)
+    ZoneImageSourceResolver::new(log, &zpools)
 }
 
 async fn upsert_synthetic_disks_if_needed(
