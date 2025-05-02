@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::common_sp_update::error_means_caboose_is_invalid;
 use gateway_client::SpComponent;
 use gateway_client::types::GetRotBootInfoParams;
 use gateway_client::types::RotState;
@@ -11,6 +12,7 @@ use gateway_client::types::SpType;
 use gateway_messages::RotBootInfo;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::inventory::BaseboardId;
+use slog_error_chain::InlineErrorChain;
 use tufaceous_artifact::ArtifactVersion;
 
 pub type GatewayClientError =
@@ -125,8 +127,13 @@ impl SpTestState {
             Ok(v) => ExpectedVersion::Version(
                 v.version.parse().expect("valid SP inactive slot version"),
             ),
-            // XXX-dap filter on error message
-            Err(_) => ExpectedVersion::NoValidVersion,
+            Err(e) if error_means_caboose_is_invalid(e) => {
+                ExpectedVersion::NoValidVersion
+            }
+            Err(e) => panic!(
+                "unexpected error reading caboose: {}",
+                InlineErrorChain::new(e)
+            ),
         }
     }
 }
