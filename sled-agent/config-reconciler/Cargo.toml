@@ -15,6 +15,7 @@ camino-tempfile.workspace = true
 chrono.workspace = true
 derive_more.workspace = true
 dropshot.workspace = true
+futures.workspace = true
 glob.workspace = true
 id-map.workspace = true
 illumos-utils.workspace = true
@@ -22,6 +23,7 @@ key-manager.workspace = true
 nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+serde.workspace = true
 sled-agent-api.workspace = true
 sled-agent-types.workspace = true
 sled-hardware.workspace = true
@@ -35,8 +37,11 @@ zone.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+expectorate.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
+scopeguard.workspace = true
+serde_json.workspace = true
 test-strategy.workspace = true
 
 [features]

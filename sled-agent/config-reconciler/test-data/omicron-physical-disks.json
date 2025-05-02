@@ -1,0 +1,95 @@
+{
+  "generation": 5,
+  "disks": [
+    {
+      "identity": {
+        "vendor": "1b96",
+        "model": "WUS4C6432DSP3X3",
+        "serial": "A084A5E5"
+      },
+      "id": "2fd7c854-5c0e-408e-8e4d-4b36ae42725d",
+      "pool_id": "f8b11629-ced6-412a-9c3f-d169b99ee996"
+    },
+    {
+      "identity": {
+        "vendor": "1b96",
+        "model": "WUS4C6432DSP3X3",
+        "serial": "A084A606"
+      },
+      "id": "735d639f-f9c9-438d-a286-12190ce419db",
+      "pool_id": "4358f47f-f21e-4cc8-829e-0c7fc2400a59"
+    },
+    {
+      "identity": {
+        "vendor": "1b96",
+        "model": "WUS4C6432DSP3X3",
+        "serial": "A084A60D"
+      },
+      "id": "c463143f-9a4e-4ac0-8c9f-49bd07f0f7f4",
+      "pool_id": "aadf48eb-6ff0-40b5-a092-1fdd06c03e11"
+    },
+    {
+      "identity": {
+        "vendor": "1b96",
+        "model": "WUS4C6432DSP3X3",
+        "serial": "A084A63C"
+      },
+      "id": "e67a2c76-22dc-4f99-8b5b-c8c633fcf000",
+      "pool_id": "17eff217-f0b1-4353-b133-0f68bbd5ceaa"
+    },
+    {
+      "identity": {
+        "vendor": "1b96",
+        "model": "WUS4C6432DSP3X3",
+        "serial": "A084A6CB"
+      },
+      "id": "76e4d7bf-c908-4843-bd41-ecd62bb42bd1",
+      "pool_id": "0ae29053-29a2-489e-a1e6-6aec0ecd05f8"
+    },
+    {
+      "identity": {
+        "vendor": "1b96",
+        "model": "WUS4C6432DSP3X3",
+        "serial": "A084A6EF"
+      },
+      "id": "6a19ddca-447e-4579-90b3-6826fa3f7950",
+      "pool_id": "d1cb6b7d-2b92-4b7d-8a4d-551987f0277e"
+    },
+    {
+      "identity": {
+        "vendor": "1b96",
+        "model": "WUS4C6432DSP3X3",
+        "serial": "A084A703"
+      },
+      "id": "e63d3ba9-7a02-4171-bdab-9ccca465b08a",
+      "pool_id": "57650e05-36ff-4de8-865f-b9562bdb67f5"
+    },
+    {
+      "identity": {
+        "vendor": "1b96",
+        "model": "WUS4C6432DSP3X3",
+        "serial": "A084A795"
+      },
+      "id": "1201b2d5-5491-4e96-aa9d-efd7afed0612",
+      "pool_id": "b358fb1e-f52a-4a63-9aab-170225509b37"
+    },
+    {
+      "identity": {
+        "vendor": "1b96",
+        "model": "WUS4C6432DSP3X3",
+        "serial": "A084A7C0"
+      },
+      "id": "25a61844-be5a-4b6d-bd3d-e6c7906ee52a",
+      "pool_id": "4eb2e4eb-41d8-496c-9a5a-687d7e004aa4"
+    },
+    {
+      "identity": {
+        "vendor": "1b96",
+        "model": "WUS4C6432DSP3X3",
+        "serial": "A084A7F3"
+      },
+      "id": "6ad551bd-487e-48fd-bf7a-fc80da2a027c",
+      "pool_id": "eb1234a5-fdf7-4977-94d5-2eef25ce56a1"
+    }
+  ]
+}
