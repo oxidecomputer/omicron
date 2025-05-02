@@ -141,12 +141,12 @@ pub struct CurrentlyManagedZpoolsReceiver {
 #[derive(Debug, Clone)]
 enum CurrentlyManagedZpoolsReceiverInner {
     Real(watch::Receiver<Arc<CurrentlyManagedZpools>>),
-    #[cfg(feature = "testing")]
+    #[cfg(any(test, feature = "testing"))]
     FakeStatic(BTreeSet<ZpoolName>),
 }
 
 impl CurrentlyManagedZpoolsReceiver {
-    #[cfg(feature = "testing")]
+    #[cfg(any(test, feature = "testing"))]
     pub fn fake_static(zpools: impl Iterator<Item = ZpoolName>) -> Self {
         Self {
             inner: CurrentlyManagedZpoolsReceiverInner::FakeStatic(
@@ -166,7 +166,7 @@ impl CurrentlyManagedZpoolsReceiver {
             CurrentlyManagedZpoolsReceiverInner::Real(rx) => {
                 Arc::clone(&*rx.borrow())
             }
-            #[cfg(feature = "testing")]
+            #[cfg(any(test, feature = "testing"))]
             CurrentlyManagedZpoolsReceiverInner::FakeStatic(zpools) => {
                 Arc::new(CurrentlyManagedZpools(zpools.clone()))
             }
@@ -178,7 +178,7 @@ impl CurrentlyManagedZpoolsReceiver {
             CurrentlyManagedZpoolsReceiverInner::Real(rx) => {
                 Arc::clone(&*rx.borrow_and_update())
             }
-            #[cfg(feature = "testing")]
+            #[cfg(any(test, feature = "testing"))]
             CurrentlyManagedZpoolsReceiverInner::FakeStatic(zpools) => {
                 Arc::new(CurrentlyManagedZpools(zpools.clone()))
             }
@@ -191,7 +191,7 @@ impl CurrentlyManagedZpoolsReceiver {
     pub async fn changed(&mut self) -> Result<(), RecvError> {
         match &mut self.inner {
             CurrentlyManagedZpoolsReceiverInner::Real(rx) => rx.changed().await,
-            #[cfg(feature = "testing")]
+            #[cfg(any(test, feature = "testing"))]
             CurrentlyManagedZpoolsReceiverInner::FakeStatic(_) => {
                 // Static set of zpools never changes
                 std::future::pending().await

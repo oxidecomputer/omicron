@@ -11431,10 +11431,12 @@ name = "sled-agent-config-reconciler"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-trait",
  "camino",
  "camino-tempfile",
  "chrono",
+ "debug-ignore",
  "derive_more",
  "dropshot",
  "expectorate",
