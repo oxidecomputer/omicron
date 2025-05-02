@@ -317,104 +317,32 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
             return Err(LedgerNewConfigError::NoInternalDisks);
         }
 
-        // Check that we can accept the new ledger. The first check is whether
-        // the generation is too old. Clone our current config to avoid holding
-        // the watch channel lock while we do our check.
-        let current_config = self.current_config_tx.borrow().clone();
-        match current_config {
-            CurrentSledConfig::WaitingForInternalDisks => {
-                unreachable!("already waited for internal disks")
-            }
-            // If this is the first config we've gotten, we have no previous
-            // generation to check.
-            CurrentSledConfig::WaitingForInitialConfig => (),
-            CurrentSledConfig::Ledgered(omicron_sled_config) => {
-                if new_config.generation < omicron_sled_config.generation {
-                    info!(
-                        self.log,
-                        "rejecting config request due to \
-                         out-of-date generation";
-                        "current-gen" => %omicron_sled_config.generation,
-                        "request-gen" => %new_config.generation,
-                    );
-                    return Err(LedgerNewConfigError::GenerationOutdated {
-                        current: omicron_sled_config.generation,
-                        requested: new_config.generation,
-                    });
-                } else if new_config.generation
-                    == omicron_sled_config.generation
-                {
-                    if new_config != omicron_sled_config {
-                        warn!(
-                            self.log,
-                            "requested config changed (with same generation)";
-                            "generation" => %new_config.generation,
-                        );
-                        return Err(
-                            LedgerNewConfigError::ConfigurationChanged {
-                                generation: new_config.generation,
-                            },
-                        );
-                    }
-                    info!(
-                        self.log, "configuration unchanged";
-                        "generation" => %new_config.generation,
-                    );
+        // Check that we can accept the new ledger.
+        self.validate_sled_config(&new_config).await?;
 
-                    // We now fall through to committing the ledger to disk.
-                    // This seems unnecessary: if the generation matches, we
-                    // already committed the ledger previously. But we don't
-                    // know that it's been written to both M.2s:
-                    //
-                    // * It's possible only one M.2 was available when we
-                    //   previously committed
-                    // * It's possible we had two M.2s, but one of the writes
-                    //   failed (`Ledger::commit()` returns `Ok(())` as long as
-                    //   at least one of the writes succeeds)
-                    //
-                    // We could probably address both of those and avoid
-                    // spurious writes, but it seems a little tricky and not
-                    // particularly important. Sled configs are currently on the
-                    // order of 25 KiB. If we get a request from each Nexus
-                    // every minute, that's ~75 KiB of usually-spurious writes
-                    // to both M.2 drives every minute. Rounding up to 100
-                    // KiB/minute (to give some room for the config to grow),
-                    // that's ~150 MiB / day, and the our drive endurance is 1
-                    // TiB / day (1 DWPD). We're using up something like 0.01%
-                    // of the drive endurance via these writes.
-                }
-            }
-        }
-
-        // Continue validating the incoming config. For now, the only other
-        // thing we confirm is that any referenced artifacts are present in the
-        // artifact store.
-        let mut artifact_validation_errors = Vec::new();
-        for zone in &new_config.zones {
-            let Some(artifact_hash) = zone.image_source.artifact_hash() else {
-                continue;
-            };
-            match self
-                .artifact_store
-                .validate_artifact_exists_in_storage(artifact_hash)
-                .await
-            {
-                Ok(()) => (),
-                Err(err) => {
-                    artifact_validation_errors.push(format!("{err:#}"));
-                }
-            }
-        }
-        if !artifact_validation_errors.is_empty() {
-            return Err(LedgerNewConfigError::ArtifactStoreValidationFailed(
-                artifact_validation_errors.join(", "),
-            ));
-        }
-
-        // We could do more validation; e.g., self-consistency checks a la what
-        // `blippy` does for blueprints (zones only reference datasets that
-        // exist, at most one dataset kind per zpool, etc.), but we'll rely on
-        // Nexus only sending us internally consistent configs for now.
+        // `validate_sled_config` confirmed that the new config is valid in
+        // terms of generation numbers. The most common valid case is
+        // "generation the same, contents unchanged", because Nexus periodically
+        // sends us our current config regardless of whether we already have it.
+        // In that most common case, we now fall through to committing the
+        // ledger to disk. This seems unnecessary: if the generation matches, we
+        // already committed the ledger previously. But we don't know that it's
+        // been written to both M.2s:
+        //
+        // * It's possible only one M.2 was available when we previously
+        //   committed
+        // * It's possible we had two M.2s, but one of the writes failed
+        //   (`Ledger::commit()` returns `Ok(())` as long as at least one of the
+        //   writes succeeds)
+        //
+        // We could probably address both of those and avoid spurious writes,
+        // but it seems a little tricky and not particularly important. Sled
+        // configs are currently on the order of 25 KiB. If we get a request
+        // from each Nexus every minute, that's ~75 KiB of usually-spurious
+        // writes to both M.2 drives every minute. Rounding up to 100 KiB/minute
+        // (to give some room for the config to grow), that's ~150 MiB / day,
+        // and the our drive endurance is 1 TiB / day (1 DWPD). We're using up
+        // something like 0.01% of the drive endurance via these writes.
 
         // Write the validated configs to our ledger.
         let config_paths = config_datasets
@@ -451,6 +379,91 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
                 Err(LedgerNewConfigError::LedgerCommitFailed(err))
             }
         }
+    }
+
+    // Perform checks on a new incoming config that it's valid given our current
+    // config (and other external state, like our artifact store contents).
+    async fn validate_sled_config(
+        &self,
+        new_config: &OmicronSledConfig,
+    ) -> Result<(), LedgerNewConfigError> {
+        // The first check is whether the generation is too old. Clone our
+        // current config to avoid holding the watch channel lock while we do
+        // our check.
+        let current_config = self.current_config_tx.borrow().clone();
+        match current_config {
+            CurrentSledConfig::WaitingForInternalDisks => {
+                unreachable!("already waited for internal disks")
+            }
+            // If this is the first config we've gotten, we have no previous
+            // generation to check.
+            CurrentSledConfig::WaitingForInitialConfig => (),
+            CurrentSledConfig::Ledgered(omicron_sled_config) => {
+                if new_config.generation < omicron_sled_config.generation {
+                    info!(
+                        self.log,
+                        "rejecting config request due to \
+                         out-of-date generation";
+                        "current-gen" => %omicron_sled_config.generation,
+                        "request-gen" => %new_config.generation,
+                    );
+                    return Err(LedgerNewConfigError::GenerationOutdated {
+                        current: omicron_sled_config.generation,
+                        requested: new_config.generation,
+                    });
+                } else if new_config.generation
+                    == omicron_sled_config.generation
+                {
+                    if *new_config != omicron_sled_config {
+                        warn!(
+                            self.log,
+                            "requested config changed (with same generation)";
+                            "generation" => %new_config.generation,
+                        );
+                        return Err(
+                            LedgerNewConfigError::ConfigurationChanged {
+                                generation: new_config.generation,
+                            },
+                        );
+                    }
+                    info!(
+                        self.log, "configuration unchanged";
+                        "generation" => %new_config.generation,
+                    );
+                }
+            }
+        }
+
+        // Continue validating the incoming config. For now, the only other
+        // thing we confirm is that any referenced artifacts are present in the
+        // artifact store.
+        let mut artifact_validation_errors = Vec::new();
+        for zone in &new_config.zones {
+            let Some(artifact_hash) = zone.image_source.artifact_hash() else {
+                continue;
+            };
+            match self
+                .artifact_store
+                .validate_artifact_exists_in_storage(artifact_hash)
+                .await
+            {
+                Ok(()) => (),
+                Err(err) => {
+                    artifact_validation_errors.push(format!("{err:#}"));
+                }
+            }
+        }
+        if !artifact_validation_errors.is_empty() {
+            return Err(LedgerNewConfigError::ArtifactStoreValidationFailed(
+                artifact_validation_errors.join(", "),
+            ));
+        }
+
+        // We could do more validation; e.g., self-consistency checks a la what
+        // `blippy` does for blueprints (zones only reference datasets that
+        // exist, at most one dataset kind per zpool, etc.), but we'll rely on
+        // Nexus only sending us internally consistent configs for now.
+        Ok(())
     }
 
     fn validate_artifact_config(
