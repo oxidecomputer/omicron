@@ -1005,5 +1005,8 @@ mod test {
                 // No changes should have been made in this case.
                 assert_eq!(sp1, sp2);
             });
+
+        artifacts.teardown().await;
+        gwtestctx.teardown().await;
     }
 }
