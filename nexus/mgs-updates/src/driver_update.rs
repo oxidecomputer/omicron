@@ -607,11 +607,9 @@ mod test {
     use slog_error_chain::InlineErrorChain;
     use tufaceous_artifact::ArtifactHash;
 
-    // XXX-dap
-    // test cases TODO:
+    // XXX-dap test cases TODO:
     //  - success: add test that precondition passes when expecting invalid
     //    inactive version and it really is inactive
-    //  - failure: when initial conditions don't match
     //  - failure: failed to fetch artifact
     //  - failure: MGS failure
     //  - failure: reset in the middle

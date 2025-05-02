@@ -352,11 +352,7 @@ impl FinishedUpdateAttempt {
 
     pub fn expect_failure(
         &self,
-        assert_error: &dyn Fn(
-            &ApplyUpdateError,
-            &SpTestState,
-            &SpTestState,
-        ),
+        assert_error: &dyn Fn(&ApplyUpdateError, &SpTestState, &SpTestState),
     ) {
         let Err(error) = &self.result else {
             panic!("unexpected success from apply_update(): {:?}", self.result);
