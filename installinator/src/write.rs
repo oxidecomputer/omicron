@@ -669,7 +669,7 @@ impl ControlPlaneZoneWriteContext<'_> {
             .new_step(
                 WriteComponent::ControlPlane,
                 ControlPlaneZonesStepId::CreateMeasurementDir,
-                format!("Creating measurement directory"),
+                "Creating measurement directory".to_string(),
                 async move |_cx| {
                     std::fs::create_dir(
                         self.output_directory.join("measurements"),
