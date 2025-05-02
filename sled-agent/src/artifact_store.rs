@@ -45,7 +45,7 @@ use sled_storage::manager::StorageHandle;
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::File;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{OwnedSemaphorePermit, mpsc, oneshot, watch};
 use tokio::task::JoinSet;
 use tufaceous_artifact::ArtifactHash;
 
@@ -77,12 +77,12 @@ const TEMP_SUBDIR: &str = "tmp";
 /// - for PUT, we try to write to all datasets, logging errors as we go; if we
 ///   successfully write the artifact to at least one, we return OK.
 /// - for GET, we look in each dataset until we find it.
-pub(crate) struct ArtifactStore<T: DatasetsManager> {
+pub struct ArtifactStore<T: DatasetsManager> {
     log: Logger,
     reqwest_client: reqwest::Client,
     ledger_tx: mpsc::Sender<LedgerManagerRequest>,
     config: watch::Receiver<Option<ArtifactConfig>>,
-    storage: T,
+    pub(crate) storage: T,
 
     /// Used for synchronization in unit tests.
     #[cfg(test)]
@@ -400,6 +400,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     ) -> Result<(), Error> {
         // Check that there's no conflict before we send the upstream request.
         let writer = self.writer(sha256, generation).await?;
+        let permit = self.storage.copy_permit().await;
 
         let client = repo_depot_client::Client::new_with_client(
             depot_base_url,
@@ -421,6 +422,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         let log = self.log.clone();
         let base_url = depot_base_url.to_owned();
         tokio::task::spawn(async move {
+            let _permit = permit;
             let stream = response.into_inner().into_inner().map_err(|err| {
                 Error::DepotCopy {
                     sha256,
@@ -601,10 +603,15 @@ async fn delete_reconciler<T: DatasetsManager>(
 /// Abstracts over what kind of sled agent we are; each of the real sled agent,
 /// simulated sled agent, and this module's unit tests have different ways of
 /// keeping track of the datasets on the system.
-pub(crate) trait DatasetsManager: Clone + Send + Sync + 'static {
+pub trait DatasetsManager: Clone + Send + Sync + 'static {
     fn artifact_storage_paths(
         &self,
     ) -> impl Future<Output = impl Iterator<Item = Utf8PathBuf> + Send + '_> + Send;
+
+    #[expect(async_fn_in_trait)]
+    async fn copy_permit(&self) -> Option<OwnedSemaphorePermit> {
+        None
+    }
 }
 
 impl DatasetsManager for StorageHandle {
