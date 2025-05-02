@@ -224,11 +224,14 @@ impl SimSpUpdate {
             state @ UpdateState::Prepared { .. } => {
                 Err(SpError::UpdateInProgress(state.to_message()))
             }
-            // XXX-dap verify if it's true that the SP won't let you start
-            // another update if one is completed
-            state @ UpdateState::Completed { .. }
-                if component == SpComponent::SP_ITSELF =>
+            state @ UpdateState::Completed {
+                component: update_component,
+                ..
+            } if component == SpComponent::SP_ITSELF
+                && component == *update_component =>
             {
+                // The SP will not allow you to start another update of itself
+                // while one is completed.
                 Err(SpError::UpdateInProgress(state.to_message()))
             }
             UpdateState::NotPrepared

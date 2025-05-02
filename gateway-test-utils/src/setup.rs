@@ -44,7 +44,6 @@ pub struct GatewayTestContext {
 }
 
 impl GatewayTestContext {
-    // XXX-dap replace all things that were inlining this
     pub fn client(&self) -> gateway_client::Client {
         gateway_client::Client::new(
             &self.client.url("/").to_string(),

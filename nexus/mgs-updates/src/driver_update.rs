@@ -607,10 +607,6 @@ mod test {
     use slog_error_chain::InlineErrorChain;
     use tufaceous_artifact::ArtifactHash;
 
-    // XXX-dap test cases TODO:
-    //  - success: add test that precondition passes when expecting invalid
-    //    inactive version and it really is inactive
-
     #[tokio::test]
     async fn test_sp_update_basic() {
         let gwtestctx = gateway_test_utils::setup::test_setup(
