@@ -90,7 +90,7 @@ pub async fn start_servers(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 "api-version"
                     .parse::<http::header::HeaderName>()
-                    .expect("TODO asghahgahghag"),
+                    .expect("api-version is a valid header name"),
                 semver::Version::new(2, 0, 0),
             ),
         )))
