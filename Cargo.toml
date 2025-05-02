@@ -127,6 +127,7 @@ members = [
     "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/zone-images",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -279,6 +280,7 @@ default-members = [
     "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/zone-images",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -345,6 +347,7 @@ api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.17"
+assert_fs = "1.1.2"
 async-bb8-diesel = "0.2"
 async-trait = "0.1.88"
 atomicwrites = "0.4.4"
@@ -666,6 +669,7 @@ sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
+sled-agent-zone-images = { path = "sled-agent/zone-images" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }

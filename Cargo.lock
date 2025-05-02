@@ -262,6 +262,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "assert_fs"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7efdb1fdb47602827a342857666feb372712cbc64b414172bd6b167a02927674"
+dependencies = [
+ "anstyle",
+ "doc-comment",
+ "globwalk",
+ "predicates",
+ "predicates-core",
+ "predicates-tree",
+ "tempfile",
+]
+
+[[package]]
 name = "assert_matches"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3693,6 +3708,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "globwalk"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bf760ebf69878d9fd8f110c89703d90ce35095324d1f1edcb595c63945ee757"
+dependencies = [
+ "bitflags 2.9.0",
+ "ignore",
+ "walkdir",
+]
+
+[[package]]
 name = "gloo-timers"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4532,6 +4558,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ignore"
+version = "0.4.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d89fd380afde86567dfba715db065673989d6253f42b88179abd3eae47bda4b"
+dependencies = [
+ "crossbeam-deque",
+ "globset",
+ "log",
+ "memchr",
+ "regex-automata",
+ "same-file",
+ "walkdir",
+ "winapi-util",
+]
+
+[[package]]
 name = "illumos-devinfo"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/illumos-devinfo?branch=main#4323b17bfdd0c94d2875ac64b47f0e60fac1d640"
@@ -4740,10 +4782,12 @@ dependencies = [
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "partial-io",
  "proptest",
  "reqwest",
+ "serde_json",
  "sha2",
  "sled-hardware",
  "sled-hardware-types",
@@ -7717,6 +7761,7 @@ dependencies = [
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-types",
+ "sled-agent-zone-images",
  "sled-diagnostics",
  "sled-hardware",
  "sled-hardware-types",
@@ -11482,6 +11527,28 @@ dependencies = [
  "thiserror 1.0.69",
  "toml 0.8.20",
  "uuid",
+]
+
+[[package]]
+name = "sled-agent-zone-images"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_fs",
+ "camino",
+ "dropshot",
+ "id-map",
+ "illumos-utils",
+ "nexus-sled-agent-shared",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pretty_assertions",
+ "serde_json",
+ "sled-storage",
+ "slog",
+ "slog-error-chain",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

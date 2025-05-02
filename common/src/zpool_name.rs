@@ -80,19 +80,19 @@ impl JsonSchema for ZpoolName {
 }
 
 impl ZpoolName {
-    pub fn new_internal(id: ZpoolUuid) -> Self {
+    pub const fn new_internal(id: ZpoolUuid) -> Self {
         Self { id, kind: ZpoolKind::Internal }
     }
 
-    pub fn new_external(id: ZpoolUuid) -> Self {
+    pub const fn new_external(id: ZpoolUuid) -> Self {
         Self { id, kind: ZpoolKind::External }
     }
 
-    pub fn id(&self) -> ZpoolUuid {
+    pub const fn id(&self) -> ZpoolUuid {
         self.id
     }
 
-    pub fn kind(&self) -> ZpoolKind {
+    pub const fn kind(&self) -> ZpoolKind {
         self.kind
     }
 
