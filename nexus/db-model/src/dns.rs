@@ -194,7 +194,7 @@ impl From<SRV> for params::Srv {
 }
 
 /// This type is identical to `dns_service_client::SOA`.  It's defined
-/// separately for the same reason as SOA: this is serialized to JSON and stored
+/// separately for the same reason as SRV: this is serialized to JSON and stored
 /// in the database.  The same desire to avoid linking database state to the DNS
 /// server API applies.
 ///
