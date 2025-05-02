@@ -70,6 +70,7 @@ use nexus_db_model::ExternalIp;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Image;
 use nexus_db_model::Instance;
+use nexus_db_model::InstanceIntendedState;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvPhysicalDisk;
@@ -4791,6 +4792,7 @@ struct VmmStateRow {
 struct CustomerInstanceRow {
     id: String,
     state: String,
+    intent: InstanceIntendedState,
     propolis_id: MaybePropolisId,
     sled_id: MaybeSledId,
     host_serial: String,
@@ -4868,6 +4870,7 @@ async fn cmd_db_instances(
             id: i.instance().id().to_string(),
             name: i.instance().name().to_string(),
             state: i.effective_state().to_string(),
+            intent: i.instance().intended_state,
             propolis_id: (&i).into(),
             sled_id: (&i).into(),
             host_serial,
