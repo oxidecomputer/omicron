@@ -16,6 +16,7 @@ use tufaceous_artifact::ArtifactVersion;
 pub type GatewayClientError =
     gateway_client::Error<gateway_client::types::Error>;
 
+#[derive(Debug)]
 pub struct SpTestState {
     pub caboose_sp_active: SpComponentCaboose,
     pub caboose_sp_inactive: Result<SpComponentCaboose, GatewayClientError>,
@@ -127,5 +128,45 @@ impl SpTestState {
             // XXX-dap filter on error message
             Err(_) => ExpectedVersion::NoValidVersion,
         }
+    }
+}
+
+impl Eq for SpTestState {}
+impl PartialEq for SpTestState {
+    fn eq(&self, other: &Self) -> bool {
+        let Self {
+            caboose_sp_active,
+            caboose_sp_inactive,
+            caboose_rot_a,
+            caboose_rot_b,
+            sp_state,
+            sp_boot_info,
+        } = self;
+
+        // The basic fields are easy.
+        if *caboose_sp_active != other.caboose_sp_active
+            || *sp_state != other.sp_state
+            || *sp_boot_info != other.sp_boot_info
+        {
+            return false;
+        }
+
+        // The cabooses are a little trickier because they might be missing and
+        // the errors don't impl Eq.  For our purposes, we can consider errors
+        // equivalent if they stringify the same.  (This case seems unlikely to
+        // come up.)
+        for (mine, other) in [
+            (caboose_sp_inactive, &other.caboose_sp_inactive),
+            (caboose_rot_a, &other.caboose_rot_a),
+            (caboose_rot_b, &other.caboose_rot_b),
+        ] {
+            let mine = mine.as_ref().map_err(|e| e.to_string());
+            let other = other.as_ref().map_err(|e| e.to_string());
+            if mine != other {
+                return false;
+            }
+        }
+
+        true
     }
 }

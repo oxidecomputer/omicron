@@ -273,6 +273,7 @@ impl<'a> InProgressAttempt<'a> {
             StepResult::Done(result) => result,
         };
 
+        debug!(&self.log, "update done"; "result" => ?result);
         FinishedUpdateAttempt::new(
             self.sp_type,
             self.slot_id,
@@ -347,5 +348,20 @@ impl FinishedUpdateAttempt {
                 sp2.expect_caboose_sp_inactive()
             );
         }
+    }
+
+    pub fn expect_failure(
+        &self,
+        assert_error: &dyn Fn(
+            &ApplyUpdateError,
+            &SpTestState,
+            &SpTestState,
+        ),
+    ) {
+        let Err(error) = &self.result else {
+            panic!("unexpected success from apply_update(): {:?}", self.result);
+        };
+
+        assert_error(error, &self.sp1, &self.sp2);
     }
 }

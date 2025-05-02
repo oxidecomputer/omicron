@@ -592,24 +592,25 @@ async fn wait_for_update_done(
 
 #[cfg(test)]
 mod test {
+    use super::ApplyUpdateError;
     use crate::driver_update::PROGRESS_TIMEOUT;
     use crate::test_util::test_artifacts::TestArtifacts;
     use crate::test_util::updates::UpdateDescription;
+    use assert_matches::assert_matches;
     use gateway_client::types::SpType;
     use gateway_messages::SpPort;
     use gateway_test_utils::setup::GatewayTestContext;
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::internal_api::views::UpdateAttemptStatus;
     use nexus_types::internal_api::views::UpdateCompletedHow;
+    use nexus_types::inventory::BaseboardId;
+    use slog_error_chain::InlineErrorChain;
     use tufaceous_artifact::ArtifactHash;
 
     // XXX-dap
-    // test cases:
-    //  - done: successful update: updated SP
-    //  - done: successful update: no changes needed
-    //  - done: successful update: watched another finish
-    //  - successful update: took over
-    //  - failure: wrong identity
+    // test cases TODO:
+    //  - success: add test that precondition passes when expecting invalid
+    //    inactive version and it really is inactive
     //  - failure: when initial conditions don't match
     //  - failure: failed to fetch artifact
     //  - failure: MGS failure
@@ -848,5 +849,163 @@ mod test {
 
         artifacts.teardown().await;
         gwtestctx.teardown().await;
+    }
+
+    /// Tests the case where an update takes over from a previously-started one.
+    #[tokio::test]
+    async fn test_sp_basic_failures() {
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_sp_basic_failures",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let artifacts = TestArtifacts::new(log).await.unwrap();
+
+        // Test a case of mistaken identity.
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: Some(BaseboardId {
+                part_number: String::from("i86pc"),
+                serial_number: String::from("SimGimlet0"),
+            }),
+            override_expected_active: None,
+            override_expected_inactive: None,
+        };
+
+        desc.load()
+            .await
+            .begin(PROGRESS_TIMEOUT)
+            .await
+            .finish()
+            .await
+            .expect_failure(&|error, sp1, sp2| {
+                assert_matches!(
+                    error,
+                    ApplyUpdateError::PreconditionFailed(..)
+                );
+                let message = InlineErrorChain::new(error).to_string();
+                eprintln!("{}", message);
+                assert!(message.contains(
+                    "in sled slot 1, expected to find part \"i86pc\" serial \
+                     \"SimGimlet0\", but found part \"i86pc\" serial \
+                     \"SimGimlet01\"",
+                ));
+
+                // No changes should have been made in this case.
+                assert_eq!(sp1, sp2);
+            });
+
+        // Now test a case where the active version doesn't match what it
+        // should.
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: Some("not-right".parse().unwrap()),
+            override_expected_inactive: None,
+        };
+
+        desc.load()
+            .await
+            .begin(PROGRESS_TIMEOUT)
+            .await
+            .finish()
+            .await
+            .expect_failure(&|error, sp1, sp2| {
+                assert_matches!(
+                    error,
+                    ApplyUpdateError::PreconditionFailed(..)
+                );
+                let message = InlineErrorChain::new(error).to_string();
+                eprintln!("{}", message);
+                assert!(message.contains(
+                    "expected to find active version \"not-right\", but \
+                     found \"0.0.2\""
+                ));
+
+                // No changes should have been made in this case.
+                assert_eq!(sp1, sp2);
+            });
+
+        // Now test a case where the inactive version doesn't match what it
+        // should (expected invalid, found something else).
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: Some(ExpectedVersion::NoValidVersion),
+        };
+
+        desc.load()
+            .await
+            .begin(PROGRESS_TIMEOUT)
+            .await
+            .finish()
+            .await
+            .expect_failure(&|error, sp1, sp2| {
+                assert_matches!(
+                    error,
+                    ApplyUpdateError::PreconditionFailed(..)
+                );
+                let message = InlineErrorChain::new(error).to_string();
+                eprintln!("{}", message);
+                assert!(message.contains(
+                    "expected to find inactive version NoValidVersion, \
+                     but found Version(\"0.0.1\")"
+                ));
+
+                // No changes should have been made in this case.
+                assert_eq!(sp1, sp2);
+            });
+
+        // Now test a case where the inactive version doesn't match what it
+        // should (expected a different valid version).
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: Some(ExpectedVersion::Version(
+                "something-else".parse().unwrap(),
+            )),
+        };
+
+        desc.load()
+            .await
+            .begin(PROGRESS_TIMEOUT)
+            .await
+            .finish()
+            .await
+            .expect_failure(&|error, sp1, sp2| {
+                assert_matches!(
+                    error,
+                    ApplyUpdateError::PreconditionFailed(..)
+                );
+                let message = InlineErrorChain::new(error).to_string();
+                eprintln!("{}", message);
+                assert!(message.contains(
+                    "expected to find inactive version \
+                     Version(ArtifactVersion(\"something-else\")), but found \
+                     Version(\"0.0.1\")"
+                ));
+
+                // No changes should have been made in this case.
+                assert_eq!(sp1, sp2);
+            });
     }
 }

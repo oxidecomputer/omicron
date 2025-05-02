@@ -32,6 +32,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
+assert_matches.workspace = true
 dropshot.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
