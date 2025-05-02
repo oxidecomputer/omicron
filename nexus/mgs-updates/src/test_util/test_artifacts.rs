@@ -63,15 +63,15 @@ impl TestArtifacts {
         };
 
         let artifact_data = [
-            (sp_gimlet_artifact_hash.clone(), sp_gimlet_artifact),
-            (sp_sidecar_artifact_hash.clone(), sp_sidecar_artifact),
+            (sp_gimlet_artifact_hash, sp_gimlet_artifact),
+            (sp_sidecar_artifact_hash, sp_sidecar_artifact),
         ]
         .into_iter()
         .collect();
 
         let deployed_cabooses = [
-            (sp_gimlet_artifact_hash.clone(), sp_gimlet_artifact_caboose),
-            (sp_sidecar_artifact_hash.clone(), sp_sidecar_artifact_caboose),
+            (sp_gimlet_artifact_hash, sp_gimlet_artifact_caboose),
+            (sp_sidecar_artifact_hash, sp_sidecar_artifact_caboose),
         ]
         .into_iter()
         .collect();

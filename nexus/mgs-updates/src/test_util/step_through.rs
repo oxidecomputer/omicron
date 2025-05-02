@@ -68,7 +68,7 @@ pub enum StepResult<'a, T> {
     Done(T),
 }
 
-impl<'a, T> StepResult<'a, T> {
+impl<T> StepResult<'_, T> {
     pub async fn step(self) -> Self {
         match self {
             StepResult::ReadyAgain(stepper) => stepper.step().await,

@@ -94,7 +94,7 @@ impl<'a> UpdateDescription<'a> {
                 expected_active_version,
                 expected_inactive_version,
             },
-            artifact_hash: self.artifact_hash.clone(),
+            artifact_hash: *self.artifact_hash,
             artifact_version: std::str::from_utf8(
                 deployed_caboose.version().unwrap(),
             )
@@ -222,7 +222,7 @@ pub enum Paused {
     Done,
 }
 
-impl<'a> InProgressAttempt<'a> {
+impl InProgressAttempt<'_> {
     pub async fn run_until_status(
         &mut self,
         status: UpdateAttemptStatus,
