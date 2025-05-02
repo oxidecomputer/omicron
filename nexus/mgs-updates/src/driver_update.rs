@@ -610,7 +610,6 @@ mod test {
     // XXX-dap test cases TODO:
     //  - success: add test that precondition passes when expecting invalid
     //    inactive version and it really is inactive
-    //  - failure: failed to fetch artifact
 
     #[tokio::test]
     async fn test_sp_update_basic() {
@@ -1015,7 +1014,25 @@ mod test {
                 assert_eq!(sp1, sp2);
             });
 
+        // Now test a case where we fail to fetch the artifact.
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: None,
+        };
+        let in_progress = desc.load().await.begin(PROGRESS_TIMEOUT).await;
         artifacts.teardown().await;
+        in_progress.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::FetchArtifact(..));
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
         gwtestctx.teardown().await;
     }
 }
