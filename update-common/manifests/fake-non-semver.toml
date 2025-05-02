@@ -44,6 +44,11 @@ zones = [
     { kind = "fake", name = "zone1", size = "1MiB" },
     { kind = "fake", name = "zone2", size = "1MiB" },
 ]
+measurement_corpus = [
+    { kind = "fake", name = "sp", size = "1MiB" },
+    { kind = "fake", name = "rot", size = "1MiB" },
+]
+
 
 [[artifact.psc_sp]]
 name = "fake-psc-sp"

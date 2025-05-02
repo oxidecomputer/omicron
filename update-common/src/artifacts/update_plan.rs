@@ -2085,7 +2085,8 @@ mod tests {
                 | KnownArtifactKind::SwitchRot
                 | KnownArtifactKind::SwitchRotBootloader
                 | KnownArtifactKind::GimletRotBootloader
-                | KnownArtifactKind::PscRotBootloader => {}
+                | KnownArtifactKind::PscRotBootloader
+                | KnownArtifactKind::MeasurementCorpus => {}
             }
         }
 
