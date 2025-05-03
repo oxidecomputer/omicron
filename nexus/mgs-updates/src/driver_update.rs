@@ -18,6 +18,8 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SpUpdateUuid;
 use qorb::resolver::AllBackends;
 use slog::{debug, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
@@ -54,7 +56,7 @@ pub(crate) struct SpComponentUpdate {
     pub target_sp_type: SpType,
     pub target_sp_slot: u32,
     pub firmware_slot: u16,
-    pub update_id: Uuid,
+    pub update_id: SpUpdateUuid,
 }
 
 impl SpComponentUpdate {
@@ -65,7 +67,7 @@ impl SpComponentUpdate {
     pub fn from_request(
         log: &slog::Logger,
         request: &PendingMgsUpdate,
-        update_id: Uuid,
+        update_id: SpUpdateUuid,
     ) -> SpComponentUpdate {
         match &request.details {
             PendingMgsUpdateDetails::Sp { .. } => SpComponentUpdate {
@@ -213,7 +215,7 @@ pub(crate) async fn apply_update(
                         sp_slot,
                         component,
                         sp_update.firmware_slot,
-                        &sp_update.update_id,
+                        &sp_update.update_id.as_untyped_uuid(),
                         reqwest::Body::from(data.clone()),
                     )
                     .await?;
@@ -249,7 +251,9 @@ pub(crate) async fn apply_update(
     status.update(UpdateAttemptStatus::UpdateWaiting);
     let our_update =
         match wait_for_delivery(&mut mgs_clients, sp_update).await? {
-            DeliveryWaitStatus::Completed(id) => id == my_update_id,
+            DeliveryWaitStatus::Completed(id) => {
+                id == my_update_id.into_untyped_uuid()
+            }
             DeliveryWaitStatus::Aborted(id) => {
                 warn!(
                     log,

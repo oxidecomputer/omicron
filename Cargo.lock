@@ -6225,6 +6225,7 @@ dependencies = [
  "internal-dns-types",
  "nexus-types",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "qorb",
  "rand 0.8.5",

@@ -29,13 +29,13 @@ use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
 use nexus_types::inventory::BaseboardId;
+use omicron_uuid_kinds::SpUpdateUuid;
 use slog::debug;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
-use uuid::Uuid;
 
 /// Describes an update operation that can later be executed any number of times
 pub struct UpdateDescription<'a> {
@@ -110,7 +110,7 @@ impl UpdateDescription<'_> {
         };
 
         let request = sp_update_request.clone();
-        let update_id = Uuid::new_v4();
+        let update_id = SpUpdateUuid::new_v4();
         let log = self.gwtestctx.logctx.log.new(slog::o!(
             "update_id" => update_id.to_string(),
             baseboard_id.clone(),
