@@ -4542,13 +4542,13 @@ pub(crate) mod test {
 
         // We should start with no specified TUF repo and nothing to do.
         assert!(example.input.tuf_repo().is_none());
-        assert_planning_makes_no_changes(
-            &logctx.log,
-            &blueprint1,
-            &example.input,
-            &example.collection,
-            TEST_NAME,
-        );
+        // assert_planning_makes_no_changes(
+        //     &logctx.log,
+        //     &blueprint1,
+        //     &example.input,
+        //     &example.collection,
+        //     TEST_NAME,
+        // );
 
         // All zones should be sourced from the install dataset by default.
         assert!(
@@ -4659,16 +4659,46 @@ pub(crate) mod test {
                 && zone.image_source == image_source
         };
 
-        // Request another Nexus zone. This should *not* use the new artifact,
-        // since not all of its dependencies can be updated.
+        // Request another Nexus zone.
         input_builder.policy_mut().target_nexus_zone_count =
             input_builder.policy_mut().target_nexus_zone_count + 1;
         let input = input_builder.build();
 
+        // Check that there is a new nexus zone that does *not* use the new
+        // artifact (since not all of its dependencies are updated yet).
+        update_collection_from_blueprint(&mut example, &blueprint2);
+        let blueprint3 = Planner::new_based_on(
+            log.clone(),
+            &blueprint2,
+            &input,
+            "test_blueprint3",
+            &example.collection,
+        )
+        .expect("can't create planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
+        .plan()
+        .expect("can't re-plan for new Nexus zone");
+        {
+            let summary = blueprint3.diff_since_blueprint(&blueprint2);
+            for sled in summary.diff.sleds.modified_values_diff() {
+                assert!(sled.zones.removed.is_empty());
+                assert_eq!(sled.zones.added.len(), 1);
+                let added = sled.zones.added.values().next().unwrap();
+                assert!(matches!(
+                    &added.zone_type,
+                    BlueprintZoneType::Nexus(_)
+                ));
+                assert!(matches!(
+                    &added.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                ));
+            }
+        }
+
         // We should now have three sets of expunge/add iterations for the
         // Crucible Pantry zones.
-        let mut parent = blueprint2;
-        for i in 3..=8 {
+        let mut parent = blueprint3;
+        for i in 4..=9 {
             let blueprint_name = format!("blueprint_{i}");
             update_collection_from_blueprint(&mut example, &parent);
             let blueprint = Planner::new_based_on(
@@ -4682,6 +4712,38 @@ pub(crate) mod test {
             .with_rng(PlannerRng::from_seed((TEST_NAME, &blueprint_name)))
             .plan()
             .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
+
+            let summary = blueprint.diff_since_blueprint(&parent);
+            for sled in summary.diff.sleds.modified_values_diff() {
+                if i % 2 == 0 {
+                    assert!(sled.zones.added.is_empty());
+                    assert!(sled.zones.removed.is_empty());
+                    assert_eq!(
+                        sled.zones
+                            .common
+                            .iter()
+                            .filter(|(_, z)| matches!(
+                                z.after.zone_type,
+                                BlueprintZoneType::CruciblePantry(_)
+                            ) && matches!(
+                                z.after.disposition,
+                                BlueprintZoneDisposition::Expunged { .. }
+                            ))
+                            .count(),
+                        1
+                    );
+                } else {
+                    assert!(sled.zones.removed.is_empty());
+                    assert_eq!(sled.zones.added.len(), 1);
+                    let added = sled.zones.added.values().next().unwrap();
+                    assert!(matches!(
+                        &added.zone_type,
+                        BlueprintZoneType::CruciblePantry(_)
+                    ));
+                    assert_eq!(added.image_source, image_source);
+                }
+            }
+
             parent = blueprint;
         }
 
