@@ -35,6 +35,7 @@ pub struct WebhookEvent {
     /// The class of this event.
     pub event_class: WebhookEventClass,
 
+    // pub payload_version:
     /// The event's data payload.
     pub event: serde_json::Value,
 

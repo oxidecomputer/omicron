@@ -6694,6 +6694,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-webhooks"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "nexus-auth",
+ "nexus-db-model",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+]
+
+[[package]]
 name = "nibble_vec"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7367,6 +7382,7 @@ dependencies = [
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
+ "nexus-webhooks",
  "num-integer",
  "omicron-common",
  "omicron-passwords",

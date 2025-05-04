@@ -174,20 +174,35 @@ use omicron_uuid_kinds::WebhookDeliveryUuid;
 use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 use omicron_uuid_kinds::WebhookSecretUuid;
-use schemars::JsonSchema;
-use serde::Serialize;
 use sha2::Sha256;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
 
-/// Trait implemented by types that represent the payload of a webhook event.
-pub trait Event: Serialize + JsonSchema {
-    /// The event's event class.
-    const CLASS: WebhookEventClass;
-    /// The version number of the event's payload.
-    const VERSION: usize;
+pub use nexus_webhooks::{Event, EventSchemaRegistry};
+
+impl nexus_webhooks::PublishEvent for Nexus {
+    async fn publish_event<E: Event>(
+        &self,
+        opctx: &OpContext,
+        id: WebhookEventUuid,
+        event: E,
+    ) -> Result<WebhookEvent, Error> {
+        self.webhook_event_publish(opctx, id, event).await
+    }
+}
+
+pub(crate) fn event_schemas() -> EventSchemaRegistry {
+    let mut registry = EventSchemaRegistry::new();
+
+    #[cfg(debug_assertions)]
+    nexus_webhooks::events::test::register_all(&mut registry);
+
+    // WHEN ADDING NEW WEBHOOK EVENT CLASSES OR NEW SCHEMA VERSIONS, REMEMBER TO
+    // REGISTER THEM HERE!
+
+    registry
 }
 
 impl Nexus {
@@ -209,6 +224,39 @@ impl Nexus {
         id: WebhookEventUuid,
         event: E,
     ) -> Result<WebhookEvent, Error> {
+        #[cfg(debug_assertions)]
+        {
+            // In test builds, assert that this is a schema that we know about.
+            let versions = match self
+                .webhook_schemas
+                .schema_versions_for(E::CLASS)
+            {
+                Some(versions) => versions,
+                None => panic!(
+                    "You have attempted to publish a webhook event type whose \
+                     event class was not added to the webhook event schema \
+                     registry in `nexus::app::webhook::event_schemas()`! This \
+                     means that the event type's schema will not be returned \
+                     by the /v1/webhooks/event-classes endpoint. This is \
+                     probably a mistake. Since I am a test build, I will now \
+                     panic!\n    event class: {}",
+                    E::CLASS,
+                ),
+            };
+
+            if !versions.contains_key(&E::VERSION) {
+                panic!(
+                    "You have attempted to publish a webhook event type whose \
+                     schema version is not present in the webhook event schema \
+                     registry in `nexus::app::webhook::event_schemas()`! This \
+                     is probably a mistake. Since I am a test build, I will \
+                     now panic!\n    event class: {}\n schema version: {}",
+                    E::CLASS,
+                    E::VERSION,
+                );
+            }
+        }
+
         let json =
             serde_json::to_value(event).map_err(|e| Error::InternalError {
                 internal_message: format!(

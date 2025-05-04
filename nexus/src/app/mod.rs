@@ -252,6 +252,9 @@ pub struct Nexus {
 
     /// reports status of pending MGS-managed updates
     mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
+
+    /// Collection of JSON schemas for webhook event classes and versions.
+    webhook_schemas: webhook::EventSchemaRegistry,
 }
 
 impl Nexus {
@@ -479,6 +482,7 @@ impl Nexus {
             )),
             tuf_artifact_replication_tx,
             mgs_update_status_rx,
+            webhook_schemas: webhook::EventSchemaRegistry::new(),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

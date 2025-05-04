@@ -105,6 +105,7 @@ members = [
     "nexus/test-utils-macros",
     "nexus/test-utils",
     "nexus/types",
+    "nexus/webhooks",
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
@@ -256,6 +257,7 @@ default-members = [
     "nexus/test-utils-macros",
     "nexus/test-utils",
     "nexus/types",
+    "nexus/webhooks",
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
@@ -532,6 +534,7 @@ nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
+nexus-webhooks = { path = "nexus/webhooks" }
 nix = { version = "0.29", features = ["net"] }
 nom = "7.1.3"
 num-integer = "0.1.46"
