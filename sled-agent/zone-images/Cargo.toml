@@ -22,7 +22,7 @@ slog-error-chain.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-assert_fs.workspace = true
+camino-tempfile-ext.workspace = true
 dropshot.workspace = true
 omicron-uuid-kinds.workspace = true
 pretty_assertions.workspace = true

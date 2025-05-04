@@ -487,8 +487,7 @@ impl PartialEq for MupdateOverrideReadError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assert_fs::TempDir;
-    use assert_fs::prelude::*;
+    use camino_tempfile_ext::prelude::*;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use dropshot::test_util::LogContext;
@@ -554,14 +553,14 @@ mod tests {
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
         let override_info = override_info();
-        let dir = TempDir::new().unwrap();
+        let dir = Utf8TempDir::new().unwrap();
 
         dir.child(&BOOT_PATHS.override_json)
             .write_str(&serde_json::to_string(&override_info).unwrap())
             .unwrap();
 
         let zpools = ZoneImageZpools {
-            root: dir.path().try_into().unwrap(),
+            root: dir.path(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL],
         };
@@ -583,8 +582,7 @@ mod tests {
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
         let override_info = override_info();
-        let dir = TempDir::new().unwrap();
-        let dir_path: &Utf8Path = dir.path().try_into().unwrap();
+        let dir = Utf8TempDir::new().unwrap();
 
         dir.child(&BOOT_PATHS.override_json)
             .write_str(&serde_json::to_string(&override_info).unwrap())
@@ -594,7 +592,7 @@ mod tests {
             .unwrap();
 
         let zpools = ZoneImageZpools {
-            root: dir.path().try_into().unwrap(),
+            root: dir.path(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
@@ -608,7 +606,7 @@ mod tests {
             overrides.non_boot_disk_overrides,
             [MupdateOverrideNonBootInfo {
                 zpool_name: NON_BOOT_ZPOOL,
-                path: dir_path.join(&NON_BOOT_PATHS.override_json),
+                path: dir.path().join(&NON_BOOT_PATHS.override_json),
                 result: MupdateOverrideNonBootResult::MatchesPresent,
             }]
             .into_iter()
@@ -625,15 +623,14 @@ mod tests {
             "mupdate_override_read_both_absent",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let dir = TempDir::new().unwrap();
-        let dir_path: &Utf8Path = dir.path().try_into().unwrap();
+        let dir = Utf8TempDir::new().unwrap();
 
         // Create the directories but not the override JSONs within them.
         dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
         dir.child(&NON_BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
         let zpools = ZoneImageZpools {
-            root: dir.path().try_into().unwrap(),
+            root: dir.path(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
@@ -647,7 +644,7 @@ mod tests {
             overrides.non_boot_disk_overrides,
             [MupdateOverrideNonBootInfo {
                 zpool_name: NON_BOOT_ZPOOL,
-                path: dir_path.join(&NON_BOOT_PATHS.override_json),
+                path: dir.path().join(&NON_BOOT_PATHS.override_json),
                 result: MupdateOverrideNonBootResult::MatchesAbsent,
             }]
             .into_iter()
@@ -665,8 +662,7 @@ mod tests {
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
         let override_info = override_info();
-        let dir = TempDir::new().unwrap();
-        let dir_path: &Utf8Path = dir.path().try_into().unwrap();
+        let dir = Utf8TempDir::new().unwrap();
 
         dir.child(&BOOT_PATHS.override_json)
             .write_str(&serde_json::to_string(&override_info).unwrap())
@@ -675,7 +671,7 @@ mod tests {
         dir.child(&NON_BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
         let zpools = ZoneImageZpools {
-            root: dir.path().try_into().unwrap(),
+            root: dir.path(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
@@ -689,7 +685,7 @@ mod tests {
             overrides.non_boot_disk_overrides,
             [MupdateOverrideNonBootInfo {
                 zpool_name: NON_BOOT_ZPOOL,
-                path: dir_path.join(&NON_BOOT_PATHS.override_json),
+                path: dir.path().join(&NON_BOOT_PATHS.override_json),
                 result: MupdateOverrideNonBootResult::Mismatch(
                     MupdateOverrideNonBootMismatch::BootPresentOtherAbsent,
                 ),
@@ -709,8 +705,7 @@ mod tests {
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
         let override_info = override_info();
-        let dir = TempDir::new().unwrap();
-        let dir_path: &Utf8Path = dir.path().try_into().unwrap();
+        let dir = Utf8TempDir::new().unwrap();
 
         // Create the directory, but not the override JSON within it.
         dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
@@ -720,7 +715,7 @@ mod tests {
             .unwrap();
 
         let zpools = ZoneImageZpools {
-            root: dir.path().try_into().unwrap(),
+            root: dir.path(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
@@ -733,7 +728,7 @@ mod tests {
             overrides.non_boot_disk_overrides,
             [MupdateOverrideNonBootInfo {
                 zpool_name: NON_BOOT_ZPOOL,
-                path: dir_path.join(&NON_BOOT_PATHS.override_json),
+                path: dir.path().join(&NON_BOOT_PATHS.override_json),
                 result: MupdateOverrideNonBootResult::Mismatch(
                     MupdateOverrideNonBootMismatch::BootAbsentOtherPresent {
                         non_boot_disk_info: override_info.clone()
@@ -756,8 +751,7 @@ mod tests {
         );
         let override_info = override_info();
         let override_info_2 = override_info_2();
-        let dir = TempDir::new().unwrap();
-        let dir_path: &Utf8Path = dir.path().try_into().unwrap();
+        let dir = Utf8TempDir::new().unwrap();
 
         dir.child(&BOOT_PATHS.override_json)
             .write_str(&serde_json::to_string(&override_info).unwrap())
@@ -767,7 +761,7 @@ mod tests {
             .expect("failed to write override json");
 
         let zpools = ZoneImageZpools {
-            root: dir.path().try_into().unwrap(),
+            root: dir.path(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
@@ -780,7 +774,7 @@ mod tests {
             overrides.non_boot_disk_overrides,
             [MupdateOverrideNonBootInfo {
                 zpool_name: NON_BOOT_ZPOOL,
-                path: dir_path.join(&NON_BOOT_PATHS.override_json),
+                path: dir.path().join(&NON_BOOT_PATHS.override_json),
                 result: MupdateOverrideNonBootResult::Mismatch(
                     MupdateOverrideNonBootMismatch::ValueMismatch {
                         non_boot_disk_info: override_info_2,
@@ -802,8 +796,7 @@ mod tests {
             "mupdate_override_read_boot_install_dataset_missing",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let dir = TempDir::new().unwrap();
-        let dir_path: &Utf8Path = dir.path().try_into().unwrap();
+        let dir = Utf8TempDir::new().unwrap();
 
         // Create the parent directory but not the install dataset directory.
         dir.child(&BOOT_PATHS.install_dataset.parent().unwrap())
@@ -814,23 +807,25 @@ mod tests {
             .unwrap();
 
         let zpools = ZoneImageZpools {
-            root: dir.path().try_into().unwrap(),
+            root: dir.path(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
         let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
-            &dataset_missing_error(&dir_path.join(&BOOT_PATHS.install_dataset))
+            &dataset_missing_error(
+                &dir.path().join(&BOOT_PATHS.install_dataset)
+            )
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
             [MupdateOverrideNonBootInfo {
                 zpool_name: NON_BOOT_ZPOOL,
-                path: dir_path.join(&NON_BOOT_PATHS.override_json),
+                path: dir.path().join(&NON_BOOT_PATHS.override_json),
                 result: MupdateOverrideNonBootResult::ReadError(
                     dataset_missing_error(
-                        &dir_path.join(&NON_BOOT_PATHS.install_dataset)
+                        &dir.path().join(&NON_BOOT_PATHS.install_dataset)
                     ),
                 )
             }]
@@ -848,31 +843,32 @@ mod tests {
             "mupdate_override_read_boot_install_dataset_missing",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let dir = TempDir::new().unwrap();
-        let dir_path: &Utf8Path = dir.path().try_into().unwrap();
+        let dir = Utf8TempDir::new().unwrap();
 
         // Make the install directory paths files -- fun!
         dir.child(&BOOT_PATHS.install_dataset).touch().unwrap();
         dir.child(&NON_BOOT_PATHS.install_dataset).touch().unwrap();
 
         let zpools = ZoneImageZpools {
-            root: dir.path().try_into().unwrap(),
+            root: dir.path(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
         let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
-            &dataset_not_dir_error(&dir_path.join(&BOOT_PATHS.install_dataset))
+            &dataset_not_dir_error(
+                &dir.path().join(&BOOT_PATHS.install_dataset)
+            )
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
             [MupdateOverrideNonBootInfo {
                 zpool_name: NON_BOOT_ZPOOL,
-                path: dir_path.join(&NON_BOOT_PATHS.override_json),
+                path: dir.path().join(&NON_BOOT_PATHS.override_json),
                 result: MupdateOverrideNonBootResult::ReadError(
                     dataset_not_dir_error(
-                        &dir_path.join(&NON_BOOT_PATHS.install_dataset),
+                        &dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     ),
                 ),
             }]
@@ -891,8 +887,7 @@ mod tests {
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
         let override_info = override_info();
-        let dir = TempDir::new().unwrap();
-        let dir_path: &Utf8Path = dir.path().try_into().unwrap();
+        let dir = Utf8TempDir::new().unwrap();
 
         // Create an empty file: this won't deserialize correctly.
         dir.child(&BOOT_PATHS.override_json).touch().unwrap();
@@ -906,7 +901,7 @@ mod tests {
         dir.child(&NON_BOOT_3_PATHS.override_json).touch().unwrap();
 
         let zpools = ZoneImageZpools {
-            root: dir.path().try_into().unwrap(),
+            root: dir.path(),
             boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![
                 BOOT_ZPOOL,
@@ -918,14 +913,14 @@ mod tests {
         let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
-            &deserialize_error(dir_path, &BOOT_PATHS.override_json, "",),
+            &deserialize_error(dir.path(), &BOOT_PATHS.override_json, "",),
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
             [
                 MupdateOverrideNonBootInfo {
                     zpool_name: NON_BOOT_ZPOOL,
-                    path: dir_path.join(&NON_BOOT_PATHS.override_json),
+                    path: dir.path().join(&NON_BOOT_PATHS.override_json),
                     result: MupdateOverrideNonBootResult::Mismatch(
                         MupdateOverrideNonBootMismatch::BootDiskReadError {
                             non_boot_disk_info: Some(override_info),
@@ -934,7 +929,7 @@ mod tests {
                 },
                 MupdateOverrideNonBootInfo {
                     zpool_name: NON_BOOT_2_ZPOOL,
-                    path: dir_path.join(&NON_BOOT_2_PATHS.override_json),
+                    path: dir.path().join(&NON_BOOT_2_PATHS.override_json),
                     result: MupdateOverrideNonBootResult::Mismatch(
                         MupdateOverrideNonBootMismatch::BootDiskReadError {
                             non_boot_disk_info: None,
@@ -943,10 +938,10 @@ mod tests {
                 },
                 MupdateOverrideNonBootInfo {
                     zpool_name: NON_BOOT_3_ZPOOL,
-                    path: dir_path.join(&NON_BOOT_3_PATHS.override_json),
+                    path: dir.path().join(&NON_BOOT_3_PATHS.override_json),
                     result: MupdateOverrideNonBootResult::ReadError(
                         deserialize_error(
-                            dir_path,
+                            dir.path(),
                             &NON_BOOT_3_PATHS.override_json,
                             "",
                         ),
@@ -983,12 +978,12 @@ mod tests {
 
     fn dataset_not_dir_error(dir_path: &Utf8Path) -> MupdateOverrideReadError {
         // A `FileType` must unfortunately be retrieved from disk -- can't
-        // create a new one in-memory. We assume that `dir_path` passed in
+        // create a new one in-memory. We assume that `dir.path()` passed in
         // actually has the described error condition.
         MupdateOverrideReadError::DatasetNotDirectory {
             dataset_dir: dir_path.to_owned(),
             file_type: fs::symlink_metadata(dir_path)
-                .expect("lstat on dir_path succeeded")
+                .expect("lstat on dir.path() succeeded")
                 .file_type(),
         }
     }
