@@ -7,7 +7,6 @@
 use dropshot::test_util::ClientTestContext;
 use hmac::{Hmac, Mac};
 use httpmock::prelude::*;
-use nexus_db_model::WebhookEventClass;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::AuthnMode;

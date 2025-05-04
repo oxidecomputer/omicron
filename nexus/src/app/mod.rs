@@ -482,7 +482,7 @@ impl Nexus {
             )),
             tuf_artifact_replication_tx,
             mgs_update_status_rx,
-            webhook_schemas: webhook::EventSchemaRegistry::new(),
+            webhook_schemas: webhook::event_schemas(),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
