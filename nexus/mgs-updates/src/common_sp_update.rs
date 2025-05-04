@@ -282,8 +282,8 @@ pub enum PrecheckError {
     GatewayClientError(#[from] GatewayClientError),
 
     #[error(
-        "in {sp_type} slot {slot_id}, expected to find
-         part {expected_part:?} serial {expected_serial:?}, but found
+        "in {sp_type} slot {slot_id}, expected to find \
+         part {expected_part:?} serial {expected_serial:?}, but found \
          part {found_part:?} serial {found_serial:?}"
     )]
     WrongDevice {
@@ -296,7 +296,8 @@ pub enum PrecheckError {
     },
 
     #[error(
-        "expected to find active version {expected:?}, but found {found:?}"
+        "expected to find active version {:?}, but found {found:?}",
+        .expected.as_str(),
     )]
     WrongActiveVersion { expected: ArtifactVersion, found: String },
 
@@ -310,4 +311,13 @@ pub enum PrecheckError {
 pub enum FoundVersion {
     MissingVersion,
     Version(String),
+}
+
+pub(crate) fn error_means_caboose_is_invalid(
+    error: &GatewayClientError,
+) -> bool {
+    // This is not great.  See oxidecomputer/omicron#8014.
+    let message = format!("{error:?}");
+    message.contains("the image caboose does not contain")
+        || message.contains("the image does not include a caboose")
 }
