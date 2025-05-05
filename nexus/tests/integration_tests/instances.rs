@@ -37,6 +37,7 @@ use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils::wait_for_producer;
 use nexus_types::external_api::params::SshKeyCreate;
 use nexus_types::external_api::shared::IpKind;
@@ -6473,7 +6474,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
