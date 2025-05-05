@@ -103,9 +103,9 @@ checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
 name = "anstream"
-version = "0.6.15"
+version = "0.6.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64e15c1ab1f89faffbf04a634d5e1962e9074f2741eef6d97f3c4e322426d526"
+checksum = "8acc5369981196006228e28809f761875c0327210a891e941f4c683b3a99529b"
 dependencies = [
  "anstyle",
  "anstyle-parse",
@@ -142,12 +142,13 @@ dependencies = [
 
 [[package]]
 name = "anstyle-wincon"
-version = "3.0.4"
+version = "3.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bf74e1b6e971609db8ca7a9ce79fd5768ab6ae46441c572e46cf596f59e57f8"
+checksum = "ca3534e77181a9cc07539ad51f2141fe32f6c3ffd4df76db8ad92346b003ae4e"
 dependencies = [
  "anstyle",
- "windows-sys 0.52.0",
+ "once_cell",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1057,12 +1058,28 @@ dependencies = [
 
 [[package]]
 name = "camino-tempfile"
-version = "1.1.1"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb905055fa81e4d427f919b2cd0d76a998267de7d225ea767a1894743a5263c2"
+checksum = "4f37f0bd2bfeb019b359945a89e5a3541ac105195da0b30219a0a1b84d681dda"
 dependencies = [
  "camino",
  "tempfile",
+]
+
+[[package]]
+name = "camino-tempfile-ext"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7b3ab964bd19840be2c70b7795188187a8c1c90006a310b1500bf67b35a80d3"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "camino",
+ "camino-tempfile",
+ "globwalk",
+ "predicates",
+ "predicates-core",
+ "predicates-tree",
 ]
 
 [[package]]
@@ -3695,6 +3712,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "globwalk"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bf760ebf69878d9fd8f110c89703d90ce35095324d1f1edcb595c63945ee757"
+dependencies = [
+ "bitflags 2.9.0",
+ "ignore",
+ "walkdir",
+]
+
+[[package]]
 name = "gloo-timers"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4534,6 +4562,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ignore"
+version = "0.4.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d89fd380afde86567dfba715db065673989d6253f42b88179abd3eae47bda4b"
+dependencies = [
+ "crossbeam-deque",
+ "globset",
+ "log",
+ "memchr",
+ "regex-automata",
+ "same-file",
+ "walkdir",
+ "winapi-util",
+]
+
+[[package]]
 name = "illumos-devinfo"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/illumos-devinfo?branch=main#4323b17bfdd0c94d2875ac64b47f0e60fac1d640"
@@ -4742,10 +4786,12 @@ dependencies = [
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "partial-io",
  "proptest",
  "reqwest",
+ "serde_json",
  "sha2",
  "sled-hardware",
  "sled-hardware-types",
@@ -7724,6 +7770,7 @@ dependencies = [
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-types",
+ "sled-agent-zone-images",
  "sled-diagnostics",
  "sled-hardware",
  "sled-hardware-types",
@@ -8410,7 +8457,7 @@ dependencies = [
  "strum",
  "tabled 0.15.0",
  "tempfile",
- "termtree 0.5.1",
+ "termtree",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
@@ -9382,12 +9429,12 @@ checksum = "ae8177bee8e75d6846599c6b9ff679ed51e882816914eec639944d7c9aa11931"
 
 [[package]]
 name = "predicates-tree"
-version = "1.0.11"
+version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41b740d195ed3166cd147c8047ec98db0e22ec019eb8eeb76d343b795304fb13"
+checksum = "72dd2d6d381dfb73a193c7fca536518d7caee39fc8503f74e7dc0be0531b425c"
 dependencies = [
  "predicates-core",
- "termtree 0.4.1",
+ "termtree",
 ]
 
 [[package]]
@@ -11497,6 +11544,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "sled-agent-zone-images"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "camino-tempfile-ext",
+ "dropshot",
+ "id-map",
+ "illumos-utils",
+ "nexus-sled-agent-shared",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pretty_assertions",
+ "serde_json",
+ "sled-storage",
+ "slog",
+ "slog-error-chain",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "sled-diagnostics"
 version = "0.1.0"
 dependencies = [
@@ -12395,12 +12464,6 @@ checksum = "411c5bf740737c7918b8b1fe232dca4dc9f8e754b8ad5e20966814001ed0ac6b"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "termtree"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3369f5ac52d5eb6ab48c6b4ffdc8efbcad6b89c765749064ba298f2c68a16a76"
 
 [[package]]
 name = "termtree"
