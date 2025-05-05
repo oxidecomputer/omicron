@@ -240,9 +240,17 @@ mod tests {
 
     #[derive(Debug, Arbitrary)]
     enum Operation {
+        // Call `RawDisksSender::add_or_update_raw_disk` with the disk at
+        // the given index
         Add(Index),
+        // Change the active firmware slot of the disk at the given index, then
+        // pass it to `RawDisksSender::add_or_update_raw_disk`
         Update(Index),
+        // Call `RawDisksSender::remove_raw_disk` with the disk at the given
+        // index
         Remove(Index),
+        // Call `RawDisksSender::set_raw_disks` using the set of disks in the
+        // range `[start, start + num)`
         Set { start: Index, num: usize },
     }
 
@@ -374,8 +382,9 @@ mod tests {
             for i in 0..states.len() {
                 let disk = &all_disks[i];
                 if states[i].present {
-                    let contained =
-                        current.get(disk.identity()).expect("disk is present");
+                    let contained = current
+                        .get(disk.identity())
+                        .expect("disk should be present");
                     assert_eq!(
                         disk.firmware().active_slot(),
                         contained.firmware().active_slot()
