@@ -5256,6 +5256,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_event (
     -- The number of receivers that this event was dispatched to.
     num_dispatched INT8 NOT NULL,
 
+    -- The version number of the JSON schema for this event class.
+    payload_schema_version INT8 NOT NULL,
+
     CONSTRAINT time_dispatched_set_if_dispatched CHECK (
         (num_dispatched = 0) OR (time_dispatched IS NOT NULL)
     ),
@@ -5476,7 +5479,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '139.0.0', NULL)
+    (TRUE, NOW(), NOW(), '140.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
