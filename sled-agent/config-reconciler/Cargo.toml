@@ -35,6 +35,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tufaceous-artifact.workspace = true
 zone.workspace = true
+
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
@@ -45,6 +46,7 @@ proptest.workspace = true
 scopeguard.workspace = true
 serde_json.workspace = true
 test-strategy.workspace = true
+xshell.workspace = true
 
 [features]
 testing = []

@@ -142,10 +142,17 @@ pub struct CurrentlyManagedZpoolsReceiver {
 enum CurrentlyManagedZpoolsReceiverInner {
     Real(watch::Receiver<Arc<CurrentlyManagedZpools>>),
     #[cfg(any(test, feature = "testing"))]
+    FakeDynamic(watch::Receiver<BTreeSet<ZpoolName>>),
+    #[cfg(any(test, feature = "testing"))]
     FakeStatic(BTreeSet<ZpoolName>),
 }
 
 impl CurrentlyManagedZpoolsReceiver {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fake_dynamic(rx: watch::Receiver<BTreeSet<ZpoolName>>) -> Self {
+        Self { inner: CurrentlyManagedZpoolsReceiverInner::FakeDynamic(rx) }
+    }
+
     #[cfg(any(test, feature = "testing"))]
     pub fn fake_static(zpools: impl Iterator<Item = ZpoolName>) -> Self {
         Self {
@@ -167,6 +174,10 @@ impl CurrentlyManagedZpoolsReceiver {
                 Arc::clone(&*rx.borrow())
             }
             #[cfg(any(test, feature = "testing"))]
+            CurrentlyManagedZpoolsReceiverInner::FakeDynamic(rx) => {
+                Arc::new(CurrentlyManagedZpools(rx.borrow().clone()))
+            }
+            #[cfg(any(test, feature = "testing"))]
             CurrentlyManagedZpoolsReceiverInner::FakeStatic(zpools) => {
                 Arc::new(CurrentlyManagedZpools(zpools.clone()))
             }
@@ -177,6 +188,10 @@ impl CurrentlyManagedZpoolsReceiver {
         match &mut self.inner {
             CurrentlyManagedZpoolsReceiverInner::Real(rx) => {
                 Arc::clone(&*rx.borrow_and_update())
+            }
+            #[cfg(any(test, feature = "testing"))]
+            CurrentlyManagedZpoolsReceiverInner::FakeDynamic(rx) => {
+                Arc::new(CurrentlyManagedZpools(rx.borrow_and_update().clone()))
             }
             #[cfg(any(test, feature = "testing"))]
             CurrentlyManagedZpoolsReceiverInner::FakeStatic(zpools) => {
@@ -191,6 +206,10 @@ impl CurrentlyManagedZpoolsReceiver {
     pub async fn changed(&mut self) -> Result<(), RecvError> {
         match &mut self.inner {
             CurrentlyManagedZpoolsReceiverInner::Real(rx) => rx.changed().await,
+            #[cfg(any(test, feature = "testing"))]
+            CurrentlyManagedZpoolsReceiverInner::FakeDynamic(rx) => {
+                rx.changed().await
+            }
             #[cfg(any(test, feature = "testing"))]
             CurrentlyManagedZpoolsReceiverInner::FakeStatic(_) => {
                 // Static set of zpools never changes
