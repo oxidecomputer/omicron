@@ -41,7 +41,7 @@ impl ZoneImageSourceResolver {
     }
 
     pub fn override_image_directory(&self, path: Utf8PathBuf) {
-        self.inner.lock().unwrap().image_directory_override(path);
+        self.inner.lock().unwrap().override_image_directory(path);
     }
 
     /// Returns a [`ZoneImageFileSource`] consisting of the file name, plus a
@@ -66,7 +66,7 @@ impl ResolverInner {
         Self { image_directory_override: None }
     }
 
-    fn image_directory_override(
+    fn override_image_directory(
         &mut self,
         image_directory_override: Utf8PathBuf,
     ) {
