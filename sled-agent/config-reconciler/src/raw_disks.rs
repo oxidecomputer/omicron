@@ -394,5 +394,7 @@ mod tests {
                 }
             }
         }
+
+        logctx.cleanup_successful();
     }
 }
