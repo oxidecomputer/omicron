@@ -2143,10 +2143,7 @@ fn after_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async {
         let rows = ctx
             .client
-            .query(
-                &format!("SELECT id, intended_state FROM instance ORDER BY id"),
-                &[],
-            )
+            .query("SELECT id, intended_state FROM instance ORDER BY id", &[])
             .await
             .expect("failed to load instance auto-restart policies");
         let records = process_rows(&rows);
