@@ -253,10 +253,9 @@ fn make_zone_image_resolver(
 ) -> ZoneImageSourceResolver {
     let zpools = ZoneImageZpools {
         root: &all_disks.mount_config().root,
-        boot_zpool,
         all_m2_zpools: all_disks.all_m2_zpools(),
     };
-    ZoneImageSourceResolver::new(log, &zpools)
+    ZoneImageSourceResolver::new(log, &zpools, boot_zpool)
 }
 
 async fn upsert_synthetic_disks_if_needed(

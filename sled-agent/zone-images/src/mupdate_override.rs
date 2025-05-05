@@ -58,9 +58,10 @@ impl AllMupdateOverrides {
     pub(crate) fn read_all(
         log: &slog::Logger,
         zpools: &ZoneImageZpools<'_>,
+        boot_zpool: &ZpoolName,
     ) -> Self {
         let dataset =
-            zpools.boot_zpool.dataset_mountpoint(zpools.root, INSTALL_DATASET);
+            boot_zpool.dataset_mountpoint(zpools.root, INSTALL_DATASET);
 
         let (boot_disk_path, boot_disk_res) =
             read_mupdate_override(log, &dataset);
@@ -71,7 +72,7 @@ impl AllMupdateOverrides {
         let non_boot_zpools = zpools
             .all_m2_zpools
             .iter()
-            .filter(|&zpool_name| zpool_name != zpools.boot_zpool);
+            .filter(|&zpool_name| zpool_name != boot_zpool);
         let non_boot_disks_overrides = non_boot_zpools
             .map(|zpool_name| {
                 let dataset =
@@ -90,7 +91,7 @@ impl AllMupdateOverrides {
             .collect();
 
         Self {
-            boot_zpool: zpools.boot_zpool.clone(),
+            boot_zpool: boot_zpool.clone(),
             boot_disk_path,
             boot_disk_override: boot_disk_res,
             non_boot_disk_overrides: non_boot_disks_overrides,
@@ -561,10 +562,10 @@ mod tests {
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
-            boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL],
         };
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
+        let overrides =
+            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&override_info)
@@ -593,11 +594,11 @@ mod tests {
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
-            boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
 
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
+        let overrides =
+            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&override_info)
@@ -631,11 +632,11 @@ mod tests {
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
-            boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
 
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
+        let overrides =
+            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             None,
@@ -672,11 +673,11 @@ mod tests {
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
-            boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
 
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
+        let overrides =
+            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&override_info)
@@ -716,10 +717,10 @@ mod tests {
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
-            boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
+        let overrides =
+            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             None,
@@ -762,10 +763,10 @@ mod tests {
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
-            boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
+        let overrides =
+            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&override_info),
@@ -808,10 +809,10 @@ mod tests {
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
-            boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
+        let overrides =
+            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
             &dataset_missing_error(
@@ -851,10 +852,10 @@ mod tests {
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
-            boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
         };
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
+        let overrides =
+            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
             &dataset_not_dir_error(
@@ -902,7 +903,6 @@ mod tests {
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
-            boot_zpool: &BOOT_ZPOOL,
             all_m2_zpools: vec![
                 BOOT_ZPOOL,
                 NON_BOOT_ZPOOL,
@@ -910,7 +910,8 @@ mod tests {
                 NON_BOOT_3_ZPOOL,
             ],
         };
-        let overrides = AllMupdateOverrides::read_all(&logctx.log, &zpools);
+        let overrides =
+            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
             &deserialize_error(dir.path(), &BOOT_PATHS.override_json, "",),

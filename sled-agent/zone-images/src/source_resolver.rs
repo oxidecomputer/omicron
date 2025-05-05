@@ -35,9 +35,6 @@ pub struct ZoneImageZpools<'a> {
     /// The root directory, typically `/`.
     pub root: &'a Utf8Path,
 
-    /// The boot disk's zpool name.
-    pub boot_zpool: &'a ZpoolName,
-
     /// The full set of M.2 zpools that are currently known. Must be non-empty,
     /// but it can include the boot zpool.
     pub all_m2_zpools: Vec<ZpoolName>,
@@ -55,8 +52,16 @@ pub struct ZoneImageSourceResolver {
 
 impl ZoneImageSourceResolver {
     /// Creates a new `ZoneImageSourceResolver`.
-    pub fn new(log: &slog::Logger, zpools: &ZoneImageZpools<'_>) -> Self {
-        Self { inner: Arc::new(Mutex::new(ResolverInner::new(log, zpools))) }
+    pub fn new(
+        log: &slog::Logger,
+        zpools: &ZoneImageZpools<'_>,
+        boot_zpool: &ZpoolName,
+    ) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(ResolverInner::new(
+                log, zpools, boot_zpool,
+            ))),
+        }
     }
 
     pub fn override_image_directory(&self, path: Utf8PathBuf) {
@@ -89,10 +94,15 @@ struct ResolverInner {
 }
 
 impl ResolverInner {
-    fn new(log: &slog::Logger, zpools: &ZoneImageZpools<'_>) -> Self {
+    fn new(
+        log: &slog::Logger,
+        zpools: &ZoneImageZpools<'_>,
+        boot_zpool: &ZpoolName,
+    ) -> Self {
         let log = log.new(o!("component" => "ZoneImageSourceResolver"));
 
-        let mupdate_overrides = AllMupdateOverrides::read_all(&log, zpools);
+        let mupdate_overrides =
+            AllMupdateOverrides::read_all(&log, zpools, boot_zpool);
 
         // Log the results.
         mupdate_overrides.log_results(&log);

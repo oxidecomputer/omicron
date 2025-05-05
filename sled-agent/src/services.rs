@@ -5367,11 +5367,10 @@ mod illumos_tests {
             let (_, boot_zpool) = storage_manager.wait_for_boot_disk().await;
             let zpools = ZoneImageZpools {
                 root: &all_disks.mount_config().root,
-                boot_zpool: &boot_zpool,
                 all_m2_zpools: all_disks.all_m2_zpools(),
             };
             let zone_image_resolver =
-                ZoneImageSourceResolver::new(&log, &zpools);
+                ZoneImageSourceResolver::new(&log, &zpools, &boot_zpool);
 
             LedgerTestHelper {
                 log,
