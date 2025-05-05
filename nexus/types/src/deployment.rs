@@ -1246,8 +1246,14 @@ pub enum PendingMgsUpdateDetails {
         expected_inactive_version: ExpectedVersion,
     },
     /// the RoT is being updated
-    RoT {
-        // TODO-K: Fill in fields
+    Rot {
+        // implicit: component = ROT
+        // TODO-K: Is this accurate for the RoT as well?
+        // implicit: firmware slot id = 0 (always 0 for ROT)
+        /// expected contents of the active slot
+        expected_active_version: ArtifactVersion,
+        /// expected contents of the inactive slot
+        expected_inactive_version: ExpectedVersion,
     },
 }
 
@@ -1272,8 +1278,20 @@ impl slog::KV for PendingMgsUpdateDetails {
                     &format!("{:?}", expected_inactive_version),
                 )
             }
-            // TODO-K: Set serialiser information
-            PendingMgsUpdateDetails::RoT {} => todo!(),
+            PendingMgsUpdateDetails::Rot {
+                expected_active_version,
+                expected_inactive_version,
+            } => {
+                serializer.emit_str(Key::from("component"), "rot")?;
+                serializer.emit_str(
+                    Key::from("expected_active_version"),
+                    &expected_active_version.to_string(),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_inactive_version"),
+                    &format!("{:?}", expected_inactive_version),
+                )
+            }
         }
     }
 }

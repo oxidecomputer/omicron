@@ -315,6 +315,10 @@ fn cmd_config(
             PendingMgsUpdateDetails::Sp {
                 expected_active_version,
                 expected_inactive_version,
+            }
+            | PendingMgsUpdateDetails::Rot {
+                expected_active_version,
+                expected_inactive_version,
             } => {
                 writeln!(
                     &mut s,
@@ -322,8 +326,6 @@ fn cmd_config(
                     expected_active_version, expected_inactive_version,
                 )?;
             }
-            // TODO-K: Print preconditions
-            PendingMgsUpdateDetails::RoT {} => todo!(),
         }
 
         writeln!(&mut s)?;

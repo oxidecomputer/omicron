@@ -5377,6 +5377,39 @@
               "expected_active_version",
               "expected_inactive_version"
             ]
+          },
+          {
+            "description": "the RoT is being updated",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "rot"
+                ]
+              },
+              "expected_active_version": {
+                "description": "expected contents of the active slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ArtifactVersion"
+                  }
+                ]
+              },
+              "expected_inactive_version": {
+                "description": "expected contents of the inactive slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExpectedVersion"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "expected_active_version",
+              "expected_inactive_version"
+            ]
           }
         ]
       },

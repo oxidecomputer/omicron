@@ -5,10 +5,12 @@
 //! Drive one or more in-progress MGS-managed updates
 
 use crate::ArtifactCache;
+use crate::SpComponentUpdateHelper;
 use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
+use crate::rot_updater::ReconfiguratorRotUpdater;
 use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -307,13 +309,21 @@ impl MgsUpdateDriver {
                 let sp_update =
                     SpComponentUpdate::from_request(&log, &request, update_id);
 
-                (sp_update, Box::new(ReconfiguratorSpUpdater {}))
+                (
+                    sp_update,
+                    ReconfiguratorUpdater::Sp(ReconfiguratorSpUpdater {}),
+                )
             }
-            // TODO-K: fill in necessary component information
-            nexus_types::deployment::PendingMgsUpdateDetails::RoT {
+            nexus_types::deployment::PendingMgsUpdateDetails::Rot {
                 ..
             } => {
-                todo!()
+                let sp_update =
+                    SpComponentUpdate::from_request(&log, &request, update_id);
+
+                (
+                    sp_update,
+                    ReconfiguratorUpdater::Rot(ReconfiguratorRotUpdater {}),
+                )
             }
         };
 
@@ -350,7 +360,7 @@ impl MgsUpdateDriver {
             let result = apply_update(
                 artifacts,
                 &sp_update,
-                &*updater,
+                &*updater.inner(),
                 mgs_rx,
                 &request,
                 status_updater,
@@ -491,6 +501,21 @@ impl MgsUpdateDriver {
             request: my_request,
             nattempts_done: waiting.internal_request.nattempts_done,
         });
+    }
+}
+
+/// the component reconfigurator will update
+enum ReconfiguratorUpdater {
+    Sp(ReconfiguratorSpUpdater),
+    Rot(ReconfiguratorRotUpdater),
+}
+
+impl ReconfiguratorUpdater {
+    fn inner(self) -> Box<dyn SpComponentUpdateHelper + Send + Sync> {
+        match self {
+            ReconfiguratorUpdater::Sp(updater) => Box::new(updater),
+            ReconfiguratorUpdater::Rot(updater) => Box::new(updater),
+        }
     }
 }
 
