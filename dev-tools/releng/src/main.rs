@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod cmd;
+mod helios;
 mod hubris;
 mod job;
 mod tuf;
@@ -152,6 +153,15 @@ struct Args {
     /// Extra manifest to be merged with the rest of the repo
     #[clap(long)]
     extra_manifest: Option<Utf8PathBuf>,
+
+    /// Create and use an `omicron-ci-incorporation` package during the image
+    /// build. The incorporation can then be reused during branching to pin
+    /// packages in the image to the same version.
+    ///
+    /// This option does nothing if the `[helios]` table is present in
+    /// tools/pins.toml.
+    #[clap(long, conflicts_with("helios_local"))]
+    mkincorp: bool,
 }
 
 impl Args {
@@ -477,6 +487,19 @@ async fn main() -> Result<()> {
         }};
     }
 
+    let incorp_version = version.major;
+    if args.mkincorp && pins.helios.is_none() {
+        helios::push_incorporation_jobs(
+            &mut jobs,
+            &logger,
+            &args.output_dir,
+            incorp_version,
+        )
+        .await?;
+    } else {
+        jobs.push("helios-incorp", std::future::ready(Ok(())));
+    }
+
     for target in [Target::Host, Target::Recovery] {
         let artifacts_path = target.artifacts_path(&args);
 
@@ -574,10 +597,29 @@ async fn main() -> Result<()> {
 
         if let Some(helios) = &pins.helios {
             image_cmd = image_cmd.arg("-F").arg(format!(
-                "extra_packages+=\
-                /consolidation/oxide/omicron-release-incorporation@{}",
+                "extra_packages+=/{}@{}",
+                helios::INCORP_NAME,
                 helios.incorporation
             ));
+        } else if args.mkincorp {
+            image_cmd = image_cmd
+                .arg("-F")
+                .arg(format!(
+                    "extra_packages+=/{}@{incorp_version}",
+                    helios::INCORP_NAME
+                ))
+                .arg("-p")
+                .arg(format!(
+                    "{}=file://{}",
+                    helios::PUBLISHER,
+                    args.output_dir
+                        .canonicalize_utf8()
+                        .with_context(|| format!(
+                            "failed to canonicalize {}",
+                            args.output_dir
+                        ))?
+                        .join(helios::ARCHIVE_PATH)
+                ));
         }
 
         if !args.helios_local {
@@ -589,6 +631,7 @@ async fn main() -> Result<()> {
         // helios-build experiment-image
         jobs.push_command(format!("{}-image", target), image_cmd)
             .after("helios-setup")
+            .after("helios-incorp")
             .after(format!("{}-proto", target));
     }
     // Build the recovery target after we build the host target. Only one
