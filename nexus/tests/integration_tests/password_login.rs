@@ -9,7 +9,6 @@ use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
 use nexus_types::external_api::shared::{self, SiloRole};
 use nexus_types::external_api::views;
 use omicron_common::api::external::{Name, UserId};
