@@ -1068,9 +1068,9 @@ dependencies = [
 
 [[package]]
 name = "camino-tempfile-ext"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0ed484a0f760737961ac676efeaffc029948cd7ea329d6c55a4baf936d1cb31"
+checksum = "f7b3ab964bd19840be2c70b7795188187a8c1c90006a310b1500bf67b35a80d3"
 dependencies = [
  "anstream",
  "anstyle",
