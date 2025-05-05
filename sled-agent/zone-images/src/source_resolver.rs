@@ -60,7 +60,7 @@ impl ZoneImageSourceResolver {
     }
 
     pub fn override_image_directory(&self, path: Utf8PathBuf) {
-        self.inner.lock().unwrap().image_directory_override(path);
+        self.inner.lock().unwrap().override_image_directory(path);
     }
 
     /// Returns a [`ZoneImageFileSource`] consisting of the file name, plus a
@@ -100,12 +100,19 @@ impl ResolverInner {
         Self { log, image_directory_override: None, mupdate_overrides }
     }
 
-    fn image_directory_override(
+    fn override_image_directory(
         &mut self,
         image_directory_override: Utf8PathBuf,
     ) {
         if let Some(dir) = &self.image_directory_override {
-            panic!("image_directory_override already set to {dir}");
+            // Allow idempotent sets to the same directory -- some tests do
+            // this.
+            if image_directory_override != *dir {
+                panic!(
+                    "image_directory_override already set to `{dir}`, \
+                     attempting to set it to `{image_directory_override}`"
+                );
+            }
         }
         self.image_directory_override = Some(image_directory_override);
     }

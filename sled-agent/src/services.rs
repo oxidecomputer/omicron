@@ -1007,7 +1007,7 @@ impl ServiceManager {
 
     #[cfg(all(test, target_os = "illumos"))]
     fn override_image_directory(&self, path: Utf8PathBuf) {
-        self.zone_image_source_resolver.override_image_directory(path).unwrap();
+        self.inner.zone_image_resolver.override_image_directory(path);
     }
 
     pub(crate) fn ddm_reconciler(&self) -> &DdmReconciler {
@@ -5147,6 +5147,7 @@ mod illumos_tests {
 
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_zone_images::ZoneImageZpools;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::{
         net::{Ipv6Addr, SocketAddrV6},
@@ -5348,6 +5349,7 @@ mod illumos_tests {
         log: slog::Logger,
         storage_test_harness: StorageManagerTestHarness,
         zone_bundler: ZoneBundler,
+        zone_image_resolver: ZoneImageSourceResolver,
         test_config: &'a TestConfig,
     }
 
@@ -5360,10 +5362,22 @@ mod illumos_tests {
                 Default::default(),
             );
 
+            let mut storage_manager = storage_test_harness.handle().clone();
+            let all_disks = storage_manager.get_latest_disks().await;
+            let (_, boot_zpool) = storage_manager.wait_for_boot_disk().await;
+            let zpools = ZoneImageZpools {
+                root: &all_disks.mount_config().root,
+                boot_zpool: &boot_zpool,
+                all_m2_zpools: all_disks.all_m2_zpools(),
+            };
+            let zone_image_resolver =
+                ZoneImageSourceResolver::new(&log, &zpools);
+
             LedgerTestHelper {
                 log,
                 storage_test_harness,
                 zone_bundler,
+                zone_image_resolver,
                 test_config,
             }
         }
@@ -5398,6 +5412,7 @@ mod illumos_tests {
                 vec![],
                 self.storage_test_harness.handle().clone(),
                 self.zone_bundler.clone(),
+                self.zone_image_resolver.clone(),
                 system,
             );
             self.test_config.override_paths(&mgr);
