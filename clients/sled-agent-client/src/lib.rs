@@ -56,6 +56,7 @@ progenitor::generate_api!(
         DiskVariant = omicron_common::disk::DiskVariant,
         ExternalIpGatewayMap = omicron_common::api::internal::shared::ExternalIpGatewayMap,
         Generation = omicron_common::api::external::Generation,
+        Hostname = omicron_common::api::external::Hostname,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         Inventory = nexus_sled_agent_shared::inventory::Inventory,
         InventoryDisk = nexus_sled_agent_shared::inventory::InventoryDisk,
@@ -114,14 +115,6 @@ impl From<omicron_common::api::internal::nexus::VmmState> for types::VmmState {
             Input::Failed => types::VmmState::Failed,
             Input::Destroyed => types::VmmState::Destroyed,
         }
-    }
-}
-
-impl From<omicron_common::api::external::InstanceCpuCount>
-    for types::InstanceCpuCount
-{
-    fn from(s: omicron_common::api::external::InstanceCpuCount) -> Self {
-        Self(s.0)
     }
 }
 
@@ -185,14 +178,6 @@ impl From<types::MigrationState>
             types::MigrationState::Failed => Output::Failed,
             types::MigrationState::Completed => Output::Completed,
         }
-    }
-}
-
-impl From<types::InstanceCpuCount>
-    for omicron_common::api::external::InstanceCpuCount
-{
-    fn from(s: types::InstanceCpuCount) -> Self {
-        Self(s.0)
     }
 }
 

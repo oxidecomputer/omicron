@@ -31,6 +31,9 @@ use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::WebhookEventUuid;
+use omicron_uuid_kinds::WebhookReceiverUuid;
+use omicron_uuid_kinds::WebhookSecretUuid;
 use slog::{error, trace};
 use uuid::Uuid;
 
@@ -476,6 +479,59 @@ impl<'a> LookupPath<'a> {
     {
         SamlIdentityProvider::PrimaryKey(Root { lookup_root: self }, id)
     }
+
+    pub fn webhook_receiver_id<'b>(
+        self,
+        id: WebhookReceiverUuid,
+    ) -> WebhookReceiver<'b>
+    where
+        'a: 'b,
+    {
+        WebhookReceiver::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type [`WebhookReceiver`], identified by its name
+    pub fn webhook_receiver_name<'b, 'c>(
+        self,
+        name: &'b Name,
+    ) -> WebhookReceiver<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        WebhookReceiver::Name(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type [`WebhookReceiver`], identified by its owned name
+    pub fn webhook_receiver_name_owned<'b, 'c>(
+        self,
+        name: Name,
+    ) -> WebhookReceiver<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        WebhookReceiver::OwnedName(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type [`WebhookSecret`], identified by its UUID.
+    pub fn webhook_secret_id<'b>(
+        self,
+        id: WebhookSecretUuid,
+    ) -> WebhookSecret<'b>
+    where
+        'a: 'b,
+    {
+        WebhookSecret::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type [`WebhookEvent`], identified by its UUID.
+    pub fn webhook_event_id<'b>(self, id: WebhookEventUuid) -> WebhookEvent<'b>
+    where
+        'a: 'b,
+    {
+        WebhookEvent::PrimaryKey(Root { lookup_root: self }, id)
+    }
 }
 
 /// Represents the head of the selection path for a resource
@@ -848,6 +904,36 @@ lookup_resource! {
         { column_name = "address", rust_type = IpNetwork },
         { column_name = "rack_id", rust_type = Uuid },
         { column_name = "switch_location", rust_type = String }
+    ]
+}
+
+lookup_resource! {
+    name = "WebhookReceiver",
+    ancestors = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = WebhookReceiverKind }
+    ]
+}
+
+lookup_resource! {
+    name = "WebhookSecret",
+    ancestors = ["WebhookReceiver"],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = WebhookSecretKind }
+    ]
+}
+
+lookup_resource! {
+    name = "WebhookEvent",
+    ancestors = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = WebhookEventKind }
     ]
 }
 

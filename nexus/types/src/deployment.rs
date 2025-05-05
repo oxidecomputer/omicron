@@ -23,7 +23,6 @@ use daft::Diffable;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
@@ -31,10 +30,8 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
-use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -668,53 +665,41 @@ impl BlueprintSledConfig {
     /// is named slightly more explicitly, as it filters the blueprint
     /// configuration to only consider components that should be in-service.
     pub fn into_in_service_sled_config(self) -> OmicronSledConfig {
-        // TODO OmicronSledConfig should have a single generation; for now we
-        // reuse our generation for all three subfields. Tracked by
-        // https://github.com/oxidecomputer/omicron/issues/7774
-        let generation = self.sled_agent_generation;
         OmicronSledConfig {
-            disks_config: OmicronPhysicalDisksConfig {
-                generation,
-                disks: self
-                    .disks
-                    .into_iter()
-                    .filter_map(|disk| {
-                        if disk.disposition.is_in_service() {
-                            Some(disk.into())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
-            },
-            datasets_config: DatasetsConfig {
-                generation,
-                datasets: self
-                    .datasets
-                    .into_iter()
-                    .filter_map(|dataset| {
-                        if dataset.disposition.is_in_service() {
-                            Some((dataset.id, dataset.into()))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
-            },
-            zones_config: OmicronZonesConfig {
-                generation,
-                zones: self
-                    .zones
-                    .into_iter()
-                    .filter_map(|zone| {
-                        if zone.disposition.is_in_service() {
-                            Some(zone.into())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
-            },
+            generation: self.sled_agent_generation,
+            disks: self
+                .disks
+                .into_iter()
+                .filter_map(|disk| {
+                    if disk.disposition.is_in_service() {
+                        Some(disk.into())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            datasets: self
+                .datasets
+                .into_iter()
+                .filter_map(|dataset| {
+                    if dataset.disposition.is_in_service() {
+                        Some(dataset.into())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            zones: self
+                .zones
+                .into_iter()
+                .filter_map(|zone| {
+                    if zone.disposition.is_in_service() {
+                        Some(zone.into())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
         }
     }
 

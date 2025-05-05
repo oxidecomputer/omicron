@@ -13,5 +13,6 @@ pub mod instance;
 pub mod rack_init;
 pub mod rack_ops;
 pub mod sled;
+pub mod support_bundle;
 pub mod time_sync;
 pub mod zone_bundle;

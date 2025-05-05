@@ -8,6 +8,7 @@ workspace = true
 
 [dependencies]
 daft.workspace = true
+id-map.workspace = true
 illumos-utils.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true

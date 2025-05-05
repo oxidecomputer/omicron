@@ -1040,6 +1040,9 @@ pub enum ResourceType {
     Probe,
     ProbeNetworkInterface,
     LldpLinkConfig,
+    WebhookEvent,
+    WebhookReceiver,
+    WebhookSecret,
 }
 
 // IDENTITY METADATA

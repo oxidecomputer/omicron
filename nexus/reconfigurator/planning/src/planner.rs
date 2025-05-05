@@ -996,6 +996,7 @@ pub(crate) mod test {
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
+    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -1180,16 +1181,18 @@ pub(crate) mod test {
         // example.collection -- this should be addressed via API improvements.
         example
             .system
-            .sled_set_omicron_zones(
-                new_sled_id,
-                blueprint4
+            .sled_set_omicron_zones(new_sled_id, {
+                let sled_cfg = blueprint4
                     .sleds
                     .get(&new_sled_id)
                     .expect("blueprint should contain zones for new sled")
                     .clone()
-                    .into_in_service_sled_config()
-                    .zones_config,
-            )
+                    .into_in_service_sled_config();
+                OmicronZonesConfig {
+                    generation: sled_cfg.generation,
+                    zones: sled_cfg.zones.into_iter().collect(),
+                }
+            })
             .unwrap();
         let collection =
             example.system.to_collection_builder().unwrap().build();
