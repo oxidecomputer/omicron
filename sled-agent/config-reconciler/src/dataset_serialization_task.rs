@@ -57,8 +57,21 @@ pub enum DatasetTaskError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DatasetEnsureError {
-    #[error("could not find matching zpool: {0}")]
+    #[error("could not find matching zpool {0}")]
     ZpoolNotFound(ZpoolName),
+    #[error("transient zone root not in config for zpool {0}")]
+    TransientZoneRootNoConfig(ZpoolName),
+    #[error("ensuring transient zone root failed on zpool {zpool}")]
+    TransientZoneRootFailure {
+        zpool: ZpoolName,
+        #[source]
+        err: Arc<DatasetEnsureError>,
+    },
+    #[error(
+        "dataset {name} exists with unexpected ID \
+         (expected {expected}, got {got})"
+    )]
+    UuidMismatch { name: String, expected: DatasetUuid, got: DatasetUuid },
     #[error("failed to ensure dataset")]
     EnsureFailed {
         name: String,
@@ -134,10 +147,6 @@ impl IdMappable for SingleDatasetEnsureResult {
 enum DatasetState {
     Mounted,
     FailedToEnsure(Arc<DatasetEnsureError>),
-    UuidMismatch(DatasetUuid),
-    ZpoolNotFound,
-    ParentMissingFromConfig,
-    ParentFailedToMount,
 }
 
 #[derive(Debug)]
@@ -380,9 +389,10 @@ impl DatasetTask {
                     "configured dataset on zpool we're not managing";
                     "dataset" => ?dataset,
                 );
+                let err = DatasetEnsureError::ZpoolNotFound(zpool.clone());
                 self.datasets.0.insert(SingleDatasetEnsureResult {
                     config: dataset,
-                    state: DatasetState::ZpoolNotFound,
+                    state: DatasetState::FailedToEnsure(Arc::new(err)),
                 });
                 continue;
             }
@@ -490,26 +500,42 @@ impl DatasetTask {
                 let Some(zpool_transient_zone_root_dataset_id) =
                     transient_zone_root_by_zpool.get(&zpool_id)
                 else {
+                    let err = DatasetEnsureError::TransientZoneRootNoConfig(
+                        dataset.name.pool().clone(),
+                    );
                     self.datasets.0.insert(SingleDatasetEnsureResult {
                         config: dataset,
-                        state: DatasetState::ParentMissingFromConfig,
+                        state: DatasetState::FailedToEnsure(Arc::new(err)),
                     });
                     continue;
                 };
 
                 // Have we successfully ensured that parent dataset?
-                if !matches!(
-                    self.datasets
-                        .0
-                        .get(zpool_transient_zone_root_dataset_id)
-                        .map(|d| &d.state),
-                    Some(DatasetState::Mounted)
-                ) {
-                    self.datasets.0.insert(SingleDatasetEnsureResult {
-                        config: dataset,
-                        state: DatasetState::ParentFailedToMount,
-                    });
-                    continue;
+                match self
+                    .datasets
+                    .0
+                    .get(zpool_transient_zone_root_dataset_id)
+                    .map(|d| &d.state)
+                {
+                    Some(DatasetState::Mounted) => (),
+                    Some(DatasetState::FailedToEnsure(err)) => {
+                        let err =
+                            DatasetEnsureError::TransientZoneRootFailure {
+                                zpool: dataset.name.pool().clone(),
+                                err: Arc::clone(err),
+                            };
+                        self.datasets.0.insert(SingleDatasetEnsureResult {
+                            config: dataset,
+                            state: DatasetState::FailedToEnsure(Arc::new(err)),
+                        });
+                        continue;
+                    }
+                    None => {
+                        // The only way to have no state for a transient zone
+                        // root is if it's not in the config at all, which we
+                        // just checked above.
+                        unreachable!("all transient zone roots have states")
+                    }
                 }
 
                 transient_zone_futures.push(async move {
@@ -561,7 +587,16 @@ impl DatasetTask {
         };
 
         if old_id != dataset.id {
-            return Some(DatasetState::UuidMismatch(old_id));
+            // We cannot do anything here: we already have a dataset with this
+            // name, but it has a different ID. Nexus has sent us bad
+            // information (or we have a bug somewhere); refuse to proceed.
+            return Some(DatasetState::FailedToEnsure(Arc::new(
+                DatasetEnsureError::UuidMismatch {
+                    name: dataset.name.full_name(),
+                    expected: dataset.id,
+                    got: old_id,
+                },
+            )));
         }
 
         let old_props = match SharedDatasetConfig::try_from(old_dataset) {
@@ -1261,8 +1296,9 @@ mod tests {
                 num_datasets_on_managed_pools += 1;
             } else {
                 assert_matches!(
-                    single_result.state,
-                    DatasetState::ZpoolNotFound
+                    &single_result.state,
+                    DatasetState::FailedToEnsure(err)
+                        if matches!(**err, DatasetEnsureError::ZpoolNotFound(_))
                 );
             }
         }
@@ -1411,15 +1447,20 @@ mod tests {
                     TransientZoneRootBehavior::Fail,
                     DatasetKind::TransientZone { .. },
                 ) => assert_matches!(
-                    result.state,
-                    DatasetState::ParentFailedToMount
+                    &result.state,
+                    DatasetState::FailedToEnsure(err) if matches!(
+                        **err,
+                        DatasetEnsureError::TransientZoneRootFailure { .. }
+                    )
                 ),
                 (
                     TransientZoneRootBehavior::Omit,
                     DatasetKind::TransientZone { .. },
                 ) => assert_matches!(
-                    result.state,
-                    DatasetState::ParentMissingFromConfig
+                    &result.state,
+                    DatasetState::FailedToEnsure(err) if matches!(
+                        **err, DatasetEnsureError::TransientZoneRootNoConfig(_)
+                    )
                 ),
                 (x, y) => panic!("unexpected combo: ({x:?}, {y:?})"),
             }
