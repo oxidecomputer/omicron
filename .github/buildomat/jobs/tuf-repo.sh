@@ -8,6 +8,7 @@
 #:	"=/work/manifest.toml",
 #:	"=/work/repo.zip",
 #:	"=/work/repo.zip.sha256.txt",
+#:	"=/work/helios.json",
 #:	"=/work/incorporation.p5m",
 #:	"=/work/incorporation.p5p",
 #:	"%/work/*.log",
@@ -43,6 +44,11 @@
 #: series = "rot-all"
 #: name = "repo.zip.sha256.txt"
 #: from_output = "/work/repo.zip.sha256.txt"
+#:
+#: [[publish]]
+#: series = "rot-all"
+#: name = "helios.json"
+#: from_output = "/work/helios.json"
 #:
 #: [[publish]]
 #: series = "rot-all"

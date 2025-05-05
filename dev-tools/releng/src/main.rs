@@ -8,6 +8,8 @@ mod hubris;
 mod job;
 mod tuf;
 
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -16,6 +18,7 @@ use std::time::Instant;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::Utc;
 use clap::Parser;
@@ -286,22 +289,19 @@ async fn main() -> Result<()> {
 
     // Ensure the Helios checkout exists. If the directory exists and is
     // non-empty, check that the commit is correct.
-    if args.helios_dir.exists()
+    let helios_commit = if args.helios_dir.exists()
         && fs::read_dir(&args.helios_dir).await?.next_entry().await?.is_some()
     {
+        let helios_commit = git_resolve_commit(
+            &args.git_bin,
+            &args.helios_dir,
+            "HEAD",
+            &logger,
+        )
+        .await?;
         if !args.ignore_helios_origin {
             if let Some(helios) = &pins.helios {
-                let stdout = Command::new(&args.git_bin)
-                    .arg("-C")
-                    .arg(&args.helios_dir)
-                    .args(["rev-parse", "HEAD"])
-                    .ensure_stdout(&logger)
-                    .await?;
-                let line = stdout
-                    .lines()
-                    .next()
-                    .context("git-rev-parse output was empty")?;
-                if line != helios.commit {
+                if helios_commit != helios.commit {
                     error!(
                         logger,
                         "helios checkout at {0} is not at pinned commit {1}; \
@@ -317,24 +317,17 @@ async fn main() -> Result<()> {
                 Command::new(&args.git_bin)
                     .arg("-C")
                     .arg(&args.helios_dir)
-                    .args([
-                        "fetch",
-                        "--no-write-fetch-head",
-                        "origin",
-                        "master",
-                    ])
+                    .args(["fetch", "--no-write-fetch-head", "origin", "HEAD"])
                     .ensure_success(&logger)
                     .await?;
-                let stdout = Command::new(&args.git_bin)
-                    .arg("-C")
-                    .arg(&args.helios_dir)
-                    .args(["rev-parse", "HEAD", "origin/master"])
-                    .ensure_stdout(&logger)
-                    .await?;
-                let mut lines = stdout.lines();
-                let first =
-                    lines.next().context("git-rev-parse output was empty")?;
-                if !lines.all(|line| line == first) {
+                let upstream_commit = git_resolve_commit(
+                    &args.git_bin,
+                    &args.helios_dir,
+                    "origin/HEAD",
+                    &logger,
+                )
+                .await?;
+                if helios_commit != upstream_commit {
                     error!(
                         logger,
                         "helios checkout at {0} is out-of-date; run \
@@ -346,6 +339,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        helios_commit
     } else {
         info!(logger, "cloning helios to {}", args.helios_dir);
         Command::new(&args.git_bin)
@@ -364,8 +358,12 @@ async fn main() -> Result<()> {
                 .args(["checkout", &helios.commit])
                 .ensure_success(&logger)
                 .await?;
+            helios.commit.clone()
+        } else {
+            git_resolve_commit(&args.git_bin, &args.helios_dir, "HEAD", &logger)
+                .await?
         }
-    }
+    };
 
     // Check that the omicron1 brand is installed
     if !Command::new("pkg")
@@ -414,14 +412,6 @@ async fn main() -> Result<()> {
         .context("failed to create temporary directory")?;
     let mut jobs = Jobs::new(&logger, permits.clone(), &args.output_dir);
 
-    // Record the branch and commit of helios.git in the output
-    Command::new(&args.git_bin)
-        .arg("-C")
-        .arg(&args.helios_dir)
-        .args(["status", "--branch", "--porcelain=2"])
-        .ensure_success(&logger)
-        .await?;
-
     jobs.push_command(
         "helios-setup",
         Command::new("ptime")
@@ -437,6 +427,42 @@ async fn main() -> Result<()> {
             .env_remove("CARGO")
             .env_remove("RUSTUP_TOOLCHAIN"),
     );
+
+    // Record the commit of helios.git and everything helios-setup cloned
+    {
+        let git_bin = args.git_bin.clone();
+        let output_dir = args.output_dir.clone();
+        let helios_dir = args.helios_dir.clone();
+        let logger = logger.clone();
+        jobs.push("helios-record", async move {
+            let projects_dir = helios_dir.join("projects");
+            let mut projects = BTreeMap::new();
+            let mut read_dir = fs::read_dir(&projects_dir).await?;
+            while let Some(entry) = read_dir.next_entry().await? {
+                let name =
+                    Utf8PathBuf::try_from(PathBuf::from(entry.file_name()))?;
+                let commit = git_resolve_commit(
+                    &git_bin,
+                    &projects_dir.join(&name),
+                    "HEAD",
+                    &logger,
+                )
+                .await?;
+                projects.insert(name, commit);
+            }
+
+            let json = format!(
+                "{:#}\n",
+                serde_json::json!({
+                    "helios": helios_commit,
+                    "projects": projects,
+                })
+            );
+            fs::write(output_dir.join("helios.json"), json).await?;
+            Ok(())
+        })
+        .after("helios-setup");
+    }
 
     let omicron_package = if let Some(path) = &args.omicron_package_bin {
         // omicron-package is provided, so don't build it.
@@ -794,7 +820,7 @@ async fn build_proto_area(
                 let cloned_path = path.clone();
                 let cloned_package_dir = package_dir.to_owned();
                 tokio::task::spawn_blocking(move || -> Result<()> {
-                    let mut archive = tar::Archive::new(std::fs::File::open(
+                    let mut archive = tar::Archive::new(fs_err::File::open(
                         cloned_package_dir
                             .join(package_name.as_str())
                             .with_extension("tar"),
@@ -839,4 +865,19 @@ async fn host_add_root_profile(host_proto_root: Utf8PathBuf) -> Result<()> {
         export PATH=$PATH:/opt/oxide/opte/bin:/opt/oxide/mg-ddm:/opt/oxide/oxlog\n",
     ).await?;
     Ok(())
+}
+
+async fn git_resolve_commit(
+    git_bin: &Utf8Path,
+    repo: &Utf8Path,
+    what: &str,
+    logger: &Logger,
+) -> Result<String> {
+    Ok(Command::new(git_bin)
+        .args(["-C", repo.as_str(), "rev-parse", "--verify"])
+        .arg(format!("{what}^{{commit}}"))
+        .ensure_stdout(&logger)
+        .await?
+        .trim()
+        .to_owned())
 }
