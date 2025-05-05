@@ -364,7 +364,7 @@ impl DatasetTask {
         //
         // This looks like a TOCTOU problem: what if the set of managed zpools
         // changed in between this snapshot and when we actually create datasets
-        // below? In practic it isn't, although this feels a little fragile:
+        // below? In practice it isn't, although this feels a little fragile:
         // only the reconciler task calls this method, and only the reconciler
         // task changes the set of managed disks. It will not change the set of
         // managed disks while waiting for us to ensure datasets on its behalf.
@@ -453,8 +453,8 @@ impl DatasetTask {
         let mount_config = &self.mount_config;
         let log = &self.log;
 
-        // Ensure all the "group 2" datasets (i.e., everyting except
-        // `TransientZone` datasets) concurrently.
+        // Ensure all the datasets except those with kind `TransientZone { .. }`
+        // concurrently.
         const DATASET_ENSURE_CONCURRENCY_LIMIT: usize = 16;
         let mut non_transient_zones = futures::stream::iter(
             non_transient_zone_configs.into_iter().map(|dataset| async move {
@@ -539,7 +539,11 @@ impl DatasetTask {
         }
     }
 
-    fn should_skip_dataset_ensure(
+    /// Compare `dataset`'s properties against `old_dataset` (an set of
+    /// recently-retrieved properties from ZFS). If we already know
+    /// the state of `dataset` based on those properties, return `Some(state)`;
+    /// otherwise, return `None`.
+    fn is_dataset_state_known(
         dataset: &DatasetConfig,
         old_dataset: Option<&DatasetProperties>,
         log: &Logger,
@@ -623,10 +627,10 @@ impl DatasetTask {
                     (dataset_id, zoned, mountpoint, full_name, &config.inner)
                 }
                 DatasetCreationDetails::Config(config, old_props) => {
-                    // Does this dataset already exist with the right
-                    // properties?
+                    // Do we alread know the state of this dataset based on
+                    // `old_props`?
                     if let Some(state) =
-                        Self::should_skip_dataset_ensure(config, old_props, log)
+                        Self::is_dataset_state_known(config, old_props, log)
                     {
                         return Ok(state);
                     }
@@ -1376,7 +1380,7 @@ mod tests {
         //
         // * success for all zone roots with the `Succeed` behavior
         // * errors for all zone roots with the `Fail` behavior
-        // * success for all transient zones on pools where the zoon root has
+        // * success for all transient zones on pools where the zone root has
         //   the `Succeed` behavior
         // * errors for all other transient zones (with the specific error
         //   depending on whether the parent failed or was omitted)
@@ -1711,7 +1715,7 @@ mod tests {
     ) {
         let logctx = dev::test_setup_log("nested_dataset_operations");
 
-        // Setup: Create our pile of zpools, and a pilot of debug datasets for a
+        // Setup: Create our pile of zpools, and a pile of debug datasets for a
         // subset of them.
         let currently_managed_zpools_rx =
             CurrentlyManagedZpoolsReceiver::fake_static(
