@@ -127,6 +127,7 @@ members = [
     "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/zone-images",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -279,6 +280,7 @@ default-members = [
     "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/zone-images",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -361,6 +363,7 @@ byteorder = "1.5.0"
 bytes = "1.10.1"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.1.1"
+camino-tempfile-ext = { version = "0.3.0", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
 cargo_metadata = "0.19.2"
 chacha20poly1305 = "0.10.1"
@@ -666,6 +669,7 @@ sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
+sled-agent-zone-images = { path = "sled-agent/zone-images" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }

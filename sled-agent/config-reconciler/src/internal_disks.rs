@@ -333,7 +333,7 @@ impl From<&'_ Disk> for InternalDiskDetails {
 
         Self {
             identity: Arc::new(disk.identity().clone()),
-            zpool_name: disk.zpool_name().clone(),
+            zpool_name: *disk.zpool_name(),
             is_boot_disk: disk.is_boot_disk(),
             slot,
             raw_devfs_path,
