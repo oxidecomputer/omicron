@@ -39,7 +39,9 @@ pub enum ZpoolKind {
 ///
 /// This expects that the format will be: `ox{i,p}_<UUID>` - we parse the prefix
 /// when reading the structure, and validate that the UUID can be utilized.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Diffable)]
+#[derive(
+    Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Diffable,
+)]
 #[daft(leaf)]
 pub struct ZpoolName {
     id: ZpoolUuid,
@@ -80,19 +82,19 @@ impl JsonSchema for ZpoolName {
 }
 
 impl ZpoolName {
-    pub fn new_internal(id: ZpoolUuid) -> Self {
+    pub const fn new_internal(id: ZpoolUuid) -> Self {
         Self { id, kind: ZpoolKind::Internal }
     }
 
-    pub fn new_external(id: ZpoolUuid) -> Self {
+    pub const fn new_external(id: ZpoolUuid) -> Self {
         Self { id, kind: ZpoolKind::External }
     }
 
-    pub fn id(&self) -> ZpoolUuid {
+    pub const fn id(&self) -> ZpoolUuid {
         self.id
     }
 
-    pub fn kind(&self) -> ZpoolKind {
+    pub const fn kind(&self) -> ZpoolKind {
         self.kind
     }
 

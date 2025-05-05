@@ -551,7 +551,7 @@ impl ModifiedZone {
                 zone: BlueprintZoneConfig {
                     disposition: *diff.disposition.after,
                     id: *diff.id.after,
-                    filesystem_pool: diff.filesystem_pool.after.clone(),
+                    filesystem_pool: *diff.filesystem_pool.after,
                     zone_type: diff.zone_type.after.clone(),
                     image_source: diff.image_source.after.clone(),
                 },
@@ -1043,7 +1043,7 @@ impl ModifiedDataset {
                 dataset: BlueprintDatasetConfig {
                     disposition: *disposition.after,
                     id: *id.after,
-                    pool: pool.after.clone(),
+                    pool: *pool.after,
                     kind: kind.after.clone(),
                     address: address.after.copied(),
                     quota: quota.after.copied(),
@@ -1074,9 +1074,8 @@ impl BpDiffDatasetsModified {
                 Err(error) => errors.push(error),
             }
         }
-        datasets.sort_unstable_by_key(|d| {
-            (d.dataset.kind.clone(), d.dataset.pool.clone())
-        });
+        datasets
+            .sort_unstable_by_key(|d| (d.dataset.kind.clone(), d.dataset.pool));
         (BpDiffDatasetsModified { datasets }, BpDiffDatasetErrors { errors })
     }
 }
@@ -1096,7 +1095,7 @@ impl BpTableData for BpDiffDatasetsModified {
                 vec![
                     BpTableColumn::value(
                         DatasetName::new(
-                            dataset.dataset.pool.clone(),
+                            dataset.dataset.pool,
                             dataset.dataset.kind.clone(),
                         )
                         .full_name(),
