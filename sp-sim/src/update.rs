@@ -38,7 +38,6 @@ pub(crate) struct SimSpUpdate {
     /// data from the last completed phase1 update for each slot (exposed for
     /// testing)
     last_host_phase1_update_data: BTreeMap<u16, Box<[u8]>>,
-    active_host_slot: Option<u16>,
 
     /// records whether a change to the stage0 "active slot" has been requested
     pending_stage0_update: bool,
@@ -179,12 +178,6 @@ impl SimSpUpdate {
             last_rot_update_data: None,
             last_host_phase1_update_data: BTreeMap::new(),
 
-            // In the real SP, there is always _some_ active host slot. We could
-            // emulate that by always defaulting to slot 0, but instead we'll
-            // ensure any tests that expect to read or write a particular slot
-            // set that slot as active first.
-            active_host_slot: None,
-
             pending_stage0_update: false,
 
             caboose_sp_active,
@@ -237,15 +230,6 @@ impl SimSpUpdate {
             UpdateState::NotPrepared
             | UpdateState::Aborted(_)
             | UpdateState::Completed { .. } => {
-                let slot = if component == SpComponent::HOST_CPU_BOOT_FLASH {
-                    match self.active_host_slot {
-                        Some(slot) => slot,
-                        None => return Err(SpError::InvalidSlotForComponent),
-                    }
-                } else {
-                    slot
-                };
-
                 self.state = UpdateState::Prepared {
                     component,
                     id,
@@ -520,7 +504,6 @@ impl SimSpUpdate {
                 }
             }
             SpComponent::HOST_CPU_BOOT_FLASH => {
-                self.active_host_slot = Some(slot);
                 Ok(())
             }
             _ => {
