@@ -503,9 +503,7 @@ impl SimSpUpdate {
                     Err(SpError::RequestUnsupportedForComponent)
                 }
             }
-            SpComponent::HOST_CPU_BOOT_FLASH => {
-                Ok(())
-            }
+            SpComponent::HOST_CPU_BOOT_FLASH => Ok(()),
             _ => {
                 // The real SP returns `RequestUnsupportedForComponent` for
                 // anything other than the RoT and host boot flash, including
