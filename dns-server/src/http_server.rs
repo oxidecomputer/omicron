@@ -60,9 +60,7 @@ impl DnsServerApi for DnsServerApiImpl {
     {
         Self::dns_config_put(
             rqctx,
-            rq.into_inner()
-                .try_into()
-                .expect("can convert v1 DnsCnofigParams to v2"),
+            rq.into_inner().into()
         )
         .await
     }

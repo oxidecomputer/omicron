@@ -1085,21 +1085,28 @@ mod test {
         );
         assert_eq!(external_dns_zone.zone_name, String::from("oxide.test"));
         let records = &external_dns_zone.records;
-        // One name for the silo, three for the nameservers, and one more for the zone apex.
+        // One name for the silo, three for the nameservers, and one more for
+        // the zone apex.
         let expected_dns_names = 1 + baseline_external_dns_names;
         assert_eq!(records.len(), expected_dns_names);
         let silo_records = records
             .get(&silo_dns_name(my_silo.name()))
             .expect("missing silo DNS records");
 
-        // Helper for converting dns records for a given silo to IpAddrs
+        // Helper for converting dns records for a given silo to IpAddrs. Below
+        // we'll check about the Nexuses represented in a silo's DNS records.
+        // These currently are the *only* records that can be present for a
+        // silo's name. If that changes in the future, this section of the test
+        // probably needs to be reworked.
         let records_to_ips = |silo_records: &Vec<_>| {
             let mut ips: Vec<_> = silo_records
                 .into_iter()
                 .map(|record| match record {
                     DnsRecord::A(v) => IpAddr::V4(*v),
                     DnsRecord::Aaaa(v) => IpAddr::V6(*v),
-                    other => {
+                    other @ DnsRecord::Srv(_) |
+                    other @ DnsRecord::Ns(_) |
+                    other @ DnsRecord::Soa(_) => {
                         panic!("unexpected DNS record for silo: {other:?}")
                     }
                 })
