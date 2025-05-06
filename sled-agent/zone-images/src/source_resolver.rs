@@ -40,13 +40,12 @@ pub struct ZoneImageZpools<'a> {
     pub all_m2_zpools: Vec<ZpoolName>,
 }
 
-/// Turns [`OmicronZoneImageSource`] instances into file names and search paths.
-#[derive(Clone)]
+/// Resolves [`OmicronZoneImageSource`] instances into file names and search
+/// paths.
+///
+/// This is cheaply cloneable.
 pub struct ZoneImageSourceResolver {
     // Inner state, guarded by a mutex.
-    //
-    // This is mostly a way to ensure that accesses to the resolver are
-    // serialized.
     inner: Arc<Mutex<ResolverInner>>,
 }
 
