@@ -44,6 +44,7 @@ pub struct ZoneImageZpools<'a> {
 /// paths.
 ///
 /// This is cheaply cloneable.
+#[derive(Clone)]
 pub struct ZoneImageSourceResolver {
     // Inner state, guarded by a mutex.
     inner: Arc<Mutex<ResolverInner>>,
