@@ -255,7 +255,7 @@ impl UnparsedDisk {
         &self.firmware
     }
 
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(feature = "testing")]
     pub fn firmware_mut(&mut self) -> &mut DiskFirmware {
         &mut self.firmware
     }
