@@ -26,6 +26,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::IpAddr;
+use std::sync::LazyLock;
 use strum::{EnumIter, IntoEnumIterator};
 use url::Url;
 use uuid::Uuid;
@@ -1174,8 +1175,33 @@ impl fmt::Display for WebhookDeliveryState {
     }
 }
 
+impl std::str::FromStr for WebhookDeliveryState {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Error> {
+        static EXPECTED_ONE_OF: LazyLock<String> =
+            LazyLock::new(expected_one_of::<WebhookDeliveryState>);
+
+        for &v in Self::ALL {
+            if s.trim().eq_ignore_ascii_case(v.as_str()) {
+                return Ok(v);
+            }
+        }
+        Err(Error::invalid_value("WebhookDeliveryState", &*EXPECTED_ONE_OF))
+    }
+}
+
 /// The reason a webhook event was delivered
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    strum::VariantArray,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum WebhookDeliveryTrigger {
     /// Delivery was triggered by the event occurring for the first time.
@@ -1199,6 +1225,21 @@ impl WebhookDeliveryTrigger {
 impl fmt::Display for WebhookDeliveryTrigger {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for WebhookDeliveryTrigger {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Error> {
+        static EXPECTED_ONE_OF: LazyLock<String> =
+            LazyLock::new(expected_one_of::<WebhookDeliveryTrigger>);
+
+        for &v in <Self as strum::VariantArray>::VARIANTS {
+            if s.trim().eq_ignore_ascii_case(v.as_str()) {
+                return Ok(v);
+            }
+        }
+        Err(Error::invalid_value("WebhookDeliveryTrigger", &*EXPECTED_ONE_OF))
     }
 }
 
@@ -1324,4 +1365,47 @@ pub struct TargetRelease {
 
     /// The source of the target release.
     pub release_source: TargetReleaseSource,
+}
+
+fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
+    use std::fmt::Write;
+    let mut msg = "expected one of:".to_string();
+    let mut variants = T::VARIANTS.iter().peekable();
+    while let Some(variant) = variants.next() {
+        if variants.peek().is_some() {
+            write!(&mut msg, " '{variant}',").unwrap();
+        } else {
+            write!(&mut msg, " or '{variant}'").unwrap();
+        }
+    }
+    msg
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_expected_one_of() {
+        // Test this using an enum that we declare here, so that the test
+        // needn't be updated if the types which actually use this helper
+        // change.
+        #[derive(Debug, strum::VariantArray)]
+        enum Test {
+            Foo,
+            Bar,
+            Baz,
+        }
+
+        impl fmt::Display for Test {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                fmt::Debug::fmt(self, f)
+            }
+        }
+
+        assert_eq!(
+            expected_one_of::<Test>(),
+            "expected one of: 'Foo', 'Bar', or 'Baz'"
+        );
+    }
 }

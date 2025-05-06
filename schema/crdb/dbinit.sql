@@ -1151,6 +1151,26 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
      'best_effort'
 );
 
+/*
+ * Represents the *desired* state of an instance, as requested by the user.
+*/
+CREATE TYPE IF NOT EXISTS omicron.public.instance_intended_state AS ENUM (
+    /* The instance should be running. */
+    'running',
+
+    /* The instance was asked to stop by an API request. */
+    'stopped',
+
+    /* The guest OS shut down the virtual machine.
+     *
+     * This is distinct from the 'stopped' intent, which represents a stop
+     * requested by the API.
+     */
+    'guest_shutdown',
+
+    /* The instance should be destroyed. */
+    'destroyed'
+);
 
 /*
  * TODO consider how we want to manage multiple sagas operating on the same
@@ -1234,6 +1254,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * its boot-time fates.
      */
     boot_disk_id UUID,
+
+    /*
+     * The intended state of the instance, as requested by the user.
+     *
+     * This may differ from its current state, and is used to determine what
+     * action should be taken when the instance's VMM state changes.
+     */
+    intended_state omicron.public.instance_intended_state NOT NULL,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR

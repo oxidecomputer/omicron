@@ -69,6 +69,7 @@ mod iam;
 mod image;
 mod instance;
 mod instance_network;
+mod instance_platform;
 mod internet_gateway;
 mod ip_pool;
 mod lldp;

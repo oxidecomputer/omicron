@@ -1385,7 +1385,7 @@ mod test {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: external_dns_id,
-                    filesystem_pool: dataset.pool_name.clone(),
+                    filesystem_pool: dataset.pool_name,
                     zone_type: BlueprintZoneType::ExternalDns(
                         blueprint_zone_type::ExternalDns {
                             dataset,
@@ -2085,7 +2085,7 @@ mod test {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: external_dns_id,
-                    filesystem_pool: dataset.pool_name.clone(),
+                    filesystem_pool: dataset.pool_name,
                     zone_type: BlueprintZoneType::ExternalDns(
                         blueprint_zone_type::ExternalDns {
                             dataset,

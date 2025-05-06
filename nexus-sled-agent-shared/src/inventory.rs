@@ -7,14 +7,17 @@
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 
 use daft::Diffable;
+use id_map::IdMap;
+use id_map::IdMappable;
+use omicron_common::ledger::Ledgerable;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
     disk::{
-        DatasetManagementStatus, DatasetsConfig, DiskManagementStatus,
-        DiskVariant, OmicronPhysicalDisksConfig,
+        DatasetConfig, DatasetManagementStatus, DiskManagementStatus,
+        DiskVariant, OmicronPhysicalDiskConfig,
     },
     zpool_name::ZpoolName,
 };
@@ -130,13 +133,25 @@ pub enum SledRole {
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
 // TODO this struct should have a generation number; at the moment, each of
 // the fields has a separete one internally.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct OmicronSledConfig {
-    pub disks_config: OmicronPhysicalDisksConfig,
-    pub datasets_config: DatasetsConfig,
-    pub zones_config: OmicronZonesConfig,
+    pub generation: Generation,
+    pub disks: IdMap<OmicronPhysicalDiskConfig>,
+    pub datasets: IdMap<DatasetConfig>,
+    pub zones: IdMap<OmicronZoneConfig>,
+}
+
+impl Ledgerable for OmicronSledConfig {
+    fn is_newer_than(&self, other: &Self) -> bool {
+        self.generation > other.generation
+    }
+
+    fn generation_bump(&mut self) {
+        // DO NOTHING!
+        //
+        // Generation bumps must only ever come from nexus and will be encoded
+        // in the struct itself
+    }
 }
 
 /// Result of the currently-synchronous `omicron_config_put` endpoint.
@@ -188,6 +203,14 @@ pub struct OmicronZoneConfig {
     // blueprint or ledger.
     #[serde(default = "deserialize_image_source_default")]
     pub image_source: OmicronZoneImageSource,
+}
+
+impl IdMappable for OmicronZoneConfig {
+    type Id = OmicronZoneUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
 }
 
 impl OmicronZoneConfig {

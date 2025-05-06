@@ -502,10 +502,7 @@ mod tests {
                 .expect("expunged dataset");
 
             let new_dataset = PartialDatasetConfig {
-                name: DatasetName::new(
-                    dataset.pool.clone(),
-                    dataset.kind.clone(),
-                ),
+                name: DatasetName::new(dataset.pool, dataset.kind.clone()),
                 address: dataset.address,
                 quota: dataset.quota,
                 reservation: dataset.reservation,
@@ -563,10 +560,7 @@ mod tests {
             .filter(|dataset| dataset.disposition.is_in_service())
         {
             let new_dataset = PartialDatasetConfig {
-                name: DatasetName::new(
-                    dataset.pool.clone(),
-                    dataset.kind.clone(),
-                ),
+                name: DatasetName::new(dataset.pool, dataset.kind.clone()),
                 address: dataset.address,
                 quota: dataset.quota,
                 reservation: dataset.reservation,
