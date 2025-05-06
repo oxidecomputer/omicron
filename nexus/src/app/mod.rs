@@ -135,14 +135,6 @@ pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
 /// This value is aribtrary
 pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
 
-/// The amount of disk space to reserve for non-Crucible / control plane
-/// storage. This amount represents a buffer that the region allocation query
-/// will not use for each U2.
-///
-/// See oxidecomputer/omicron#7875 for the 250G determination.
-pub const CONTROL_PLANE_STORAGE_BUFFER: ByteCount =
-    ByteCount::from_gibibytes_u32(250);
-
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.
@@ -253,6 +245,11 @@ pub struct Nexus {
 
     /// reports status of pending MGS-managed updates
     mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
+
+    /// The amount of disk space to reserve for non-Crucible / control plane
+    /// storage. This amount represents a buffer that the region allocation query
+    /// will not use for each U2.
+    control_plane_storage_buffer: ByteCount,
 }
 
 impl Nexus {
@@ -429,6 +426,10 @@ impl Nexus {
         let mgs_update_status_rx = mgs_update_driver.status_rx();
         let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
+        let control_plane_storage_buffer = ByteCount::from_gibibytes_u32(
+            config.pkg.tunables.control_plane_storage_buffer_gb,
+        );
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -480,6 +481,7 @@ impl Nexus {
             )),
             tuf_artifact_replication_tx,
             mgs_update_status_rx,
+            control_plane_storage_buffer,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -539,6 +541,7 @@ impl Nexus {
                     },
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
+                    control_plane_storage_buffer,
                 },
             );
 
