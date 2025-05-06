@@ -2046,8 +2046,7 @@ mod tests {
         // We can call "upsert_filesystem" both with and without a UUID.
         let dataset_id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let dataset_name =
-            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        let dataset_name = DatasetName::new(zpool_name, DatasetKind::Crucible);
         harness
             .handle()
             .upsert_filesystem(Some(dataset_id), dataset_name.clone())
@@ -2099,8 +2098,7 @@ mod tests {
 
         // Create a filesystem on the newly formatted U.2, without a UUID
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let dataset_name =
-            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        let dataset_name = DatasetName::new(zpool_name, DatasetKind::Crucible);
         harness
             .handle()
             .upsert_filesystem(None, dataset_name.clone())
@@ -2152,7 +2150,7 @@ mod tests {
         // Create a dataset on the newly formatted U.2
         let id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let name = DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        let name = DatasetName::new(zpool_name, DatasetKind::Crucible);
         let datasets = BTreeMap::from([(
             id,
             DatasetConfig { id, name, inner: SharedDatasetConfig::default() },
@@ -2250,7 +2248,7 @@ mod tests {
         // Create a dataset on the newly formatted U.2
         let id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let name = DatasetName::new(zpool_name.clone(), DatasetKind::Debug);
+        let name = DatasetName::new(zpool_name, DatasetKind::Debug);
         let datasets = BTreeMap::from([(
             id,
             DatasetConfig {
@@ -2317,7 +2315,7 @@ mod tests {
             !kind.zoned(),
             "We need to use a non-zoned dataset for this test"
         );
-        let name = DatasetName::new(zpool_name.clone(), kind);
+        let name = DatasetName::new(zpool_name, kind);
         let datasets = BTreeMap::from([(
             id,
             DatasetConfig {
@@ -2425,33 +2423,30 @@ mod tests {
             let zpool_name = ZpoolName::new_external(config.disks[i].pool_id);
 
             let id = DatasetUuid::new_v4();
+            let name = DatasetName::new(zpool_name, DatasetKind::Crucible);
+            datasets.insert(
+                id,
+                DatasetConfig {
+                    id,
+                    name,
+                    inner: SharedDatasetConfig::default(),
+                },
+            );
+
+            let id = DatasetUuid::new_v4();
+            let name = DatasetName::new(zpool_name, DatasetKind::Debug);
+            datasets.insert(
+                id,
+                DatasetConfig {
+                    id,
+                    name,
+                    inner: SharedDatasetConfig::default(),
+                },
+            );
+
+            let id = DatasetUuid::new_v4();
             let name =
-                DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
-            datasets.insert(
-                id,
-                DatasetConfig {
-                    id,
-                    name,
-                    inner: SharedDatasetConfig::default(),
-                },
-            );
-
-            let id = DatasetUuid::new_v4();
-            let name = DatasetName::new(zpool_name.clone(), DatasetKind::Debug);
-            datasets.insert(
-                id,
-                DatasetConfig {
-                    id,
-                    name,
-                    inner: SharedDatasetConfig::default(),
-                },
-            );
-
-            let id = DatasetUuid::new_v4();
-            let name = DatasetName::new(
-                zpool_name.clone(),
-                DatasetKind::TransientZoneRoot,
-            );
+                DatasetName::new(zpool_name, DatasetKind::TransientZoneRoot);
             datasets.insert(
                 id,
                 DatasetConfig {
@@ -2504,7 +2499,7 @@ mod tests {
 
         // Use the dataset on the newly formatted U.2
         let all_disks = harness.handle().get_latest_disks().await;
-        let zpool = all_disks.all_u2_zpools()[0].clone();
+        let zpool = all_disks.all_u2_zpools()[0];
         let datasets = harness.handle().datasets_list(zpool).await.unwrap();
 
         let dataset = datasets
