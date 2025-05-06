@@ -31,6 +31,7 @@ use omicron_common::ledger::Ledger;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog::{Logger, error, info, o, warn};
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::future::Future;
@@ -1126,8 +1127,7 @@ impl StorageManager {
             .await
         {
             warn!(log, "Failed to ensure dataset"; "dataset" => ?status.dataset_name, "err" => ?err);
-            status.err =
-                Some(slog_error_chain::InlineErrorChain::new(&err).to_string());
+            status.err = Some(InlineErrorChain::new(&err).to_string());
         };
 
         status
@@ -2623,7 +2623,8 @@ mod tests {
             .expect_err(
                 "Should not be able to destroy nested dataset a second time",
             );
-        assert!(err.to_string().contains("Dataset not found"), "{err:?}");
+        let err = InlineErrorChain::new(&err).to_string();
+        assert!(err.contains("Dataset not found"), "{err:?}");
 
         // The nested dataset should now be gone
         let nested_datasets = harness
