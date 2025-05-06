@@ -39,13 +39,13 @@ pub struct ZoneImageZpools<'a> {
     pub all_m2_zpools: Vec<ZpoolName>,
 }
 
-/// Turns [`OmicronZoneImageSource`] instances into file names and search paths.
+/// Resolves [`OmicronZoneImageSource`] instances into file names and search
+/// paths.
+///
+/// This is cheaply cloneable.
 #[derive(Clone)]
 pub struct ZoneImageSourceResolver {
     // Inner state, guarded by a mutex.
-    //
-    // This is mostly a way to ensure that accesses to the resolver are
-    // serialized.
     inner: Arc<Mutex<ResolverInner>>,
 }
 
@@ -63,6 +63,9 @@ impl ZoneImageSourceResolver {
         }
     }
 
+    /// Overrides the image directory with another one.
+    ///
+    /// Intended for testing.
     pub fn override_image_directory(&self, path: Utf8PathBuf) {
         self.inner.lock().unwrap().override_image_directory(path);
     }
