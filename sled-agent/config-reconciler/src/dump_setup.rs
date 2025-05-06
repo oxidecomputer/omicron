@@ -276,7 +276,7 @@ impl DumpSetup {
                         if info.health() == ZpoolHealth::Online {
                             m2_core_datasets.push(CoreZpool {
                                 mount_config: mount_config.clone(),
-                                name: name.clone(),
+                                name: *name,
                             });
                         } else {
                             warn!(
@@ -294,7 +294,7 @@ impl DumpSetup {
                         if info.health() == ZpoolHealth::Online {
                             u2_debug_datasets.push(DebugZpool {
                                 mount_config: mount_config.clone(),
-                                name: name.clone(),
+                                name: *name,
                             });
                         } else {
                             warn!(

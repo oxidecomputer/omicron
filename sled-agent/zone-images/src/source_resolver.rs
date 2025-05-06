@@ -82,7 +82,7 @@ impl ZoneImageSourceResolver {
                     all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
                 // This iterator starts with the zpool for the boot disk (if it
                 // exists), and then is followed by all other zpools.
-                let zpool_iter = boot_zpool.clone().into_iter().chain(
+                let zpool_iter = boot_zpool.into_iter().chain(
                     all_disks
                         .all_m2_zpools()
                         .into_iter()
