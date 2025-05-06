@@ -9,6 +9,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use sled_storage::dataset::INSTALL_DATASET;
 use sled_storage::dataset::M2_ARTIFACT_DATASET;
 use sled_storage::resources::AllDisks;
+use std::sync::Arc;
 use std::sync::Mutex;
 
 /// Places to look for an Omicron zone image.
@@ -27,17 +28,19 @@ pub struct ZoneImageFileSource {
 
 /// Resolves [`OmicronZoneImageSource`] instances into file names and search
 /// paths.
+///
+/// This is cheaply cloneable.
+#[derive(Clone)]
 pub struct ZoneImageSourceResolver {
     // Inner state, guarded by a mutex.
-    //
-    // This is mostly a way to ensure that accesses to the resolver are
-    // serialized.
-    inner: Mutex<ResolverInner>,
+    inner: Arc<Mutex<ResolverInner>>,
 }
 
 impl ZoneImageSourceResolver {
     pub fn new() -> Self {
-        ZoneImageSourceResolver { inner: Mutex::new(ResolverInner::new()) }
+        ZoneImageSourceResolver {
+            inner: Arc::new(Mutex::new(ResolverInner::new())),
+        }
     }
 
     pub fn override_image_directory(&self, path: Utf8PathBuf) {
@@ -116,7 +119,7 @@ impl ResolverInner {
                     all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
                 // This iterator starts with the zpool for the boot disk (if it
                 // exists), and then is followed by all other zpools.
-                let zpool_iter = boot_zpool.clone().into_iter().chain(
+                let zpool_iter = boot_zpool.into_iter().chain(
                     all_disks
                         .all_m2_zpools()
                         .into_iter()
