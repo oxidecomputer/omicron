@@ -24,7 +24,7 @@ use crate::{
 };
 
 use super::{
-    Overridables, Sled, blueprint_external_dns_resolver_ips,
+    Overridables, Sled, blueprint_external_dns_nameserver_ips,
     blueprint_nexus_external_ips,
 };
 
@@ -170,7 +170,7 @@ pub fn blueprint_external_dns_config<'a>(
     external_dns_zone_name: String,
 ) -> DnsConfigZone {
     let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
-    let dns_external_ips = blueprint_external_dns_resolver_ips(blueprint);
+    let dns_external_ips = blueprint_external_dns_nameserver_ips(blueprint);
 
     let nexus_dns_records: Vec<DnsRecord> = nexus_external_ips
         .into_iter()

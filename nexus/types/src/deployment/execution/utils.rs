@@ -88,7 +88,7 @@ pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
 
 /// Return the addresses on which this blueprint's external DNS servers listen
 /// for DNS queries.
-pub fn blueprint_external_dns_resolver_ips(
+pub fn blueprint_external_dns_nameserver_ips(
     blueprint: &Blueprint,
 ) -> Vec<IpAddr> {
     blueprint
