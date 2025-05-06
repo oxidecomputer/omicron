@@ -5276,7 +5276,8 @@ INSERT INTO omicron.public.webhook_event (
     event_class,
     event,
     time_dispatched,
-    num_dispatched
+    num_dispatched,
+    payload_schema_version
 ) VALUES (
     -- NOTE: this UUID is duplicated in nexus_db_model::webhook_event.
     '001de000-7768-4000-8000-000000000001',
@@ -5287,7 +5288,8 @@ INSERT INTO omicron.public.webhook_event (
     -- Pretend to be dispatched so we won't show up in "list events needing
     -- dispatch" queries
     NOW(),
-    0
+    0,
+    1
 ) ON CONFLICT DO NOTHING;
 
 -- Look up webhook events in need of dispatching.
