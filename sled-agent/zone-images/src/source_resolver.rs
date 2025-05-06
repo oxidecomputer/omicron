@@ -36,6 +36,9 @@ impl ZoneImageSourceResolver {
         ZoneImageSourceResolver { image_directory_override: OnceLock::new() }
     }
 
+    /// Overrides the image directory with another one.
+    ///
+    /// Intended for testing.
     pub fn override_image_directory(&self, path: Utf8PathBuf) {
         self.image_directory_override.set(path).unwrap();
     }
