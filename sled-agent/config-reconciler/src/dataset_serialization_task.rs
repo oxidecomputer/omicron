@@ -389,7 +389,7 @@ impl DatasetTask {
                     "configured dataset on zpool we're not managing";
                     "dataset" => ?dataset,
                 );
-                let err = DatasetEnsureError::ZpoolNotFound(zpool.clone());
+                let err = DatasetEnsureError::ZpoolNotFound(*zpool);
                 self.datasets.0.insert(SingleDatasetEnsureResult {
                     config: dataset,
                     state: DatasetState::FailedToEnsure(Arc::new(err)),
@@ -496,13 +496,14 @@ impl DatasetTask {
         let mut transient_zone_futures = Vec::new();
         for (zpool_id, datasets) in transient_zone_configs_by_zpool {
             for dataset in datasets {
+                let zpool = *dataset.name.pool();
+
                 // Did we have the parent `TransientZoneRoot` for this zpool?
                 let Some(zpool_transient_zone_root_dataset_id) =
                     transient_zone_root_by_zpool.get(&zpool_id)
                 else {
-                    let err = DatasetEnsureError::TransientZoneRootNoConfig(
-                        dataset.name.pool().clone(),
-                    );
+                    let err =
+                        DatasetEnsureError::TransientZoneRootNoConfig(zpool);
                     self.datasets.0.insert(SingleDatasetEnsureResult {
                         config: dataset,
                         state: DatasetState::FailedToEnsure(Arc::new(err)),
@@ -521,7 +522,7 @@ impl DatasetTask {
                     Some(DatasetState::FailedToEnsure(err)) => {
                         let err =
                             DatasetEnsureError::TransientZoneRootFailure {
-                                zpool: dataset.name.pool().clone(),
+                                zpool,
                                 err: Arc::clone(err),
                             };
                         self.datasets.0.insert(SingleDatasetEnsureResult {
@@ -1257,10 +1258,9 @@ mod tests {
         let datasets = managed_pools
             .iter()
             .chain(unmanaged_pools.iter())
+            .copied()
             .cycle()
-            .map(|zpool| {
-                make_dataset_config(zpool.clone(), DatasetKind::Crucible)
-            })
+            .map(|zpool| make_dataset_config(zpool, DatasetKind::Crucible))
             .take(100)
             .collect::<IdMap<_>>();
 
@@ -1321,7 +1321,7 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    #[derive(Debug, Arbitrary, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, Arbitrary, PartialEq, Eq)]
     enum TransientZoneRootBehavior {
         // zone root is present in config and mounts successfully
         Succeed,
@@ -1361,21 +1361,21 @@ mod tests {
         // 2. Add a few transient zone datasets
         let datasets = pools
             .iter()
-            .flat_map(|(zpool, behavior)| {
+            .flat_map(|(&zpool, &behavior)| {
                 let maybe_zone_root = match behavior {
                     TransientZoneRootBehavior::Succeed
                     | TransientZoneRootBehavior::Fail => {
                         Some(make_dataset_config(
-                            zpool.clone(),
+                            zpool,
                             DatasetKind::TransientZoneRoot,
                         ))
                     }
                     TransientZoneRootBehavior::Omit => None,
                 };
 
-                maybe_zone_root.into_iter().chain((0..5).map(|_| {
+                maybe_zone_root.into_iter().chain((0..5).map(move |_| {
                     make_dataset_config(
-                        zpool.clone(),
+                        zpool,
                         DatasetKind::TransientZone {
                             name: OmicronZoneUuid::new_v4().to_string(),
                         },
@@ -1504,14 +1504,12 @@ mod tests {
         // for each of the (many) pools.
         let datasets = pools
             .iter()
+            .copied()
             .flat_map(|zpool| {
                 [
+                    make_dataset_config(zpool, DatasetKind::TransientZoneRoot),
                     make_dataset_config(
-                        zpool.clone(),
-                        DatasetKind::TransientZoneRoot,
-                    ),
-                    make_dataset_config(
-                        zpool.clone(),
+                        zpool,
                         DatasetKind::TransientZone {
                             name: OmicronZoneUuid::new_v4().to_string(),
                         },
@@ -1572,6 +1570,7 @@ mod tests {
         // Make a few datasets for each zpool.
         let datasets = pools
             .iter()
+            .copied()
             .flat_map(|zpool| {
                 [
                     DatasetKind::Cockroach,
@@ -1580,7 +1579,7 @@ mod tests {
                     DatasetKind::Debug,
                 ]
                 .into_iter()
-                .map(|kind| make_dataset_config(zpool.clone(), kind))
+                .map(move |kind| make_dataset_config(zpool, kind))
             })
             .collect::<IdMap<_>>();
 
@@ -1717,14 +1716,14 @@ mod tests {
             .into_iter()
             .map(|(pool, nested)| {
                 let pool = ZpoolName::from(pool);
-                let root = DatasetName::new(pool.clone(), DatasetKind::Debug);
+                let root = DatasetName::new(pool, DatasetKind::Debug);
                 let inner = SharedDatasetConfig {
                     compression: CompressionAlgorithm::On,
                     quota: None,
                     reservation: None,
                 };
                 NestedDatasetTestInput {
-                    pool: pool.clone(),
+                    pool,
                     is_debug_datset_mounted: nested.is_parent_mounted,
                     nested: nested
                         .nested_dataset_name_suffixes
@@ -1760,14 +1759,12 @@ mod tests {
         // subset of them.
         let currently_managed_zpools_rx =
             CurrentlyManagedZpoolsReceiver::fake_static(
-                inputs.iter().map(|input| input.pool.clone()),
+                inputs.iter().map(|input| input.pool),
             );
         let datasets = inputs
             .iter()
             .filter(|input| input.is_debug_datset_mounted)
-            .map(|input| {
-                make_dataset_config(input.pool.clone(), DatasetKind::Debug)
-            })
+            .map(|input| make_dataset_config(input.pool, DatasetKind::Debug))
             .collect::<IdMap<_>>();
 
         // Spawn the task and feed our setup to it. All the debug datasets
@@ -1813,8 +1810,7 @@ mod tests {
         // Listing the nested datasets should succeed for all the ones we
         // successfully created and return empty lists for those we didn't.
         for input in &inputs {
-            let parent =
-                DatasetName::new(input.pool.clone(), DatasetKind::Debug);
+            let parent = DatasetName::new(input.pool, DatasetKind::Debug);
 
             // Listing the children only should only show our nested
             // datasets if the debug dataset is mounted.
@@ -2060,7 +2056,7 @@ mod illumos_tests {
 
             eprintln!("created vdev-backed zpool at {full_path}");
             self.currently_managed_zpools_tx.send_modify(|zpools| {
-                zpools.insert(zpool.clone());
+                zpools.insert(zpool);
             });
 
             zpool
@@ -2130,7 +2126,7 @@ mod illumos_tests {
         );
 
         // Create a dataset on the newly formatted U.2
-        let dataset = make_dataset_config(zpool.clone(), DatasetKind::Crucible);
+        let dataset = make_dataset_config(zpool, DatasetKind::Crucible);
         let result = task_handle
             .datasets_ensure([dataset.clone()].into_iter().collect())
             .await
@@ -2202,7 +2198,7 @@ mod illumos_tests {
         );
 
         // Create a dataset on the newly formatted U.2
-        let dataset = make_dataset_config(zpool.clone(), DatasetKind::Debug);
+        let dataset = make_dataset_config(zpool, DatasetKind::Debug);
         let name = &dataset.name;
 
         let result = task_handle
@@ -2270,7 +2266,7 @@ mod illumos_tests {
             !kind.zoned(),
             "We need to use a non-zoned dataset for this test"
         );
-        let dataset = make_dataset_config(zpool.clone(), kind);
+        let dataset = make_dataset_config(zpool, kind);
 
         // Before we actually make the dataset - create the mountpoint, and
         // stick a file there.
@@ -2283,7 +2279,7 @@ mod illumos_tests {
         // supply its parent root.
         let dataset_configs: IdMap<_> = [
             dataset.clone(),
-            make_dataset_config(zpool.clone(), DatasetKind::TransientZoneRoot),
+            make_dataset_config(zpool, DatasetKind::TransientZoneRoot),
         ]
         .into_iter()
         .collect();
@@ -2357,15 +2353,11 @@ mod illumos_tests {
 
         // Build configs for a few datasets on each zpool
         let mut datasets = IdMap::new();
-        for zpool in &zpools {
+        for &zpool in &zpools {
+            datasets.insert(make_dataset_config(zpool, DatasetKind::Crucible));
+            datasets.insert(make_dataset_config(zpool, DatasetKind::Debug));
             datasets.insert(make_dataset_config(
-                zpool.clone(),
-                DatasetKind::Crucible,
-            ));
-            datasets
-                .insert(make_dataset_config(zpool.clone(), DatasetKind::Debug));
-            datasets.insert(make_dataset_config(
-                zpool.clone(),
+                zpool,
                 DatasetKind::TransientZoneRoot,
             ));
         }
@@ -2409,8 +2401,7 @@ mod illumos_tests {
         );
 
         // Add a `Debug` dataset to our zpool.
-        let debug_dataset =
-            make_dataset_config(zpool.clone(), DatasetKind::Debug);
+        let debug_dataset = make_dataset_config(zpool, DatasetKind::Debug);
         let result = task_handle
             .datasets_ensure([debug_dataset.clone()].into_iter().collect())
             .await
