@@ -597,7 +597,7 @@ impl Nexus {
             LazyLock::new(|| serde_json::json!({}));
 
         let attempt = match client
-            .send_delivery_request(opctx, &delivery, CLASS, &DATA)
+            .send_delivery_request(opctx, &delivery, CLASS, 1, &DATA)
             .await
         {
             Ok(attempt) => attempt,
@@ -878,6 +878,7 @@ impl<'a> ReceiverClient<'a> {
         opctx: &OpContext,
         delivery: &WebhookDelivery,
         event_class: WebhookEventClass,
+        event_version: u32,
         data: &serde_json::Value,
     ) -> Result<WebhookDeliveryAttempt, anyhow::Error> {
         const HDR_DELIVERY_ID: HeaderName =
@@ -888,6 +889,8 @@ impl<'a> ReceiverClient<'a> {
             HeaderName::from_static("x-oxide-event-id");
         const HDR_EVENT_CLASS: HeaderName =
             HeaderName::from_static("x-oxide-event-class");
+        const HDR_EVENT_VERSION: HeaderName =
+            HeaderName::from_static("x-oxide-event-version");
         const HDR_SIG: HeaderName =
             HeaderName::from_static("x-oxide-signature");
 
@@ -895,6 +898,7 @@ impl<'a> ReceiverClient<'a> {
         struct Payload<'a> {
             event_class: WebhookEventClass,
             event_id: WebhookEventUuid,
+            event_version: u32,
             data: &'a serde_json::Value,
             delivery: DeliveryMetadata<'a>,
         }
@@ -912,6 +916,7 @@ impl<'a> ReceiverClient<'a> {
         let sent_at = time_attempted.to_rfc3339();
         let payload = Payload {
             event_class,
+            event_version,
             event_id: delivery.event_id.into(),
             data,
             delivery: DeliveryMetadata {
@@ -961,6 +966,7 @@ impl<'a> ReceiverClient<'a> {
             .header(HDR_DELIVERY_ID, delivery.id.to_string())
             .header(HDR_EVENT_ID, delivery.event_id.to_string())
             .header(HDR_EVENT_CLASS, event_class.to_string())
+            .header(HDR_EVENT_VERSION, event_version.to_string())
             .header(http::header::CONTENT_TYPE, "application/json");
 
         // For each secret assigned to this webhook, calculate the HMAC and add a signature header.

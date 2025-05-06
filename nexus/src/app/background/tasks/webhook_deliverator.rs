@@ -35,10 +35,10 @@ use crate::app::webhook::ReceiverClient;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAndEvent;
 use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAttemptState;
 pub use nexus_db_queries::db::datastore::webhook_delivery::DeliveryConfig;
 use nexus_db_queries::db::model::WebhookDeliveryAttemptResult;
+use nexus_db_queries::db::model::WebhookEvent;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::identity::Resource;
@@ -230,7 +230,11 @@ impl WebhookDeliverator {
             ..Default::default()
         };
 
-        for DeliveryAndEvent { delivery, event_class, event } in deliveries {
+        for (delivery, event) in deliveries {
+            let WebhookEvent {
+                event_class, event, payload_schema_version, ..
+            } = event;
+            let event_version = payload_schema_version.into();
             let attempt = (*delivery.attempts) + 1;
             let delivery_id = WebhookDeliveryUuid::from(delivery.id);
             match self
@@ -248,6 +252,7 @@ impl WebhookDeliverator {
                         "webhook event delivery attempt started";
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
+                        "event_version" => %event_version,
                         "delivery_id" => %delivery_id,
                         "attempt" => ?attempt,
                     );
@@ -259,6 +264,7 @@ impl WebhookDeliverator {
                          at {time:?}";
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
+                        "event_version" => %event_version,
                         "delivery_id" => %delivery_id,
                         "time_completed" => ?time,
                     );
@@ -272,6 +278,7 @@ impl WebhookDeliverator {
                          another Nexus";
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
+                        "event_version" => %event_version,
                         "delivery_id" => %delivery_id,
                         "nexus_id" => %nexus_id,
                         "time_started" => ?started,
@@ -286,6 +293,7 @@ impl WebhookDeliverator {
                          delivery attempt";
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
+                        "event_version" => %event_version,
                         "delivery_id" => %delivery_id,
                         "error" => %error,
                     );
@@ -298,7 +306,13 @@ impl WebhookDeliverator {
 
             // okay, actually do the thing...
             let delivery_attempt = match client
-                .send_delivery_request(opctx, &delivery, event_class, &event)
+                .send_delivery_request(
+                    opctx,
+                    &delivery,
+                    event_class,
+                    event_version,
+                    &event,
+                )
                 .await
             {
                 Ok(delivery) => delivery,
@@ -326,6 +340,7 @@ impl WebhookDeliverator {
                     "{MSG}";
                     "event_id" => %delivery.event_id,
                     "event_class" => %event_class,
+                    "event_version" => %event_version,
                     "delivery_id" => %delivery_id,
                     "error" => %e,
                 );
