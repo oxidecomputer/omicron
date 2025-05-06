@@ -1079,7 +1079,7 @@ pub struct WebhookReceiver {
     pub endpoint: Url,
     // A list containing the IDs of the secret keys used to sign payloads sent
     // to this receiver.
-    pub secrets: Vec<WebhookSecretId>,
+    pub secrets: Vec<WebhookSecret>,
     /// The list of event classes to which this receiver is subscribed.
     pub subscriptions: Vec<shared::WebhookSubscription>,
 }
@@ -1093,13 +1093,21 @@ pub struct WebhookSubscriptionCreated {
 /// A list of the IDs of secrets associated with a webhook.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookSecrets {
-    pub secrets: Vec<WebhookSecretId>,
+    pub secrets: Vec<WebhookSecret>,
 }
 
-/// The public ID of a secret key assigned to a webhook.
+/// A view of a shared secret key assigned to a webhook receiver.
+///
+/// Once a secret is created, the value of the secret is not available in the
+/// API, as it must remain secret. Instead, secrets are referenced by their
+/// unique IDs assigned when they are created.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct WebhookSecretId {
+pub struct WebhookSecret {
+    /// The public unique ID of the secret.
     pub id: Uuid,
+
+    /// The UTC timestamp at which this secret was created.
+    pub time_created: DateTime<Utc>,
 }
 
 /// A delivery of a webhook event.
