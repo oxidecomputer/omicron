@@ -811,7 +811,7 @@ impl BlueprintZoneConfig {
             Some(self.id),
         );
         let kind = DatasetKind::TransientZone { name };
-        DatasetName::new(self.filesystem_pool.clone(), kind)
+        DatasetName::new(self.filesystem_pool, kind)
     }
 
     pub fn kind(&self) -> ZoneKind {
@@ -1546,7 +1546,7 @@ fn unwrap_or_none<T: ToString>(opt: &Option<T>) -> String {
 impl BlueprintDatasetConfig {
     fn as_strings(&self) -> Vec<String> {
         vec![
-            DatasetName::new(self.pool.clone(), self.kind.clone()).full_name(),
+            DatasetName::new(self.pool, self.kind.clone()).full_name(),
             self.id.to_string(),
             self.disposition.to_string(),
             unwrap_or_none(&self.quota),
@@ -1623,7 +1623,7 @@ impl From<&BlueprintDatasetConfig> for CollectionDatasetIdentifier {
     fn from(d: &BlueprintDatasetConfig) -> Self {
         Self {
             id: Some(d.id),
-            name: DatasetName::new(d.pool.clone(), d.kind.clone()).full_name(),
+            name: DatasetName::new(d.pool, d.kind.clone()).full_name(),
         }
     }
 }
