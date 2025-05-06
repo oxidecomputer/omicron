@@ -18,7 +18,7 @@ pub trait Event: Serialize + JsonSchema {
     /// The event's event class.
     const CLASS: EventClass;
     /// The version number of the event's payload.
-    const VERSION: usize;
+    const VERSION: u32;
 }
 
 /// The interface for publishing webhook events.
@@ -41,7 +41,7 @@ pub trait PublishEvent {
 
 #[derive(Default)]
 pub struct EventSchemaRegistry {
-    schemas: BTreeMap<EventClass, BTreeMap<usize, Schema>>,
+    schemas: BTreeMap<EventClass, BTreeMap<u32, Schema>>,
 }
 
 impl EventSchemaRegistry {
@@ -71,14 +71,14 @@ impl EventSchemaRegistry {
     pub fn schema_versions_for(
         &self,
         class: EventClass,
-    ) -> Option<&BTreeMap<usize, Schema>> {
+    ) -> Option<&BTreeMap<u32, Schema>> {
         self.schemas.get(&class)
     }
 
     pub fn schema_for(
         &self,
         class: EventClass,
-        version: usize,
+        version: u32,
     ) -> Option<&Schema> {
         self.schema_versions_for(class)?.get(&version)
     }

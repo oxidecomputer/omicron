@@ -454,6 +454,7 @@ mod test {
                 &opctx,
                 event_id,
                 db::model::WebhookEventClass::TestQuuxBar,
+                1,
                 serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
             )
             .await

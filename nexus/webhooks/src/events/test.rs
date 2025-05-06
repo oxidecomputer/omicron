@@ -19,7 +19,7 @@ pub struct Foo {
 
 impl Event for Foo {
     const CLASS: EventClass = EventClass::TestFoo;
-    const VERSION: usize = 1;
+    const VERSION: u32 = 1;
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -29,7 +29,7 @@ pub struct FooBar {
 
 impl Event for FooBar {
     const CLASS: EventClass = EventClass::TestFooBar;
-    const VERSION: usize = 1;
+    const VERSION: u32 = 1;
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -39,7 +39,7 @@ pub struct FooBaz {
 
 impl Event for FooBaz {
     const CLASS: EventClass = EventClass::TestFooBaz;
-    const VERSION: usize = 1;
+    const VERSION: u32 = 1;
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -50,5 +50,5 @@ pub struct QuuxBar {
 
 impl Event for QuuxBar {
     const CLASS: EventClass = EventClass::TestQuuxBar;
-    const VERSION: usize = 1;
+    const VERSION: u32 = 1;
 }

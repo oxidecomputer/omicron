@@ -35,11 +35,13 @@ pub struct WebhookEvent {
     /// The class of this event.
     pub event_class: WebhookEventClass,
 
-    // pub payload_version:
     /// The event's data payload.
     pub event: serde_json::Value,
 
     pub num_dispatched: i64,
+
+    /// The version of the JSON schema for `event`.
+    pub payload_schema_version: i64,
 }
 
 impl WebhookEvent {

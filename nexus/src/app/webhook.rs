@@ -267,7 +267,7 @@ impl Nexus {
             })?;
         let event = self
             .datastore()
-            .webhook_event_create(opctx, id, E::CLASS, json)
+            .webhook_event_create(opctx, id, E::CLASS, E::VERSION, json)
             .await?;
         slog::debug!(
             &opctx.log,

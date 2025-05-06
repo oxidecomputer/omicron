@@ -503,6 +503,7 @@ mod test {
                 &opctx,
                 event_id,
                 WebhookEventClass::TestFoo,
+                1,
                 serde_json::json!({
                     "answer": 42,
                 }),
