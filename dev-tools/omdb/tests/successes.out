@@ -52,7 +52,7 @@ EXECUTING COMMAND: omdb ["db", "instances"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID STATE PROPOLIS_ID SLED_ID HOST_SERIAL NAME 
+ID STATE INTENT PROPOLIS_ID SLED_ID HOST_SERIAL NAME 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
