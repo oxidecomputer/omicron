@@ -80,7 +80,7 @@ impl AllMupdateOverrides {
 
                 let (path, res) = read_mupdate_override(log, &dataset);
                 MupdateOverrideNonBootInfo {
-                    zpool_name: zpool_name.clone(),
+                    zpool_name: *zpool_name,
                     path,
                     result: MupdateOverrideNonBootResult::new(
                         res,
@@ -91,7 +91,7 @@ impl AllMupdateOverrides {
             .collect();
 
         Self {
-            boot_zpool: boot_zpool.clone(),
+            boot_zpool: *boot_zpool,
             boot_disk_path,
             boot_disk_override: boot_disk_res,
             non_boot_disk_overrides: non_boot_disks_overrides,
@@ -266,7 +266,7 @@ impl IdMappable for MupdateOverrideNonBootInfo {
     type Id = ZpoolName;
 
     fn id(&self) -> Self::Id {
-        self.zpool_name.clone()
+        self.zpool_name
     }
 }
 

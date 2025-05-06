@@ -40,13 +40,12 @@ pub struct ZoneImageZpools<'a> {
     pub all_m2_zpools: Vec<ZpoolName>,
 }
 
-/// Turns [`OmicronZoneImageSource`] instances into file names and search paths.
-#[derive(Clone)]
+/// Resolves [`OmicronZoneImageSource`] instances into file names and search
+/// paths.
+///
+/// This is cheaply cloneable.
 pub struct ZoneImageSourceResolver {
     // Inner state, guarded by a mutex.
-    //
-    // This is mostly a way to ensure that accesses to the resolver are
-    // serialized.
     inner: Arc<Mutex<ResolverInner>>,
 }
 
@@ -167,7 +166,7 @@ impl ResolverInner {
                     all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
                 // This iterator starts with the zpool for the boot disk (if it
                 // exists), and then is followed by all other zpools.
-                let zpool_iter = boot_zpool.clone().into_iter().chain(
+                let zpool_iter = boot_zpool.into_iter().chain(
                     all_disks
                         .all_m2_zpools()
                         .into_iter()
