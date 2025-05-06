@@ -846,7 +846,6 @@ mod tests {
                 .collect(),
             datasets: IdMap::default(),
             zones: IdMap::default(),
-            remove_mupdate_override: None,
         }
     }
 
@@ -1047,7 +1046,6 @@ mod tests {
             )]
             .into_iter()
             .collect(),
-            remove_mupdate_override: None,
         };
 
         // The ledger task should reject this config due to a missing artifact.
@@ -1073,7 +1071,6 @@ mod tests {
             )]
             .into_iter()
             .collect(),
-            remove_mupdate_override: None,
         };
 
         test_harness

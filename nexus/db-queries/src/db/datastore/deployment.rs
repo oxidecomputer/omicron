@@ -208,9 +208,6 @@ impl DataStore {
                 sled_id: sled_id.into(),
                 sled_state: sled.state.into(),
                 sled_agent_generation: sled.sled_agent_generation.into(),
-                remove_mupdate_override: sled
-                    .remove_mupdate_override
-                    .map(|id| id.into()),
             })
             .collect::<Vec<_>>();
 
