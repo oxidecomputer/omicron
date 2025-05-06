@@ -1104,9 +1104,9 @@ mod test {
                 .map(|record| match record {
                     DnsRecord::A(v) => IpAddr::V4(*v),
                     DnsRecord::Aaaa(v) => IpAddr::V6(*v),
-                    other @ DnsRecord::Srv(_) |
-                    other @ DnsRecord::Ns(_) |
-                    other @ DnsRecord::Soa(_) => {
+                    other @ DnsRecord::Srv(_)
+                    | other @ DnsRecord::Ns(_)
+                    | other @ DnsRecord::Soa(_) => {
                         panic!("unexpected DNS record for silo: {other:?}")
                     }
                 })

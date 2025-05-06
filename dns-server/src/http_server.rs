@@ -58,11 +58,7 @@ impl DnsServerApi for DnsServerApiImpl {
         rq: dropshot::TypedBody<v1::config::DnsConfigParams>,
     ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>
     {
-        Self::dns_config_put(
-            rqctx,
-            rq.into_inner().into()
-        )
-        .await
+        Self::dns_config_put(rqctx, rq.into_inner().into()).await
     }
 
     async fn dns_config_put_v2(
