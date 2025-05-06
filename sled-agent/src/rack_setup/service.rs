@@ -541,6 +541,7 @@ impl ServiceInner {
                         .collect(),
                     datasets: config.datasets.values().cloned().collect(),
                     zones: zones_config.zones.iter().cloned().collect(),
+                    remove_mupdate_override: None,
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
@@ -1498,7 +1499,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             datasets.insert(BlueprintDatasetConfig {
                 disposition: BlueprintDatasetDisposition::InService,
                 id: d.id,
-                pool: d.name.pool().clone(),
+                pool: *d.name.pool(),
                 kind: d.name.kind().clone(),
                 address,
                 compression: d.inner.compression,
@@ -1525,6 +1526,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 disks: sled_config.disks.clone(),
                 datasets,
                 zones: sled_config.zones.iter().cloned().collect(),
+                remove_mupdate_override: None,
             },
         );
     }

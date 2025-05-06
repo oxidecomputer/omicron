@@ -2152,7 +2152,7 @@ mod tests {
         // Create a dataset on the newly formatted U.2
         let id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let name = DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        let name = DatasetName::new(zpool_name, DatasetKind::Crucible);
         let datasets = BTreeMap::from([(
             id,
             DatasetConfig { id, name, inner: SharedDatasetConfig::default() },
@@ -2250,7 +2250,7 @@ mod tests {
         // Create a dataset on the newly formatted U.2
         let id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let name = DatasetName::new(zpool_name.clone(), DatasetKind::Debug);
+        let name = DatasetName::new(zpool_name, DatasetKind::Debug);
         let datasets = BTreeMap::from([(
             id,
             DatasetConfig {
@@ -2425,8 +2425,7 @@ mod tests {
             let zpool_name = ZpoolName::new_external(config.disks[i].pool_id);
 
             let id = DatasetUuid::new_v4();
-            let name =
-                DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+            let name = DatasetName::new(zpool_name, DatasetKind::Crucible);
             datasets.insert(
                 id,
                 DatasetConfig {
@@ -2437,7 +2436,7 @@ mod tests {
             );
 
             let id = DatasetUuid::new_v4();
-            let name = DatasetName::new(zpool_name.clone(), DatasetKind::Debug);
+            let name = DatasetName::new(zpool_name, DatasetKind::Debug);
             datasets.insert(
                 id,
                 DatasetConfig {

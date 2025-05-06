@@ -100,7 +100,7 @@ impl AllDisks {
         for (id, disk) in self.inner.values.iter() {
             if let ManagedDisk::ImplicitlyManaged(disk) = disk {
                 if disk.is_boot_disk() {
-                    return Some((id.clone(), disk.zpool_name().clone()));
+                    return Some((id.clone(), *disk.zpool_name()));
                 }
             }
         }
@@ -147,7 +147,7 @@ impl AllDisks {
             .filter_map(|disk| match disk {
                 ManagedDisk::ExplicitlyManaged(disk)
                 | ManagedDisk::ImplicitlyManaged(disk) => {
-                    Some((disk.zpool_name().clone(), disk.variant()))
+                    Some((*disk.zpool_name(), disk.variant()))
                 }
                 ManagedDisk::Unmanaged(_) => None,
             })
@@ -165,7 +165,7 @@ impl AllDisks {
                 ManagedDisk::ExplicitlyManaged(disk)
                 | ManagedDisk::ImplicitlyManaged(disk) => {
                     if disk.variant() == variant {
-                        return Some(disk.zpool_name().clone());
+                        return Some(*disk.zpool_name());
                     }
                     None
                 }
