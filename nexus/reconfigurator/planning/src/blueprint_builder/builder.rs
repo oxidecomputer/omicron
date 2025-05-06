@@ -1153,7 +1153,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zpool = self.sled_select_zpool(sled_id, ZoneKind::InternalDns)?;
         let zone_type =
             BlueprintZoneType::InternalDns(blueprint_zone_type::InternalDns {
-                dataset: OmicronZoneDataset { pool_name: zpool.clone() },
+                dataset: OmicronZoneDataset { pool_name: zpool },
                 dns_address: SocketAddrV6::new(address, DNS_PORT, 0, 0),
                 http_address: SocketAddrV6::new(address, DNS_HTTP_PORT, 0, 0),
                 gz_address: dns_subnet.gz_address(),
@@ -1206,7 +1206,7 @@ impl<'a> BlueprintBuilder<'a> {
             self.sled_select_zpool(sled_id, ZoneKind::ExternalDns)?;
         let zone_type =
             BlueprintZoneType::ExternalDns(blueprint_zone_type::ExternalDns {
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
                 http_address,
                 dns_address,
                 nic,
@@ -1308,7 +1308,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type =
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;
 
@@ -1482,7 +1482,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type =
             BlueprintZoneType::CockroachDb(blueprint_zone_type::CockroachDb {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;
 
@@ -1509,7 +1509,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type =
             BlueprintZoneType::Clickhouse(blueprint_zone_type::Clickhouse {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             });
 
         let zone = BlueprintZoneConfig {
@@ -1535,7 +1535,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type = BlueprintZoneType::ClickhouseServer(
             blueprint_zone_type::ClickhouseServer {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             },
         );
         let filesystem_pool = pool_name;
@@ -1563,7 +1563,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type = BlueprintZoneType::ClickhouseKeeper(
             blueprint_zone_type::ClickhouseKeeper {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             },
         );
         let filesystem_pool = pool_name;
@@ -2222,7 +2222,7 @@ pub mod test {
                     {
                         let ip = address.ip();
                         assert!(new_sled_resources.subnet.net().contains(*ip));
-                        Some(dataset.pool_name.clone())
+                        Some(dataset.pool_name)
                     } else {
                         None
                     }
