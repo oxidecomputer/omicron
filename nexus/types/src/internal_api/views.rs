@@ -334,7 +334,7 @@ pub struct Ipv4NatEntryView {
 
 /// Status of ongoing update attempts, recently completed attempts, and update
 /// requests that are waiting for retry.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct MgsUpdateDriverStatus {
     pub recent: VecDeque<CompletedAttempt>,
     pub in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdateStatus>,
@@ -426,7 +426,9 @@ pub struct CompletedAttempt {
     pub nattempts_done: u32,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateCompletedHow {
     FoundNoChangesNeeded,
@@ -444,7 +446,9 @@ pub struct InProgressUpdateStatus {
 }
 
 /// status of a single update attempt
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateAttemptStatus {
     NotStarted,

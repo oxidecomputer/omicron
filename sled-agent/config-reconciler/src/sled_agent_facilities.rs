@@ -57,7 +57,7 @@ pub trait SledAgentFacilities: Send + 'static {
     ) -> impl Future<Output = anyhow::Result<()>> + Send;
 }
 
-pub trait SledAgentArtifactStore: Send + 'static {
+pub trait SledAgentArtifactStore: Send + Sync + 'static {
     /// Check an artifact exists in the TUF Repo Depot storage.
     fn validate_artifact_exists_in_storage(
         &self,

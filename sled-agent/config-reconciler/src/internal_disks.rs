@@ -42,29 +42,68 @@ pub struct InternalDisksReceiver {
 #[derive(Debug, Clone)]
 enum InternalDisksReceiverInner {
     Real(watch::Receiver<Arc<IdMap<InternalDiskDetails>>>),
-    #[cfg(feature = "testing")]
+    #[cfg(any(test, feature = "testing"))]
     FakeStatic(Arc<IdMap<InternalDiskDetails>>),
+    #[cfg(any(test, feature = "testing"))]
+    FakeDynamic(watch::Receiver<Arc<IdMap<InternalDiskDetails>>>),
 }
 
 impl InternalDisksReceiver {
-    #[cfg(feature = "testing")]
+    /// Create an `InternalDisksReceiver` that always reports a fixed set of
+    /// disks.
+    #[cfg(any(test, feature = "testing"))]
     pub fn fake_static(
         mount_config: Arc<MountConfig>,
         disks: impl Iterator<Item = (DiskIdentity, ZpoolName)>,
     ) -> Self {
         let inner = InternalDisksReceiverInner::FakeStatic(Arc::new(
             disks
-                .map(|(identity, zpool_name)| InternalDiskDetails {
-                    identity: Arc::new(identity),
-                    zpool_name,
-                    // We can expand the interface for fake disks if we need to
-                    // be able to specify these fields in future tests.
-                    is_boot_disk: false,
-                    slot: None,
-                    raw_devfs_path: None,
+                .map(|(identity, zpool_name)| {
+                    InternalDiskDetails::fake_details(identity, zpool_name)
                 })
                 .collect(),
         ));
+        Self { mount_config, inner }
+    }
+
+    /// Create an `InternalDisksReceiver` that forwards any changes made in the
+    /// given watch channel out to its consumers.
+    ///
+    /// Note that this forwarding is not immediate: this method spawns a tokio
+    /// task responsible for reading changes on `disks_rx` and then publishing
+    /// them out to the consumers of the returned `InternalDisksReceiver`.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fake_dynamic(
+        mount_config: Arc<MountConfig>,
+        mut disks_rx: watch::Receiver<Vec<(DiskIdentity, ZpoolName)>>,
+    ) -> Self {
+        let current = disks_rx
+            .borrow_and_update()
+            .clone()
+            .into_iter()
+            .map(|(identity, zpool_name)| {
+                InternalDiskDetails::fake_details(identity, zpool_name)
+            })
+            .collect();
+        let (mapped_tx, mapped_rx) = watch::channel(Arc::new(current));
+
+        tokio::spawn(async move {
+            while let Ok(()) = disks_rx.changed().await {
+                let remapped = disks_rx
+                    .borrow_and_update()
+                    .clone()
+                    .into_iter()
+                    .map(|(identity, zpool_name)| {
+                        InternalDiskDetails::fake_details(identity, zpool_name)
+                    })
+                    .collect();
+                if mapped_tx.send(Arc::new(remapped)).is_err() {
+                    break;
+                }
+            }
+        });
+
+        let inner = InternalDisksReceiverInner::FakeDynamic(mapped_rx);
         Self { mount_config, inner }
     }
 
@@ -97,8 +136,12 @@ impl InternalDisksReceiver {
     pub fn current(&self) -> InternalDisks {
         let disks = match &self.inner {
             InternalDisksReceiverInner::Real(rx) => Arc::clone(&*rx.borrow()),
-            #[cfg(feature = "testing")]
+            #[cfg(any(test, feature = "testing"))]
             InternalDisksReceiverInner::FakeStatic(disks) => Arc::clone(disks),
+            #[cfg(any(test, feature = "testing"))]
+            InternalDisksReceiverInner::FakeDynamic(rx) => {
+                Arc::clone(&*rx.borrow())
+            }
         };
         InternalDisks { disks, mount_config: Arc::clone(&self.mount_config) }
     }
@@ -113,8 +156,12 @@ impl InternalDisksReceiver {
             InternalDisksReceiverInner::Real(rx) => {
                 Arc::clone(&*rx.borrow_and_update())
             }
-            #[cfg(feature = "testing")]
+            #[cfg(any(test, feature = "testing"))]
             InternalDisksReceiverInner::FakeStatic(disks) => Arc::clone(disks),
+            #[cfg(any(test, feature = "testing"))]
+            InternalDisksReceiverInner::FakeDynamic(rx) => {
+                Arc::clone(&*rx.borrow_and_update())
+            }
         };
         InternalDisks { disks, mount_config: Arc::clone(&self.mount_config) }
     }
@@ -123,11 +170,13 @@ impl InternalDisksReceiver {
     pub async fn changed(&mut self) -> Result<(), RecvError> {
         match &mut self.inner {
             InternalDisksReceiverInner::Real(rx) => rx.changed().await,
-            #[cfg(feature = "testing")]
+            #[cfg(any(test, feature = "testing"))]
             InternalDisksReceiverInner::FakeStatic(_) => {
                 // Static set of disks never changes
                 std::future::pending().await
             }
+            #[cfg(any(test, feature = "testing"))]
+            InternalDisksReceiverInner::FakeDynamic(rx) => rx.changed().await,
         }
     }
 
@@ -137,13 +186,15 @@ impl InternalDisksReceiver {
     pub(crate) async fn wait_for_boot_disk(&mut self) -> DiskIdentity {
         let disks_rx = match &mut self.inner {
             InternalDisksReceiverInner::Real(rx) => rx,
-            #[cfg(feature = "testing")]
+            #[cfg(any(test, feature = "testing"))]
             InternalDisksReceiverInner::FakeStatic(disks) => {
                 if let Some(disk) = disks.iter().find(|d| d.is_boot_disk) {
                     return (*disk.identity).clone();
                 }
                 panic!("fake InternalDisksReceiver has no boot disk")
             }
+            #[cfg(any(test, feature = "testing"))]
+            InternalDisksReceiverInner::FakeDynamic(rx) => rx,
         };
         loop {
             let disks = disks_rx.borrow_and_update();
@@ -282,10 +333,25 @@ impl From<&'_ Disk> for InternalDiskDetails {
 
         Self {
             identity: Arc::new(disk.identity().clone()),
-            zpool_name: disk.zpool_name().clone(),
+            zpool_name: *disk.zpool_name(),
             is_boot_disk: disk.is_boot_disk(),
             slot,
             raw_devfs_path,
+        }
+    }
+}
+
+impl InternalDiskDetails {
+    #[cfg(any(test, feature = "testing"))]
+    fn fake_details(identity: DiskIdentity, zpool_name: ZpoolName) -> Self {
+        Self {
+            identity: Arc::new(identity),
+            zpool_name,
+            // We can expand the interface for fake disks if we need to
+            // be able to specify these fields in future tests.
+            is_boot_disk: false,
+            slot: None,
+            raw_devfs_path: None,
         }
     }
 }

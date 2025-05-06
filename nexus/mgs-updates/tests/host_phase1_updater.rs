@@ -38,11 +38,7 @@ async fn test_host_phase1_updater_updates_sled() {
     .await;
 
     // Configure an MGS client.
-    let mut mgs_clients =
-        MgsClients::from_clients([gateway_client::Client::new(
-            &mgstestctx.client.url("/").to_string(),
-            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )]);
+    let mut mgs_clients = MgsClients::from_clients([mgstestctx.client()]);
 
     for target_host_slot in [0, 1] {
         // Configure and instantiate an `HostPhase1Updater`.
@@ -391,11 +387,7 @@ async fn test_host_phase1_updater_delivers_progress() {
     .await;
 
     // Configure an MGS client.
-    let mut mgs_clients =
-        MgsClients::from_clients([gateway_client::Client::new(
-            &mgstestctx.client.url("/").to_string(),
-            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )]);
+    let mut mgs_clients = MgsClients::from_clients([mgstestctx.client()]);
 
     let sp_type = SpType::Sled;
     let sp_slot = 0;
