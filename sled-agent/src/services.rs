@@ -778,7 +778,7 @@ pub struct ServiceManagerInner {
     switch_zone_bootstrap_address: Ipv6Addr,
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
-    zone_image_source_resolver: ZoneImageSourceResolver,
+    zone_image_resolver: ZoneImageSourceResolver,
     ledger_directory_override: OnceLock<Utf8PathBuf>,
     system_api: Box<dyn SystemApi>,
 }
@@ -990,7 +990,7 @@ impl ServiceManager {
                     .switch_zone_bootstrap_ip,
                 storage,
                 zone_bundler,
-                zone_image_source_resolver: ZoneImageSourceResolver::new(),
+                zone_image_resolver: ZoneImageSourceResolver::new(),
                 ledger_directory_override: OnceLock::new(),
                 system_api,
             }),
@@ -1004,7 +1004,7 @@ impl ServiceManager {
 
     #[cfg(all(test, target_os = "illumos"))]
     fn override_image_directory(&self, path: Utf8PathBuf) {
-        self.zone_image_source_resolver.override_image_directory(path).unwrap();
+        self.inner.zone_image_resolver.override_image_directory(path);
     }
 
     pub(crate) fn ddm_reconciler(&self) -> &DdmReconciler {
@@ -1727,7 +1727,7 @@ impl ServiceManager {
         let all_disks = self.inner.storage.get_latest_disks().await;
         let file_source = self
             .inner
-            .zone_image_source_resolver
+            .zone_image_resolver
             .file_source_for(image_source, &all_disks);
 
         let zone_type_str = match &request {
