@@ -240,7 +240,7 @@ impl RawDisk {
         }
     }
 
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(feature = "testing")]
     pub fn firmware_mut(&mut self) -> &mut DiskFirmware {
         match self {
             RawDisk::Real(unparsed) => unparsed.firmware_mut(),
