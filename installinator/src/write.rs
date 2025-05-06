@@ -20,7 +20,8 @@ use installinator_common::{
     StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
     WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
-use omicron_common::disk::M2Slot;
+use omicron_common::{disk::M2Slot, update::MupdateOverrideInfo};
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use sha2::{Digest, Sha256};
 use slog::{Logger, info, warn};
 use tokio::{
@@ -559,6 +560,8 @@ impl ArtifactsToWrite<'_> {
             clean_output_directory: destinations.clean_control_plane_dir,
             output_directory: &destinations.control_plane_dir,
             zones: self.control_plane_zones,
+            host_phase_2_id: self.host_phase_2_id,
+            control_plane_id: self.control_plane_id,
         };
         cx.with_nested_engine(|engine| {
             inner_cx.register_steps(
@@ -592,6 +595,8 @@ struct ControlPlaneZoneWriteContext<'a> {
     clean_output_directory: bool,
     output_directory: &'a Utf8Path,
     zones: &'a ControlPlaneZoneImages,
+    host_phase_2_id: &'a ArtifactHashId,
+    control_plane_id: &'a ArtifactHashId,
 }
 
 impl ControlPlaneZoneWriteContext<'_> {
@@ -639,6 +644,43 @@ impl ControlPlaneZoneWriteContext<'_> {
         // return it on completion. This way each step passes it forward to its
         // successor.
         let mut transport = StepHandle::ready(transport);
+
+        // Write out a file to indicate that installinator has updated the
+        // dataset. Do this at the very beginning to ensure that installinator's
+        // presence is recorded even if something goes wrong after this step.
+        transport = engine
+            .new_step(
+                WriteComponent::ControlPlane,
+                ControlPlaneZonesStepId::MupdateOverride,
+                "Writing MUPdate override file",
+                async move |cx| {
+                    let transport = transport.into_value(cx.token()).await;
+                    let mupdate_uuid = MupdateOverrideUuid::new_v4();
+                    let mupdate_json =
+                        self.mupdate_override_artifact(mupdate_uuid);
+
+                    let out_path = self
+                        .output_directory
+                        .join(MupdateOverrideInfo::FILE_NAME);
+
+                    write_artifact_impl(
+                        WriteComponent::ControlPlane,
+                        slot,
+                        mupdate_json,
+                        &out_path,
+                        transport,
+                        &cx,
+                    )
+                    .await?;
+
+                    StepSuccess::new(transport)
+                        .with_message(format!(
+                            "{out_path} written with UUID: {mupdate_uuid}",
+                        ))
+                        .into()
+                },
+            )
+            .register();
 
         for (name, data) in &self.zones.zones {
             let out_path = self.output_directory.join(name);
@@ -694,6 +736,22 @@ impl ControlPlaneZoneWriteContext<'_> {
                 },
             )
             .register();
+    }
+
+    fn mupdate_override_artifact(
+        &self,
+        mupdate_uuid: MupdateOverrideUuid,
+    ) -> BufList {
+        // Might be worth writing out individual hash IDs for each zone in the
+        // future.
+        let hash_ids =
+            [self.host_phase_2_id.clone(), self.control_plane_id.clone()]
+                .into_iter()
+                .collect();
+        let mupdate_override = MupdateOverrideInfo { mupdate_uuid, hash_ids };
+        let json_bytes = serde_json::to_vec(&mupdate_override)
+            .expect("this serialization is infallible");
+        BufList::from(json_bytes)
     }
 }
 

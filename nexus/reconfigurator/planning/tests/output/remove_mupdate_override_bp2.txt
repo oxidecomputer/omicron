@@ -1,0 +1,148 @@
+blueprint  5859a375-fbf8-4ff9-a0f1-3010faf816cf
+parent:    298eb984-d140-4044-a0cc-dce17397e374
+
+  sled: 0af92ab6-8de8-4a5f-907e-d59fe3f5d76e (active, config generation 1)
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: 66db85f2-9f83-44d3-bb35-b0034bb8ba4a (active, config generation 1)
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: 924e4dfb-3569-4b5b-9091-a1be1f9acd0f (active, config generation 2)
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: ad323a60-3d46-4057-9849-075b55f2bebf (active, config generation 2)
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: c2bf6b87-2f82-4264-9497-a6f3269c71dc (active, config generation 2)
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: cd692895-edfe-4670-b34a-4185bf5e134d (active, config generation 2)
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none)
+    cluster.preserve_downgrade_option:   (do not modify)
+
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
+ METADATA:
+    created by:::::::::::   builder_remove_mupdate_override_diff
+    created at:::::::::::   1970-01-01T00:00:00.000Z
+    comment::::::::::::::   (none)
+    internal DNS version:   1
+    external DNS version:   1
+
+ PENDING MGS-MANAGED UPDATES: 0

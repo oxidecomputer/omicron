@@ -1,0 +1,43 @@
+from: blueprint 5859a375-fbf8-4ff9-a0f1-3010faf816cf
+to:   blueprint b760e8a2-04e7-4daf-85db-00570f9f3543
+
+ UNCHANGED SLEDS:
+
+  sled 0af92ab6-8de8-4a5f-907e-d59fe3f5d76e (active, config generation 1):
+
+  sled ad323a60-3d46-4057-9849-075b55f2bebf (active, config generation 2):
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000
+
+ REMOVED SLEDS:
+
+  sled cd692895-edfe-4670-b34a-4185bf5e134d (was active, config generation 2):
+-   would have removed mupdate override:   00000000-0000-0000-0000-000000000000
+
+ MODIFIED SLEDS:
+
+  sled 66db85f2-9f83-44d3-bb35-b0034bb8ba4a (active, config generation 1 -> 2):
++   will remove mupdate override:   (none) -> ffffffff-ffff-ffff-ffff-ffffffffffff
+
+  sled 924e4dfb-3569-4b5b-9091-a1be1f9acd0f (active, config generation 2 -> 3):
+-   will remove mupdate override:   00000000-0000-0000-0000-000000000000 -> (none)
+
+  sled c2bf6b87-2f82-4264-9497-a6f3269c71dc (active, config generation 2 -> 3):
+*   will remove mupdate override:   00000000-0000-0000-0000-000000000000 -> ffffffff-ffff-ffff-ffff-ffffffffffff
+
+ ADDED SLEDS:
+
+  sled 7f8220f7-b54e-4f86-8ea6-806b902acad7 (active, config generation 2):
++   will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:   1 (unchanged)
+    external DNS version:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+

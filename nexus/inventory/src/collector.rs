@@ -606,6 +606,7 @@ mod test {
                 }]
                 .into_iter()
                 .collect(),
+                remove_mupdate_override: None,
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

@@ -211,6 +211,8 @@ fn merge_old_configs(
         disks: disks.disks.into_iter().collect(),
         datasets: datasets.datasets.into_values().collect(),
         zones: zones.zones.into_iter().map(|z| z.zone).collect(),
+        // Old configs are pre-mupdate overrides.
+        remove_mupdate_override: None,
     }
 }
 

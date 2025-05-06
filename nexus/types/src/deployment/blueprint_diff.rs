@@ -8,7 +8,7 @@ use super::blueprint_display::{
     BpClickhouseServersTableSchema, BpDatasetsTableSchema, BpDiffState,
     BpGeneration, BpOmicronZonesTableSchema, BpPendingMgsUpdates,
     BpPhysicalDisksTableSchema, BpTable, BpTableColumn, BpTableData,
-    BpTableRow, KvListWithHeading, KvPair, constants::*, linear_table_modified,
+    BpTableRow, KvList, KvPair, constants::*, linear_table_modified,
     linear_table_unchanged,
 };
 use super::{
@@ -19,7 +19,7 @@ use super::{
     CockroachDbPreserveDowngrade, PendingMgsUpdatesDiff, unwrap_or_none,
     zone_sort_key,
 };
-use daft::Diffable;
+use daft::{Diffable, Leaf};
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::{CompressionAlgorithm, DatasetName};
@@ -1186,7 +1186,7 @@ impl BpDiffDatasets {
 /// there is only a single known blueprint with no before or after collection or
 /// bluerpint to compare to.
 pub struct ClickhouseClusterConfigDiffTablesForSingleBlueprint {
-    pub metadata: KvListWithHeading,
+    pub metadata: KvList,
     pub keepers: BpTable,
     pub servers: BpTable,
 }
@@ -1220,7 +1220,7 @@ impl ClickhouseClusterConfigDiffTablesForSingleBlueprint {
         .collect();
 
         let metadata =
-            KvListWithHeading::new(CLICKHOUSE_CLUSTER_CONFIG_HEADING, rows);
+            KvList::new(Some(CLICKHOUSE_CLUSTER_CONFIG_HEADING), rows);
 
         let keepers = BpTable::new(
             BpClickhouseKeepersTableSchema {},
@@ -1259,7 +1259,7 @@ impl From<ClickhouseClusterConfigDiffTablesForSingleBlueprint>
 /// `ClickhouseClusterConfig` tables or a `ClickhouseClusterConfig` table and
 /// its inventory representation.
 pub struct ClickhouseClusterConfigDiffTables {
-    pub metadata: KvListWithHeading,
+    pub metadata: KvList,
     pub keepers: BpTable,
     pub servers: Option<BpTable>,
 }
@@ -1289,8 +1289,8 @@ impl ClickhouseClusterConfigDiffTables {
                 ),
             )
         };
-        let metadata = KvListWithHeading::new(
-            CLICKHOUSE_CLUSTER_CONFIG_HEADING,
+        let metadata = KvList::new(
+            Some(CLICKHOUSE_CLUSTER_CONFIG_HEADING),
             vec![
                 KvPair::new(
                     BpDiffState::Added,
@@ -1434,8 +1434,8 @@ impl ClickhouseClusterConfigDiffTables {
             };
         }
 
-        let metadata = KvListWithHeading::new(
-            CLICKHOUSE_CLUSTER_CONFIG_HEADING,
+        let metadata = KvList::new(
+            Some(CLICKHOUSE_CLUSTER_CONFIG_HEADING),
             vec![
                 diff_row!(generation, GENERATION),
                 diff_row!(max_used_server_id, CLICKHOUSE_MAX_USED_SERVER_ID),
@@ -1523,8 +1523,8 @@ impl ClickhouseClusterConfigDiffTables {
         before: &clickhouse_admin_types::ClickhouseKeeperClusterMembership,
     ) -> Self {
         // There's only so much information in a collection. Show what we can.
-        let metadata = KvListWithHeading::new(
-            CLICKHOUSE_CLUSTER_CONFIG_HEADING,
+        let metadata = KvList::new(
+            Some(CLICKHOUSE_CLUSTER_CONFIG_HEADING),
             vec![KvPair::new(
                 BpDiffState::Removed,
                 CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX,
@@ -1713,7 +1713,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
 
     pub fn make_metadata_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvListWithHeading> {
+    ) -> impl IntoIterator<Item = KvList> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
                 diff_row!($member, $label, std::convert::identity)
@@ -1742,8 +1742,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         }
 
         [
-            KvListWithHeading::new(
-                COCKROACHDB_HEADING,
+            KvList::new(
+                Some(COCKROACHDB_HEADING),
                 vec![
                     diff_row!(
                         cockroachdb_fingerprint,
@@ -1757,8 +1757,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
                     ),
                 ],
             ),
-            KvListWithHeading::new(
-                METADATA_HEADING,
+            KvList::new(
+                Some(METADATA_HEADING),
                 vec![
                     diff_row!(internal_dns_version, INTERNAL_DNS_VERSION),
                     diff_row!(external_dns_version, EXTERNAL_DNS_VERSION),
@@ -1769,7 +1769,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
 
     pub fn make_oximeter_read_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvListWithHeading> {
+    ) -> impl IntoIterator<Item = KvList> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
                 diff_row!($member, $label, std::convert::identity)
@@ -1799,8 +1799,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
             };
         }
 
-        [KvListWithHeading::new(
-            OXIMETER_HEADING,
+        [KvList::new(
+            Some(OXIMETER_HEADING),
             vec![
                 diff_row!(oximeter_read_version, GENERATION),
                 diff_row!(oximeter_read_mode, OXIMETER_READ_FROM),
@@ -1900,9 +1900,17 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in unchanged_iter {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}, config generation {}):\n",
+                    "  sled {sled_id} ({}, config generation {}):",
                     sled.state, sled.sled_agent_generation
                 )?;
+
+                let mut rows = Vec::new();
+                if let Some(id) = sled.remove_mupdate_override {
+                    rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
+                }
+                let list = KvList::new_unchanged(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1913,9 +1921,21 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in &summary.diff.sleds.removed {
                 writeln!(
                     f,
-                    "  sled {sled_id} (was {}, config generation {}):\n",
+                    "  sled {sled_id} (was {}, config generation {}):",
                     sled.state, sled.sled_agent_generation
                 )?;
+
+                let mut rows = Vec::new();
+                if let Some(id) = sled.remove_mupdate_override {
+                    rows.push(KvPair::new(
+                        BpDiffState::Removed,
+                        WOULD_HAVE_REMOVED_MUPDATE_OVERRIDE,
+                        id.to_string(),
+                    ));
+                }
+                let list = KvList::new(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1945,8 +1965,25 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
                 writeln!(
                     f,
                     "  sled {sled_id} \
-                       ({state}, config generation {generation}):\n"
+                       ({state}, config generation {generation}):"
                 )?;
+
+                let mut rows = Vec::new();
+                // If either before or after is set for remove_mupdate_override, display it.
+                if sled.before.remove_mupdate_override.is_some()
+                    || sled.after.remove_mupdate_override.is_some()
+                {
+                    rows.push(KvPair::new_option_leaf(
+                        WILL_REMOVE_MUPDATE_OVERRIDE,
+                        Leaf {
+                            before: sled.before.remove_mupdate_override,
+                            after: sled.after.remove_mupdate_override,
+                        },
+                    ));
+                }
+                let list = KvList::new(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1957,9 +1994,21 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in &summary.diff.sleds.added {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}, config generation {}):\n",
+                    "  sled {sled_id} ({}, config generation {}):",
                     sled.state, sled.sled_agent_generation
                 )?;
+
+                let mut rows = Vec::new();
+                if let Some(id) = sled.remove_mupdate_override {
+                    rows.push(KvPair::new(
+                        BpDiffState::Added,
+                        WILL_REMOVE_MUPDATE_OVERRIDE,
+                        id.to_string(),
+                    ));
+                }
+                let list = KvList::new(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }

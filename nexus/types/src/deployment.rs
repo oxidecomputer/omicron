@@ -35,6 +35,7 @@ use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -104,7 +105,7 @@ pub use zone_type::blueprint_zone_type;
 
 use blueprint_display::{
     BpDiffState, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
-    BpTable, BpTableData, BpTableRow, KvListWithHeading, constants::*,
+    BpTable, BpTableData, BpTableRow, KvList, constants::*,
 };
 use id_map::{IdMap, IdMappable};
 use serde::de::SeqAccess;
@@ -430,15 +431,15 @@ pub struct BlueprintDisplay<'a> {
 }
 
 impl BlueprintDisplay<'_> {
-    fn make_cockroachdb_table(&self) -> KvListWithHeading {
+    fn make_cockroachdb_table(&self) -> KvList {
         let fingerprint = if self.blueprint.cockroachdb_fingerprint.is_empty() {
             NONE_PARENS.to_string()
         } else {
             self.blueprint.cockroachdb_fingerprint.clone()
         };
 
-        KvListWithHeading::new_unchanged(
-            COCKROACHDB_HEADING,
+        KvList::new_unchanged(
+            Some(COCKROACHDB_HEADING),
             vec![
                 (COCKROACHDB_FINGERPRINT, fingerprint),
                 (
@@ -451,9 +452,9 @@ impl BlueprintDisplay<'_> {
         )
     }
 
-    fn make_oximeter_table(&self) -> KvListWithHeading {
-        KvListWithHeading::new_unchanged(
-            OXIMETER_HEADING,
+    fn make_oximeter_table(&self) -> KvList {
+        KvList::new_unchanged(
+            Some(OXIMETER_HEADING),
             vec![
                 (GENERATION, self.blueprint.oximeter_read_version.to_string()),
                 (
@@ -464,15 +465,15 @@ impl BlueprintDisplay<'_> {
         )
     }
 
-    fn make_metadata_table(&self) -> KvListWithHeading {
+    fn make_metadata_table(&self) -> KvList {
         let comment = if self.blueprint.comment.is_empty() {
             NONE_PARENS.to_string()
         } else {
             self.blueprint.comment.clone()
         };
 
-        KvListWithHeading::new_unchanged(
-            METADATA_HEADING,
+        KvList::new_unchanged(
+            Some(METADATA_HEADING),
             vec![
                 (CREATED_BY, self.blueprint.creator.clone()),
                 (
@@ -498,7 +499,7 @@ impl BlueprintDisplay<'_> {
     // Return tables representing a [`ClickhouseClusterConfig`] in a given blueprint
     fn make_clickhouse_cluster_config_tables(
         &self,
-    ) -> Option<(KvListWithHeading, BpTable, BpTable)> {
+    ) -> Option<(KvList, BpTable, BpTable)> {
         let config = &self.blueprint.clickhouse_cluster_config.as_ref()?;
 
         let diff_table =
@@ -569,8 +570,17 @@ impl fmt::Display for BlueprintDisplay<'_> {
             writeln!(
                 f,
                 "\n  sled: {sled_id} ({sled_state}, config generation \
-                 {generation})\n\n{disks_table}\n",
+                 {generation})",
             )?;
+
+            let mut rows = Vec::new();
+            if let Some(id) = config.remove_mupdate_override {
+                rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
+            }
+            let list = KvList::new_unchanged(None, rows);
+            writeln!(f, "{list}")?;
+
+            writeln!(f, "{disks_table}\n")?;
 
             // Construct the datasets subtable
             let datasets_tab = BpTable::new(
@@ -656,6 +666,7 @@ pub struct BlueprintSledConfig {
     pub disks: IdMap<BlueprintPhysicalDiskConfig>,
     pub datasets: IdMap<BlueprintDatasetConfig>,
     pub zones: IdMap<BlueprintZoneConfig>,
+    pub remove_mupdate_override: Option<MupdateOverrideUuid>,
 }
 
 impl BlueprintSledConfig {
@@ -700,6 +711,7 @@ impl BlueprintSledConfig {
                     }
                 })
                 .collect(),
+            remove_mupdate_override: self.remove_mupdate_override,
         }
     }
 
