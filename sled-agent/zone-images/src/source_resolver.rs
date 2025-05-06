@@ -41,7 +41,7 @@ impl ZoneImageSourceResolver {
     }
 
     pub fn override_image_directory(&self, path: Utf8PathBuf) {
-        self.inner.lock().unwrap().image_directory_override(path);
+        self.inner.lock().unwrap().override_image_directory(path);
     }
 
     /// Returns a [`ZoneImageFileSource`] consisting of the file name, plus a
@@ -66,7 +66,7 @@ impl ResolverInner {
         Self { image_directory_override: None }
     }
 
-    fn image_directory_override(
+    fn override_image_directory(
         &mut self,
         image_directory_override: Utf8PathBuf,
     ) {
@@ -116,7 +116,7 @@ impl ResolverInner {
                     all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
                 // This iterator starts with the zpool for the boot disk (if it
                 // exists), and then is followed by all other zpools.
-                let zpool_iter = boot_zpool.clone().into_iter().chain(
+                let zpool_iter = boot_zpool.into_iter().chain(
                     all_disks
                         .all_m2_zpools()
                         .into_iter()
