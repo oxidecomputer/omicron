@@ -258,7 +258,7 @@ mod tests {
         datasets.insert(BlueprintDatasetConfig {
             disposition: BlueprintDatasetDisposition::InService,
             id: dataset_id,
-            pool: dataset_pool.clone(),
+            pool: dataset_pool,
             kind: DatasetKind::Crucible,
             address: None,
             quota: None,
@@ -286,7 +286,7 @@ mod tests {
         zones.insert(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: dataset_pool.clone(),
+            filesystem_pool: dataset_pool,
             zone_type: BlueprintZoneType::Oximeter(
                 blueprint_zone_type::Oximeter {
                     address: "[::1]:0".parse().unwrap(),
@@ -300,7 +300,7 @@ mod tests {
                 ready_for_cleanup: false,
             },
             id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: dataset_pool.clone(),
+            filesystem_pool: dataset_pool,
             zone_type: BlueprintZoneType::Oximeter(
                 blueprint_zone_type::Oximeter {
                     address: "[::1]:0".parse().unwrap(),
