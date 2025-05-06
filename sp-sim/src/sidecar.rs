@@ -8,8 +8,6 @@ use crate::config::Config;
 use crate::config::SidecarConfig;
 use crate::config::SimulatedSpsConfig;
 use crate::config::SpComponentConfig;
-use crate::helpers::rot_slot_id_from_u16;
-use crate::helpers::rot_slot_id_to_u16;
 use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
 use crate::serial_number_padded;
@@ -40,7 +38,6 @@ use gateway_messages::PowerState;
 use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
 use gateway_messages::RotResponse;
-use gateway_messages::RotSlotId;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
 use gateway_messages::SpPort;
@@ -383,7 +380,6 @@ struct Handler {
 
     serial_number: String,
     ignition: FakeIgnition,
-    rot_active_slot: RotSlotId,
     power_state: PowerState,
 
     update_state: SimSpUpdate,
@@ -432,7 +428,6 @@ impl Handler {
             leaked_component_description_strings,
             serial_number,
             ignition,
-            rot_active_slot: RotSlotId::A,
             power_state: PowerState::A2,
             update_state: SimSpUpdate::new(
                 BaseboardKind::Sidecar,
@@ -701,8 +696,7 @@ impl SpHandler for Handler {
             "received update prepare request";
             "update" => ?update,
         );
-        self.update_state.prepare(
-            SpComponent::SP_ITSELF,
+        self.update_state.sp_update_prepare(
             update.id,
             update.sp_image_size.try_into().unwrap(),
         )
@@ -717,10 +711,11 @@ impl SpHandler for Handler {
             "received update prepare request";
             "update" => ?update,
         );
-        self.update_state.prepare(
+        self.update_state.component_update_prepare(
             update.component,
             update.id,
             update.total_size.try_into().unwrap(),
+            update.slot,
         )
     }
 
@@ -911,13 +906,7 @@ impl SpHandler for Handler {
             &self.log, "asked for component active slot";
             "component" => ?component,
         );
-        if component == SpComponent::ROT {
-            Ok(rot_slot_id_to_u16(self.rot_active_slot))
-        } else {
-            // The real SP returns `RequestUnsupportedForComponent` for anything
-            // other than the RoT, including SP_ITSELF.
-            Err(SpError::RequestUnsupportedForComponent)
-        }
+        self.update_state.component_get_active_slot(component)
     }
 
     fn component_set_active_slot(
@@ -932,14 +921,7 @@ impl SpHandler for Handler {
             "slot" => slot,
             "persist" => persist,
         );
-        if component == SpComponent::ROT {
-            self.rot_active_slot = rot_slot_id_from_u16(slot)?;
-            Ok(())
-        } else {
-            // The real SP returns `RequestUnsupportedForComponent` for anything
-            // other than the RoT, including SP_ITSELF.
-            Err(SpError::RequestUnsupportedForComponent)
-        }
+        self.update_state.component_set_active_slot(component, slot, persist)
     }
 
     fn component_action(

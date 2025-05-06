@@ -7,6 +7,7 @@ use nexus_types::external_api::views;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
+use std::str::FromStr;
 
 impl_enum_type!(
     WebhookDeliveryStateEnum:
@@ -55,5 +56,12 @@ impl From<views::WebhookDeliveryState> for WebhookDeliveryState {
             views::WebhookDeliveryState::Failed => Self::Failed,
             views::WebhookDeliveryState::Delivered => Self::Delivered,
         }
+    }
+}
+
+impl FromStr for WebhookDeliveryState {
+    type Err = omicron_common::api::external::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        views::WebhookDeliveryState::from_str(s).map(Into::into)
     }
 }
