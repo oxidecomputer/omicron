@@ -42,6 +42,7 @@ define_enums! {
     IdentityTypeEnum => "identity_type",
     InstanceAutoRestartPolicyEnum => "instance_auto_restart",
     InstanceStateEnum => "instance_state_v2",
+    InstanceIntendedStateEnum => "instance_intended_state",
     IpAttachStateEnum => "ip_attach_state",
     IpKindEnum => "ip_kind",
     IpPoolResourceTypeEnum => "ip_pool_resource_type",
