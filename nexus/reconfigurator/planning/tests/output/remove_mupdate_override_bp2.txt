@@ -22,7 +22,29 @@ parent:    298eb984-d140-4044-a0cc-dce17397e374
 
 
 
-  sled: 66db85f2-9f83-44d3-bb35-b0034bb8ba4a (active, config generation 1)
+  sled: 2475f025-5c2d-4167-bdad-46618c7e0223 (active, config generation 1)
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: 66db85f2-9f83-44d3-bb35-b0034bb8ba4a (active, config generation 2)
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000
 
     physical disks:
     -------------------------------------

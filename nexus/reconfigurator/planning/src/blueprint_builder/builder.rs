@@ -2966,14 +2966,15 @@ pub mod test {
         let logctx = test_setup_log(TEST_NAME);
         let log = logctx.log.clone();
 
-        // Use our example system. We'll need 6 sleds to test for now.
+        // Use our example system. We'll need 7 sleds to test for now.
         //
         // sled 0: unset -> unset (unchanged)
         // sled 1: unset -> set
         // sled 2: set -> unset
         // sled 3: set -> set (unchanged)
         // sled 4: set -> set (changed)
-        // sled 5: set -> sled removed
+        // sled 5: set -> set (unchanged) but change something else
+        // sled 6: set -> sled removed
         //
         // We'll also add another sled below (new_sled_id) with
         // remove_mupdate_override set.
@@ -2983,7 +2984,7 @@ pub mod test {
         let mut rng = SimRngState::from_seed(TEST_NAME);
         let (mut example, blueprint1) =
             ExampleSystemBuilder::new_with_rng(&log, rng.next_system_rng())
-                .nsleds(6)
+                .nsleds(7)
                 .ndisks_per_sled(0)
                 .create_zones(false)
                 .build();
@@ -3001,30 +3002,28 @@ pub mod test {
         // Set the remove_mupdate_override_setting.
         let sled_ids =
             example.input.all_sled_ids(SledFilter::All).collect::<Vec<_>>();
-        blueprint_builder
-            .sled_editors
-            .get_mut(&sled_ids[2])
-            .expect("sled editor exists")
-            .set_remove_mupdate_override(Some(MupdateOverrideUuid::nil()))
-            .expect("remove_mupdate_override successful on sled 2");
-        blueprint_builder
-            .sled_editors
-            .get_mut(&sled_ids[3])
-            .expect("sled editor exists")
-            .set_remove_mupdate_override(Some(MupdateOverrideUuid::nil()))
-            .expect("remove_mupdate_override successful on sled 3");
-        blueprint_builder
-            .sled_editors
-            .get_mut(&sled_ids[4])
-            .expect("sled editor exists")
-            .set_remove_mupdate_override(Some(MupdateOverrideUuid::nil()))
-            .expect("remove_mupdate_override successful on sled 4");
-        blueprint_builder
-            .sled_editors
-            .get_mut(&sled_ids[5])
-            .expect("sled editor exists")
-            .set_remove_mupdate_override(Some(MupdateOverrideUuid::nil()))
-            .expect("remove_mupdate_override successful on sled 5");
+
+        let set_value =
+            |builder: &mut BlueprintBuilder,
+             ix: usize,
+             value: Option<MupdateOverrideUuid>| {
+                builder
+                    .sled_editors
+                    .get_mut(&sled_ids[ix])
+                    .expect("sled editor exists")
+                    .set_remove_mupdate_override(value)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "remove_mupdate_override failed on sled {ix}: {e}",
+                        )
+                    })
+            };
+
+        set_value(&mut blueprint_builder, 2, Some(MupdateOverrideUuid::nil()));
+        set_value(&mut blueprint_builder, 3, Some(MupdateOverrideUuid::nil()));
+        set_value(&mut blueprint_builder, 4, Some(MupdateOverrideUuid::nil()));
+        set_value(&mut blueprint_builder, 5, Some(MupdateOverrideUuid::nil()));
+        set_value(&mut blueprint_builder, 6, Some(MupdateOverrideUuid::nil()));
 
         let mut blueprint2 = blueprint_builder.build();
         // Define a time_created for consistent output across runs.
@@ -3057,24 +3056,10 @@ pub mod test {
         .expect("built blueprint builder");
         blueprint_builder.set_rng(PlannerRng::from_seed((TEST_NAME, "bp3")));
 
-        blueprint_builder
-            .sled_editors
-            .get_mut(&sled_ids[1])
-            .expect("sled editor exists")
-            .set_remove_mupdate_override(Some(MupdateOverrideUuid::max()))
-            .expect("set remove_mupdate_override successful on sled 1");
-        blueprint_builder
-            .sled_editors
-            .get_mut(&sled_ids[2])
-            .expect("sled editor exists")
-            .set_remove_mupdate_override(None)
-            .expect("unset remove_mupdate_override successful on sled 2");
-        blueprint_builder
-            .sled_editors
-            .get_mut(&sled_ids[4])
-            .expect("sled editor exists")
-            .set_remove_mupdate_override(Some(MupdateOverrideUuid::max()))
-            .expect("set remove_mupdate_override successful on sled 4");
+        set_value(&mut blueprint_builder, 1, Some(MupdateOverrideUuid::max()));
+        set_value(&mut blueprint_builder, 2, None);
+        set_value(&mut blueprint_builder, 4, Some(MupdateOverrideUuid::max()));
+
         blueprint_builder
             .sled_editors
             .get_mut(&new_sled_id)
@@ -3083,7 +3068,15 @@ pub mod test {
             .expect("set remove_mupdate_override successful on new sled");
 
         let mut blueprint3 = blueprint_builder.build();
-        blueprint3.sleds.remove(&sled_ids[5]);
+        // For sled 5, we'd like to test that if the sled is modified but the
+        // remove_mupdate_override is unchanged, we display it appropriately.
+        // The easiest change to make is to just bump the generation number by
+        // hand.
+        let generation = blueprint3.sleds[&sled_ids[5]].sled_agent_generation;
+        blueprint3.sleds.get_mut(&sled_ids[5]).unwrap().sled_agent_generation =
+            generation.next();
+        // Remove sled 6.
+        blueprint3.sleds.remove(&sled_ids[6]);
 
         let diff = blueprint3.diff_since_blueprint(&blueprint2);
         assert_contents(

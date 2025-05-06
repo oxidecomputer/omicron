@@ -5,7 +5,7 @@ to:   blueprint b760e8a2-04e7-4daf-85db-00570f9f3543
 
   sled 0af92ab6-8de8-4a5f-907e-d59fe3f5d76e (active, config generation 1):
 
-  sled ad323a60-3d46-4057-9849-075b55f2bebf (active, config generation 2):
+  sled 924e4dfb-3569-4b5b-9091-a1be1f9acd0f (active, config generation 2):
     will remove mupdate override:   00000000-0000-0000-0000-000000000000
 
  REMOVED SLEDS:
@@ -15,14 +15,17 @@ to:   blueprint b760e8a2-04e7-4daf-85db-00570f9f3543
 
  MODIFIED SLEDS:
 
-  sled 66db85f2-9f83-44d3-bb35-b0034bb8ba4a (active, config generation 1 -> 2):
+  sled 2475f025-5c2d-4167-bdad-46618c7e0223 (active, config generation 1 -> 2):
 +   will remove mupdate override:   (none) -> ffffffff-ffff-ffff-ffff-ffffffffffff
 
-  sled 924e4dfb-3569-4b5b-9091-a1be1f9acd0f (active, config generation 2 -> 3):
+  sled 66db85f2-9f83-44d3-bb35-b0034bb8ba4a (active, config generation 2 -> 3):
 -   will remove mupdate override:   00000000-0000-0000-0000-000000000000 -> (none)
 
-  sled c2bf6b87-2f82-4264-9497-a6f3269c71dc (active, config generation 2 -> 3):
+  sled ad323a60-3d46-4057-9849-075b55f2bebf (active, config generation 2 -> 3):
 *   will remove mupdate override:   00000000-0000-0000-0000-000000000000 -> ffffffff-ffff-ffff-ffff-ffffffffffff
+
+  sled c2bf6b87-2f82-4264-9497-a6f3269c71dc (active, config generation 2 -> 3):
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000 (unchanged)
 
  ADDED SLEDS:
 

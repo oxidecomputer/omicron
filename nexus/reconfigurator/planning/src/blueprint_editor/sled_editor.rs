@@ -355,7 +355,7 @@ impl SledEditor {
 
     /// Sets remove-mupdate-override configuration for this sled.
     ///
-    /// Currently unused.
+    /// Currently only used in test code.
     #[cfg_attr(not(test), expect(dead_code))]
     pub fn set_remove_mupdate_override(
         &mut self,
