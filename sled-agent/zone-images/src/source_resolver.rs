@@ -63,6 +63,9 @@ impl ZoneImageSourceResolver {
         }
     }
 
+    /// Overrides the image directory with another one.
+    ///
+    /// Intended for testing.
     pub fn override_image_directory(&self, path: Utf8PathBuf) {
         self.inner.lock().unwrap().override_image_directory(path);
     }
