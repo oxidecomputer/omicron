@@ -3348,10 +3348,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.sw_caboose (
     git_commit TEXT NOT NULL,
     name TEXT NOT NULL,
     version TEXT NOT NULL,
-    sign TEXT -- nullable
+    sign TEXT, -- nullable
+    /* We cannot use `sign` as an index as it is a nullable value
+     * and nullable values are distinct by default. This means
+     * it's possible to insert rows that appear to be duplicates
+     * if one of the values is NULL. To enforce uniqueness, we
+     * create the index on a computed virtual column which assigns
+     * `n/a` as the value if `sign` is null.
+     */
+    sign_idx TEXT NOT NULL AS (IFNULL(sign, 'n/a')) VIRTUAL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
-    on omicron.public.sw_caboose (board, git_commit, name, version, sign);
+    on omicron.public.sw_caboose (board, git_commit, name, version, sign_idx);
 
 /* root of trust pages: this table assigns unique ids to distinct RoT CMPA
    and CFPA page contents, each of which is a 512-byte blob */
