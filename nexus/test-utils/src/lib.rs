@@ -889,7 +889,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         datasets.insert(BlueprintDatasetConfig {
                             disposition: BlueprintDatasetDisposition::InService,
                             id,
-                            pool: zpool.clone(),
+                            pool: *zpool,
                             kind: DatasetKind::TransientZone {
                                 name: illumos_utils::zone::zone_name(
                                     zone.zone_type.kind().zone_prefix(),

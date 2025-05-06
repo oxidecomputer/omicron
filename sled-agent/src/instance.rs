@@ -1783,7 +1783,7 @@ impl InstanceRunner {
             return None;
         };
         match run_state.running_zone.root_zpool() {
-            ZpoolOrRamdisk::Zpool(zpool_name) => Some(zpool_name.clone()),
+            ZpoolOrRamdisk::Zpool(zpool_name) => Some(*zpool_name),
             ZpoolOrRamdisk::Ramdisk => None,
         }
     }

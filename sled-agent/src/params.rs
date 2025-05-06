@@ -70,10 +70,7 @@ pub(crate) trait OmicronZoneTypeExt {
             }
         }?;
 
-        Some((
-            DatasetName::new(dataset.pool_name.clone(), dataset_kind),
-            *address,
-        ))
+        Some((DatasetName::new(dataset.pool_name, dataset_kind), *address))
     }
 }
 
