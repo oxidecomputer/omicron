@@ -145,6 +145,12 @@ impl From<RawDisk> for RawDiskWithId {
     }
 }
 
+impl From<RawDiskWithId> for RawDisk {
+    fn from(disk: RawDiskWithId) -> Self {
+        disk.disk
+    }
+}
+
 impl Deref for RawDiskWithId {
     type Target = RawDisk;
 
