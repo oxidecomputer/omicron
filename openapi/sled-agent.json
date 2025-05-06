@@ -5467,6 +5467,14 @@
           "generation": {
             "$ref": "#/components/schemas/Generation"
           },
+          "remove_mupdate_override": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              }
+            ]
+          },
           "zones": {
             "$ref": "#/components/schemas/IdMapOmicronZoneConfig"
           }
@@ -7055,6 +7063,10 @@
         "format": "uuid"
       },
       "TypedUuidForInstanceKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForMupdateOverrideKind": {
         "type": "string",
         "format": "uuid"
       },

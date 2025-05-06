@@ -3939,6 +3939,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     sled_id UUID NOT NULL,
     sled_state omicron.public.sled_state NOT NULL,
     sled_agent_generation INT8 NOT NULL,
+    -- NULL means do not remove any overrides
+    remove_mupdate_override UUID,
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
@@ -5504,7 +5506,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '140.0.0', NULL)
+    (TRUE, NOW(), NOW(), '141.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

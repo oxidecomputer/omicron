@@ -208,6 +208,9 @@ impl DataStore {
                 sled_id: sled_id.into(),
                 sled_state: sled.state.into(),
                 sled_agent_generation: sled.sled_agent_generation.into(),
+                remove_mupdate_override: sled
+                    .remove_mupdate_override
+                    .map(|id| id.into()),
             })
             .collect::<Vec<_>>();
 
@@ -514,6 +517,9 @@ impl DataStore {
                         disks: IdMap::new(),
                         datasets: IdMap::new(),
                         zones: IdMap::new(),
+                        remove_mupdate_override: s
+                            .remove_mupdate_override
+                            .map(|id| id.into()),
                     };
                     let old = sled_configs.insert(s.sled_id.into(), config);
                     bail_unless!(

@@ -19,7 +19,7 @@ use super::{
     CockroachDbPreserveDowngrade, PendingMgsUpdatesDiff, unwrap_or_none,
     zone_sort_key,
 };
-use daft::Diffable;
+use daft::{Diffable, Leaf};
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::{CompressionAlgorithm, DatasetName};
@@ -1900,9 +1900,17 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in unchanged_iter {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}, config generation {}):\n",
+                    "  sled {sled_id} ({}, config generation {}):",
                     sled.state, sled.sled_agent_generation
                 )?;
+
+                let mut rows = Vec::new();
+                if let Some(id) = sled.remove_mupdate_override {
+                    rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
+                }
+                let list = KvList::new_unchanged(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1913,9 +1921,21 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in &summary.diff.sleds.removed {
                 writeln!(
                     f,
-                    "  sled {sled_id} (was {}, config generation {}):\n",
+                    "  sled {sled_id} (was {}, config generation {}):",
                     sled.state, sled.sled_agent_generation
                 )?;
+
+                let mut rows = Vec::new();
+                if let Some(id) = sled.remove_mupdate_override {
+                    rows.push(KvPair::new(
+                        BpDiffState::Removed,
+                        WOULD_HAVE_REMOVED_MUPDATE_OVERRIDE,
+                        id.to_string(),
+                    ));
+                }
+                let list = KvList::new(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1945,8 +1965,25 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
                 writeln!(
                     f,
                     "  sled {sled_id} \
-                       ({state}, config generation {generation}):\n"
+                       ({state}, config generation {generation}):"
                 )?;
+
+                let mut rows = Vec::new();
+                // If either before or after is set for remove_mupdate_override, display it.
+                if sled.before.remove_mupdate_override.is_some()
+                    || sled.after.remove_mupdate_override.is_some()
+                {
+                    rows.push(KvPair::new_option_leaf(
+                        WILL_REMOVE_MUPDATE_OVERRIDE,
+                        Leaf {
+                            before: sled.before.remove_mupdate_override,
+                            after: sled.after.remove_mupdate_override,
+                        },
+                    ));
+                }
+                let list = KvList::new(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1957,9 +1994,21 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in &summary.diff.sleds.added {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}, config generation {}):\n",
+                    "  sled {sled_id} ({}, config generation {}):",
                     sled.state, sled.sled_agent_generation
                 )?;
+
+                let mut rows = Vec::new();
+                if let Some(id) = sled.remove_mupdate_override {
+                    rows.push(KvPair::new(
+                        BpDiffState::Added,
+                        WILL_REMOVE_MUPDATE_OVERRIDE,
+                        id.to_string(),
+                    ));
+                }
+                let list = KvList::new(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }

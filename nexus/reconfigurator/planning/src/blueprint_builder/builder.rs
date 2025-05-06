@@ -450,6 +450,7 @@ impl<'a> BlueprintBuilder<'a> {
                     disks: IdMap::default(),
                     datasets: IdMap::default(),
                     zones: IdMap::default(),
+                    remove_mupdate_override: None,
                 };
                 (sled_id, config)
             })
@@ -2059,6 +2060,9 @@ pub mod test {
     use crate::example::example;
     use crate::planner::test::assert_planning_makes_no_changes;
     use crate::system::SledBuilder;
+    use chrono::NaiveDateTime;
+    use chrono::TimeZone;
+    use chrono::Utc;
     use expectorate::assert_contents;
     use nexus_reconfigurator_blippy::Blippy;
     use nexus_reconfigurator_blippy::BlippyReportSortKey;
@@ -2068,6 +2072,7 @@ pub mod test {
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::MupdateOverrideUuid;
     use std::collections::BTreeSet;
     use std::mem;
     use tufaceous_artifact::ArtifactHash;
@@ -2949,6 +2954,134 @@ pub mod test {
         assert_contents(
             "tests/output/zone_image_source_change_1.txt",
             &display.to_string(),
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test diff output with remove_mupdate_override.
+    #[test]
+    fn test_remove_mupdate_override_diff() {
+        static TEST_NAME: &str = "builder_remove_mupdate_override_diff";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system. We'll need 7 sleds to test for now.
+        //
+        // sled 0: unset -> unset (unchanged)
+        // sled 1: unset -> set
+        // sled 2: set -> unset
+        // sled 3: set -> set (unchanged)
+        // sled 4: set -> set (changed)
+        // sled 5: set -> set (unchanged) but change something else
+        // sled 6: set -> sled removed
+        //
+        // We'll also add another sled below (new_sled_id) with
+        // remove_mupdate_override set.
+        //
+        // We don't need any zones for this test, so disable that to keep the
+        // outputs minimal.
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new_with_rng(&log, rng.next_system_rng())
+                .nsleds(7)
+                .ndisks_per_sled(0)
+                .create_zones(false)
+                .build();
+
+        let mut blueprint_builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        )
+        .expect("built blueprint builder");
+        blueprint_builder.set_rng(PlannerRng::from_seed((TEST_NAME, "bp2")));
+
+        // Set the remove_mupdate_override_setting.
+        let sled_ids =
+            example.input.all_sled_ids(SledFilter::All).collect::<Vec<_>>();
+
+        let set_value =
+            |builder: &mut BlueprintBuilder,
+             ix: usize,
+             value: Option<MupdateOverrideUuid>| {
+                builder
+                    .sled_editors
+                    .get_mut(&sled_ids[ix])
+                    .expect("sled editor exists")
+                    .set_remove_mupdate_override(value)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "remove_mupdate_override failed on sled {ix}: {e}",
+                        )
+                    })
+            };
+
+        set_value(&mut blueprint_builder, 2, Some(MupdateOverrideUuid::nil()));
+        set_value(&mut blueprint_builder, 3, Some(MupdateOverrideUuid::nil()));
+        set_value(&mut blueprint_builder, 4, Some(MupdateOverrideUuid::nil()));
+        set_value(&mut blueprint_builder, 5, Some(MupdateOverrideUuid::nil()));
+        set_value(&mut blueprint_builder, 6, Some(MupdateOverrideUuid::nil()));
+
+        let mut blueprint2 = blueprint_builder.build();
+        // Define a time_created for consistent output across runs.
+        blueprint2.time_created =
+            Utc.from_utc_datetime(&NaiveDateTime::UNIX_EPOCH);
+
+        // blueprint2's display should have mupdate overrides listed.
+        assert_contents(
+            "tests/output/remove_mupdate_override_bp2.txt",
+            &blueprint2.display().to_string(),
+        );
+
+        // Now make a third blueprint. Start by adding a new sled.
+        let mut sled_id_rng = rng.next_sled_id_rng();
+        let new_sled_id = sled_id_rng.next();
+        let _ = example
+            .system
+            .sled(SledBuilder::new().id(new_sled_id).npools(0))
+            .unwrap();
+        let input = example.system.to_planning_input_builder().unwrap().build();
+
+        // Add it to the builder. This will record the new sled in the blueprint.
+        let mut blueprint_builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            &example.collection,
+            TEST_NAME,
+        )
+        .expect("built blueprint builder");
+        blueprint_builder.set_rng(PlannerRng::from_seed((TEST_NAME, "bp3")));
+
+        set_value(&mut blueprint_builder, 1, Some(MupdateOverrideUuid::max()));
+        set_value(&mut blueprint_builder, 2, None);
+        set_value(&mut blueprint_builder, 4, Some(MupdateOverrideUuid::max()));
+
+        blueprint_builder
+            .sled_editors
+            .get_mut(&new_sled_id)
+            .expect("sled editor exists")
+            .set_remove_mupdate_override(Some(MupdateOverrideUuid::max()))
+            .expect("set remove_mupdate_override successful on new sled");
+
+        let mut blueprint3 = blueprint_builder.build();
+        // For sled 5, we'd like to test that if the sled is modified but the
+        // remove_mupdate_override is unchanged, we display it appropriately.
+        // The easiest change to make is to just bump the generation number by
+        // hand.
+        let generation = blueprint3.sleds[&sled_ids[5]].sled_agent_generation;
+        blueprint3.sleds.get_mut(&sled_ids[5]).unwrap().sled_agent_generation =
+            generation.next();
+        // Remove sled 6.
+        blueprint3.sleds.remove(&sled_ids[6]);
+
+        let diff = blueprint3.diff_since_blueprint(&blueprint2);
+        assert_contents(
+            "tests/output/remove_mupdate_override_2_3.txt",
+            &diff.display().to_string(),
         );
 
         logctx.cleanup_successful();
