@@ -1,1 +1,3 @@
-DROP INDEX IF EXISTS omicron.public.sw_caboose@caboose_properties;
+CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
+    on omicron.public.sw_caboose (board, git_commit, name, version, sign)
+    WHERE sign IS NOT NULL;
