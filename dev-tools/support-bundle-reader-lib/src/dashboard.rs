@@ -15,14 +15,16 @@ use anyhow::bail;
 use bytes::BytesMut;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
-    execute,
-    terminal::{
-        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
-        enable_raw_mode,
-    },
-};
+use crossterm::event;
+use crossterm::event::DisableMouseCapture;
+use crossterm::event::EnableMouseCapture;
+use crossterm::event::Event;
+use crossterm::event::KeyCode;
+use crossterm::execute;
+use crossterm::terminal::EnterAlternateScreen;
+use crossterm::terminal::LeaveAlternateScreen;
+use crossterm::terminal::disable_raw_mode;
+use crossterm::terminal::enable_raw_mode;
 use futures::TryStreamExt;
 use nexus_client::types::SupportBundleInfo;
 use nexus_client::types::SupportBundleState;
@@ -55,7 +57,7 @@ enum FileState<'a> {
     Closed,
 }
 
-/// A dashboard for inspecting a support bundle contents
+/// A dashboard for inspecting a support bundle's contents
 pub struct SupportBundleDashboard<'a> {
     access: Box<dyn SupportBundleAccessor + 'a>,
     index: SupportBundleIndex,
@@ -77,17 +79,27 @@ impl<'a> SupportBundleDashboard<'a> {
     }
 
     async fn select_up(&mut self, count: usize) -> Result<()> {
+        let old_selection = self.selected;
         self.selected = self.selected.saturating_sub(count);
-        if matches!(self.file, FileState::Open { .. }) {
+
+        // Buffer the new file if we're currently viewing open files
+        if old_selection != self.selected
+            && matches!(self.file, FileState::Open { .. })
+        {
             self.open_and_buffer().await?;
         }
         Ok(())
     }
 
     async fn select_down(&mut self, count: usize) -> Result<()> {
+        let old_selection = self.selected;
         self.selected =
             std::cmp::min(self.selected + count, self.index.files().len() - 1);
-        if matches!(self.file, FileState::Open { .. }) {
+
+        // Buffer the new file if we're currently viewing open files
+        if old_selection != self.selected
+            && matches!(self.file, FileState::Open { .. })
+        {
             self.open_and_buffer().await?;
         }
         Ok(())

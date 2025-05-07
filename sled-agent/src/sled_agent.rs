@@ -1388,21 +1388,20 @@ impl SledAgent {
                 total_size: ByteCount::try_from(info.size())?,
             });
 
-            let inv_props =
-                match self.storage().datasets_list(zpool.clone()).await {
-                    Ok(props) => props
-                        .into_iter()
-                        .map(|prop| InventoryDataset::from(prop)),
-                    Err(err) => {
-                        warn!(
-                            self.log,
-                            "Failed to access dataset info within zpool";
-                            "zpool" => %zpool,
-                            "err" => %err
-                        );
-                        continue;
-                    }
-                };
+            let inv_props = match self.storage().datasets_list(zpool).await {
+                Ok(props) => {
+                    props.into_iter().map(|prop| InventoryDataset::from(prop))
+                }
+                Err(err) => {
+                    warn!(
+                        self.log,
+                        "Failed to access dataset info within zpool";
+                        "zpool" => %zpool,
+                        "err" => %err
+                    );
+                    continue;
+                }
+            };
             datasets.extend(inv_props);
         }
 

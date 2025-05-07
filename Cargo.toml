@@ -125,6 +125,7 @@ members = [
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
+    "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-diagnostics",
@@ -277,6 +278,7 @@ default-members = [
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
+    "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-diagnostics",
@@ -401,7 +403,7 @@ display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
-derive_more = "0.99.19"
+derive_more = "0.99.20"
 derive-where = "1.2.7"
 dev-tools-common = { path = "dev-tools/common" }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
@@ -556,7 +558,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.0"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "88adb1a5df689b3e2daddab9325ee94047f6ffad", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "db01858ce12db22079b5776731adbff163a50d91", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.1"
 once_cell = "1.20.3"
@@ -566,7 +568,7 @@ openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "88adb1a5df689b3e2daddab9325ee94047f6ffad" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "db01858ce12db22079b5776731adbff163a50d91" }
 oso = "0.27"
 owo-colors = "4.2.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -664,6 +666,7 @@ similar-asserts = "1.7.0"
 sled = "=0.34.7"
 sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
+sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }
