@@ -7728,6 +7728,7 @@ dependencies = [
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-types",
+ "sled-agent-zone-images",
  "sled-diagnostics",
  "sled-hardware",
  "sled-hardware-types",
@@ -11501,6 +11502,17 @@ dependencies = [
  "thiserror 1.0.69",
  "toml 0.8.20",
  "uuid",
+]
+
+[[package]]
+name = "sled-agent-zone-images"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "nexus-sled-agent-shared",
+ "omicron-workspace-hack",
+ "sled-storage",
 ]
 
 [[package]]

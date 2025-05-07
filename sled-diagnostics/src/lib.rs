@@ -152,7 +152,7 @@ pub async fn health_check()
     [
         uptime(),
         kstat_low_page(),
-        svcs_show_disabled(),
+        svcs_enabled_but_not_running(),
         count_disks(),
         zfs_list_unmounted(),
         count_crucibles(),
