@@ -501,6 +501,8 @@ enum SupportBundleCommands {
     GetIndex(SupportBundleIndexArgs),
     /// View a file within a support bundle
     GetFile(SupportBundleFileArgs),
+    /// Creates a dashboard for viewing the contents of a support bundle
+    Inspect(SupportBundleInspectArgs),
 }
 
 #[derive(Debug, Args)]
@@ -521,6 +523,23 @@ struct SupportBundleFileArgs {
     /// instead of stdout.
     #[arg(short, long)]
     output: Option<Utf8PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleInspectArgs {
+    /// A specific bundle to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "path".
+    #[arg(short, long)]
+    id: Option<SupportBundleUuid>,
+
+    /// A local bundle file to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "id".
+    #[arg(short, long)]
+    path: Option<Utf8PathBuf>,
 }
 
 impl NexusArgs {
@@ -737,6 +756,9 @@ impl NexusArgs {
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::GetFile(args),
             }) => cmd_nexus_support_bundles_get_file(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Inspect(args),
+            }) => cmd_nexus_support_bundles_inspect(&client, args).await,
         }
     }
 }
@@ -3879,4 +3901,17 @@ async fn cmd_nexus_support_bundles_get_file(
         format!("streaming support bundle file {}: {}", args.id, args.path)
     })?;
     Ok(())
+}
+
+/// Runs `omdb nexus support-bundles inspect`
+async fn cmd_nexus_support_bundles_inspect(
+    client: &nexus_client::Client,
+    args: &SupportBundleInspectArgs,
+) -> Result<(), anyhow::Error> {
+    support_bundle_reader_lib::run_dashboard(
+        client,
+        args.id,
+        args.path.as_ref(),
+    )
+    .await
 }
