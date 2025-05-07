@@ -278,7 +278,7 @@ pub fn kstat_low_page() -> Command {
     cmd
 }
 
-pub fn svcs_show_disabled() -> Command {
+pub fn svcs_enabled_but_not_running() -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(SVCS).arg("-xZ");
     cmd
