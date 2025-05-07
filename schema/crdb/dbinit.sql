@@ -3380,14 +3380,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.sw_caboose (
 );
 
 /*
- * We use two separate partial indexes to ensure uniqueness. 
+ * We use a complete and a partial index to ensure uniqueness. 
  * This is necessary because the sign column is NULLable, but in SQL, NULL values
- * are considered distinct. That means that a non-partial index on all of these
+ * are considered distinct. That means that a single complete index on all of these
  * columns would allow duplicate rows where sign is NULL, which we don't want.
  */
 CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
-    on omicron.public.sw_caboose (board, git_commit, name, version, sign)
-    WHERE sign IS NOT NULL;
+    on omicron.public.sw_caboose (board, git_commit, name, version, sign);
 
 CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties_no_sign
     on omicron.public.sw_caboose (board, git_commit, name, version)
