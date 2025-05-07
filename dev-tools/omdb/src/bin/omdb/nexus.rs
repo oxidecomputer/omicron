@@ -501,7 +501,7 @@ enum SupportBundleCommands {
     GetIndex(SupportBundleIndexArgs),
     /// View a file within a support bundle
     GetFile(SupportBundleFileArgs),
-    /// Creates dashboard for viewing the contents of a support bundle
+    /// Creates a dashboard for viewing the contents of a support bundle
     Inspect(SupportBundleInspectArgs),
 }
 
