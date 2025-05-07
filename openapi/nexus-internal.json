@@ -5778,6 +5778,12 @@
               "$ref": "#/components/schemas/Certificate"
             }
           },
+          "control_plane_storage_buffer_gib": {
+            "description": "The amount of space to reserve per-disk for non-Crucible storage (i.e. control plane storage) in gibibytes. This amount represents a buffer that the region allocation query will not use for each U2.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "crucible_datasets": {
             "description": "Crucible datasets on the rack which have been provisioned by RSS.",
             "type": "array",
@@ -5847,6 +5853,7 @@
           "allowed_source_ips",
           "blueprint",
           "certs",
+          "control_plane_storage_buffer_gib",
           "crucible_datasets",
           "external_dns_zone_name",
           "external_port_count",

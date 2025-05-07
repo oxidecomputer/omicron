@@ -52,6 +52,7 @@ use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::BgpPeer;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -136,7 +137,10 @@ impl super::Nexus {
                     pool.id,
                     pool.sled_id,
                     pool.physical_disk_id,
-                    self.control_plane_storage_buffer.into(),
+                    ByteCount::from_gibibytes_u32(
+                        request.control_plane_storage_buffer_gib,
+                    )
+                    .into(),
                 )
             })
             .collect();
@@ -727,6 +731,8 @@ impl super::Nexus {
                         .into(),
                     dns_update,
                     allowed_source_ips: request.allowed_source_ips,
+                    control_plane_storage_buffer_gib: request
+                        .control_plane_storage_buffer_gib,
                 },
             )
             .await?;

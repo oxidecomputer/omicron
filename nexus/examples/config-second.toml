@@ -86,9 +86,6 @@ default_request_body_max_bytes = 1048576
 # IPv4 subnetwork. This size allows for ~60 hosts.
 max_vpc_ipv4_subnet_prefix = 26
 
-# For development environments, choose a zero sized storage buffer
-control_plane_storage_buffer_gb = 0
-
 # Configuration for interacting with the dataplane daemon
 [dendrite.switch0]
 address = "[::1]:12224"

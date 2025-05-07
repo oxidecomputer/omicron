@@ -31,7 +31,6 @@ use nexus_types::deployment::PendingMgsUpdates;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
-use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -245,11 +244,6 @@ pub struct Nexus {
 
     /// reports status of pending MGS-managed updates
     mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
-
-    /// The amount of disk space to reserve for non-Crucible / control plane
-    /// storage. This amount represents a buffer that the region allocation query
-    /// will not use for each U2.
-    control_plane_storage_buffer: ByteCount,
 }
 
 impl Nexus {
@@ -426,10 +420,6 @@ impl Nexus {
         let mgs_update_status_rx = mgs_update_driver.status_rx();
         let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
-        let control_plane_storage_buffer = ByteCount::from_gibibytes_u32(
-            config.pkg.tunables.control_plane_storage_buffer_gb,
-        );
-
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -481,7 +471,6 @@ impl Nexus {
             )),
             tuf_artifact_replication_tx,
             mgs_update_status_rx,
-            control_plane_storage_buffer,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -541,7 +530,6 @@ impl Nexus {
                     },
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
-                    control_plane_storage_buffer,
                 },
             );
 

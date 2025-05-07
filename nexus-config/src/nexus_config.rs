@@ -275,7 +275,6 @@ pub struct MgdConfig {
 struct UnvalidatedTunables {
     max_vpc_ipv4_subnet_prefix: u8,
     load_timeout: Option<std::time::Duration>,
-    control_plane_storage_buffer_gb: u32,
 }
 
 /// Configuration for HTTP clients to external services.
@@ -304,11 +303,6 @@ pub struct Tunables {
     ///
     /// If "None", nexus loops forever during initialization.
     pub load_timeout: Option<std::time::Duration>,
-
-    /// The amount of disk space to reserve for non-Crucible / control plane
-    /// storage in gibibytes. This amount represents a buffer that the region
-    /// allocation query will not use for each U2.
-    pub control_plane_storage_buffer_gb: u32,
 }
 
 // Convert from the unvalidated tunables, verifying each parameter as needed.
@@ -320,8 +314,6 @@ impl TryFrom<UnvalidatedTunables> for Tunables {
         Ok(Tunables {
             max_vpc_ipv4_subnet_prefix: unvalidated.max_vpc_ipv4_subnet_prefix,
             load_timeout: unvalidated.load_timeout,
-            control_plane_storage_buffer_gb: unvalidated
-                .control_plane_storage_buffer_gb,
         })
     }
 }
@@ -373,7 +365,6 @@ impl Default for Tunables {
         Tunables {
             max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX,
             load_timeout: None,
-            control_plane_storage_buffer_gb: 0,
         }
     }
 }
@@ -1023,7 +1014,6 @@ mod test {
             trusted_root = "/path/to/root.json"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 27
-            control_plane_storage_buffer_gb = 0
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
@@ -1166,8 +1156,7 @@ mod test {
                     schema: None,
                     tunables: Tunables {
                         max_vpc_ipv4_subnet_prefix: 27,
-                        load_timeout: None,
-                        control_plane_storage_buffer_gb: 0,
+                        load_timeout: None
                     },
                     dendrite: HashMap::from([(
                         SwitchLocation::Switch0,
@@ -1488,7 +1477,6 @@ mod test {
             default_base_url = "http://example.invalid/"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 100
-            control_plane_storage_buffer_gb = 0
             [deployment]
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"

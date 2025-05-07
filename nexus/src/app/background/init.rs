@@ -137,7 +137,6 @@ use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::PendingMgsUpdates;
-use omicron_common::api::external::ByteCount;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
@@ -526,7 +525,6 @@ impl BackgroundTasksInitializer {
                     inventory_watcher.clone(),
                     config.physical_disk_adoption.disable,
                     rack_id,
-                    args.control_plane_storage_buffer,
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
@@ -961,10 +959,6 @@ pub struct BackgroundTasksData {
     pub webhook_delivery_client: reqwest::Client,
     /// Channel for configuring pending MGS updates
     pub mgs_updates_tx: watch::Sender<PendingMgsUpdates>,
-    /// The amount of disk space to reserve for non-Crucible / control plane
-    /// storage. This amount represents a buffer that the region allocation query
-    /// will not use for each U2.
-    pub control_plane_storage_buffer: ByteCount,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either

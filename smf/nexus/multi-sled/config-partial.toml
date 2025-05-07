@@ -24,13 +24,6 @@ if_exists = "append"
 # [schema]
 # schema_dir = "/var/nexus/schema/crdb"
 
-[tunables]
-max_vpc_ipv4_subnet_prefix = 26
-
-# Reserve space for non-Crucible storage
-# See oxidecomputer/omicron#7875 for the 250G determination.
-control_plane_storage_buffer_gb = 250
-
 [background_tasks]
 dns_internal.period_secs_config = 60
 dns_internal.period_secs_servers = 60

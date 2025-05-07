@@ -944,6 +944,13 @@
               }
             ]
           },
+          "control_plane_storage_buffer_gib": {
+            "description": "The amount of space to reserve per-disk for non-Crucible storage (i.e. control plane storage) in gibibytes. This amount represents a buffer that the region allocation query will not use for each U2.",
+            "default": 0,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "dns_servers": {
             "description": "The external DNS server addresses.",
             "type": "array",

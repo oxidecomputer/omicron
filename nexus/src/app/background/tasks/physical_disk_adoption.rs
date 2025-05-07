@@ -34,7 +34,6 @@ pub struct PhysicalDiskAdoption {
     disable: bool,
     rack_id: Uuid,
     rx_inventory_collection: watch::Receiver<Option<CollectionUuid>>,
-    control_plane_storage_buffer: ByteCount,
 }
 
 impl PhysicalDiskAdoption {
@@ -43,14 +42,12 @@ impl PhysicalDiskAdoption {
         rx_inventory_collection: watch::Receiver<Option<CollectionUuid>>,
         disable: bool,
         rack_id: Uuid,
-        control_plane_storage_buffer: ByteCount,
     ) -> Self {
         PhysicalDiskAdoption {
             datastore,
             disable,
             rack_id,
             rx_inventory_collection,
-            control_plane_storage_buffer,
         }
     }
 }
@@ -64,6 +61,25 @@ impl BackgroundTask for PhysicalDiskAdoption {
             if self.disable {
                 return json!({ "error": "task disabled" });
             }
+
+            let control_plane_storage_buffer: ByteCount = match self
+                .datastore
+                .get_control_plane_storage_buffer(opctx)
+                .await {
+                    Ok(value) => match value {
+                        Some(value) => value,
+                        None => {
+                            // If no setting is in the database, use 0
+                            ByteCount::from(0)
+                        }
+                    },
+
+                    Err(e) => {
+                        return json!({ "error": format!(
+                            "error getting control plane storage buffer: {e}"
+                        )});
+                    }
+                };
 
             // Only adopt physical disks after rack handoff has completed.
             //
@@ -143,7 +159,7 @@ impl BackgroundTask for PhysicalDiskAdoption {
                     Uuid::new_v4(),
                     inv_disk.sled_id.into_untyped_uuid(),
                     disk.id(),
-                    self.control_plane_storage_buffer.into(),
+                    control_plane_storage_buffer.into(),
                 );
 
                 let result = self.datastore.physical_disk_and_zpool_insert(

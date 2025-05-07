@@ -595,6 +595,7 @@ pub async fn run_standalone_server(
             bfd: Vec::new(),
         },
         allowed_source_ips: NexusTypes::AllowedSourceIps::Any,
+        control_plane_storage_buffer_gib: 0,
     };
 
     handoff_to_nexus(&log, &config, &rack_init_request).await?;
