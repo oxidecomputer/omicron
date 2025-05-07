@@ -555,7 +555,7 @@ impl DataStore {
             // - `hw_baseboard` with an "id" primary key and lookup columns
             //   "part_number" and "serial_number"
             // - `sw_caboose` with an "id" primary key and lookup columns
-            //   "board", "git_commit", "name", "version, and sign"
+            //   "board", "git_commit", "name", "version", and "sign"
             // - `inv_caboose` with foreign keys "hw_baseboard_id",
             //   "sw_caboose_id", and various other columns
             //
