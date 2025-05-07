@@ -234,27 +234,10 @@ async fn utf8_stream_to_string(
     mut stream: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>>
     + std::marker::Unpin,
 ) -> Result<String> {
-    let mut result = String::new();
-
-    // When we read from the string, we might not read a whole UTF-8 sequence.
-    // Keep this "leftover" type here to concatenate this partially-read data
-    // when we read the next sequence.
-    let mut leftover: Option<bytes::Bytes> = None;
-    while let Some(data) = stream.next().await {
-        match data {
-            Err(err) => return Err(anyhow::anyhow!(err)),
-            Ok(data) => {
-                let combined = match leftover.take() {
-                    Some(old) => [old, data].concat(),
-                    None => data.to_vec(),
-                };
-
-                match std::str::from_utf8(&combined) {
-                    Ok(data) => result += data,
-                    Err(_) => leftover = Some(combined.into()),
-                }
-            }
-        }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        bytes.extend_from_slice(&chunk);
     }
-    Ok(result)
+    Ok(String::from_utf8(bytes)?)
 }

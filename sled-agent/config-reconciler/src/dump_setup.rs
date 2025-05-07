@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! This module is responsible for moving debug info (kernel crash dumps,
 //! userspace process core dumps, and rotated logs) onto external drives for
 //! perusal/archival, and to prevent internal drives from filling up.
@@ -92,13 +96,22 @@ use illumos_utils::dumpadm::{DumpAdm, DumpContentType};
 use illumos_utils::zone::ZONE_PREFIX;
 use illumos_utils::zpool::{ZpoolHealth, ZpoolName};
 use omicron_common::disk::DiskVariant;
+use sled_agent_types::support_bundle::BUNDLE_FILE_NAME;
+use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME_SUFFIX;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::{CRASH_DATASET, DUMP_DATASET};
 use sled_storage::disk::Disk;
 use slog::Logger;
+use slog::debug;
+use slog::error;
+use slog::info;
+use slog::o;
+use slog::trace;
+use slog::warn;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, SystemTimeError, UNIX_EPOCH};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot;
@@ -122,13 +135,13 @@ struct CoreDataset(Utf8PathBuf);
 
 #[derive(AsRef, Clone, Debug, From)]
 pub(super) struct CoreZpool {
-    mount_config: MountConfig,
+    mount_config: Arc<MountConfig>,
     name: ZpoolName,
 }
 
 #[derive(AsRef, Clone, Debug, From)]
 pub(super) struct DebugZpool {
-    mount_config: MountConfig,
+    mount_config: Arc<MountConfig>,
     name: ZpoolName,
 }
 
@@ -204,13 +217,13 @@ struct DumpSetupWorker {
 
 pub struct DumpSetup {
     tx: tokio::sync::mpsc::Sender<DumpSetupCmd>,
-    mount_config: MountConfig,
+    mount_config: Arc<MountConfig>,
     _poller: tokio::task::JoinHandle<()>,
     log: Logger,
 }
 
 impl DumpSetup {
-    pub fn new(log: &Logger, mount_config: MountConfig) -> Self {
+    pub fn new(log: &Logger, mount_config: Arc<MountConfig>) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(16);
         let worker = DumpSetupWorker::new(
             Box::new(RealCoreDumpAdm {}),
@@ -231,7 +244,7 @@ impl DumpSetup {
     /// This function returns only once this request has been handled, which
     /// can be used as a signal by callers that any "old disks" are no longer
     /// being used by [DumpSetup].
-    pub(crate) async fn update_dumpdev_setup(
+    pub async fn update_dumpdev_setup(
         &self,
         disks: impl Iterator<Item = &Disk>,
     ) {
@@ -263,7 +276,7 @@ impl DumpSetup {
                         if info.health() == ZpoolHealth::Online {
                             m2_core_datasets.push(CoreZpool {
                                 mount_config: mount_config.clone(),
-                                name: name.clone(),
+                                name: *name,
                             });
                         } else {
                             warn!(
@@ -281,7 +294,7 @@ impl DumpSetup {
                         if info.health() == ZpoolHealth::Online {
                             u2_debug_datasets.push(DebugZpool {
                                 mount_config: mount_config.clone(),
-                                name: name.clone(),
+                                name: *name,
                             });
                         } else {
                             warn!(
@@ -512,13 +525,11 @@ fn safe_to_delete(path: &Utf8Path, meta: &std::fs::Metadata) -> bool {
         return false;
     };
     // Ignore support bundles
-    if file_name == crate::support_bundle::storage::BUNDLE_FILE_NAME {
+    if file_name == BUNDLE_FILE_NAME {
         return false;
     }
     // Ignore support bundle "temp files" as they're being created.
-    if file_name
-        .ends_with(crate::support_bundle::storage::BUNDLE_TMP_FILE_NAME_SUFFIX)
-    {
+    if file_name.ends_with(BUNDLE_TMP_FILE_NAME_SUFFIX) {
         return false;
     }
     return true;
@@ -1273,7 +1284,6 @@ mod tests {
     use sled_storage::dataset::{CRASH_DATASET, DUMP_DATASET};
     use std::collections::HashMap;
     use std::str::FromStr;
-    use tempfile::TempDir;
     use tokio::io::AsyncWriteExt;
 
     impl Clone for ZfsGetError {
@@ -1400,7 +1410,7 @@ mod tests {
 
         // nothing when only a disk that's not ready
         let non_mounted_zpool = CoreZpool {
-            mount_config: MountConfig::default(),
+            mount_config: Arc::default(),
             name: ZpoolName::from_str(NOT_MOUNTED_INTERNAL).unwrap(),
         };
         worker.update_disk_loadout(vec![], vec![], vec![non_mounted_zpool]);
@@ -1419,16 +1429,17 @@ mod tests {
         const MOUNTED_INTERNAL: &str =
             "oxi_474e554e-6174-616c-6965-4e677579656e";
         const ERROR_INTERNAL: &str = "oxi_4861636b-2054-6865-2050-6c616e657421";
+        let mount_config = Arc::new(MountConfig::default());
         let mounted_zpool = CoreZpool {
-            mount_config: MountConfig::default(),
+            mount_config: Arc::clone(&mount_config),
             name: ZpoolName::from_str(MOUNTED_INTERNAL).unwrap(),
         };
         let non_mounted_zpool = CoreZpool {
-            mount_config: MountConfig::default(),
+            mount_config: Arc::clone(&mount_config),
             name: ZpoolName::from_str(NOT_MOUNTED_INTERNAL).unwrap(),
         };
         let err_zpool = CoreZpool {
-            mount_config: MountConfig::default(),
+            mount_config,
             name: ZpoolName::from_str(ERROR_INTERNAL).unwrap(),
         };
         const ZPOOL_MNT: &str = "/path/to/internal/zpool";
@@ -1494,12 +1505,9 @@ mod tests {
 
     // we make these so illumos_utils::dumpadm::dump_flag_is_valid returns what we want
     async fn populate_tempdir_with_fake_dumps(
-        tempdir: &TempDir,
+        tempdir: &Utf8TempDir,
     ) -> (DumpSlicePath, DumpSlicePath) {
-        let occupied = DumpSlicePath(
-            Utf8PathBuf::from_path_buf(tempdir.path().join("occupied.bin"))
-                .unwrap(),
-        );
+        let occupied = DumpSlicePath(tempdir.path().join("occupied.bin"));
         let mut f = tokio::fs::File::create(occupied.as_ref()).await.unwrap();
         f.write_all(&[0u8; DUMP_OFFSET as usize]).await.unwrap();
         f.write_all(&DUMP_MAGIC.to_le_bytes()).await.unwrap();
@@ -1507,10 +1515,7 @@ mod tests {
         f.write_all(&DF_VALID.to_le_bytes()).await.unwrap();
         drop(f);
 
-        let vacant = DumpSlicePath(
-            Utf8PathBuf::from_path_buf(tempdir.path().join("vacant.bin"))
-                .unwrap(),
-        );
+        let vacant = DumpSlicePath(tempdir.path().join("vacant.bin"));
         let mut f = tokio::fs::File::create(vacant.as_ref()).await.unwrap();
         f.write_all(&[0u8; DUMP_OFFSET as usize]).await.unwrap();
         f.write_all(&DUMP_MAGIC.to_le_bytes()).await.unwrap();
@@ -1535,7 +1540,7 @@ mod tests {
             logctx.log.clone(),
             tokio::sync::mpsc::channel(1).1,
         );
-        let tempdir = TempDir::new().unwrap();
+        let tempdir = Utf8TempDir::new().unwrap();
         let (occupied, _) = populate_tempdir_with_fake_dumps(&tempdir).await;
 
         worker.update_disk_loadout(
@@ -1563,7 +1568,7 @@ mod tests {
             logctx.log.clone(),
             tokio::sync::mpsc::channel(1).1,
         );
-        let tempdir = TempDir::new().unwrap();
+        let tempdir = Utf8TempDir::new().unwrap();
         let (occupied, vacant) =
             populate_tempdir_with_fake_dumps(&tempdir).await;
         worker.update_disk_loadout(
@@ -1607,11 +1612,11 @@ mod tests {
             logctx.log.clone(),
             tokio::sync::mpsc::channel(1).1,
         );
-        let tempdir = TempDir::new().unwrap();
+        let tempdir = Utf8TempDir::new().unwrap();
         let (occupied, _) = populate_tempdir_with_fake_dumps(&tempdir).await;
 
         let mounted_zpool = DebugZpool {
-            mount_config: MountConfig::default(),
+            mount_config: Arc::default(),
             name: ZpoolName::from_str(MOUNTED_EXTERNAL).unwrap(),
         };
         worker.update_disk_loadout(
@@ -1635,12 +1640,12 @@ mod tests {
             "test_archives_rotated_logs_and_cores",
         );
 
-        let tempdir = TempDir::new().unwrap();
+        let tempdir = Utf8TempDir::new().unwrap();
         let core_dir = tempdir.path().join(CRASH_DATASET);
         let debug_dir = tempdir.path().join(DUMP_DATASET);
         let zone_logs = tempdir.path().join("root/var/svc/log");
 
-        let tempdir_path = tempdir.path().to_str().unwrap().to_string();
+        let tempdir_path = tempdir.path().as_str().to_string();
         let zone = Zone::from_str(&format!(
             "1:myzone:running:{tempdir_path}::ipkg:shared"
         ))
@@ -1700,12 +1705,13 @@ mod tests {
             .await
             .expect("writing fake core");
 
+        let mount_config = Arc::new(MountConfig::default());
         let mounted_core_zpool = CoreZpool {
-            mount_config: MountConfig::default(),
+            mount_config: Arc::clone(&mount_config),
             name: ZpoolName::from_str(MOUNTED_INTERNAL).unwrap(),
         };
         let mounted_debug_zpool = DebugZpool {
-            mount_config: MountConfig::default(),
+            mount_config,
             name: ZpoolName::from_str(MOUNTED_EXTERNAL).unwrap(),
         };
 
@@ -1720,7 +1726,7 @@ mod tests {
         // it'll be renamed to use an epoch timestamp instead of .0
         let log_glob =
             debug_dir.join(zone.name()).join(LOG_NAME.replace(".0", ".*"));
-        assert_eq!(glob::glob(log_glob.to_str().unwrap()).unwrap().count(), 1);
+        assert_eq!(glob::glob(log_glob.as_str()).unwrap().count(), 1);
         assert!(!zone_logs.join(LOG_NAME).is_file());
         assert!(debug_dir.join(CORE_NAME).is_file());
         assert!(!core_dir.join(CORE_NAME).is_file());
@@ -1819,7 +1825,7 @@ mod tests {
             );
 
             let mounted_debug_zpool = DebugZpool {
-                mount_config: MountConfig::default(),
+                mount_config: Arc::default(),
                 name: ZpoolName::from_str(MOUNTED_EXTERNAL).unwrap(),
             };
 

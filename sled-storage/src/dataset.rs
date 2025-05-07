@@ -502,7 +502,7 @@ async fn ensure_zpool_dataset_is_encrypted(
     }
     info!(log, "Dataset should be encrypted");
 
-    let encrypted_dataset = DatasetName::new(zpool_name.clone(), kind);
+    let encrypted_dataset = DatasetName::new(*zpool_name, kind);
     let encrypted_dataset = encrypted_dataset.full_name();
 
     let (unencrypted_dataset_exists, encrypted_dataset_exists) = (

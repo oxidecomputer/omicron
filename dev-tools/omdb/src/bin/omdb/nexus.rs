@@ -503,7 +503,7 @@ enum SupportBundleCommands {
     GetIndex(SupportBundleIndexArgs),
     /// Download a single file within a support bundle
     GetFile(SupportBundleFileArgs),
-    /// Run a dashboard for viewing the contents of a support bundle
+    /// Creates a dashboard for viewing the contents of a support bundle
     Inspect(SupportBundleInspectArgs),
 }
 

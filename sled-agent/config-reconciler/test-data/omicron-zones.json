@@ -1,0 +1,221 @@
+{
+  "omicron_generation": 5,
+  "ledger_generation": 72,
+  "zones": [
+    {
+      "zone": {
+        "id": "4c3ef132-ec83-4b1b-9574-7c7d3035f9e9",
+        "filesystem_pool": "oxp_b358fb1e-f52a-4a63-9aab-170225509b37",
+        "zone_type": {
+          "type": "cockroach_db",
+          "address": "[fd00:1122:3344:105::3]:32221",
+          "dataset": {
+            "pool_name": "oxp_b358fb1e-f52a-4a63-9aab-170225509b37"
+          }
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/b358fb1e-f52a-4a63-9aab-170225509b37/crypt/zone"
+    },
+    {
+      "zone": {
+        "id": "23dca27d-c79b-4930-a817-392e8aeaa4c1",
+        "filesystem_pool": "oxp_57650e05-36ff-4de8-865f-b9562bdb67f5",
+        "zone_type": {
+          "type": "crucible",
+          "address": "[fd00:1122:3344:105::e]:32345",
+          "dataset": {
+            "pool_name": "oxp_57650e05-36ff-4de8-865f-b9562bdb67f5"
+          }
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/57650e05-36ff-4de8-865f-b9562bdb67f5/crypt/zone"
+    },
+    {
+      "zone": {
+        "id": "3d420dff-c616-4c7d-bab1-0f9c2b5396bf",
+        "filesystem_pool": "oxp_4eb2e4eb-41d8-496c-9a5a-687d7e004aa4",
+        "zone_type": {
+          "type": "crucible",
+          "address": "[fd00:1122:3344:105::a]:32345",
+          "dataset": {
+            "pool_name": "oxp_4eb2e4eb-41d8-496c-9a5a-687d7e004aa4"
+          }
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/4eb2e4eb-41d8-496c-9a5a-687d7e004aa4/crypt/zone"
+    },
+    {
+      "zone": {
+        "id": "912346a2-d7e6-427e-b373-e8dcbe4fcea9",
+        "filesystem_pool": "oxp_b358fb1e-f52a-4a63-9aab-170225509b37",
+        "zone_type": {
+          "type": "crucible",
+          "address": "[fd00:1122:3344:105::5]:32345",
+          "dataset": {
+            "pool_name": "oxp_b358fb1e-f52a-4a63-9aab-170225509b37"
+          }
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/b358fb1e-f52a-4a63-9aab-170225509b37/crypt/zone"
+    },
+    {
+      "zone": {
+        "id": "92d3e4e9-0768-4772-83c1-23cce52190e9",
+        "filesystem_pool": "oxp_eb1234a5-fdf7-4977-94d5-2eef25ce56a1",
+        "zone_type": {
+          "type": "crucible",
+          "address": "[fd00:1122:3344:105::6]:32345",
+          "dataset": {
+            "pool_name": "oxp_eb1234a5-fdf7-4977-94d5-2eef25ce56a1"
+          }
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/eb1234a5-fdf7-4977-94d5-2eef25ce56a1/crypt/zone"
+    },
+    {
+      "zone": {
+        "id": "9470ea7d-1920-4b4b-8fca-e7659a1ef733",
+        "filesystem_pool": "oxp_17eff217-f0b1-4353-b133-0f68bbd5ceaa",
+        "zone_type": {
+          "type": "crucible",
+          "address": "[fd00:1122:3344:105::c]:32345",
+          "dataset": {
+            "pool_name": "oxp_17eff217-f0b1-4353-b133-0f68bbd5ceaa"
+          }
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/17eff217-f0b1-4353-b133-0f68bbd5ceaa/crypt/zone"
+    },
+    {
+      "zone": {
+        "id": "9c5d88c9-8ff1-4f23-9438-7b81322eaf68",
+        "filesystem_pool": "oxp_aadf48eb-6ff0-40b5-a092-1fdd06c03e11",
+        "zone_type": {
+          "type": "crucible",
+          "address": "[fd00:1122:3344:105::b]:32345",
+          "dataset": {
+            "pool_name": "oxp_aadf48eb-6ff0-40b5-a092-1fdd06c03e11"
+          }
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/aadf48eb-6ff0-40b5-a092-1fdd06c03e11/crypt/zone"
+    },
+    {
+      "zone": {
+        "id": "b3e9fee2-24d2-44e7-8539-a6918e85cf2b",
+        "filesystem_pool": "oxp_0ae29053-29a2-489e-a1e6-6aec0ecd05f8",
+        "zone_type": {
+          "type": "crucible",
+          "address": "[fd00:1122:3344:105::d]:32345",
+          "dataset": {
+            "pool_name": "oxp_0ae29053-29a2-489e-a1e6-6aec0ecd05f8"
+          }
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/0ae29053-29a2-489e-a1e6-6aec0ecd05f8/crypt/zone"
+    },
+    {
+      "zone": {
+        "id": "ce8563f3-4a93-45ff-b727-cbfbee6aa413",
+        "filesystem_pool": "oxp_4358f47f-f21e-4cc8-829e-0c7fc2400a59",
+        "zone_type": {
+          "type": "crucible",
+          "address": "[fd00:1122:3344:105::9]:32345",
+          "dataset": {
+            "pool_name": "oxp_4358f47f-f21e-4cc8-829e-0c7fc2400a59"
+          }
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/4358f47f-f21e-4cc8-829e-0c7fc2400a59/crypt/zone"
+    },
+    {
+      "zone": {
+        "id": "f9940969-b0e8-4e8c-86c7-4bc49cd15a5f",
+        "filesystem_pool": "oxp_f8b11629-ced6-412a-9c3f-d169b99ee996",
+        "zone_type": {
+          "type": "crucible",
+          "address": "[fd00:1122:3344:105::7]:32345",
+          "dataset": {
+            "pool_name": "oxp_f8b11629-ced6-412a-9c3f-d169b99ee996"
+          }
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/f8b11629-ced6-412a-9c3f-d169b99ee996/crypt/zone"
+    },
+    {
+      "zone": {
+        "id": "f9c1deca-1898-429e-8c93-254c7aa7bae6",
+        "filesystem_pool": "oxp_d1cb6b7d-2b92-4b7d-8a4d-551987f0277e",
+        "zone_type": {
+          "type": "crucible",
+          "address": "[fd00:1122:3344:105::8]:32345",
+          "dataset": {
+            "pool_name": "oxp_d1cb6b7d-2b92-4b7d-8a4d-551987f0277e"
+          }
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/d1cb6b7d-2b92-4b7d-8a4d-551987f0277e/crypt/zone"
+    },
+    {
+      "zone": {
+        "id": "375296e5-0a23-466c-b605-4204080f8103",
+        "filesystem_pool": "oxp_0ae29053-29a2-489e-a1e6-6aec0ecd05f8",
+        "zone_type": {
+          "type": "crucible_pantry",
+          "address": "[fd00:1122:3344:105::4]:17000"
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/0ae29053-29a2-489e-a1e6-6aec0ecd05f8/crypt/zone"
+    },
+    {
+      "zone": {
+        "id": "76b79b96-eaa2-4341-9aba-e77cfc92e0a9",
+        "filesystem_pool": "oxp_57650e05-36ff-4de8-865f-b9562bdb67f5",
+        "zone_type": {
+          "type": "internal_ntp",
+          "address": "[fd00:1122:3344:105::f]:123"
+        },
+        "image_source": {
+          "type": "install_dataset"
+        }
+      },
+      "root": "/pool/ext/57650e05-36ff-4de8-865f-b9562bdb67f5/crypt/zone"
+    }
+  ]
+}

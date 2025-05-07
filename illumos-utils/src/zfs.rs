@@ -58,9 +58,9 @@ pub enum DestroyDatasetErrorVariant {
 
 /// Error returned by [`Zfs::destroy_dataset`].
 #[derive(thiserror::Error, Debug)]
-#[error("Could not destroy dataset {name}: {err}")]
+#[error("Could not destroy dataset {name}")]
 pub struct DestroyDatasetError {
-    name: String,
+    pub name: String,
     #[source]
     pub err: DestroyDatasetErrorVariant,
 }
@@ -282,7 +282,7 @@ pub struct SizeDetails {
     pub compression: CompressionAlgorithm,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DatasetProperties {
     /// The Uuid of the dataset
     pub id: Option<DatasetUuid>,
