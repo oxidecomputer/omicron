@@ -12692,7 +12692,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebhookSecretId"
+                  "$ref": "#/components/schemas/WebhookSecret"
                 }
               }
             }
@@ -25949,7 +25949,7 @@
           "secrets": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/WebhookSecretId"
+              "$ref": "#/components/schemas/WebhookSecret"
             }
           },
           "subscriptions": {
@@ -26026,6 +26026,26 @@
           }
         }
       },
+      "WebhookSecret": {
+        "description": "A view of a shared secret key assigned to a webhook receiver.\n\nOnce a secret is created, the value of the secret is not available in the API, as it must remain secret. Instead, secrets are referenced by their unique IDs assigned when they are created.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The public unique ID of the secret.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "The UTC timestamp at which this secret was created.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created"
+        ]
+      },
       "WebhookSecretCreate": {
         "type": "object",
         "properties": {
@@ -26038,19 +26058,6 @@
           "secret"
         ]
       },
-      "WebhookSecretId": {
-        "description": "The public ID of a secret key assigned to a webhook.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "id"
-        ]
-      },
       "WebhookSecrets": {
         "description": "A list of the IDs of secrets associated with a webhook.",
         "type": "object",
@@ -26058,7 +26065,7 @@
           "secrets": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/WebhookSecretId"
+              "$ref": "#/components/schemas/WebhookSecret"
             }
           }
         },

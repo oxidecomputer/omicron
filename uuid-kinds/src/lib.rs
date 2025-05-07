@@ -63,7 +63,6 @@ impl_typed_uuid_kind! {
     ExternalIp => "external_ip",
     Instance => "instance",
     LoopbackAddress => "loopback_address",
-    MupdateOverride => "mupdate_override",
     OmicronZone => "service",
     PhysicalDisk => "physical_disk",
     Propolis => "propolis",
