@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use camino::Utf8PathBuf;
@@ -13,9 +13,10 @@ use dropshot::{
     TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronZonesConfig, SledRole,
+    Inventory, OmicronSledConfig, OmicronSledConfigResult, SledRole,
 };
 use omicron_common::{
+    api::external::Generation,
     api::internal::{
         nexus::{DiskRuntimeState, SledVmmState},
         shared::{
@@ -23,11 +24,8 @@ use omicron_common::{
             SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
         },
     },
-    disk::{
-        DatasetsConfig, DatasetsManagementResult, DiskVariant,
-        DisksManagementResult, OmicronPhysicalDisksConfig,
-    },
-    update::ArtifactHash,
+    disk::{DatasetsConfig, DiskVariant, OmicronPhysicalDisksConfig},
+    ledger::Ledgerable,
 };
 use omicron_uuid_kinds::{
     DatasetUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid,
@@ -55,6 +53,7 @@ use sled_agent_types::{
     },
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 // Host OS images are just over 800 MiB currently; set this to 2 GiB to give
@@ -91,16 +90,6 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         params: Path<ZonePathParam>,
     ) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError>;
-
-    /// Ask the sled agent to create a zone bundle.
-    #[endpoint {
-        method = POST,
-        path = "/zones/bundles/{zone_name}",
-    }]
-    async fn zone_bundle_create(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<ZonePathParam>,
-    ) -> Result<HttpResponseCreated<ZoneBundleMetadata>, HttpError>;
 
     /// Fetch the binary content of a single zone bundle.
     #[endpoint {
@@ -266,22 +255,12 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = PUT,
-        path = "/omicron-zones",
+        path = "/omicron-config",
     }]
-    async fn omicron_zones_put(
+    async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<OmicronZonesConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Configures datasets to be used on this sled
-    #[endpoint {
-        method = PUT,
-        path = "/datasets",
-    }]
-    async fn datasets_put(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<DatasetsConfig>,
-    ) -> Result<HttpResponseOk<DatasetsManagementResult>, HttpError>;
+        body: TypedBody<OmicronSledConfig>,
+    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError>;
 
     /// Lists the datasets that this sled is configured to use
     #[endpoint {
@@ -301,15 +280,6 @@ pub trait SledAgentApi {
     ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError>;
 
     #[endpoint {
-        method = PUT,
-        path = "/omicron-physical-disks",
-    }]
-    async fn omicron_physical_disks_put(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<OmicronPhysicalDisksConfig>,
-    ) -> Result<HttpResponseOk<DisksManagementResult>, HttpError>;
-
-    #[endpoint {
         method = GET,
         path = "/zpools",
     }]
@@ -324,15 +294,6 @@ pub trait SledAgentApi {
     async fn sled_role_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledRole>, HttpError>;
-
-    /// Initializes a CockroachDB cluster
-    #[endpoint {
-        method = POST,
-        path = "/cockroachdb",
-    }]
-    async fn cockroachdb_init(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
         method = PUT,
@@ -404,11 +365,28 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = GET,
+        path = "/artifacts-config"
+    }]
+    async fn artifact_config_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ArtifactConfig>, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/artifacts-config"
+    }]
+    async fn artifact_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ArtifactConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = GET,
         path = "/artifacts"
     }]
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<BTreeMap<ArtifactHash, usize>>, HttpError>;
+    ) -> Result<HttpResponseOk<ArtifactListResponse>, HttpError>;
 
     #[endpoint {
         method = POST,
@@ -417,6 +395,7 @@ pub trait SledAgentApi {
     async fn artifact_copy_from_depot(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
+        query_params: Query<ArtifactQueryParam>,
         body: TypedBody<ArtifactCopyFromDepotBody>,
     ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>;
 
@@ -428,17 +407,9 @@ pub trait SledAgentApi {
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
+        query_params: Query<ArtifactQueryParam>,
         body: StreamingBody,
     ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError>;
-
-    #[endpoint {
-        method = DELETE,
-        path = "/artifacts/{sha256}"
-    }]
-    async fn artifact_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<ArtifactPathParam>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Take a snapshot of a disk that is attached to an instance
     #[endpoint {
@@ -656,6 +627,14 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = GET,
+        path = "/support/nvmeadm-info",
+    }]
+    async fn support_nvmeadm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    #[endpoint {
+        method = GET,
         path = "/support/pargs-info",
     }]
     async fn support_pargs_info(
@@ -677,6 +656,43 @@ pub trait SledAgentApi {
     async fn support_pfiles_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/zfs-info",
+    }]
+    async fn support_zfs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/zpool-info",
+    }]
+    async fn support_zpool_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    /// This endpoint returns a list of known zones on a sled that have service
+    /// logs that can be collected into a support bundle.
+    #[endpoint {
+        method = GET,
+        path = "/support/logs/zones",
+    }]
+    async fn support_logs(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
+
+    /// This endpoint returns a zip file of a zone's logs organized by service.
+    #[endpoint {
+        method = GET,
+        path = "/support/logs/download/{zone}",
+    }]
+    async fn support_logs_download(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
+        query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -787,10 +803,39 @@ pub struct SupportBundleMetadata {
     pub state: SupportBundleState,
 }
 
+/// Path parameters for sled-diagnostics log requests used by support bundles
+/// (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+pub struct SledDiagnosticsLogsDownloadPathParm {
+    /// The zone for which one would like to collect logs for
+    pub zone: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SledDiagnosticsLogsDownloadQueryParam {
+    /// The max number of rotated logs to include in the final support bundle
+    pub max_rotated: usize,
+}
+
 /// Path parameters for Disk requests (sled agent API)
 #[derive(Deserialize, JsonSchema)]
 pub struct DiskPathParam {
     pub disk_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct ArtifactConfig {
+    pub generation: Generation,
+    pub artifacts: BTreeSet<ArtifactHash>,
+}
+
+impl Ledgerable for ArtifactConfig {
+    fn is_newer_than(&self, other: &ArtifactConfig) -> bool {
+        self.generation > other.generation
+    }
+
+    // No need to do this, the generation number is provided externally.
+    fn generation_bump(&mut self) {}
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -799,11 +844,22 @@ pub struct ArtifactPathParam {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct ArtifactQueryParam {
+    pub generation: Generation,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ArtifactListResponse {
+    pub generation: Generation,
+    pub list: BTreeMap<ArtifactHash, usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct ArtifactCopyFromDepotBody {
     pub depot_base_url: String,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct ArtifactCopyFromDepotResponse {}
 
 #[derive(Debug, Serialize, JsonSchema)]

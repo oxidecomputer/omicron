@@ -14,6 +14,7 @@ use camino_tempfile::tempfile_in;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::BoxFuture;
+use futures::stream::FuturesUnordered;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
@@ -27,7 +28,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -42,6 +42,8 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
+use tufaceous_artifact::ArtifactHash;
+use zip::ZipArchive;
 use zip::ZipWriter;
 use zip::write::FullFileOptions;
 
@@ -626,6 +628,12 @@ impl BundleCollection<'_> {
                     .boxed(),
                     save_diag_cmd_output_or_error(
                         &sled_path,
+                        "nvmeadm",
+                        sled_client.support_nvmeadm_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
                         "pargs",
                         sled_client.support_pargs_info(),
                     )
@@ -640,6 +648,18 @@ impl BundleCollection<'_> {
                         &sled_path,
                         "pstack",
                         sled_client.support_pstack_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "zfs",
+                        sled_client.support_zfs_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "zpool",
+                        sled_client.support_zpool_info(),
                     )
                     .boxed(),
                 ])
@@ -659,6 +679,30 @@ impl BundleCollection<'_> {
                             "failed to write diagnostic command output to \
                             file: {e}"
                         );
+                    }
+                }
+
+                // For each zone we concurrently fire off a request to its
+                // sled-agent to collect its logs in a zip file and write the
+                // result to the support bundle.
+                let zones = sled_client.support_logs().await?.into_inner();
+                let mut log_futs: FuturesUnordered<_> = zones
+                    .iter()
+                    .map(|zone| {
+                        save_zone_log_zip_or_error(
+                            log,
+                            &sled_client,
+                            zone,
+                            &sled_path,
+                        )
+                    })
+                    .collect();
+
+                while let Some(log_collection_result) = log_futs.next().await {
+                    // We log any errors saving the zip file to disk and
+                    // continue on.
+                    if let Err(e) = log_collection_result {
+                        error!(&self.log, "failed to write logs output: {e}");
                     }
                 }
             }
@@ -772,6 +816,89 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
     Ok(ArtifactHash(digest.as_slice().try_into()?))
 }
 
+/// For a given zone, save its service's logs into the provided destination
+/// path. This path should be the location to a per-sled directory that will end
+/// up in the final support bundle zip file.
+async fn save_zone_log_zip_or_error(
+    logger: &slog::Logger,
+    client: &sled_agent_client::Client,
+    zone: &str,
+    path: &Utf8Path,
+) -> anyhow::Result<()> {
+    // In the future when support bundle collection exposes tuning parameters
+    // this can turn into a collection parameter.
+    const DEFAULT_MAX_ROTATED_LOGS: u32 = 5;
+
+    match client.support_logs_download(zone, DEFAULT_MAX_ROTATED_LOGS).await {
+        Ok(res) => {
+            let bytestream = res.into_inner();
+            let output_dir = path.join(format!("logs/{zone}"));
+            let output_file = output_dir.join("logs.zip");
+
+            // Ensure the logs output directory exists.
+            tokio::fs::create_dir_all(&output_dir).await.with_context(
+                || format!("failed to create output directory: {output_dir}"),
+            )?;
+
+            let mut file =
+                tokio::fs::File::create(&output_file).await.with_context(
+                    || format!("failed to create file: {output_file}"),
+                )?;
+
+            let stream = bytestream.into_inner().map(|chunk| {
+                chunk.map_err(|e| std::io::Error::other(e.to_string()))
+            });
+            let mut reader = tokio_util::io::StreamReader::new(stream);
+            let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
+
+            // Unpack the zip so we don't end up with zip files inside of our
+            // final zip
+            let zipfile = output_file.clone();
+            tokio::task::spawn_blocking(move || {
+                extract_zip_file(&output_dir, &zipfile)
+            })
+            .await
+            .map_err(|join_error| {
+                anyhow::anyhow!(join_error)
+                    .context("unzipping support bundle logs zip panicked")
+            })??;
+
+            // Cleanup the zip file since we no longer need it
+            if let Err(e) = tokio::fs::remove_file(&output_file).await {
+                error!(
+                    logger,
+                    "failed to cleanup temporary logs zip file";
+                    "error" => %e,
+                    "file" => %output_file,
+
+                );
+            }
+        }
+        Err(err) => {
+            tokio::fs::write(
+                path.join(format!("{zone}.logs.err")),
+                err.to_string(),
+            )
+            .await?;
+        }
+    };
+
+    Ok(())
+}
+
+fn extract_zip_file(
+    output_dir: &Utf8Path,
+    zip_file: &Utf8Path,
+) -> Result<(), anyhow::Error> {
+    let mut zip = std::fs::File::open(&zip_file)
+        .with_context(|| format!("failed to open zip file: {zip_file}"))?;
+    let mut archive = ZipArchive::new(&mut zip)?;
+    archive.extract(&output_dir).with_context(|| {
+        format!("failed to extract log zip file to: {output_dir}")
+    })?;
+    Ok(())
+}
+
 /// Run a `sled-dianostics` future and save its output to a corresponding file.
 async fn save_diag_cmd_output_or_error<F, S: serde::Serialize>(
     path: &Utf8Path,
@@ -821,7 +948,7 @@ mod test {
     use nexus_db_model::Zpool;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::external::Generation;
+    use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetName;
@@ -912,7 +1039,12 @@ mod test {
         let zpool = datastore
             .zpool_insert(
                 opctx,
-                Zpool::new(Uuid::new_v4(), sled_id.into_untyped_uuid(), id),
+                Zpool::new(
+                    Uuid::new_v4(),
+                    sled_id.into_untyped_uuid(),
+                    id,
+                    ByteCount::from(0).into(),
+                ),
             )
             .await
             .unwrap();
@@ -1022,8 +1154,17 @@ mod test {
                     )
                 })
                 .collect();
-            let dataset_config =
-                DatasetsConfig { generation: Generation::new(), datasets };
+
+            // Read current sled config generation from zones (this will change
+            // slightly once the simulator knows how to keep the unified config
+            // and be a little less weird)
+            let current_generation =
+                cptestctx.first_sled_agent().omicron_zones_list().generation;
+
+            let dataset_config = DatasetsConfig {
+                generation: current_generation.next(),
+                datasets,
+            };
 
             let res = cptestctx
                 .first_sled_agent()

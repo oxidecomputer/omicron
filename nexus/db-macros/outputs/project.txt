@@ -44,7 +44,7 @@ impl<'a> Project<'a> {
     ) -> LookupResult<(authz::Silo, authz::Project, nexus_db_model::Project)> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
-        let datastore = &lookup.datastore;
+        let datastore = lookup.datastore;
         match &self {
             Project::Error(_, error) => Err(error.clone()),
             Project::Name(parent, &ref name) | Project::OwnedName(parent, ref name) => {
@@ -124,7 +124,7 @@ impl<'a> Project<'a> {
     async fn lookup(&self) -> LookupResult<(authz::Silo, authz::Project)> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
-        let datastore = &lookup.datastore;
+        let datastore = lookup.datastore;
         match &self {
             Project::Error(_, error) => Err(error.clone()),
             Project::Name(parent, &ref name) | Project::OwnedName(parent, ref name) => {
@@ -223,7 +223,7 @@ impl<'a> Project<'a> {
         };
         let resource_silo_id = authz_silo.id();
         if resource_silo_id != actor_silo_id {
-            use crate::authz::ApiResource;
+            use nexus_auth::authz::ApiResource;
             error!(
                 log,
                 "unexpected successful lookup of siloed resource \
@@ -244,7 +244,7 @@ impl<'a> Project<'a> {
     /// used outside this module.  See `fetch_for(authz::Action)`.
     async fn fetch_by_name_for(
         opctx: &OpContext,
-        datastore: &DataStore,
+        datastore: &dyn LookupDataStore,
         authz_silo: &authz::Silo,
         name: &Name,
         action: authz::Action,
@@ -268,11 +268,11 @@ impl<'a> Project<'a> {
     /// `lookup_for(authz::Action)`.
     async fn lookup_by_name_no_authz(
         opctx: &OpContext,
-        datastore: &DataStore,
+        datastore: &dyn LookupDataStore,
         authz_silo: &authz::Silo,
         name: &Name,
     ) -> LookupResult<(authz::Project, nexus_db_model::Project)> {
-        use db::schema::project::dsl;
+        use ::nexus_db_schema::schema::project::dsl;
         dsl::project
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
@@ -307,7 +307,7 @@ impl<'a> Project<'a> {
     /// outside this module.  See `fetch_for(authz::Action)`.
     async fn fetch_by_id_for(
         opctx: &OpContext,
-        datastore: &DataStore,
+        datastore: &dyn LookupDataStore,
         v0: &Uuid,
         action: authz::Action,
     ) -> LookupResult<(authz::Silo, authz::Project, nexus_db_model::Project)> {
@@ -328,10 +328,10 @@ impl<'a> Project<'a> {
     /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
     async fn lookup_by_id_no_authz(
         opctx: &OpContext,
-        datastore: &DataStore,
+        datastore: &dyn LookupDataStore,
         v0: &Uuid,
     ) -> LookupResult<(authz::Silo, authz::Project, nexus_db_model::Project)> {
-        use db::schema::project::dsl;
+        use ::nexus_db_schema::schema::project::dsl;
         let db_row = dsl::project
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(v0.clone()))
@@ -352,7 +352,7 @@ impl<'a> Project<'a> {
         let (authz_silo, _) = Silo::lookup_by_id_no_authz(
                 opctx,
                 datastore,
-                &db_row.silo_id,
+                &db_row.silo_id.into(),
             )
             .await?;
         let authz_project = Self::make_authz(

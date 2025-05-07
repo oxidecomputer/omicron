@@ -7,11 +7,13 @@ use dropshot::test_util::LogContext;
 use futures::future::BoxFuture;
 use nexus_config::NexusConfig;
 use nexus_config::SchemaConfig;
+use nexus_db_lookup::DataStoreConnection;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
 use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
+use nexus_test_utils::sql::AnySqlType;
 use nexus_test_utils::sql::ColumnValue;
 use nexus_test_utils::sql::Row;
 use nexus_test_utils::sql::SqlEnum;
@@ -551,11 +553,8 @@ impl InformationSchema {
             other.statistics,
             "Statistics did not match. This often means that in dbinit.sql, a new \
             column was added into the middle of a table rather than to the end. \
-            If that is the case:\n\n \
-            \
-            * Change dbinit.sql to add the column to the end of the table.\n\
-            * Update nexus/db-model/src/schema.rs and the corresponding \
-            Queryable/Insertable struct with the new column ordering."
+            If that is the case, change dbinit.sql to add the column to the \
+            end of the table.\n"
         );
         similar_asserts::assert_eq!(self.sequences, other.sequences);
         similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
@@ -779,13 +778,9 @@ async fn dbinit_equals_sum_of_all_up() {
     logctx.cleanup_successful();
 }
 
-type Conn = qorb::claim::Handle<
-    async_bb8_diesel::Connection<nexus_db_queries::db::DbConnection>,
->;
-
 struct PoolAndConnection {
     pool: nexus_db_queries::db::Pool,
-    conn: Conn,
+    conn: DataStoreConnection,
 }
 
 impl PoolAndConnection {
@@ -898,6 +893,7 @@ const INSTANCE4: Uuid = Uuid::from_u128(0x44441257_5c3d_4647_83b0_8f3515da7be1);
 
 // "67060115" -> "Prop"olis
 const PROPOLIS: Uuid = Uuid::from_u128(0x11116706_5c3d_4647_83b0_8f3515da7be1);
+const PROPOLIS2: Uuid = Uuid::from_u128(0x22226706_5c3d_4647_83b0_8f3515da7be1);
 
 // "7154"-> "Disk"
 const DISK1: Uuid = Uuid::from_u128(0x11117154_5c3d_4647_83b0_8f3515da7be1);
@@ -1103,7 +1099,6 @@ fn before_70_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             ))
             .await
             .expect("failed to create instances");
-
         ctx.client
             .batch_execute(&format!(
                 "
@@ -1354,7 +1349,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         {
             use async_bb8_diesel::AsyncRunQueryDsl;
             use nexus_db_model::Instance;
-            use nexus_db_model::schema::instance::dsl;
+            use nexus_db_schema::schema::instance::dsl;
             use nexus_types::external_api::params;
             use omicron_common::api::external::IdentityMetadataCreateParams;
             use omicron_uuid_kinds::InstanceUuid;
@@ -1380,6 +1375,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         disks: Vec::new(),
                         start: false,
                         auto_restart_policy: Default::default(),
+                        anti_affinity_groups: Vec::new(),
                     },
                 ))
                 .execute_async(&*pool_and_conn.conn)
@@ -1596,6 +1592,15 @@ fn before_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         let expunged_zone_id: Uuid =
             "00000002-0000-0000-0000-000000000000".parse().unwrap();
 
+        // Fill in a filesystem pool for each zone. This column was NULLable
+        // prior to schema version 132.0.0, but became NOT NULL in that version,
+        // so it's simplest to go ahead and populate it here (otherwise our test
+        // migration to 132 will fail). Operationally, we confirmed via omdb
+        // that all deployed systems had non-NULL filesystem_pool values prior
+        // to upgrading to 132.
+        let filesystem_pool: Uuid =
+            "00000000-0000-0000-0000-0000706f6f6c".parse().unwrap();
+
         for bp_id in [bp1_id, bp2_id] {
             for (zone_id, disposition) in [
                 (in_service_zone_id, "in_service"),
@@ -1611,6 +1616,7 @@ fn before_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                             zone_type,
                             primary_service_ip,
                             primary_service_port,
+                            filesystem_pool,
                             disposition
                         ) VALUES (
                             '{bp_id}',
@@ -1619,6 +1625,7 @@ fn before_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                             'oximeter',
                             '::1',
                             0,
+                            '{filesystem_pool}',
                             '{disposition}'
                         );
                     "
@@ -1742,6 +1749,444 @@ fn after_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn before_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // This VMM will have a sled_resource_vmm record and a VMM record
+        let vmm1_id: Uuid =
+            "00000000-0000-0000-0000-000000000001".parse().unwrap();
+        // This VMM will have a sled_resource_vmm record only
+        let vmm2_id: Uuid =
+            "00000000-0000-0000-0000-000000000002".parse().unwrap();
+
+        let sled_id = Uuid::new_v4();
+        let instance1_id = Uuid::new_v4();
+        let instance2_id = Uuid::new_v4();
+
+        ctx.client
+            .batch_execute(&format!(
+                "
+                    INSERT INTO sled_resource_vmm (
+                        id,
+                        sled_id,
+                        hardware_threads,
+                        rss_ram,
+                        reservoir_ram,
+                        instance_id
+                    ) VALUES
+                    (
+                        '{vmm1_id}', '{sled_id}', 1, 0, 0, '{instance1_id}'
+                    ),
+                    (
+                        '{vmm2_id}', '{sled_id}', 1, 0, 0, '{instance2_id}'
+                    );
+
+                "
+            ))
+            .await
+            .expect("inserted record");
+
+        // Only insert a vmm record for one of these reservations
+        ctx.client
+            .batch_execute(&format!(
+                "
+                INSERT INTO vmm (
+                    id,
+                    time_created,
+                    time_deleted,
+                    instance_id,
+                    time_state_updated,
+                    state_generation,
+                    sled_id,
+                    propolis_ip,
+                    propolis_port,
+                    state
+                ) VALUES (
+                    '{vmm1_id}',
+                    now(),
+                    NULL,
+                    '{instance1_id}',
+                    now(),
+                    1,
+                    '{sled_id}',
+                    'fd00:1122:3344:104::1',
+                    12400,
+                    'running'
+                );
+            "
+            ))
+            .await
+            .expect("inserted record");
+    })
+}
+
+fn after_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // This record should still have a sled_resource_vmm, and be the only
+        // one.
+        let vmm1_id: Uuid =
+            "00000000-0000-0000-0000-000000000001".parse().unwrap();
+
+        let rows = ctx
+            .client
+            .query(
+                r#"
+                SELECT id FROM sled_resource_vmm
+                "#,
+                &[],
+            )
+            .await
+            .expect("loaded sled_resource_vmm rows");
+
+        let records = process_rows(&rows);
+
+        assert_eq!(records.len(), 1, "{records:?}");
+
+        assert_eq!(
+            records[0].values,
+            vec![ColumnValue::new("id", vmm1_id),],
+            "Unexpected sled_resource_vmm record value",
+        );
+    })
+}
+
+fn before_134_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // To test the size_used upgrader, create a few crucible datasets and
+        // regions
+
+        // First, a crucible dataset with no regions
+        let dataset_id: Uuid =
+            "00000001-0000-0000-0000-000000000000".parse().unwrap();
+        let pool_id = Uuid::new_v4();
+        let size_used = 0;
+
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO crucible_dataset VALUES (
+                    '{dataset_id}',
+                    now(),
+                    now(),
+                    null,
+                    1,
+                    '{pool_id}',
+                    '::1',
+                    10000,
+                    {size_used}
+                )"
+            ))
+            .await
+            .expect("inserted");
+
+        // Then, a crucible dataset with 1 region
+        let dataset_id: Uuid =
+            "00000002-0000-0000-0000-000000000000".parse().unwrap();
+
+        let region_id = Uuid::new_v4();
+        let pool_id = Uuid::new_v4();
+        let volume_id = Uuid::new_v4();
+        let block_size = 512;
+        let blocks_per_extent = 64;
+        let extent_count = 1000;
+
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO region VALUES (
+                    '{region_id}',
+                    now(),
+                    now(),
+                    '{dataset_id}',
+                    '{volume_id}',
+                    {block_size},
+                    {blocks_per_extent},
+                    {extent_count},
+                    5000,
+                    false,
+                    false
+                )"
+            ))
+            .await
+            .expect("inserted");
+
+        let size_used = block_size * blocks_per_extent * extent_count;
+
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO crucible_dataset VALUES (
+                    '{dataset_id}',
+                    now(),
+                    now(),
+                    null,
+                    1,
+                    '{pool_id}',
+                    '::1',
+                    10000,
+                    {size_used}
+                )"
+            ))
+            .await
+            .expect("inserted");
+
+        // Finally, a crucible dataset with 3 regions
+        let dataset_id: Uuid =
+            "00000003-0000-0000-0000-000000000000".parse().unwrap();
+        let pool_id = Uuid::new_v4();
+
+        let block_size = 512;
+        let blocks_per_extent = 64;
+        let extent_count = 7000;
+
+        for _ in 0..3 {
+            let region_id = Uuid::new_v4();
+            let volume_id = Uuid::new_v4();
+
+            ctx.client
+                .batch_execute(&format!(
+                    "INSERT INTO region VALUES (
+                        '{region_id}',
+                        now(),
+                        now(),
+                        '{dataset_id}',
+                        '{volume_id}',
+                        {block_size},
+                        {blocks_per_extent},
+                        {extent_count},
+                        5000,
+                        false,
+                        false
+                    )"
+                ))
+                .await
+                .expect("inserted");
+        }
+
+        let size_used = 3 * block_size * blocks_per_extent * extent_count;
+
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO crucible_dataset VALUES (
+                    '{dataset_id}',
+                    now(),
+                    now(),
+                    null,
+                    1,
+                    '{pool_id}',
+                    '::1',
+                    10000,
+                    {size_used}
+                )"
+            ))
+            .await
+            .expect("inserted");
+    })
+}
+
+fn after_134_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // The first crucible dataset still has size_used = 0
+        let rows = ctx
+            .client
+            .query(
+                "SELECT size_used FROM crucible_dataset WHERE
+                id = '00000001-0000-0000-0000-000000000000'",
+                &[],
+            )
+            .await
+            .expect("select");
+
+        let records = process_rows(&rows);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].values,
+            vec![ColumnValue::new("size_used", 0i64)],
+        );
+
+        // Note: the default crucible reservation factor is 1.25
+
+        // The second crucible dataset has
+        //  size_used = 1.25 * (512 * 64 * 1000)
+        let rows = ctx
+            .client
+            .query(
+                "SELECT size_used FROM crucible_dataset WHERE
+                id = '00000002-0000-0000-0000-000000000000'",
+                &[],
+            )
+            .await
+            .expect("select");
+
+        let records = process_rows(&rows);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].values,
+            vec![ColumnValue::new("size_used", 40960000i64)],
+        );
+
+        // The third crucible dataset has
+        //  size_used = 1.25 * (3 * 512 * 64 * 7000)
+        let rows = ctx
+            .client
+            .query(
+                "SELECT size_used FROM crucible_dataset WHERE
+                id = '00000003-0000-0000-0000-000000000000'",
+                &[],
+            )
+            .await
+            .expect("select");
+
+        let records = process_rows(&rows);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].values,
+            vec![ColumnValue::new("size_used", 860160000i64)],
+        );
+    })
+}
+
+fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        let probe_event_id: Uuid =
+            "001de000-7768-4000-8000-000000000001".parse().unwrap();
+        let rows = ctx
+            .client
+            .query(
+                // Don't select timestamps, as those are variable, and we don't
+                // want to assert that they always have a particular value.
+                // However, we *do* need to ensure that `time_dispatched` is
+                // set, so that the event is not eligible for dispatching ---
+                // include a WHERE clause ensuring it is not null.
+                r#"
+                SELECT
+                    id,
+                    event_class,
+                    event,
+                    num_dispatched
+                FROM webhook_event
+                WHERE time_dispatched IS NOT NULL
+                "#,
+                &[],
+            )
+            .await
+            .expect("loaded bp_omicron_zone rows");
+
+        let records = process_rows(&rows);
+
+        assert_eq!(
+            records.len(),
+            1,
+            "there should be exactly one singleton event in the webhook_event \
+             table"
+        );
+
+        assert_eq!(
+            records[0].values,
+            vec![
+                ColumnValue::new("id", probe_event_id),
+                ColumnValue::new(
+                    "event_class",
+                    SqlEnum::from(("webhook_event_class", "probe")),
+                ),
+                ColumnValue::new("event", serde_json::json!({})),
+                ColumnValue::new("num_dispatched", 0i64),
+            ],
+            "singleton liveness probe webhook event record must have the \
+             correct values",
+        );
+    })
+}
+
+fn before_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // We'll mostly reuse the instances from previous migration tests, but
+        // give instance 4 a VMM in the `Stopped` state.
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO vmm (
+                    id,
+                    time_created,
+                    time_deleted,
+                    instance_id,
+                    time_state_updated,
+                    state_generation,
+                    sled_id,
+                    propolis_ip,
+                    propolis_port,
+                    state
+                ) VALUES (
+                    '{PROPOLIS2}',
+                    now(),
+                    NULL,
+                    '{INSTANCE4}',
+                    now(),
+                    1,
+                    '{SLED2}',
+                    'fd00:1122:3344:104::1',
+                    12400,
+                    'stopped'
+                );"
+            ))
+            .await
+            .expect("inserted VMM record");
+        ctx.client
+            .batch_execute(&format!(
+                "UPDATE instance
+                SET
+                    state = 'vmm',
+                    active_propolis_id = '{PROPOLIS2}'
+                WHERE id = '{INSTANCE4}';"
+            ))
+            .await
+            .expect("updated instance4 record");
+    })
+}
+
+fn after_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        let rows = ctx
+            .client
+            .query("SELECT id, intended_state FROM instance ORDER BY id", &[])
+            .await
+            .expect("failed to load instance auto-restart policies");
+        let records = process_rows(&rows);
+        let instances = records.into_iter().map(|row| {
+            slog::info!(&ctx.log, "instance record: {row:?}");
+            let [id_value, state_value] = &row.values[..] else {
+                panic!("row did not have two columns! {row:?}");
+            };
+            let Some(&AnySqlType::Uuid(id)) = id_value.expect("id") else {
+                panic!("id column must be non-null UUID, but found: {id_value:?}")
+            };
+            let AnySqlType::Enum(intended_state) = state_value
+                .expect("intended_state")
+                .expect("intended state must not be null")
+            else {
+                panic!("intended_state column must be an enum, but found: {state_value:?}");
+            };
+            (id, intended_state.clone())
+        }).collect::<std::collections::HashMap<_, _>>();
+
+        assert_eq!(
+            instances.get(&INSTANCE1),
+            Some(&SqlEnum::from(("instance_intended_state", "stopped"))),
+            "instance 1 ({INSTANCE1}): state='no_vmm'"
+        );
+        assert_eq!(
+            instances.get(&INSTANCE2),
+            Some(&SqlEnum::from(("instance_intended_state", "running"))),
+            "instance 2 ({INSTANCE2}): state='vmm', active_vmm='running'"
+        );
+        assert_eq!(
+            instances.get(&INSTANCE3),
+            Some(&SqlEnum::from(("instance_intended_state", "running"))),
+            "instance 3 ({INSTANCE3}): state='failed'"
+        );
+        assert_eq!(
+            instances.get(&INSTANCE4),
+            Some(&SqlEnum::from(("instance_intended_state", "stopped"))),
+            "instance 4 ({INSTANCE4}): state='vmm',active_vmm='stopped'"
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -1789,6 +2234,22 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(125, 0, 0),
         DataMigrationFns::new().before(before_125_0_0).after(after_125_0_0),
+    );
+    map.insert(
+        Version::new(133, 0, 0),
+        DataMigrationFns::new().before(before_133_0_0).after(after_133_0_0),
+    );
+    map.insert(
+        Version::new(134, 0, 0),
+        DataMigrationFns::new().before(before_134_0_0).after(after_134_0_0),
+    );
+    map.insert(
+        Version::new(139, 0, 0),
+        DataMigrationFns::new().after(after_139_0_0),
+    );
+    map.insert(
+        Version::new(140, 0, 0),
+        DataMigrationFns::new().before(before_140_0_0).after(after_140_0_0),
     );
 
     map

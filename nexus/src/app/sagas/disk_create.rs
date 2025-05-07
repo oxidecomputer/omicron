@@ -12,8 +12,8 @@ use super::{
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::identity::{Asset, Resource};
-use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeUuid;
@@ -154,7 +154,7 @@ async fn sdc_create_disk_record(
             }
             params::DiskSource::Snapshot { snapshot_id } => {
                 let (.., db_snapshot) =
-                    LookupPath::new(&opctx, &osagactx.datastore())
+                    LookupPath::new(&opctx, osagactx.datastore())
                         .snapshot_id(*snapshot_id)
                         .fetch()
                         .await
@@ -167,16 +167,15 @@ async fn sdc_create_disk_record(
                 db_snapshot.block_size
             }
             params::DiskSource::Image { image_id } => {
-                let (.., image) =
-                    LookupPath::new(&opctx, &osagactx.datastore())
-                        .image_id(*image_id)
-                        .fetch()
-                        .await
-                        .map_err(|e| {
-                            ActionError::action_failed(Error::internal_error(
-                                &e.to_string(),
-                            ))
-                        })?;
+                let (.., image) = LookupPath::new(&opctx, osagactx.datastore())
+                    .image_id(*image_id)
+                    .fetch()
+                    .await
+                    .map_err(|e| {
+                        ActionError::action_failed(Error::internal_error(
+                            &e.to_string(),
+                        ))
+                    })?;
 
                 image.block_size
             }
@@ -201,7 +200,7 @@ async fn sdc_create_disk_record(
         ActionError::action_failed(Error::invalid_request(&e.to_string()))
     })?;
 
-    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_project) = LookupPath::new(&opctx, osagactx.datastore())
         .project_id(params.project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -380,7 +379,7 @@ async fn sdc_regions_ensure(
                 debug!(log, "grabbing snapshot {}", snapshot_id);
 
                 let (.., db_snapshot) =
-                    LookupPath::new(&opctx, &osagactx.datastore())
+                    LookupPath::new(&opctx, osagactx.datastore())
                         .snapshot_id(*snapshot_id)
                         .fetch()
                         .await
@@ -423,12 +422,11 @@ async fn sdc_regions_ensure(
             params::DiskSource::Image { image_id } => {
                 debug!(log, "grabbing image {}", image_id);
 
-                let (.., image) =
-                    LookupPath::new(&opctx, &osagactx.datastore())
-                        .image_id(*image_id)
-                        .fetch()
-                        .await
-                        .map_err(ActionError::action_failed)?;
+                let (.., image) = LookupPath::new(&opctx, osagactx.datastore())
+                    .image_id(*image_id)
+                    .fetch()
+                    .await
+                    .map_err(ActionError::action_failed)?;
 
                 debug!(log, "retrieved project image {}", image.id());
 
@@ -575,7 +573,7 @@ async fn sdc_regions_ensure_undo(
             );
 
             let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-            let (.., authz_disk, db_disk) = LookupPath::new(&opctx, &datastore)
+            let (.., authz_disk, db_disk) = LookupPath::new(&opctx, datastore)
                 .disk_id(disk_id)
                 .fetch_for(authz::Action::Modify)
                 .await
@@ -647,7 +645,7 @@ async fn sdc_finalize_disk_record(
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
-    let (.., authz_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .lookup_for(authz::Action::Modify)
         .await
@@ -713,7 +711,7 @@ async fn sdc_get_pantry_address(
         "using pantry at {} for importing to disk {}", pantry_address, disk_id
     );
 
-    let (.., authz_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .lookup_for(authz::Action::Modify)
         .await
@@ -902,7 +900,7 @@ pub(crate) mod test {
 
     async fn no_disk_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Disk;
-        use nexus_db_queries::db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
 
         dsl::disk
             .filter(dsl::time_deleted.is_null())
@@ -918,7 +916,7 @@ pub(crate) mod test {
 
     async fn no_volume_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Volume;
-        use nexus_db_queries::db::schema::volume::dsl;
+        use nexus_db_schema::schema::volume::dsl;
 
         dsl::volume
             .filter(dsl::time_deleted.is_null())
@@ -935,7 +933,7 @@ pub(crate) mod test {
     async fn no_volume_resource_usage_records_exist(
         datastore: &DataStore,
     ) -> bool {
-        use nexus_db_queries::db::schema::volume_resource_usage::dsl;
+        use nexus_db_schema::schema::volume_resource_usage::dsl;
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
@@ -964,7 +962,7 @@ pub(crate) mod test {
         datastore: &DataStore,
     ) -> bool {
         use nexus_db_queries::db::model::VirtualProvisioningResource;
-        use nexus_db_queries::db::schema::virtual_provisioning_resource::dsl;
+        use nexus_db_schema::schema::virtual_provisioning_resource::dsl;
 
         dsl::virtual_provisioning_resource
             .select(VirtualProvisioningResource::as_select())
@@ -981,7 +979,7 @@ pub(crate) mod test {
         datastore: &DataStore,
     ) -> bool {
         use nexus_db_queries::db::model::VirtualProvisioningCollection;
-        use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
+        use nexus_db_schema::schema::virtual_provisioning_collection::dsl;
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
@@ -1012,15 +1010,11 @@ pub(crate) mod test {
         test: &DiskTest<'_>,
     ) -> bool {
         for zpool in test.zpools() {
-            for dataset in &zpool.datasets {
-                if datastore
-                    .regions_total_occupied_size(dataset.id)
-                    .await
-                    .unwrap()
-                    != 0
-                {
-                    return false;
-                }
+            let dataset = zpool.crucible_dataset();
+            if datastore.regions_total_reserved_size(dataset.id).await.unwrap()
+                != 0
+            {
+                return false;
             }
         }
         true
@@ -1028,12 +1022,11 @@ pub(crate) mod test {
 
     fn no_regions_ensured(sled_agent: &SledAgent, test: &DiskTest<'_>) -> bool {
         for zpool in test.zpools() {
-            for dataset in &zpool.datasets {
-                let crucible_dataset =
-                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
-                if !crucible_dataset.is_empty() {
-                    return false;
-                }
+            let dataset = zpool.crucible_dataset();
+            let crucible_dataset =
+                sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+            if !crucible_dataset.is_empty() {
+                return false;
             }
         }
         true

@@ -79,7 +79,14 @@ async fn test_omdb_usage_errors() {
         &["db", "dns"],
         &["db", "dns", "diff"],
         &["db", "dns", "names"],
+        &["db", "inventory", "--help"],
+        &["db", "inventory", "collections", "--help"],
+        &["db", "inventory", "collections", "show"],
+        &["db", "inventory", "collections", "show", "--help"],
+        &["db", "inventory", "collections", "show", "all", "--help"],
+        &["db", "inventory", "collections", "show", "sp", "--help"],
         &["db", "sleds", "--help"],
+        &["db", "saga"],
         &["db", "snapshots"],
         &["db", "network"],
         &["mgs"],
@@ -227,6 +234,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     // execution. These redactions work around the issue described in
     // https://github.com/oxidecomputer/omicron/issues/7417.
     redactor
+        .field("put config ok:", r"\d+")
         .field("list ok:", r"\d+")
         .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
 

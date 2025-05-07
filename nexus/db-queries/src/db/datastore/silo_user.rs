@@ -8,10 +8,7 @@ use super::DataStore;
 use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::datastore::IdentityMetadataCreateParams;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::Name;
 use crate::db::model::Silo;
 use crate::db::model::SiloUser;
@@ -24,6 +21,8 @@ use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_types::external_api::params;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -49,7 +48,7 @@ impl DataStore {
         silo_user: SiloUser,
     ) -> CreateResult<(authz::SiloUser, SiloUser)> {
         // TODO-security This needs an authz check.
-        use db::schema::silo_user::dsl;
+        use nexus_db_schema::schema::silo_user::dsl;
 
         let silo_user_external_id = silo_user.external_id.clone();
         let conn = self.pool_connection_unauthorized().await?;
@@ -97,7 +96,7 @@ impl DataStore {
             .transaction(&conn, |conn| async move {
                 // Delete the user record.
                 {
-                    use db::schema::silo_user::dsl;
+                    use nexus_db_schema::schema::silo_user::dsl;
                     diesel::update(dsl::silo_user)
                         .filter(dsl::id.eq(authz_silo_user_id))
                         .filter(dsl::time_deleted.is_null())
@@ -109,7 +108,7 @@ impl DataStore {
 
                 // Delete console sessions.
                 {
-                    use db::schema::console_session::dsl;
+                    use nexus_db_schema::schema::console_session::dsl;
                     diesel::delete(dsl::console_session)
                         .filter(dsl::silo_user_id.eq(authz_silo_user_id))
                         .execute_async(&conn)
@@ -118,7 +117,7 @@ impl DataStore {
 
                 // Delete device authentication tokens.
                 {
-                    use db::schema::device_access_token::dsl;
+                    use nexus_db_schema::schema::device_access_token::dsl;
                     diesel::delete(dsl::device_access_token)
                         .filter(dsl::silo_user_id.eq(authz_silo_user_id))
                         .execute_async(&conn)
@@ -127,7 +126,7 @@ impl DataStore {
 
                 // Delete group memberships.
                 {
-                    use db::schema::silo_group_membership::dsl;
+                    use nexus_db_schema::schema::silo_group_membership::dsl;
                     diesel::delete(dsl::silo_group_membership)
                         .filter(dsl::silo_user_id.eq(authz_silo_user_id))
                         .execute_async(&conn)
@@ -136,7 +135,7 @@ impl DataStore {
 
                 // Delete ssh keys.
                 {
-                    use db::schema::ssh_key::dsl;
+                    use nexus_db_schema::schema::ssh_key::dsl;
                     diesel::update(dsl::ssh_key)
                         .filter(dsl::silo_user_id.eq(authz_silo_user_id))
                         .filter(dsl::time_deleted.is_null())
@@ -170,7 +169,7 @@ impl DataStore {
     ) -> Result<Option<(authz::SiloUser, SiloUser)>, Error> {
         opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
 
-        use db::schema::silo_user::dsl;
+        use nexus_db_schema::schema::silo_user::dsl;
 
         Ok(dsl::silo_user
             .filter(dsl::silo_id.eq(authz_silo.id()))
@@ -199,7 +198,7 @@ impl DataStore {
         authz_silo_user_list: &authz::SiloUserList,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloUser> {
-        use db::schema::silo_user::dsl::*;
+        use nexus_db_schema::schema::silo_user::dsl::*;
 
         opctx
             .authorize(authz::Action::ListChildren, authz_silo_user_list)
@@ -224,8 +223,8 @@ impl DataStore {
         // TODO: this should be an authz::SiloGroup probably
         authz_silo_group: &authz::SiloGroup,
     ) -> ListResultVec<SiloUser> {
-        use db::schema::silo_group_membership as user_to_group;
-        use db::schema::silo_user as user;
+        use nexus_db_schema::schema::silo_group_membership as user_to_group;
+        use nexus_db_schema::schema::silo_user as user;
 
         opctx
             .authorize(authz::Action::ListChildren, authz_silo_user_list)
@@ -276,7 +275,7 @@ impl DataStore {
         // The caller is supposed to have verified this already.
         bail_unless!(db_silo.user_provision_type == UserProvisionType::ApiOnly);
 
-        use db::schema::silo_user_password_hash::dsl;
+        use nexus_db_schema::schema::silo_user_password_hash::dsl;
 
         if let Some(db_silo_user_password_hash) = db_silo_user_password_hash {
             let hash_for_update = db_silo_user_password_hash.hash.clone();
@@ -323,7 +322,7 @@ impl DataStore {
         // worth the effort right now.)
         opctx.authorize(authz::Action::Modify, authz_silo_user).await?;
 
-        use db::schema::silo_user_password_hash::dsl;
+        use nexus_db_schema::schema::silo_user_password_hash::dsl;
         Ok(dsl::silo_user_password_hash
             .filter(dsl::silo_user_id.eq(authz_silo_user.id()))
             .select(SiloUserPasswordHash::as_select())
@@ -340,7 +339,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Name>,
     ) -> ListResultVec<UserBuiltin> {
-        use db::schema::user_builtin::dsl;
+        use nexus_db_schema::schema::user_builtin::dsl;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         paginated(dsl::user_builtin, dsl::name, pagparams)
             .select(UserBuiltin::as_select())
@@ -356,7 +355,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use db::schema::user_builtin::dsl;
+        use nexus_db_schema::schema::user_builtin::dsl;
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
@@ -401,7 +400,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use db::schema::silo_user::dsl;
+        use nexus_db_schema::schema::silo_user::dsl;
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
@@ -426,7 +425,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        use db::schema::role_assignment::dsl;
+        use nexus_db_schema::schema::role_assignment::dsl;
         debug!(opctx.log, "attempting to create silo user role assignments");
         let count = diesel::insert_into(dsl::role_assignment)
             .values(

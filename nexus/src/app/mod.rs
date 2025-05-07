@@ -15,6 +15,7 @@ use crate::populate::populate_start;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns_types::names::ServiceName;
+use nexus_background_task_interface::BackgroundTasks;
 use nexus_config::NexusConfig;
 use nexus_config::RegionAllocationStrategy;
 use nexus_config::Tunables;
@@ -24,9 +25,13 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_mgs_updates::ArtifactCache;
+use nexus_mgs_updates::MgsUpdateDriver;
+use nexus_types::deployment::PendingMgsUpdates;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -40,6 +45,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use update_common::artifacts::ArtifactsWithPlan;
 use uuid::Uuid;
 
@@ -63,6 +69,7 @@ mod iam;
 mod image;
 mod instance;
 mod instance_network;
+mod instance_platform;
 mod internet_gateway;
 mod ip_pool;
 mod lldp;
@@ -92,6 +99,7 @@ mod volume;
 mod vpc;
 mod vpc_router;
 mod vpc_subnet;
+mod webhook;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
@@ -102,6 +110,8 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
+use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
+use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use sagas::demo::CompletingDemoSagas;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
@@ -124,6 +134,14 @@ pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
 
 /// This value is aribtrary
 pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
+
+/// The amount of disk space to reserve for non-Crucible / control plane
+/// storage. This amount represents a buffer that the region allocation query
+/// will not use for each U2.
+///
+/// See oxidecomputer/omicron#7875 for the 250G determination.
+pub const CONTROL_PLANE_STORAGE_BUFFER: ByteCount =
+    ByteCount::from_gibibytes_u32(250);
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
@@ -156,7 +174,7 @@ pub struct Nexus {
     internal_server: std::sync::Mutex<Option<DropshotServer>>,
 
     /// Status of background task to populate database
-    populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
+    populate_status: watch::Receiver<PopulateStatus>,
 
     /// The metric producer server from which oximeter collects metric data.
     producer_server: std::sync::Mutex<Option<ProducerServer>>,
@@ -170,6 +188,13 @@ pub struct Nexus {
 
     /// Client to the timeseries database.
     timeseries_client: oximeter_db::Client,
+
+    /// `reqwest` client used for webhook delivery requests.
+    ///
+    /// This lives on the Nexus struct as we would like to use the same client
+    /// pool for the webhook deliverator background task and the webhook probe
+    /// API.
+    webhook_delivery_client: reqwest::Client,
 
     /// Contents of the trusted root role for the TUF repository.
     #[allow(dead_code)]
@@ -211,7 +236,10 @@ pub struct Nexus {
     background_tasks_driver: OnceLock<background::Driver>,
 
     /// Handles to various specific tasks
-    background_tasks: background::BackgroundTasks,
+    background_tasks: BackgroundTasks,
+
+    /// Internal state related to background tasks
+    background_tasks_internal: background::BackgroundTasksInternal,
 
     /// Default Crucible region allocation strategy
     default_region_allocation_strategy: RegionAllocationStrategy,
@@ -222,6 +250,9 @@ pub struct Nexus {
     /// Sender for TUF repository artifacts temporarily stored in this zone to
     /// be replicated out to sleds in the background
     tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
+
+    /// reports status of pending MGS-managed updates
+    mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
 }
 
 impl Nexus {
@@ -311,114 +342,6 @@ impl Nexus {
         let (tuf_artifact_replication_tx, tuf_artifact_replication_rx) =
             mpsc::channel(16);
 
-        let client_state = dpd_client::ClientState {
-            tag: String::from("nexus"),
-            log: log.new(o!(
-                "component" => "DpdClient"
-            )),
-        };
-
-        let mut dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>> =
-            HashMap::new();
-
-        let mut mg_clients: HashMap<
-            SwitchLocation,
-            Arc<mg_admin_client::Client>,
-        > = HashMap::new();
-
-        // Currently static dpd configuration mappings are still required for
-        // testing
-        for (location, config) in &config.pkg.dendrite {
-            let address = config.address.ip().to_string();
-            let port = config.address.port();
-            let dpd_client = dpd_client::Client::new(
-                &format!("http://[{address}]:{port}"),
-                client_state.clone(),
-            );
-            dpd_clients.insert(*location, Arc::new(dpd_client));
-        }
-        for (location, config) in &config.pkg.mgd {
-            let mg_client = mg_admin_client::Client::new(
-                &format!("http://{}", config.address),
-                log.clone(),
-            );
-            mg_clients.insert(*location, Arc::new(mg_client));
-        }
-        if config.pkg.dendrite.is_empty() {
-            loop {
-                let result = resolver
-                    .lookup_all_ipv6(ServiceName::Dendrite)
-                    .await
-                    .map_err(|e| {
-                        format!("Cannot lookup Dendrite addresses: {e}")
-                    });
-                match result {
-                    Ok(addrs) => {
-                        let mappings = map_switch_zone_addrs(
-                            &log.new(o!("component" => "Nexus")),
-                            addrs,
-                        )
-                        .await;
-                        for (location, addr) in &mappings {
-                            let port = DENDRITE_PORT;
-                            let dpd_client = dpd_client::Client::new(
-                                &format!("http://[{addr}]:{port}"),
-                                client_state.clone(),
-                            );
-                            dpd_clients.insert(*location, Arc::new(dpd_client));
-                        }
-                        break;
-                    }
-                    Err(e) => {
-                        warn!(log, "Failed to lookup Dendrite address: {e}");
-                        tokio::time::sleep(std::time::Duration::from_secs(1))
-                            .await;
-                    }
-                }
-            }
-        }
-        if config.pkg.mgd.is_empty() {
-            loop {
-                let result = resolver
-                    // TODO this should be ServiceName::Mgd, but in the upgrade
-                    //      path, that does not exist because RSS has not
-                    //      created it. So we just piggyback on Dendrite's SRV
-                    //      record.
-                    .lookup_all_ipv6(ServiceName::Dendrite)
-                    .await
-                    .map_err(|e| format!("Cannot lookup mgd addresses: {e}"));
-                match result {
-                    Ok(addrs) => {
-                        let mappings = map_switch_zone_addrs(
-                            &log.new(o!("component" => "Nexus")),
-                            addrs,
-                        )
-                        .await;
-                        for (location, addr) in &mappings {
-                            let port = MGD_PORT;
-                            let mgd_client = mg_admin_client::Client::new(
-                                &format!(
-                                    "http://{}",
-                                    &std::net::SocketAddr::new(
-                                        (*addr).into(),
-                                        port,
-                                    )
-                                ),
-                                log.clone(),
-                            );
-                            mg_clients.insert(*location, Arc::new(mgd_client));
-                        }
-                        break;
-                    }
-                    Err(e) => {
-                        warn!(log, "Failed to lookup mgd address: {e}");
-                        tokio::time::sleep(std::time::Duration::from_secs(1))
-                            .await;
-                    }
-                }
-            }
-        }
-
         let reqwest_client = reqwest::ClientBuilder::new()
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(15))
@@ -429,7 +352,7 @@ impl Nexus {
         let timeseries_client = match &config.pkg.timeseries_db.address {
             None => {
                 let native_resolver =
-                    qorb_resolver.for_service(ServiceName::ClickhouseNative);
+                    qorb_resolver.for_service(ServiceName::OximeterReader);
                 oximeter_db::Client::new_with_resolver(native_resolver, &log)
             }
             Some(address) => oximeter_db::Client::new(*address, &log),
@@ -458,8 +381,11 @@ impl Nexus {
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
-        let (background_tasks_initializer, background_tasks) =
-            background::BackgroundTasksInitializer::new();
+        let (
+            background_tasks_initializer,
+            background_tasks,
+            background_tasks_internal,
+        ) = background::BackgroundTasksInitializer::new();
 
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
@@ -469,6 +395,39 @@ impl Nexus {
                 &config.deployment.external_dns_servers,
             ))
         };
+
+        let webhook_delivery_client = {
+            // The webhook delivery HTTP client will send requests to endpoints
+            // external to the rack, so apply the configuration for external
+            // HTTP clients.
+            let builder = external_http_client_builder(
+                &config.deployment.external_http_clients,
+                &external_resolver,
+            );
+            webhook::delivery_client(builder).map_err(|e| {
+                format!("failed to build webhook delivery client: {e}")
+            })?
+        };
+
+        let mut mgs_resolver =
+            qorb_resolver.for_service(ServiceName::ManagementGatewayService);
+        let mut repo_depot_resolver =
+            qorb_resolver.for_service(ServiceName::RepoDepot);
+        let (mgs_updates_tx, mgs_updates_rx) =
+            watch::channel(PendingMgsUpdates::new());
+        let artifact_cache = Arc::new(ArtifactCache::new(
+            log.new(o!("component" => "ArtifactCache")),
+            repo_depot_resolver.monitor(),
+        ));
+        let mgs_update_driver = MgsUpdateDriver::new(
+            log.new(o!("component" => "MgsUpdateDriver")),
+            artifact_cache,
+            mgs_updates_rx,
+            mgs_resolver.monitor(),
+            DEFAULT_RETRY_TIMEOUT,
+        );
+        let mgs_update_status_rx = mgs_update_driver.status_rx();
+        let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
         let nexus = Nexus {
             id: config.deployment.id,
@@ -484,6 +443,7 @@ impl Nexus {
             populate_status,
             reqwest_client,
             timeseries_client,
+            webhook_delivery_client,
             updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
             opctx_alloc: OpContext::for_background(
@@ -510,6 +470,7 @@ impl Nexus {
                 .clone(),
             background_tasks_driver: OnceLock::new(),
             background_tasks,
+            background_tasks_internal,
             default_region_allocation_strategy: config
                 .pkg
                 .default_region_allocation_strategy
@@ -518,6 +479,7 @@ impl Nexus {
                 CompletingDemoSagas::new(),
             )),
             tuf_artifact_replication_tx,
+            mgs_update_status_rx,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -564,6 +526,9 @@ impl Nexus {
                     resolver,
                     saga_starter: task_nexus.sagas.clone(),
                     producer_registry: task_registry,
+                    webhook_delivery_client: task_nexus
+                        .webhook_delivery_client
+                        .clone(),
 
                     saga_recovery: SagaRecoveryHelpers {
                         recovery_opctx: saga_recovery_opctx,
@@ -573,6 +538,7 @@ impl Nexus {
                         sagas_started_rx: saga_recovery_rx,
                     },
                     tuf_artifact_replication_rx,
+                    mgs_updates_tx,
                 },
             );
 
@@ -627,7 +593,7 @@ impl Nexus {
         // Wait for the background task to complete at least once.  We don't
         // care about its value.  To do this, we need our own copy of the
         // channel.
-        let mut rx = self.background_tasks.external_endpoints.clone();
+        let mut rx = self.background_tasks_internal.external_endpoints.clone();
         let _ = rx.wait_for(|s| s.is_some()).await;
         if !tls_enabled {
             return None;
@@ -637,7 +603,7 @@ impl Nexus {
             .with_no_client_auth()
             .with_cert_resolver(Arc::new(NexusCertResolver::new(
                 self.log.new(o!("component" => "NexusCertResolver")),
-                self.background_tasks.external_endpoints.clone(),
+                self.background_tasks_internal.external_endpoints.clone(),
             )));
         rustls_cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Some(rustls_cfg)
@@ -886,9 +852,9 @@ impl Nexus {
     /// underneath Organizations:
     ///
     /// ```
+    /// use nexus_db_lookup::LookupPath;
     /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
-    /// use nexus_db_queries::db::lookup::LookupPath;
     /// use nexus_db_queries::db::model::Name;
     /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
@@ -916,9 +882,9 @@ impl Nexus {
     /// example stub for the "get" endpoint for that same resource:
     ///
     /// ```
+    /// use nexus_db_lookup::LookupPath;
     /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
-    /// use nexus_db_queries::db::lookup::LookupPath;
     /// use nexus_db_queries::db::model::Name;
     /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
@@ -1068,6 +1034,18 @@ impl Nexus {
             }
         }
     }
+
+    pub(crate) async fn mgs_updates(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<MgsUpdateDriverStatus, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        // Borrowing from a watch receiver locks the channel until the borrow is
+        // dropped.  Return a cloned copy so that the caller doesn't have to
+        // think about this internal detail.
+        Ok(self.mgs_update_status_rx.borrow().clone())
+    }
 }
 
 /// For unimplemented endpoints, indicates whether the resource identified
@@ -1138,21 +1116,35 @@ pub(crate) async fn lldpd_clients(
     Ok(clients)
 }
 
+// Look up Dendrite addresses in DNS then determine the switch location for
+// each address DNS returns.  If we fail to lookup ServiceName::Dendrite, we
+// return error, otherwise we keep looping until we can determine the switch
+// location of all addresses returned to us from the lookup.
 async fn switch_zone_address_mappings(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
-    let switch_zone_addresses = match resolver
-        .lookup_all_ipv6(ServiceName::Dendrite)
-        .await
-    {
-        Ok(addrs) => addrs,
-        Err(e) => {
-            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-            return Err(e.to_string());
+    loop {
+        let switch_zone_addresses = match resolver
+            .lookup_all_ipv6(ServiceName::Dendrite)
+            .await
+        {
+            Ok(addrs) => addrs,
+            Err(e) => {
+                error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                return Err(e.to_string());
+            }
+        };
+        match map_switch_zone_addrs(&log, switch_zone_addresses).await {
+            Ok(mappings) => {
+                return Ok(mappings);
+            }
+            Err(e) => {
+                warn!(log, "Failed to map switch zone addr: {e}, retrying");
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
         }
-    };
-    Ok(map_switch_zone_addrs(&log, switch_zone_addresses).await)
+    }
 }
 
 // TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`
@@ -1166,7 +1158,7 @@ async fn switch_zone_address_mappings(
 async fn map_switch_zone_addrs(
     log: &Logger,
     switch_zone_addresses: Vec<Ipv6Addr>,
-) -> HashMap<SwitchLocation, Ipv6Addr> {
+) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
     use gateway_client::Client as MgsClient;
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
@@ -1177,28 +1169,25 @@ async fn map_switch_zone_addrs(
         );
 
         info!(log, "determining switch slot managed by dendrite zone"; "zone_address" => #?addr);
-        // TODO: #3599 Use retry function instead of looping on a fixed timer
-        let switch_slot = loop {
-            match mgs_client.sp_local_switch_id().await {
-                Ok(switch) => {
-                    info!(
-                        log,
-                        "identified switch slot for dendrite zone";
-                        "slot" => #?switch,
-                        "zone_address" => #?addr
-                    );
-                    break switch.slot;
-                }
-                Err(e) => {
-                    warn!(
-                        log,
-                        "failed to identify switch slot for dendrite, will retry in 2 seconds";
-                        "zone_address" => #?addr,
-                        "reason" => #?e
-                    );
-                }
+        let switch_slot = match mgs_client.sp_local_switch_id().await {
+            Ok(switch) => {
+                info!(
+                    log,
+                    "identified switch slot for dendrite zone";
+                    "slot" => #?switch,
+                    "zone_address" => #?addr
+                );
+                switch.slot
             }
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            Err(e) => {
+                warn!(
+                    log,
+                    "failed to identify switch slot for dendrite";
+                    "zone_address" => #?addr,
+                    "reason" => #?e
+                );
+                return Err(e.to_string());
+            }
         };
 
         match switch_slot {
@@ -1221,5 +1210,30 @@ async fn map_switch_zone_addrs(
         "completed mapping dendrite zones to switch slots";
         "mappings" => #?switch_zone_addrs
     );
-    switch_zone_addrs
+    Ok(switch_zone_addrs)
+}
+
+/// Begin configuring an external HTTP client, returning a
+/// `reqwest::ClientBuilder`.
+pub(crate) fn external_http_client_builder(
+    config: &nexus_config::ExternalHttpClientConfig,
+    resolver: &Arc<external_dns::Resolver>,
+) -> reqwest::ClientBuilder {
+    let mut builder = reqwest::ClientBuilder::new();
+
+    builder = builder.dns_resolver(resolver.clone());
+
+    // If we are configured to only bind external TCP connections on a specific interface, do so.
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "illumos",
+    ))]
+    {
+        if let Some(ref interface) = config.interface {
+            builder = builder.interface(interface);
+        }
+    }
+
+    builder
 }

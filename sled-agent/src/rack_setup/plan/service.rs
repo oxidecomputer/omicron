@@ -4,6 +4,7 @@
 
 //! Plan generation for "where should services be initialized".
 
+use id_map::IdMap;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::{
     DnsConfigBuilder, DnsConfigParams, Host, Zone,
@@ -14,18 +15,18 @@ use nexus_sled_agent_shared::inventory::{
 };
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
-    BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
-    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
-    OmicronZoneExternalSnatIp, blueprint_zone_type,
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneImageSource,
+    BlueprintZoneType, OmicronZoneExternalFloatingAddr,
+    OmicronZoneExternalFloatingIp, OmicronZoneExternalSnatIp,
+    blueprint_zone_type,
 };
 use omicron_common::address::{
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT,
-    NEXUS_INTERNAL_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
+    NEXUS_INTERNAL_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, REPO_DEPOT_PORT,
     RSS_RESERVED_ADDRESSES, ReservedRackSubnet, SLED_PREFIX, get_sled_address,
     get_switch_zone_address,
 };
-use omicron_common::api::external::{Generation, MacAddr, Vni};
+use omicron_common::api::external::{MacAddr, Vni};
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
     SourceNatConfigError,
@@ -34,8 +35,8 @@ use omicron_common::backoff::{
     BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{
-    CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName,
-    DatasetsConfig, DiskVariant, SharedDatasetConfig,
+    CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName, DiskVariant,
+    SharedDatasetConfig,
 };
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY,
@@ -96,13 +97,13 @@ pub enum PlanError {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct SledConfig {
     /// Control plane disks configured for this sled
-    pub disks: BlueprintPhysicalDisksConfig,
+    pub disks: IdMap<BlueprintPhysicalDiskConfig>,
 
     /// Datasets configured for this sled
-    pub datasets: DatasetsConfig,
+    pub datasets: BTreeMap<DatasetUuid, DatasetConfig>,
 
     /// zones configured for this sled
-    pub zones: Vec<BlueprintZoneConfig>,
+    pub zones: IdMap<BlueprintZoneConfig>,
 }
 
 impl SledConfig {
@@ -110,7 +111,7 @@ impl SledConfig {
     /// durable datasets.
     pub fn add_zone_and_datasets(&mut self, zone: BlueprintZoneConfig) {
         let fs_dataset_name = DatasetName::new(
-            zone.filesystem_pool.clone().expect("Missing pool"),
+            zone.filesystem_pool,
             DatasetKind::TransientZone {
                 name: illumos_utils::zone::zone_name(
                     zone.zone_type.kind().zone_prefix(),
@@ -129,12 +130,12 @@ impl SledConfig {
                 reservation: None,
             },
         };
-        self.datasets.datasets.insert(fs_dataset.id, fs_dataset);
+        self.datasets.insert(fs_dataset.id, fs_dataset);
 
         // If a durable dataset exists, add it.
         if let Some(dataset) = zone.zone_type.durable_dataset() {
             let id = DatasetUuid::new_v4();
-            self.datasets.datasets.insert(
+            self.datasets.insert(
                 id,
                 DatasetConfig {
                     id,
@@ -153,7 +154,7 @@ impl SledConfig {
         // Currently this is pushing back to a Vec; we could inspect to
         // ensure this function is idempotent, but it currently is not
         // re-callable.
-        self.zones.push(zone);
+        self.zones.insert(zone);
     }
 }
 
@@ -296,6 +297,20 @@ impl Plan {
         let mut dns_builder = DnsConfigBuilder::new();
         let mut svc_port_builder = ServicePortBuilder::new(config);
 
+        // All sleds get a DNS entry for Repo Depot.
+        for sled in sled_info.iter() {
+            let dns_sled = dns_builder
+                .host_sled(sled.sled_id, *sled.sled_address.ip())
+                .unwrap();
+            dns_builder
+                .service_backend_sled(
+                    ServiceName::RepoDepot,
+                    &dns_sled,
+                    REPO_DEPOT_PORT,
+                )
+                .unwrap();
+        }
+
         // Scrimlets get DNS records for running Dendrite.
         let scrimlets: Vec<_> =
             sled_info.iter().filter(|s| s.is_scrimlet).collect();
@@ -322,7 +337,7 @@ impl Plan {
         //
         // Our policy at RSS time is currently "adopt all the U.2 disks we can see".
         for sled_info in sled_info.iter_mut() {
-            let disks = sled_info
+            sled_info.request.disks = sled_info
                 .inventory
                 .disks
                 .iter()
@@ -334,14 +349,8 @@ impl Plan {
                     pool_id: ZpoolUuid::new_v4(),
                 })
                 .collect();
-            sled_info.request.disks = BlueprintPhysicalDisksConfig {
-                // Any non-empty config must start at generation 2
-                generation: Generation::new().next(),
-                disks,
-            };
             sled_info.u2_zpools = sled_info
                 .request
-                .disks
                 .disks
                 .iter()
                 .map(|disk| ZpoolName::new_external(disk.pool_id))
@@ -369,18 +378,14 @@ impl Plan {
 
                     let config = DatasetConfig {
                         id: DatasetUuid::new_v4(),
-                        name: DatasetName::new(zpool.clone(), kind),
+                        name: DatasetName::new(*zpool, kind),
                         inner: SharedDatasetConfig {
                             compression: intrinsic_dataset.get_compression(),
                             quota: intrinsic_dataset.get_quota(),
                             reservation: None,
                         },
                     };
-                    sled_info
-                        .request
-                        .datasets
-                        .datasets
-                        .insert(config.id, config);
+                    sled_info.request.datasets.insert(config.id, config);
                 }
             }
         }
@@ -418,7 +423,7 @@ impl Plan {
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::InternalDns)?;
-            let filesystem_pool = Some(dataset_name.pool().clone());
+            let filesystem_pool = *dataset_name.pool();
 
             sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
@@ -427,7 +432,7 @@ impl Plan {
                 zone_type: BlueprintZoneType::InternalDns(
                     blueprint_zone_type::InternalDns {
                         dataset: OmicronZoneDataset {
-                            pool_name: dataset_name.pool().clone(),
+                            pool_name: *dataset_name.pool(),
                         },
                         http_address,
                         dns_address,
@@ -455,7 +460,7 @@ impl Plan {
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Cockroach)?;
-            let filesystem_pool = Some(dataset_name.pool().clone());
+            let filesystem_pool = *dataset_name.pool();
             sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
@@ -463,7 +468,7 @@ impl Plan {
                     blueprint_zone_type::CockroachDb {
                         address,
                         dataset: OmicronZoneDataset {
-                            pool_name: dataset_name.pool().clone(),
+                            pool_name: *dataset_name.pool(),
                         },
                     },
                 ),
@@ -503,7 +508,7 @@ impl Plan {
             );
             let dataset_kind = DatasetKind::ExternalDns;
             let dataset_name = sled.alloc_dataset_from_u2s(dataset_kind)?;
-            let filesystem_pool = Some(dataset_name.pool().clone());
+            let filesystem_pool = *dataset_name.pool();
 
             sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
@@ -511,7 +516,7 @@ impl Plan {
                 zone_type: BlueprintZoneType::ExternalDns(
                     blueprint_zone_type::ExternalDns {
                         dataset: OmicronZoneDataset {
-                            pool_name: dataset_name.pool().clone(),
+                            pool_name: *dataset_name.pool(),
                         },
                         http_address,
                         dns_address,
@@ -542,7 +547,7 @@ impl Plan {
                 )
                 .unwrap();
             let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
-            let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
+            let filesystem_pool = sled.alloc_zpool_from_u2s()?;
             sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
@@ -587,7 +592,7 @@ impl Plan {
             dns_builder
                 .host_zone_with_one_backend(id, ServiceName::Oximeter, address)
                 .unwrap();
-            let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
+            let filesystem_pool = sled.alloc_zpool_from_u2s()?;
             sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
@@ -611,16 +616,18 @@ impl Plan {
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let http_port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
             let http_address = SocketAddrV6::new(ip, http_port, 0, 0);
+            let oximeter_read_mode_enabled = true;
             dns_builder
                 .host_zone_clickhouse_single_node(
                     id,
                     ServiceName::Clickhouse,
                     http_address,
+                    oximeter_read_mode_enabled,
                 )
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Clickhouse)?;
-            let filesystem_pool = Some(dataset_name.pool().clone());
+            let filesystem_pool = *dataset_name.pool();
             sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
@@ -628,7 +635,7 @@ impl Plan {
                     blueprint_zone_type::Clickhouse {
                         address: http_address,
                         dataset: OmicronZoneDataset {
-                            pool_name: dataset_name.pool().clone(),
+                            pool_name: *dataset_name.pool(),
                         },
                     },
                 ),
@@ -649,7 +656,7 @@ impl Plan {
             let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             let id = OmicronZoneUuid::new_v4();
-            let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
+            let filesystem_pool = sled.alloc_zpool_from_u2s()?;
             dns_builder
                 .host_zone_with_one_backend(
                     id,
@@ -690,12 +697,10 @@ impl Plan {
                     zone_type: BlueprintZoneType::Crucible(
                         blueprint_zone_type::Crucible {
                             address,
-                            dataset: OmicronZoneDataset {
-                                pool_name: pool.clone(),
-                            },
+                            dataset: OmicronZoneDataset { pool_name: *pool },
                         },
                     ),
-                    filesystem_pool: Some(pool.clone()),
+                    filesystem_pool: *pool,
                     image_source: BlueprintZoneImageSource::InstallDataset,
                 });
             }
@@ -709,7 +714,7 @@ impl Plan {
             let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let ntp_address = SocketAddrV6::new(ip, NTP_PORT, 0, 0);
-            let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
+            let filesystem_pool = sled.alloc_zpool_from_u2s()?;
 
             let (zone_type, svcname) = if idx < BOUNDARY_NTP_REDUNDANCY {
                 boundary_ntp_servers
@@ -866,7 +871,7 @@ impl SledInfo {
     fn alloc_zpool_from_u2s(&self) -> Result<ZpoolName, PlanError> {
         self.u2_zpools
             .choose(&mut rand::thread_rng())
-            .map(|z| z.clone())
+            .map(|z| *z)
             .ok_or_else(|| PlanError::NotEnoughSleds)
     }
 
@@ -896,7 +901,7 @@ impl SledInfo {
         match allocator.next() {
             None => Err(PlanError::NotEnoughSleds),
             Some(which_zpool) => {
-                Ok(DatasetName::new(self.u2_zpools[which_zpool].clone(), kind))
+                Ok(DatasetName::new(self.u2_zpools[which_zpool], kind))
             }
         }
     }
@@ -1148,6 +1153,7 @@ mod tests {
     use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
     use oxnet::Ipv6Net;
@@ -1231,7 +1237,12 @@ mod tests {
             recovery_silo: RecoverySiloConfig {
                 silo_name: "recovery".parse().unwrap(),
                 user_name: "recovery".parse().unwrap(),
-                user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
+                // Generated via `cargo run --example argon2`.
+                user_password_hash: "$argon2id$v=19$m=98304,t=23,\
+                    p=1$Naz/hHpgS8GXQqT8Zm0Nog$ucAKOsMiq70xtAEaLCY\
+                    unjEgDyjSnuXaKTfmMKpKQIA"
+                    .parse()
+                    .unwrap(),
             },
             rack_network_config: RackNetworkConfig {
                 rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
@@ -1376,7 +1387,7 @@ mod tests {
         assert_eq!(plan.services.len(), 1);
 
         let sled_config = plan.services.iter().next().unwrap().1;
-        assert_eq!(sled_config.disks.disks.len(), DISK_COUNT);
+        assert_eq!(sled_config.disks.len(), DISK_COUNT);
 
         let zone_count = sled_config.zones.len();
 
@@ -1402,7 +1413,7 @@ mod tests {
             + dns_ips.len()
             + DISK_COUNT * 3; // (Debug, Root, Crucible)
         assert_eq!(
-            sled_config.datasets.datasets.len(),
+            sled_config.datasets.len(),
             expected_dataset_count,
             "Saw: {:#?}, expected {expected_dataset_count}",
             sled_config.datasets

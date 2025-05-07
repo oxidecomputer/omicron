@@ -10,9 +10,9 @@ loaded example system with:
 blueprint  3f00b694-1b16-4aaa-8f78-e6b3a527b434
 parent:    06c88262-f435-410e-ba98-101bed41ec27
 
-  sled: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active)
+  sled: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active, config generation 2)
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -28,7 +28,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     fake-vendor   fake-model   serial-fb29d469-7d3f-47b9-944c-ce817fc70370   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -83,7 +83,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     oxp_fb29d469-7d3f-47b9-944c-ce817fc70370/crypt/debug                                                           19c25551-a54c-47b6-8495-dbd51ed8e384   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
@@ -106,9 +106,9 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
 
 
 
-  sled: 9dc50690-f9bf-4520-bf80-051d0f465c2c (active)
+  sled: 9dc50690-f9bf-4520-bf80-051d0f465c2c (active, config generation 2)
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -124,7 +124,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     fake-vendor   fake-model   serial-f1a041cc-85c7-4d14-8fc0-8d0e417f7e24   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -177,7 +177,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     oxp_f1a041cc-85c7-4d14-8fc0-8d0e417f7e24/crypt/debug                                                           83b408b5-02b6-4f06-bd08-f6a807d3c5e8   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
@@ -199,9 +199,9 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
 
 
 
-  sled: a88790de-5962-4871-8686-61c1fd5b7094 (active)
+  sled: a88790de-5962-4871-8686-61c1fd5b7094 (active, config generation 2)
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -217,7 +217,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     fake-vendor   fake-model   serial-fa9ce87c-fa7c-4854-95bd-69b8f01c46f9   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -270,7 +270,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crypt/debug                                                           b7569aa4-f0d6-4de0-9b9a-cd8d0a6cc01d   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
@@ -295,6 +295,10 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     state fingerprint:::::::::::::::::   (none)
     cluster.preserve_downgrade_option:   (do not modify)
 
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   test suite
     created at:::::::::::   <REDACTED_TIMESTAMP>
@@ -302,6 +306,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     internal DNS version:   1
     external DNS version:   1
 
+ PENDING MGS-MANAGED UPDATES: 0
 
 
 > blueprint-edit 3f00b694-1b16-4aaa-8f78-e6b3a527b434 expunge-zone 9995de32-dd52-4eb1-b0eb-141eb84bc739
@@ -313,9 +318,9 @@ blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0 created from blueprint 3f00b694-1
 blueprint  366b0b68-d80e-4bc1-abd3-dc69837847e0
 parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
 
-  sled: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active)
+  sled: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active, config generation 2)
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -331,7 +336,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     fake-vendor   fake-model   serial-fb29d469-7d3f-47b9-944c-ce817fc70370   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -386,7 +391,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     oxp_fb29d469-7d3f-47b9-944c-ce817fc70370/crypt/debug                                                           19c25551-a54c-47b6-8495-dbd51ed8e384   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
@@ -409,9 +414,9 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
 
 
 
-  sled: 9dc50690-f9bf-4520-bf80-051d0f465c2c (active)
+  sled: 9dc50690-f9bf-4520-bf80-051d0f465c2c (active, config generation 2)
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -427,7 +432,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     fake-vendor   fake-model   serial-f1a041cc-85c7-4d14-8fc0-8d0e417f7e24   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -480,7 +485,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     oxp_f1a041cc-85c7-4d14-8fc0-8d0e417f7e24/crypt/debug                                                           83b408b5-02b6-4f06-bd08-f6a807d3c5e8   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
@@ -502,9 +507,9 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
 
 
 
-  sled: a88790de-5962-4871-8686-61c1fd5b7094 (active)
+  sled: a88790de-5962-4871-8686-61c1fd5b7094 (active, config generation 3)
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -520,7 +525,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     fake-vendor   fake-model   serial-fa9ce87c-fa7c-4854-95bd-69b8f01c46f9   in service 
 
 
-    datasets at generation 3:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -573,7 +578,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crypt/debug                                                           b7569aa4-f0d6-4de0-9b9a-cd8d0a6cc01d   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 3:
+    omicron zones:
     ----------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition    underlay IP           
     ----------------------------------------------------------------------------------------------------------------
@@ -598,6 +603,10 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     state fingerprint:::::::::::::::::   (none)
     cluster.preserve_downgrade_option:   (do not modify)
 
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   reconfigurator-cli
     created at:::::::::::   <REDACTED_TIMESTAMP>
@@ -605,6 +614,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     internal DNS version:   1
     external DNS version:   1
 
+ PENDING MGS-MANAGED UPDATES: 0
 
 
 > blueprint-plan 366b0b68-d80e-4bc1-abd3-dc69837847e0
@@ -627,9 +637,9 @@ generated blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 based on parent bluepri
 blueprint  9c998c1d-1a7b-440a-ae0c-40f781dea6e2
 parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
 
-  sled: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active)
+  sled: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active, config generation 2)
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -645,7 +655,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     fake-vendor   fake-model   serial-fb29d469-7d3f-47b9-944c-ce817fc70370   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -700,7 +710,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     oxp_fb29d469-7d3f-47b9-944c-ce817fc70370/crypt/debug                                                           19c25551-a54c-47b6-8495-dbd51ed8e384   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
@@ -723,9 +733,9 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
 
 
 
-  sled: 9dc50690-f9bf-4520-bf80-051d0f465c2c (active)
+  sled: 9dc50690-f9bf-4520-bf80-051d0f465c2c (active, config generation 2)
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -741,7 +751,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     fake-vendor   fake-model   serial-f1a041cc-85c7-4d14-8fc0-8d0e417f7e24   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -794,7 +804,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     oxp_f1a041cc-85c7-4d14-8fc0-8d0e417f7e24/crypt/debug                                                           83b408b5-02b6-4f06-bd08-f6a807d3c5e8   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
@@ -816,9 +826,9 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
 
 
 
-  sled: a88790de-5962-4871-8686-61c1fd5b7094 (active)
+  sled: a88790de-5962-4871-8686-61c1fd5b7094 (active, config generation 4)
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -834,7 +844,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     fake-vendor   fake-model   serial-fa9ce87c-fa7c-4854-95bd-69b8f01c46f9   in service 
 
 
-    datasets at generation 4:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -889,7 +899,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crypt/debug                                                           b7569aa4-f0d6-4de0-9b9a-cd8d0a6cc01d   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 4:
+    omicron zones:
     ----------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition    underlay IP           
     ----------------------------------------------------------------------------------------------------------------
@@ -915,6 +925,10 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     state fingerprint:::::::::::::::::   (none)
     cluster.preserve_downgrade_option:   (do not modify)
 
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   reconfigurator-sim
     created at:::::::::::   <REDACTED_TIMESTAMP>
@@ -922,6 +936,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     internal DNS version:   1
     external DNS version:   1
 
+ PENDING MGS-MANAGED UPDATES: 0
 
 
 > blueprint-edit 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 expunge-zone d786ef4a-5acb-4f5d-a732-a00addf986b5

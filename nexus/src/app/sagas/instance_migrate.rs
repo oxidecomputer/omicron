@@ -10,7 +10,8 @@ use crate::app::instance::{
 use crate::app::sagas::{
     declare_saga_actions, instance_common::allocate_vmm_ipv6,
 };
-use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
+use nexus_db_lookup::LookupPath;
+use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use omicron_common::api::external::Error;
@@ -399,7 +400,7 @@ async fn sim_ensure_destination_propolis(
           "dst_vmm_state" => ?vmm);
 
     let (authz_silo, authz_project, authz_instance) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .instance_id(db_instance.id())
             .lookup_for(authz::Action::Modify)
             .await
@@ -613,6 +614,7 @@ mod tests {
                 boot_disk: None,
                 start: true,
                 auto_restart_policy: Default::default(),
+                anti_affinity_groups: Vec::new(),
             },
         )
         .await

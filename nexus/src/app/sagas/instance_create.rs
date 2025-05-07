@@ -10,8 +10,8 @@ use crate::app::{
     MAX_NICS_PER_INSTANCE,
 };
 use crate::external_api::params;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::{ExternalIp, NetworkInterfaceKind};
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
@@ -21,7 +21,9 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
+use omicron_uuid_kinds::{
+    AffinityGroupUuid, AntiAffinityGroupUuid, GenericUuid, InstanceUuid,
+};
 use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
@@ -55,6 +57,20 @@ struct NetParams {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+struct AffinityParams {
+    serialized_authn: authn::saga::Serialized,
+    instance_id: InstanceUuid,
+    group: AffinityGroupUuid,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct AntiAffinityParams {
+    serialized_authn: authn::saga::Serialized,
+    instance_id: InstanceUuid,
+    group: AntiAffinityGroupUuid,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 struct NetworkConfigParams {
     saga_params: Params,
     instance_id: InstanceUuid,
@@ -81,6 +97,11 @@ declare_saga_actions! {
     ASSOCIATE_SSH_KEYS -> "output" {
         + sic_associate_ssh_keys
         - sic_associate_ssh_keys_undo
+    }
+    ADD_TO_ANTI_AFFINITY_GROUP -> "output" {
+        + sic_add_to_anti_affinity_group
+        // NOTE: Deleting the instance record deletes all anti-affinity group memberships.
+        // Therefore: No undo action is necessary here.
     }
     CREATE_NETWORK_INTERFACE -> "output" {
         + sic_create_network_interface
@@ -148,7 +169,7 @@ impl NexusSaga for SagaInstanceCreate {
         ) -> Result<(), SagaInitError> {
             // The "parameter" node is a constant node that goes into the outer
             // saga.  Its value becomes the parameters for the one-node subsaga
-            // (defined below) that actually creates each NIC.
+            // (defined below) that actually creates each resource.
             let params_node_name = format!("{}_params{}", node_basename, which);
             parent_builder.append(Node::constant(
                 &params_node_name,
@@ -164,6 +185,42 @@ impl NexusSaga for SagaInstanceCreate {
                 params_node_name,
             ));
             Ok(())
+        }
+
+        for (i, group) in
+            params.create_params.anti_affinity_groups.iter().enumerate()
+        {
+            let group = match group {
+                NameOrId::Id(id) => {
+                    AntiAffinityGroupUuid::from_untyped_uuid(*id)
+                }
+                _ => {
+                    return Err(SagaInitError::InvalidParameter(
+                        "Non-UUID group".to_string(),
+                    ));
+                }
+            };
+
+            let repeat_params = AntiAffinityParams {
+                serialized_authn: params.serialized_authn.clone(),
+                instance_id,
+                group,
+            };
+            let subsaga_name =
+                SagaName::new(&format!("add-to-anti-affinity-group-{i}"));
+            let mut subsaga_builder = DagBuilder::new(subsaga_name);
+            subsaga_builder.append(Node::action(
+                "output",
+                format!("AddToAntiAffinityGroup{i}").as_str(),
+                ADD_TO_ANTI_AFFINITY_GROUP.as_ref(),
+            ));
+            subsaga_append(
+                "anti_affinity_groups".into(),
+                subsaga_builder.build()?,
+                &mut builder,
+                repeat_params,
+                i,
+            )?;
         }
 
         // We use a similar pattern here for NICs, external IPs and disks.  We
@@ -333,7 +390,7 @@ async fn sic_associate_ssh_keys(
         .internal_context("loading current user's ssh keys for new Instance")
         .map_err(ActionError::action_failed)?;
 
-    let (.., authz_user) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_user) = LookupPath::new(&opctx, datastore)
         .silo_user_id(actor.actor_id())
         .lookup_for(authz::Action::ListChildren)
         .await
@@ -378,6 +435,33 @@ async fn sic_associate_ssh_keys_undo(
         .instance_ssh_keys_delete(&opctx, instance_id)
         .await
         .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sic_add_to_anti_affinity_group(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let params = sagactx.saga_params::<AntiAffinityParams>()?;
+    let AntiAffinityParams { serialized_authn, instance_id, group } = params;
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
+
+    let (.., authz_anti_affinity_group) = LookupPath::new(&opctx, datastore)
+        .anti_affinity_group_id(group.into_untyped_uuid())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+    datastore
+        .anti_affinity_group_member_instance_add(
+            &opctx,
+            &authz_anti_affinity_group,
+            instance_id,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
     Ok(())
 }
 
@@ -436,13 +520,13 @@ async fn sic_create_network_interface_undo(
         &saga_params.serialized_authn,
     );
     let interface_id = repeat_saga_params.new_id;
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
 
-    let interface_deleted = match LookupPath::new(&opctx, &datastore)
+    let interface_deleted = match LookupPath::new(&opctx, datastore)
         .instance_network_interface_id(interface_id)
         .lookup_for(authz::Action::Delete)
         .await
@@ -495,12 +579,12 @@ async fn create_custom_network_interface(
     );
 
     // Lookup authz objects, used in the call to create the NIC itself.
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
-    let (.., authz_vpc) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_vpc) = LookupPath::new(&opctx, datastore)
         .project_id(saga_params.project_id)
         .vpc_name(&db::model::Name::from(interface_params.vpc_name.clone()))
         .lookup_for(authz::Action::Read)
@@ -512,7 +596,7 @@ async fn create_custom_network_interface(
     // should probably either be in a transaction, or the
     // `instance_create_network_interface` function/query needs some JOIN
     // on the `vpc_subnet` table.
-    let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, datastore)
         .vpc_id(authz_vpc.id())
         .vpc_subnet_name(&db::model::Name::from(
             interface_params.subnet_name.clone(),
@@ -601,12 +685,12 @@ async fn create_default_primary_network_interface(
     };
 
     // Lookup authz objects, used in the call to actually create the NIC.
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
-    let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_subnet, db_subnet) = LookupPath::new(&opctx, datastore)
         .project_id(saga_params.project_id)
         .vpc_name(&internal_default_name)
         .vpc_subnet_name(&internal_default_name)
@@ -827,7 +911,7 @@ async fn sic_allocate_instance_external_ip_undo(
             datastore.deallocate_external_ip(&opctx, ip.id).await?;
         }
         params::ExternalIpCreate::Floating { .. } => {
-            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
+            let (.., authz_fip) = LookupPath::new(&opctx, datastore)
                 .floating_ip_id(ip.id)
                 .lookup_for(authz::Action::Modify)
                 .await?;
@@ -900,16 +984,15 @@ async fn ensure_instance_disk_attach_state(
         }
     };
 
-    let (.., authz_instance, _db_instance) =
-        LookupPath::new(&opctx, &datastore)
-            .instance_id(instance_id.into_untyped_uuid())
-            .fetch()
-            .await
-            .map_err(ActionError::action_failed)?;
+    let (.., authz_instance, _db_instance) = LookupPath::new(&opctx, datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
 
     // TODO-correctness TODO-security It's not correct to re-resolve the
     // disk name now.  See oxidecomputer/omicron#1536.
-    let (.., authz_disk, _db_disk) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_disk, _db_disk) = LookupPath::new(&opctx, datastore)
         .project_id(project_id)
         .disk_name(&disk_name)
         .fetch()
@@ -953,7 +1036,7 @@ async fn sic_create_instance_record(
         &params.create_params,
     );
 
-    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_project) = LookupPath::new(&opctx, osagactx.datastore())
         .project_id(params.project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -981,7 +1064,7 @@ async fn sic_delete_instance_record(
 
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
-    let result = LookupPath::new(&opctx, &datastore)
+    let result = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await;
@@ -1057,7 +1140,7 @@ async fn sic_set_boot_disk(
 
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
@@ -1091,7 +1174,7 @@ async fn sic_set_boot_disk_undo(
 
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
@@ -1214,6 +1297,7 @@ pub mod test {
                 disks: Vec::new(),
                 start: false,
                 auto_restart_policy: Default::default(),
+                anti_affinity_groups: Vec::new(),
             },
             boundary_switches: HashSet::from([SwitchLocation::Switch0]),
         }
@@ -1240,7 +1324,7 @@ pub mod test {
 
     async fn no_instance_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Instance;
-        use nexus_db_queries::db::schema::instance::dsl;
+        use nexus_db_schema::schema::instance::dsl;
 
         dsl::instance
             .filter(dsl::time_deleted.is_null())
@@ -1257,7 +1341,7 @@ pub mod test {
     async fn no_network_interface_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::NetworkInterface;
         use nexus_db_queries::db::model::NetworkInterfaceKind;
-        use nexus_db_queries::db::schema::network_interface::dsl;
+        use nexus_db_schema::schema::network_interface::dsl;
 
         dsl::network_interface
             .filter(dsl::time_deleted.is_null())
@@ -1274,7 +1358,7 @@ pub mod test {
 
     async fn no_external_ip_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::ExternalIp;
-        use nexus_db_queries::db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         dsl::external_ip
             .filter(dsl::time_deleted.is_null())
@@ -1291,7 +1375,7 @@ pub mod test {
 
     async fn disk_is_detached(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Disk;
-        use nexus_db_queries::db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
 
         dsl::disk
             .filter(dsl::time_deleted.is_null())

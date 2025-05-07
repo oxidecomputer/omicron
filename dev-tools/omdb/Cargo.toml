@@ -13,6 +13,7 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-bb8-diesel.workspace = true
+bytes.workspace = true
 camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
@@ -33,8 +34,11 @@ internal-dns-types.workspace = true
 itertools.workspace = true
 nexus-client.workspace = true
 nexus-config.workspace = true
+nexus-db-errors.workspace = true
+nexus-db-lookup.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
+nexus-db-schema.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-saga-recovery.workspace = true
@@ -47,12 +51,15 @@ oximeter-db = { workspace = true, default-features = false, features = [ "oxql" 
 pq-sys = "*"
 ratatui.workspace = true
 reedline.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+steno.workspace = true
 strum.workspace = true
+support-bundle-reader-lib.workspace = true
 supports-color.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
@@ -65,6 +72,9 @@ ipnetwork.workspace = true
 omicron-workspace-hack.workspace = true
 multimap.workspace = true
 indicatif.workspace = true
+petgraph.workspace = true
+oxnet.workspace = true
+owo-colors.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

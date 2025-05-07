@@ -17,13 +17,16 @@ use nexus_types::{
     external_api::{params, shared, views},
 };
 use omicron_common::api::external::{
-    http_pagination::{PaginatedById, PaginatedByName, PaginatedByNameOrId},
+    http_pagination::{
+        PaginatedById, PaginatedByName, PaginatedByNameOrId,
+        PaginatedByTimeAndId,
+    },
     *,
 };
 use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20250212.0.0";
+pub const API_VERSION: &str = "20250604.0.0";
 
 const MIB: usize = 1024 * 1024;
 const GIB: usize = 1024 * MIB;
@@ -75,7 +78,7 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
         policy = EndpointTagPolicy::ExactlyOne,
         tags = {
             "affinity" = {
-                description = "Affinity and anti-affinity groups give control over instance placement.",
+                description = "Anti-affinity groups give control over instance placement.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/affinity"
                 }
@@ -163,6 +166,12 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 description = "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/vpcs"
+                }
+            },
+            "system/webhooks" = {
+                description = "Webhooks deliver notifications for audit log events and fault management alerts.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/webhooks"
                 }
             },
             "system/probes" = {
@@ -453,7 +462,9 @@ pub trait NexusExternalApi {
 
     // Silo identity providers
 
-    /// List a silo's IdP's name
+    /// List identity providers for silo
+    ///
+    /// List identity providers for silo by silo name or ID.
     #[endpoint {
         method = GET,
         path = "/v1/system/identity-providers",
@@ -466,7 +477,7 @@ pub trait NexusExternalApi {
 
     // Silo SAML identity providers
 
-    /// Create SAML IdP
+    /// Create SAML identity provider
     #[endpoint {
         method = POST,
         path = "/v1/system/identity-providers/saml",
@@ -478,7 +489,7 @@ pub trait NexusExternalApi {
         new_provider: TypedBody<params::SamlIdentityProviderCreate>,
     ) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError>;
 
-    /// Fetch SAML IdP
+    /// Fetch SAML identity provider
     #[endpoint {
         method = GET,
         path = "/v1/system/identity-providers/saml/{provider}",
@@ -1264,13 +1275,41 @@ pub trait NexusExternalApi {
         disk_to_detach: TypedBody<params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
 
+    /// List affinity groups containing instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/affinity-groups",
+        tags = ["hidden"],
+    }]
+    async fn instance_affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AffinityGroup>>, HttpError>;
+
+    /// List anti-affinity groups containing instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/anti-affinity-groups",
+        tags = ["instances"],
+    }]
+    async fn instance_anti_affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AntiAffinityGroup>>, HttpError>;
+
     // Affinity Groups
 
     /// List affinity groups
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -1281,7 +1320,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_view(
         rqctx: RequestContext<Self::Context>,
@@ -1293,11 +1332,13 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}/members",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_member_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>;
 
@@ -1305,7 +1346,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_member_instance_view(
         rqctx: RequestContext<Self::Context>,
@@ -1317,7 +1358,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_member_instance_add(
         rqctx: RequestContext<Self::Context>,
@@ -1329,7 +1370,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_member_instance_delete(
         rqctx: RequestContext<Self::Context>,
@@ -1341,7 +1382,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/affinity-groups",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_create(
         rqctx: RequestContext<Self::Context>,
@@ -1353,7 +1394,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/affinity-groups/{affinity_group}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_update(
         rqctx: RequestContext<Self::Context>,
@@ -1366,7 +1407,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/affinity-groups/{affinity_group}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_delete(
         rqctx: RequestContext<Self::Context>,
@@ -1405,7 +1446,9 @@ pub trait NexusExternalApi {
     }]
     async fn anti_affinity_group_member_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>;
 
@@ -2438,7 +2481,7 @@ pub trait NexusExternalApi {
     async fn vpc_router_route_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::RoutePath>,
-        query_params: Query<params::RouterSelector>,
+        query_params: Query<params::OptionalRouterSelector>,
     ) -> Result<HttpResponseOk<RouterRoute>, HttpError>;
 
     /// Create route
@@ -3498,6 +3541,198 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError>;
+
+    // Webhooks
+
+    /// List webhook event classes
+    #[endpoint {
+        method = GET,
+        path = "/v1/webhooks/event-classes",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_event_class_list(
+        rqctx: RequestContext<Self::Context>,
+        pag_params: Query<
+            PaginationParams<EmptyScanParams, params::EventClassPage>,
+        >,
+        filter: Query<params::EventClassFilter>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError>;
+
+    /// List webhook receivers
+    #[endpoint {
+        method = GET,
+        path = "/v1/webhooks/receivers",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_receiver_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookReceiver>>, HttpError>;
+
+    /// Fetch webhook receiver
+    #[endpoint {
+        method = GET,
+        path = "/v1/webhooks/receivers/{receiver}",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_receiver_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+    ) -> Result<HttpResponseOk<views::WebhookReceiver>, HttpError>;
+
+    /// Create webhook receiver
+    #[endpoint {
+        method = POST,
+        path = "/v1/webhooks/receivers",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_receiver_create(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<params::WebhookCreate>,
+    ) -> Result<HttpResponseCreated<views::WebhookReceiver>, HttpError>;
+
+    /// Update webhook receiver
+    ///
+    /// Note that receiver secrets are NOT added or removed using this endpoint.
+    /// Instead, use the `/v1/webhooks/{secrets}/?receiver={receiver}` endpoint
+    /// to add and remove secrets.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/webhooks/receivers/{receiver}",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_receiver_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+        params: TypedBody<params::WebhookReceiverUpdate>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Delete webhook receiver
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/webhooks/receivers/{receiver}",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_receiver_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Add webhook receiver subscription
+    #[endpoint {
+        method = POST,
+        path = "/v1/webhooks/receivers/{receiver}/subscriptions",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_receiver_subscription_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+        params: TypedBody<params::WebhookSubscriptionCreate>,
+    ) -> Result<HttpResponseCreated<views::WebhookSubscriptionCreated>, HttpError>;
+
+    /// Remove webhook receiver subscription
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/webhooks/receivers/{receiver}/subscriptions/{subscription}",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_receiver_subscription_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookSubscriptionSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Send liveness probe to webhook receiver
+    ///
+    /// This endpoint synchronously sends a liveness probe request to the
+    /// selected webhook receiver. The response message describes the outcome of
+    /// the probe request: either the response from the receiver endpoint, or an
+    /// indication of why the probe failed.
+    ///
+    /// Note that the response status is `200 OK` as long as a probe request was
+    /// able to be sent to the receiver endpoint. If the receiver responds with
+    /// another status code, including an error, this will be indicated by the
+    /// response body, *not* the status of the response.
+    ///
+    /// The `resend` query parameter can be used to request re-delivery of
+    /// failed events if the liveness probe succeeds. If it is set to true and
+    /// the webhook receiver responds to the probe request with a `2xx` status
+    /// code, any events for which delivery to this receiver has failed will be
+    /// queued for re-delivery.
+    #[endpoint {
+        method = POST,
+        path = "/v1/webhooks/receivers/{receiver}/probe",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_receiver_probe(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+        query_params: Query<params::WebhookProbe>,
+    ) -> Result<HttpResponseOk<views::WebhookProbeResult>, HttpError>;
+
+    /// List webhook receiver secret IDs
+    #[endpoint {
+        method = GET,
+        path = "/v1/webhooks/secrets",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_secrets_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::WebhookReceiverSelector>,
+    ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError>;
+
+    /// Add secret to webhook receiver
+    #[endpoint {
+        method = POST,
+        path = "/v1/webhooks/secrets",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_secrets_add(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::WebhookReceiverSelector>,
+        params: TypedBody<params::WebhookSecretCreate>,
+    ) -> Result<HttpResponseCreated<views::WebhookSecret>, HttpError>;
+
+    /// Remove secret from webhook receiver
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/webhooks/secrets/{secret_id}",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_secrets_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookSecretSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List delivery attempts to webhook receiver
+    ///
+    /// Optional query parameters to this endpoint may be used to filter
+    /// deliveries by state. If none of the `failed`, `pending` or `delivered`
+    /// query parameters are present, all deliveries are returned. If one or
+    /// more of these parameters are provided, only those which are set to
+    /// "true" are included in the response.
+    #[endpoint {
+        method = GET,
+        path = "/v1/webhooks/deliveries",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_delivery_list(
+        rqctx: RequestContext<Self::Context>,
+        receiver: Query<params::WebhookReceiverSelector>,
+        state_filter: Query<params::WebhookDeliveryStateFilter>,
+        pagination: Query<PaginatedByTimeAndId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
+
+    /// Request re-delivery of webhook event
+    #[endpoint {
+        method = POST,
+        path = "/v1/webhooks/deliveries/{event_id}/resend",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_delivery_resend(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookEventSelector>,
+        receiver: Query<params::WebhookReceiverSelector>,
+    ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError>;
 }
 
 /// Perform extra validations on the OpenAPI spec.

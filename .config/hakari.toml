@@ -31,7 +31,8 @@ exact-versions = true
 
 [traversal-excludes]
 workspace-members = [
-    # Exclude xtask because it needs to be built quickly.
+    # Exclude dev-tools-common and xtask because they need to be built quickly.
+    "dev-tools-common",
     "xtask",
     
     # Exclude omicron-uuid-kinds because it is a no-std crate. Depending on the

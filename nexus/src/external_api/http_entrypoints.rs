@@ -38,12 +38,12 @@ use dropshot::{WebsocketChannelResult, WebsocketConnection};
 use dropshot::{http_response_found, http_response_see_other};
 use http::{Response, StatusCode, header};
 use ipnetwork::IpNetwork;
+use nexus_db_lookup::lookup::ImageLookup;
+use nexus_db_lookup::lookup::ImageParentLookup;
 use nexus_db_queries::authn::external::session_cookie::{self, SessionStore};
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Resource;
-use nexus_db_queries::db::lookup::ImageLookup;
-use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_external_api::*;
 use nexus_types::{
@@ -89,12 +89,13 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
+use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
+use omicron_common::api::external::http_pagination::ScanByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::http_pagination::data_page_params_for;
-use omicron_common::api::external::http_pagination::id_pagination;
 use omicron_common::api::external::http_pagination::marker_for_id;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -2509,6 +2510,100 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn instance_affinity_group_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AffinityGroup>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let instance_selector = params::InstanceSelector {
+                project: scan_params.selector.project.clone(),
+                instance: path.instance,
+            };
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
+            let groups = nexus
+                .instance_list_affinity_groups(
+                    &opctx,
+                    &instance_lookup,
+                    &paginated_by,
+                )
+                .await?
+                .into_iter()
+                .map(|g| g.into())
+                .collect();
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                groups,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn instance_anti_affinity_group_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AntiAffinityGroup>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let instance_selector = params::InstanceSelector {
+                project: scan_params.selector.project.clone(),
+                instance: path.instance,
+            };
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
+            let groups = nexus
+                .instance_list_anti_affinity_groups(
+                    &opctx,
+                    &instance_lookup,
+                    &paginated_by,
+                )
+                .await?
+                .into_iter()
+                .map(|g| g.into())
+                .collect();
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                groups,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Affinity Groups
 
     async fn affinity_group_list(
@@ -2577,7 +2672,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn affinity_group_member_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>
     {
@@ -2589,8 +2686,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let scan_params = ScanById::from_query(&query)?;
-            let paginated_by = id_pagination(&pag_params, scan_params)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
 
             let group_selector = params::AffinityGroupSelector {
                 project: scan_params.selector.project.clone(),
@@ -2605,10 +2702,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &paginated_by,
                 )
                 .await?;
-            Ok(HttpResponseOk(ScanById::results_page(
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 affinity_group_member_instances,
-                &marker_for_id,
+                &marker_for_name_or_id,
             )?))
         };
         apictx
@@ -2912,7 +3009,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn anti_affinity_group_member_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>
     {
@@ -2924,8 +3023,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let scan_params = ScanById::from_query(&query)?;
-            let paginated_by = id_pagination(&pag_params, scan_params)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
 
             let group_selector = params::AntiAffinityGroupSelector {
                 project: scan_params.selector.project.clone(),
@@ -2940,10 +3039,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &paginated_by,
                 )
                 .await?;
-            Ok(HttpResponseOk(ScanById::results_page(
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 group_members,
-                &marker_for_id,
+                &marker_for_name_or_id,
             )?))
         };
         apictx
@@ -2983,7 +3082,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
             let group = nexus
-                .anti_affinity_group_member_view(
+                .anti_affinity_group_member_instance_view(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
@@ -3029,7 +3128,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
             let member = nexus
-                .anti_affinity_group_member_add(
+                .anti_affinity_group_member_instance_add(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
@@ -3074,7 +3173,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
             nexus
-                .anti_affinity_group_member_delete(
+                .anti_affinity_group_member_instance_delete(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
@@ -5353,7 +5452,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn vpc_router_route_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::RoutePath>,
-        query_params: Query<params::RouterSelector>,
+        query_params: Query<params::OptionalRouterSelector>,
     ) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -5365,7 +5464,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let route_selector = params::RouteSelector {
                 project: query.project,
                 vpc: query.vpc,
-                router: Some(query.router),
+                router: query.router,
                 route: path.route,
             };
             let (.., route) = nexus
@@ -6442,14 +6541,44 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let params = body.into_inner();
             let system_version = params.system_version;
+
+            // We don't need a transaction for the following queries because
+            // (1) the generation numbers provide optimistic concurrency control:
+            // if another request were to successfully update the target release
+            // between when we fetch it here and when we try to update it below,
+            // our update would fail because the next generation number would
+            // would already be taken; and
+            // (2) we assume that TUF repo depot records are immutable, i.e.,
+            // system version X.Y.Z won't designate different repos over time.
+            let current_target_release =
+                nexus.datastore().target_release_get_current(&opctx).await?;
+
+            // Disallow downgrades.
+            if let views::TargetReleaseSource::SystemVersion { version } = nexus
+                .datastore()
+                .target_release_view(&opctx, &current_target_release)
+                .await?
+                .release_source
+            {
+                if version > system_version {
+                    return Err(HttpError::for_bad_request(
+                        None,
+                        format!(
+                            "The requested target system release ({system_version}) \
+                             is older than the current target system release ({version}). \
+                             This is not supported."
+                        ),
+                    ));
+                }
+            }
+
+            // Fetch the TUF repo metadata and update the target release.
             let tuf_repo_id = nexus
                 .datastore()
                 .update_tuf_repo_get(&opctx, system_version.into())
                 .await?
                 .repo
                 .id;
-            let current_target_release =
-                nexus.datastore().target_release_get_current(&opctx).await?;
             let next_target_release =
                 nexus_db_model::TargetRelease::new_system_version(
                     &current_target_release,
@@ -6459,6 +6588,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .datastore()
                 .target_release_insert(&opctx, next_target_release)
                 .await?;
+
             Ok(HttpResponseCreated(
                 nexus
                     .datastore()
@@ -7399,7 +7529,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let user =
                 nexus.login_local(&opctx, &silo_lookup, credentials).await?;
 
-            let session = nexus.create_session(opctx, user).await?;
+            let session = nexus.session_create(opctx, &user).await?;
             let mut response = HttpResponseHeaders::new_unnamed(
                 HttpResponseUpdatedNoContent(),
             );
@@ -7660,6 +7790,410 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx = nexus.opctx_external_authn();
             let params = params.into_inner();
             nexus.device_access_token(&opctx, params).await
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_event_class_list(
+        rqctx: RequestContext<Self::Context>,
+        pag_params: Query<
+            PaginationParams<EmptyScanParams, params::EventClassPage>,
+        >,
+        filter: Query<params::EventClassFilter>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let query = pag_params.into_inner();
+            let filter = filter.into_inner();
+            let marker = match query.page {
+                WhichPage::First(_) => None,
+                WhichPage::Next(ref addr) => Some(addr),
+            };
+            let pag_params = DataPageParams {
+                limit: rqctx.page_limit(&query)?,
+                direction: PaginationOrder::Ascending,
+                marker,
+            };
+            let event_classes = nexus
+                .webhook_event_class_list(&opctx, filter, pag_params)
+                .await?;
+            Ok(HttpResponseOk(ResultsPage::new(
+                event_classes,
+                &EmptyScanParams {},
+                |class: &views::EventClass, _| class.name.clone(),
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_receiver_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookReceiver>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pagparams, scan_params)?;
+
+            let rxs = nexus
+                .webhook_receiver_list(&opctx, &paginated_by)
+                .await?
+                .into_iter()
+                .map(views::WebhookReceiver::try_from)
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                rxs,
+                &marker_for_name_or_id,
+            )?))
+        };
+
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_receiver_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+    ) -> Result<HttpResponseOk<views::WebhookReceiver>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let webhook_selector = path_params.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let webhook =
+                nexus.webhook_receiver_config_fetch(&opctx, rx).await?;
+            Ok(HttpResponseOk(views::WebhookReceiver::try_from(webhook)?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_receiver_create(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<params::WebhookCreate>,
+    ) -> Result<HttpResponseCreated<views::WebhookReceiver>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let params = params.into_inner();
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let receiver =
+                nexus.webhook_receiver_create(&opctx, params).await?;
+            Ok(HttpResponseCreated(views::WebhookReceiver::try_from(receiver)?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_receiver_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+        params: TypedBody<params::WebhookReceiverUpdate>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let webhook_selector = path_params.into_inner();
+            let params = params.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            nexus.webhook_receiver_update(&opctx, rx, params).await?;
+
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_receiver_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let webhook_selector = path_params.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            nexus.webhook_receiver_delete(&opctx, rx).await?;
+
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_receiver_subscription_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+        params: TypedBody<params::WebhookSubscriptionCreate>,
+    ) -> Result<HttpResponseCreated<views::WebhookSubscriptionCreated>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let webhook_selector = path_params.into_inner();
+            let subscription = params.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+
+            let subscription = nexus
+                .webhook_receiver_subscription_add(&opctx, rx, subscription)
+                .await?;
+
+            Ok(HttpResponseCreated(subscription))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_receiver_subscription_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookSubscriptionSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let params::WebhookSubscriptionSelector { receiver, subscription } =
+                path_params.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, receiver)?;
+
+            nexus
+                .webhook_receiver_subscription_remove(&opctx, rx, subscription)
+                .await?;
+
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_receiver_probe(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookReceiverSelector>,
+        query_params: Query<params::WebhookProbe>,
+    ) -> Result<HttpResponseOk<views::WebhookProbeResult>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let webhook_selector = path_params.into_inner();
+            let probe_params = query_params.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let result =
+                nexus.webhook_receiver_probe(&opctx, rx, probe_params).await?;
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_secrets_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::WebhookReceiverSelector>,
+    ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let webhook_selector = query_params.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let secrets = nexus
+                .webhook_receiver_secrets_list(&opctx, rx)
+                .await?
+                .into_iter()
+                .map(Into::into)
+                .collect();
+
+            Ok(HttpResponseOk(views::WebhookSecrets { secrets }))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Add a secret to a webhook.
+    async fn webhook_secrets_add(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::WebhookReceiverSelector>,
+        params: TypedBody<params::WebhookSecretCreate>,
+    ) -> Result<HttpResponseCreated<views::WebhookSecret>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let params::WebhookSecretCreate { secret } = params.into_inner();
+            let webhook_selector = query_params.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let secret =
+                nexus.webhook_receiver_secret_add(&opctx, rx, secret).await?;
+            Ok(HttpResponseCreated(secret))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Delete a secret from a webhook receiver.
+    async fn webhook_secrets_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookSecretSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let secret_selector = path_params.into_inner();
+            let secret =
+                nexus.webhook_secret_lookup(&opctx, secret_selector)?;
+            nexus.webhook_receiver_secret_delete(&opctx, secret).await?;
+
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_delivery_list(
+        rqctx: RequestContext<Self::Context>,
+        receiver: Query<params::WebhookReceiverSelector>,
+        filter: Query<params::WebhookDeliveryStateFilter>,
+        query: Query<PaginatedByTimeAndId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let webhook_selector = receiver.into_inner();
+            let filter = filter.into_inner();
+            let query = query.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let deliveries = nexus
+                .webhook_receiver_delivery_list(&opctx, rx, filter, &pag_params)
+                .await?;
+
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
+                &query,
+                deliveries,
+                &|_, d| (d.time_started, d.id),
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn webhook_delivery_resend(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookEventSelector>,
+        receiver: Query<params::WebhookReceiverSelector>,
+    ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let event_selector = path_params.into_inner();
+            let webhook_selector = receiver.into_inner();
+            let event = nexus.webhook_event_lookup(&opctx, event_selector)?;
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let delivery_id =
+                nexus.webhook_receiver_event_resend(&opctx, rx, event).await?;
+
+            Ok(HttpResponseCreated(views::WebhookDeliveryId {
+                delivery_id: delivery_id.into_untyped_uuid(),
+            }))
         };
         apictx
             .context

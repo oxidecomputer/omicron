@@ -7,6 +7,9 @@
 use futures::{StreamExt, stream::FuturesUnordered};
 use slog::Logger;
 
+#[macro_use]
+extern crate slog;
+
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
         mod contract;
@@ -15,6 +18,9 @@ cfg_if::cfg_if! {
         use contract_stub as contract;
     }
 }
+
+pub mod logs;
+pub use logs::{LogError, LogsHandle};
 
 mod queries;
 pub use crate::queries::{
@@ -59,6 +65,11 @@ pub async fn dladm_info()
         .collect::<FuturesUnordered<_>>()
         .collect::<Vec<Result<_, _>>>()
         .await
+}
+
+pub async fn nvmeadm_info()
+-> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+    execute_command_with_timeout(nvmeadm_list(), DEFAULT_TIMEOUT).await
 }
 
 pub async fn pargs_oxide_processes(
@@ -122,4 +133,16 @@ pub async fn pfiles_oxide_processes(
         .collect::<FuturesUnordered<_>>()
         .collect::<Vec<Result<_, _>>>()
         .await
+}
+
+/// Retrieve various `zfs` command output for the system.
+pub async fn zfs_info()
+-> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+    execute_command_with_timeout(zfs_list(), DEFAULT_TIMEOUT).await
+}
+
+/// Retrieve various `zpool` command output for the system.
+pub async fn zpool_info()
+-> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+    execute_command_with_timeout(zpool_status(), DEFAULT_TIMEOUT).await
 }

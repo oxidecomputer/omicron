@@ -12,7 +12,7 @@
 #:	"!/var/tmp/omicron_tmp/rustc*",
 #: ]
 #: access_repos = [
-#:	"oxidecomputer/dendrite",
+#:	"oxidecomputer/dendrite"
 #: ]
 #:
 #: [[publish]]
@@ -25,5 +25,9 @@
 #: name = "environment.json"
 #: from_output = "/work/environment.json"
 #:
+#: [[publish]]
+#: series = "build-info-helios"
+#: name = "crate-build-timings.json"
+#: from_output = "/work/crate-build-timings.json"
 
 exec .github/buildomat/build-and-test.sh illumos

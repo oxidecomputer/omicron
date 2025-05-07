@@ -31,6 +31,8 @@ pub mod constants {
     pub const CLICKHOUSE_CLUSTER_SECRET: &str = "cluster secret";
     pub const CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX: &str =
         "highest seen keeper leader committed log index";
+    pub const OXIMETER_HEADING: &str = "OXIMETER SETTINGS";
+    pub const OXIMETER_READ_FROM: &str = "read from";
     pub const CREATED_BY: &str = "created by";
     pub const CREATED_AT: &str = "created at";
     pub const INTERNAL_DNS_VERSION: &str = "internal DNS version";
@@ -45,6 +47,7 @@ pub mod constants {
     pub const GENERATION: &str = "generation";
 }
 use constants::*;
+use std::fmt::Display;
 
 /// The state of a sled or resource (e.g. zone or physical disk) in this
 /// blueprint, with regards to the parent blueprint
@@ -129,11 +132,14 @@ pub enum BpTableColumn {
 }
 
 impl BpTableColumn {
-    pub fn new(before: String, after: String) -> BpTableColumn {
+    pub fn new<T: Display + Eq>(before: T, after: T) -> BpTableColumn {
         if before != after {
-            BpTableColumn::Diff { before, after }
+            BpTableColumn::Diff {
+                before: before.to_string(),
+                after: after.to_string(),
+            }
         } else {
-            BpTableColumn::Value(before)
+            BpTableColumn::Value(before.to_string())
         }
     }
 
@@ -191,7 +197,6 @@ pub trait BpTableSchema {
 
 // Provide data specific to an instance of a [`BpTable`]
 pub trait BpTableData {
-    fn bp_generation(&self) -> BpGeneration;
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow>;
 }
 
@@ -199,17 +204,17 @@ pub trait BpTableData {
 pub struct BpTable {
     table_name: &'static str,
     column_names: &'static [&'static str],
-    generation: BpGeneration,
+    generation: Option<BpGeneration>,
     rows: Vec<BpTableRow>,
 }
 
 impl BpTable {
     pub fn new(
         schema: impl BpTableSchema,
-        generation: BpGeneration,
+        generation: Option<BpGeneration>,
         rows: Vec<BpTableRow>,
-    ) -> BpTable {
-        BpTable {
+    ) -> Self {
+        Self {
             table_name: schema.table_name(),
             column_names: schema.column_names(),
             generation,
@@ -251,11 +256,15 @@ impl fmt::Display for BpTable {
         total_width -= COLUMN_GAP;
 
         // Write the name of the subtable
-        writeln!(
-            f,
-            "{:<SUBTABLE_INDENT$}{} {}:",
-            "", self.table_name, self.generation
-        )?;
+        if let Some(generation) = self.generation {
+            writeln!(
+                f,
+                "{:<SUBTABLE_INDENT$}{} {}:",
+                "", self.table_name, generation
+            )?;
+        } else {
+            writeln!(f, "{:<SUBTABLE_INDENT$}{}:", "", self.table_name,)?;
+        }
 
         // Write the top header border
         writeln!(f, "{:<SUBTABLE_INDENT$}{:-<total_width$}", "", "")?;
@@ -397,6 +406,26 @@ impl BpTableSchema for BpClickhouseServersTableSchema {
     }
 }
 
+/// The [`BpTable`] schema for pending MGS updates
+pub struct BpPendingMgsUpdates {}
+impl BpTableSchema for BpPendingMgsUpdates {
+    fn table_name(&self) -> &'static str {
+        "Pending MGS-managed updates (all baseboards)"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &[
+            "sp_type",
+            "slot",
+            "part_number",
+            "serial_number",
+            "artifact_hash",
+            "artifact_version",
+            "details",
+        ]
+    }
+}
+
 // An entry in a [`KvListWithHeading`]
 #[derive(Debug)]
 pub struct KvPair {
@@ -426,25 +455,25 @@ impl KvPair {
     }
 }
 
-// A top-to-bottom list of KV pairs with a heading
+// A top-to-bottom list of KV pairs, with or without a heading
 #[derive(Debug)]
-pub struct KvListWithHeading {
-    heading: &'static str,
+pub struct KvList {
+    heading: Option<&'static str>,
     kv: Vec<KvPair>,
 }
 
-impl KvListWithHeading {
+impl KvList {
     pub fn new_unchanged<S1: Into<String>, S2: Into<String>>(
-        heading: &'static str,
+        heading: Option<&'static str>,
         kv: Vec<(S1, S2)>,
-    ) -> KvListWithHeading {
+    ) -> KvList {
         let kv =
             kv.into_iter().map(|(k, v)| KvPair::new_unchanged(k, v)).collect();
-        KvListWithHeading { heading, kv }
+        KvList { heading, kv }
     }
 
-    pub fn new(heading: &'static str, kv: Vec<KvPair>) -> KvListWithHeading {
-        KvListWithHeading { heading, kv }
+    pub fn new(heading: Option<&'static str>, kv: Vec<KvPair>) -> KvList {
+        KvList { heading, kv }
     }
 
     /// Compute the max width of the keys for alignment purposes
@@ -453,10 +482,12 @@ impl KvListWithHeading {
     }
 }
 
-impl fmt::Display for KvListWithHeading {
+impl fmt::Display for KvList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Write the heading
-        writeln!(f, " {}:", self.heading)?;
+        if let Some(heading) = self.heading {
+            writeln!(f, " {}:", heading)?;
+        }
 
         // Write the rows
         let key_width = self.max_key_width() + 1;

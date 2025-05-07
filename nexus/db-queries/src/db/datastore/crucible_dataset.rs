@@ -8,13 +8,8 @@ use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
-use crate::db::error::retryable;
 use crate::db::identity::Asset;
 use crate::db::model::CrucibleDataset;
 use crate::db::model::PhysicalDisk;
@@ -27,6 +22,11 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_errors::retryable;
+use nexus_db_lookup::DbConnection;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -43,7 +43,7 @@ impl DataStore {
         &self,
         dataset_id: DatasetUuid,
     ) -> LookupResult<CrucibleDataset> {
-        use db::schema::crucible_dataset::dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl;
 
         dsl::crucible_dataset
             .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
@@ -72,10 +72,10 @@ impl DataStore {
     }
 
     async fn crucible_dataset_upsert_on_connection(
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         dataset: CrucibleDataset,
     ) -> Result<CrucibleDataset, TransactionError<Error>> {
-        use db::schema::crucible_dataset::dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl;
 
         let dataset_id = dataset.id();
         let zpool_id = dataset.pool_id;
@@ -125,7 +125,7 @@ impl DataStore {
         &self,
         dataset: CrucibleDataset,
     ) -> CreateResult<Option<CrucibleDataset>> {
-        use db::schema::crucible_dataset::dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl;
 
         let zpool_id = dataset.pool_id;
         Zpool::insert_resource(
@@ -157,7 +157,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<CrucibleDataset> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use db::schema::crucible_dataset::dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl;
 
         paginated(dsl::crucible_dataset, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
@@ -205,7 +205,7 @@ impl DataStore {
         let conn = self.pool_connection_unauthorized().await?;
 
         let dataset = {
-            use db::schema::crucible_dataset::dsl;
+            use nexus_db_schema::schema::crucible_dataset::dsl;
 
             dsl::crucible_dataset
                 .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
@@ -218,7 +218,7 @@ impl DataStore {
         };
 
         let zpool = {
-            use db::schema::zpool::dsl;
+            use nexus_db_schema::schema::zpool::dsl;
 
             dsl::zpool
                 .filter(dsl::id.eq(dataset.pool_id))
@@ -231,7 +231,7 @@ impl DataStore {
         };
 
         let physical_disk = {
-            use db::schema::physical_disk::dsl;
+            use nexus_db_schema::schema::physical_disk::dsl;
 
             dsl::physical_disk
                 .filter(dsl::id.eq(zpool.physical_disk_id))
@@ -245,6 +245,44 @@ impl DataStore {
 
         Ok(physical_disk.disk_policy == PhysicalDiskPolicy::InService)
     }
+
+    pub async fn mark_crucible_dataset_not_provisionable(
+        &self,
+        opctx: &OpContext,
+        dataset_id: DatasetUuid,
+    ) -> Result<(), Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::crucible_dataset::dsl;
+
+        diesel::update(dsl::crucible_dataset)
+            .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::no_provision.eq(true))
+            .execute_async(&*conn)
+            .await
+            .map(|_| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn mark_crucible_dataset_provisionable(
+        &self,
+        opctx: &OpContext,
+        dataset_id: DatasetUuid,
+    ) -> Result<(), Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use nexus_db_schema::schema::crucible_dataset::dsl;
+
+        diesel::update(dsl::crucible_dataset)
+            .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::no_provision.eq(false))
+            .execute_async(&*conn)
+            .await
+            .map(|_| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 #[cfg(test)]
@@ -255,6 +293,7 @@ mod test {
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
+    use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -293,6 +332,7 @@ mod test {
             *zpool_id.as_untyped_uuid(),
             *sled_id.as_untyped_uuid(),
             PhysicalDiskUuid::new_v4(),
+            ByteCount::from(0).into(),
         );
         datastore
             .zpool_insert(opctx, zpool)

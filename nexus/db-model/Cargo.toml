@@ -44,6 +44,7 @@ db-macros.workspace = true
 omicron-certificates.workspace = true
 omicron-common.workspace = true
 nexus-config.workspace = true
+nexus-db-schema.workspace = true
 nexus-defaults.workspace = true
 nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
@@ -55,3 +56,4 @@ tufaceous-artifact.workspace = true
 [dev-dependencies]
 camino-tempfile.workspace = true
 expectorate.workspace = true
+regex.workspace = true

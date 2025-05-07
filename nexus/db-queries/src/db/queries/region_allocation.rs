@@ -5,15 +5,16 @@
 //! Implementation of queries for provisioning regions.
 
 use crate::db::column_walker::AllColumnsOf;
-use crate::db::model::{CrucibleDataset, Region};
+use crate::db::model::{CrucibleDataset, Region, RegionReservationPercent};
 use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
-use crate::db::schema;
 use crate::db::true_or_cast_error::matches_sentinel;
 use const_format::concatcp;
 use diesel::pg::Pg;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_schema::enums::RegionReservationPercentEnum;
+use nexus_db_schema::schema;
 use omicron_common::api::external;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
@@ -30,8 +31,6 @@ const NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL: &'static str =
 /// Translates a generic pool error to an external error based
 /// on messages which may be emitted during region provisioning.
 pub fn from_diesel(e: DieselError) -> external::Error {
-    use crate::db::error;
-
     let sentinels = [
         NOT_ENOUGH_DATASETS_SENTINEL,
         NOT_ENOUGH_ZPOOL_SPACE_SENTINEL,
@@ -49,7 +48,11 @@ pub fn from_diesel(e: DieselError) -> external::Error {
             NOT_ENOUGH_ZPOOL_SPACE_SENTINEL => {
                 return external::Error::insufficient_capacity(
                     external_message,
-                    "Not enough zpool space to allocate disks. There may not be enough disks with space for the requested region. You may also see this if your rack is in a degraded state, or you're running the default multi-rack topology configuration in a 1-sled development environment.",
+                    "Not enough zpool space to allocate disks. There may not \
+                    be enough disks with space for the requested region. You \
+                    may also see this if your rack is in a degraded state, or \
+                    you're running the default multi-rack topology \
+                    configuration in a 1-sled development environment.",
                 );
             }
             NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL => {
@@ -63,7 +66,10 @@ pub fn from_diesel(e: DieselError) -> external::Error {
         }
     }
 
-    error::public_error_from_diesel(e, error::ErrorHandler::Server)
+    nexus_db_errors::public_error_from_diesel(
+        e,
+        nexus_db_errors::ErrorHandler::Server,
+    )
 }
 
 type SelectableSql<T> = <
@@ -82,18 +88,94 @@ pub struct RegionParameters {
     pub read_only: bool,
 }
 
+type AllocationQuery =
+    TypedSqlQuery<(SelectableSql<CrucibleDataset>, SelectableSql<Region>)>;
+
+/// Currently the largest region that can be allocated matches the largest disk
+/// that can be requested, but separate this constant so that when
+/// MAX_DISK_SIZE_BYTES is increased the region allocation query will still use
+/// this as a maximum size.
+pub const MAX_REGION_SIZE_BYTES: u64 = 1098437885952; // 1023 * (1 << 30);
+
+#[derive(Debug)]
+pub enum AllocationQueryError {
+    /// Region size multiplication overflowed u64
+    RegionSizeOverflow,
+
+    /// Requested region size larger than maximum
+    RequestedRegionOverMaxSize { request: u64, maximum: u64 },
+
+    /// Requested size not divisible by reservation factor
+    RequestedRegionNotDivisibleByFactor { request: i64, factor: i64 },
+
+    /// Adding the overhead to the requested size overflowed
+    RequestedRegionOverheadOverflow { request: i64, overhead: i64 },
+
+    /// Converting from u64 to i64 truncated
+    RequestedRegionSizeTruncated { request: u64, e: String },
+}
+
+impl From<AllocationQueryError> for external::Error {
+    fn from(e: AllocationQueryError) -> external::Error {
+        match e {
+            AllocationQueryError::RegionSizeOverflow => {
+                external::Error::invalid_value(
+                    "region allocation",
+                    "region size overflowed u64",
+                )
+            }
+
+            AllocationQueryError::RequestedRegionOverMaxSize {
+                request,
+                maximum,
+            } => external::Error::invalid_value(
+                "region allocation",
+                format!("region size {request} over maximum {maximum}"),
+            ),
+
+            AllocationQueryError::RequestedRegionNotDivisibleByFactor {
+                request,
+                factor,
+            } => external::Error::invalid_value(
+                "region allocation",
+                format!("region size {request} not divisible by {factor}"),
+            ),
+
+            AllocationQueryError::RequestedRegionOverheadOverflow {
+                request,
+                overhead,
+            } => external::Error::invalid_value(
+                "region allocation",
+                format!(
+                    "adding {overhead} to region size {request} overflowed"
+                ),
+            ),
+
+            AllocationQueryError::RequestedRegionSizeTruncated {
+                request,
+                e,
+            } => external::Error::internal_error(&format!(
+                "converting {request} to i64 failed! {e}"
+            )),
+        }
+    }
+}
+
 /// For a given volume, idempotently allocate enough regions (according to some
 /// allocation strategy) to meet some redundancy level. This should only be used
 /// for the region set that is in the top level of the Volume (not the deeper
 /// layers of the hierarchy). If that volume has region snapshots in the region
 /// set, a `snapshot_id` should be supplied matching those entries.
+///
+/// Depending on the call site, it may not safe for multiple callers to call
+/// this function concurrently for the same volume id. Care is required!
 pub fn allocation_query(
     volume_id: VolumeUuid,
     snapshot_id: Option<uuid::Uuid>,
     params: RegionParameters,
     allocation_strategy: &RegionAllocationStrategy,
     redundancy: usize,
-) -> TypedSqlQuery<(SelectableSql<CrucibleDataset>, SelectableSql<Region>)> {
+) -> Result<AllocationQuery, AllocationQueryError> {
     let (seed, distinct_sleds) = {
         let (input_seed, distinct_sleds) = match allocation_strategy {
             RegionAllocationStrategy::Random { seed } => (seed, false),
@@ -117,11 +199,70 @@ pub fn allocation_query(
 
     let seed = seed.to_le_bytes().to_vec();
 
-    let size_delta =
-        params.block_size * params.blocks_per_extent * params.extent_count;
+    // Ensure that the multiplication doesn't overflow.
+    let requested_size: u64 = params
+        .block_size
+        .checked_mul(params.blocks_per_extent)
+        .ok_or(AllocationQueryError::RegionSizeOverflow)?
+        .checked_mul(params.extent_count)
+        .ok_or(AllocationQueryError::RegionSizeOverflow)?;
+
+    if requested_size > MAX_REGION_SIZE_BYTES {
+        return Err(AllocationQueryError::RequestedRegionOverMaxSize {
+            request: requested_size,
+            maximum: MAX_REGION_SIZE_BYTES,
+        });
+    }
+
+    // After the above check, cast from u64 to i64. The value is low enough
+    // (after the check above) that try_into should always return Ok.
+    let requested_size: i64 = match requested_size.try_into() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(AllocationQueryError::RequestedRegionSizeTruncated {
+                request: requested_size,
+                e: e.to_string(),
+            });
+        }
+    };
+
+    let reservation_percent = RegionReservationPercent::TwentyFive;
+
+    let size_delta: i64 = match reservation_percent {
+        RegionReservationPercent::TwentyFive => {
+            // Check first that the requested region size is divisible by this.
+            // This should basically never fail because all block sizes are
+            // divisible by 4.
+            if requested_size % 4 != 0 {
+                return Err(
+                    AllocationQueryError::RequestedRegionNotDivisibleByFactor {
+                        request: requested_size,
+                        factor: 4,
+                    },
+                );
+            }
+
+            let overhead: i64 = requested_size.checked_div(4).ok_or(
+                AllocationQueryError::RequestedRegionNotDivisibleByFactor {
+                    request: requested_size,
+                    factor: 4,
+                },
+            )?;
+
+            requested_size.checked_add(overhead).ok_or(
+                AllocationQueryError::RequestedRegionOverheadOverflow {
+                    request: requested_size,
+                    overhead,
+                },
+            )?
+        }
+    };
+
     let redundancy: i64 = i64::try_from(redundancy).unwrap();
 
-    let builder = QueryBuilder::new().sql(
+    let mut builder = QueryBuilder::new();
+
+    builder.sql(
     // Find all old regions associated with a particular volume
 "WITH
   old_regions AS (
@@ -136,9 +277,12 @@ pub fn allocation_query(
     SELECT
       crucible_dataset.pool_id,
       sum(crucible_dataset.size_used) AS size_used
-    FROM crucible_dataset WHERE ((crucible_dataset.size_used IS NOT NULL) AND (crucible_dataset.time_deleted IS NULL)) GROUP BY crucible_dataset.pool_id),");
+    FROM crucible_dataset
+    WHERE
+      ((crucible_dataset.size_used IS NOT NULL) AND (crucible_dataset.time_deleted IS NULL))
+    GROUP BY crucible_dataset.pool_id),");
 
-    let builder = if let Some(snapshot_id) = snapshot_id {
+    if let Some(snapshot_id) = snapshot_id {
         // Any zpool already have this volume's existing regions, or host the
         // snapshot volume's regions?
         builder.sql("
@@ -151,7 +295,7 @@ pub fn allocation_query(
        select crucible_dataset.pool_id from
  crucible_dataset inner join region_snapshot on (region_snapshot.dataset_id = crucible_dataset.id)
  where region_snapshot.snapshot_id = ").param().sql(")),")
-        .bind::<sql_types::Uuid, _>(snapshot_id)
+        .bind::<sql_types::Uuid, _>(snapshot_id);
     } else {
         // Any zpool already have this volume's existing regions?
         builder.sql("
@@ -160,15 +304,15 @@ pub fn allocation_query(
           crucible_dataset.pool_id
         FROM
           crucible_dataset INNER JOIN old_regions ON (old_regions.dataset_id = crucible_dataset.id)
-      ),")
-    };
+      ),");
+    }
 
     // If `distinct_sleds` is selected, then take note of the sleds used by
     // existing allocations, and filter those out later. This step is required
     // when taking an existing allocation of regions and increasing the
     // redundancy in order to _not_ allocate to sleds already used.
 
-    let builder = if distinct_sleds {
+    if distinct_sleds {
         builder.sql(
             "
         existing_sleds AS (
@@ -179,26 +323,24 @@ pub fn allocation_query(
           WHERE
             zpool.id = ANY(SELECT pool_id FROM existing_zpools)
         ),",
-        )
-    } else {
-        builder
-    };
+        );
+    }
 
     // Identifies zpools with enough space for region allocation, that are not
     // currently used by this Volume's existing regions.
     //
     // NOTE: 'distinct_sleds' changes the format of the underlying SQL query, as it uses
     // distinct bind parameters depending on the conditional branch.
-    let builder = builder.sql(
+    builder.sql(
         "
   candidate_zpools AS (",
     );
-    let builder = if distinct_sleds {
+    if distinct_sleds {
         builder.sql("SELECT DISTINCT ON (zpool.sled_id) ")
     } else {
         builder.sql("SELECT ")
     };
-    let builder = builder.sql("
+    builder.sql("
         old_zpool_usage.pool_id
     FROM
         old_zpool_usage
@@ -206,8 +348,10 @@ pub fn allocation_query(
         (zpool INNER JOIN sled ON (zpool.sled_id = sled.id)) ON (zpool.id = old_zpool_usage.pool_id)
         INNER JOIN
         physical_disk ON (zpool.physical_disk_id = physical_disk.id)
+        INNER JOIN
+        crucible_dataset ON (crucible_dataset.pool_id = zpool.id)
     WHERE (
-      (old_zpool_usage.size_used + ").param().sql(" ) <=
+      (old_zpool_usage.size_used + ").param().sql(" + zpool.control_plane_storage_buffer) <=
          (SELECT total_size FROM omicron.public.inv_zpool WHERE
           inv_zpool.id = old_zpool_usage.pool_id
           ORDER BY inv_zpool.time_collected DESC LIMIT 1)
@@ -216,10 +360,12 @@ pub fn allocation_query(
       AND physical_disk.disk_policy = 'in_service'
       AND physical_disk.disk_state = 'active'
       AND NOT(zpool.id = ANY(SELECT existing_zpools.pool_id FROM existing_zpools))
+      AND (crucible_dataset.time_deleted is NULL)
+      AND (crucible_dataset.no_provision = false)
     "
-    ).bind::<sql_types::BigInt, _>(size_delta as i64);
+    ).bind::<sql_types::BigInt, _>(size_delta);
 
-    let builder = if distinct_sleds {
+    if distinct_sleds {
         builder
             .sql("AND NOT(sled.id = ANY(SELECT existing_sleds.id FROM existing_sleds)))
             ORDER BY zpool.sled_id, md5((CAST(zpool.id as BYTEA) || ")
@@ -240,7 +386,7 @@ pub fn allocation_query(
       crucible_dataset.id,
       crucible_dataset.pool_id
     FROM (crucible_dataset INNER JOIN candidate_zpools ON (crucible_dataset.pool_id = candidate_zpools.pool_id))
-    WHERE (crucible_dataset.time_deleted IS NULL)
+    WHERE (crucible_dataset.time_deleted IS NULL) AND (crucible_dataset.no_provision = false)
     ORDER BY crucible_dataset.pool_id, md5((CAST(crucible_dataset.id as BYTEA) || ").param().sql("))
   ),")
     .bind::<sql_types::Bytea, _>(seed.clone())
@@ -272,7 +418,8 @@ pub fn allocation_query(
       ").param().sql(" AS extent_count,
       NULL AS port,
       ").param().sql(" AS read_only,
-      FALSE as deleting
+      FALSE as deleting,
+      ").param().sql(" AS reservation_percent
     FROM shuffled_candidate_datasets")
   // Only select the *additional* number of candidate regions for the required
   // redundancy level
@@ -286,6 +433,7 @@ pub fn allocation_query(
     .bind::<sql_types::BigInt, _>(params.blocks_per_extent as i64)
     .bind::<sql_types::BigInt, _>(params.extent_count as i64)
     .bind::<sql_types::Bool, _>(params.read_only)
+    .bind::<RegionReservationPercentEnum, _>(reservation_percent)
     .bind::<sql_types::BigInt, _>(redundancy)
 
     // A subquery which summarizes the changes we intend to make, showing:
@@ -298,9 +446,10 @@ pub fn allocation_query(
     SELECT
       candidate_regions.dataset_id AS id,
       crucible_dataset.pool_id AS pool_id,
-      ((candidate_regions.block_size * candidate_regions.blocks_per_extent) * candidate_regions.extent_count) AS size_used_delta
+      ").param().sql(" AS size_used_delta
     FROM (candidate_regions INNER JOIN crucible_dataset ON (crucible_dataset.id = candidate_regions.dataset_id))
   ),")
+    .bind::<sql_types::BigInt, _>(size_delta)
 
     // Confirms whether or not the insertion and updates should
     // occur.
@@ -385,7 +534,7 @@ pub fn allocation_query(
     .sql("
   inserted_regions AS (
     INSERT INTO region
-      (id, time_created, time_modified, dataset_id, volume_id, block_size, blocks_per_extent, extent_count, port, read_only, deleting)
+      (id, time_created, time_modified, dataset_id, volume_id, block_size, blocks_per_extent, extent_count, port, read_only, deleting, reservation_percent)
     SELECT ").sql(AllColumnsOfRegion::with_prefix("candidate_regions")).sql("
     FROM candidate_regions
     WHERE
@@ -416,7 +565,9 @@ UNION
     .sql(AllColumnsOfRegion::with_prefix("inserted_regions")).sql("
   FROM (inserted_regions INNER JOIN updated_datasets ON (inserted_regions.dataset_id = updated_datasets.id))
 )"
-    ).query()
+    );
+
+    Ok(builder.query())
 }
 
 #[cfg(test)]
@@ -456,7 +607,8 @@ mod test {
                 seed: Some(1),
             },
             REGION_REDUNDANCY_THRESHOLD,
-        );
+        )
+        .unwrap();
 
         expectorate_query_contents(
             &region_allocate,
@@ -472,7 +624,8 @@ mod test {
             params,
             &RegionAllocationStrategy::Random { seed: Some(1) },
             REGION_REDUNDANCY_THRESHOLD,
-        );
+        )
+        .unwrap();
         expectorate_query_contents(
             &region_allocate,
             "tests/output/region_allocate_random_sleds.sql",
@@ -493,7 +646,8 @@ mod test {
                 seed: Some(1),
             },
             REGION_REDUNDANCY_THRESHOLD,
-        );
+        )
+        .unwrap();
         expectorate_query_contents(
             &region_allocate,
             "tests/output/region_allocate_with_snapshot_distinct_sleds.sql",
@@ -508,7 +662,8 @@ mod test {
             params,
             &RegionAllocationStrategy::Random { seed: Some(1) },
             REGION_REDUNDANCY_THRESHOLD,
-        );
+        )
+        .unwrap();
         expectorate_query_contents(
             &region_allocate,
             "tests/output/region_allocate_with_snapshot_random_sleds.sql",
@@ -541,7 +696,8 @@ mod test {
             params,
             &RegionAllocationStrategy::RandomWithDistinctSleds { seed: None },
             REGION_REDUNDANCY_THRESHOLD,
-        );
+        )
+        .unwrap();
         let _ = region_allocate
             .explain_async(&conn)
             .await
@@ -555,7 +711,8 @@ mod test {
             params,
             &RegionAllocationStrategy::Random { seed: None },
             REGION_REDUNDANCY_THRESHOLD,
-        );
+        )
+        .unwrap();
         let _ = region_allocate
             .explain_async(&conn)
             .await
@@ -563,5 +720,65 @@ mod test {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn allocation_query_region_size_overflow() {
+        let volume_id = VolumeUuid::nil();
+        let snapshot_id = None;
+
+        let params = RegionParameters {
+            block_size: 512,
+            blocks_per_extent: 4294967296,
+            extent_count: 8388609, // should cause an overflow!
+            read_only: false,
+        };
+
+        let Err(e) = allocation_query(
+            volume_id,
+            snapshot_id,
+            params,
+            &RegionAllocationStrategy::RandomWithDistinctSleds {
+                seed: Some(1),
+            },
+            REGION_REDUNDANCY_THRESHOLD,
+        ) else {
+            panic!("expected error");
+        };
+
+        assert!(matches!(e, AllocationQueryError::RegionSizeOverflow));
+    }
+
+    #[test]
+    fn allocation_query_region_size_too_large() {
+        let volume_id = VolumeUuid::nil();
+        let snapshot_id = None;
+
+        let params = RegionParameters {
+            block_size: 512,
+            blocks_per_extent: 8388608, // 2^32 / 512
+            extent_count: 256,          // 255 would be ok, 256 is too large
+            read_only: false,
+        };
+
+        let Err(e) = allocation_query(
+            volume_id,
+            snapshot_id,
+            params,
+            &RegionAllocationStrategy::RandomWithDistinctSleds {
+                seed: Some(1),
+            },
+            REGION_REDUNDANCY_THRESHOLD,
+        ) else {
+            panic!("expected error!");
+        };
+
+        assert!(matches!(
+            e,
+            AllocationQueryError::RequestedRegionOverMaxSize {
+                request: 1099511627776u64,
+                maximum: MAX_REGION_SIZE_BYTES,
+            }
+        ));
     }
 }

@@ -18,6 +18,7 @@ use crate::rack_setup::{
 use crate::sim::SimulatedUpstairs;
 use anyhow::{Context as _, anyhow};
 use crucible_agent_client::types::State as RegionState;
+use id_map::IdMap;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
@@ -28,8 +29,7 @@ use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
-    BlueprintPhysicalDisksConfig, BlueprintZoneImageSource,
-    blueprint_zone_type,
+    BlueprintZoneImageSource, blueprint_zone_type,
 };
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
@@ -77,6 +77,8 @@ pub struct Server {
     pub http_server: dropshot::HttpServer<Arc<SledAgent>>,
     /// simulated pantry server
     pub pantry_server: Option<PantryServer>,
+    /// address of repo depot server
+    pub repo_depot_address: SocketAddr,
 }
 
 impl Server {
@@ -127,7 +129,8 @@ impl Server {
         // TODO-robustness if this returns a 400 error, we probably want to
         // return a permanent error from the `notify_nexus` closure.
         let sa_address = http_server.local_addr();
-        let repo_depot_port = sled_agent.repo_depot.local_addr().port();
+        let repo_depot_address = sled_agent.repo_depot.local_addr();
+        let repo_depot_port = repo_depot_address.port();
         let config_clone = config.clone();
         let log_clone = log.clone();
         let task = tokio::spawn(async move {
@@ -230,6 +233,7 @@ impl Server {
             sled_agent,
             http_server,
             pantry_server: None,
+            repo_depot_address,
         })
     }
 
@@ -387,12 +391,13 @@ pub async fn run_standalone_server(
         SocketAddr::V6(a) => a,
     };
     let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
-    let mut zones = vec![BlueprintZoneConfig {
+    let mut zones = IdMap::new();
+    zones.insert(BlueprintZoneConfig {
         disposition: BlueprintZoneDisposition::InService,
         id: OmicronZoneUuid::new_v4(),
         zone_type: BlueprintZoneType::InternalDns(
             blueprint_zone_type::InternalDns {
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
                 http_address: http_bound,
                 dns_address: match dns.dns_server.local_address() {
                     SocketAddr::V4(_) => panic!("did not expect v4 address"),
@@ -403,9 +408,9 @@ pub async fn run_standalone_server(
             },
         ),
         // Co-locate the filesystem pool with the dataset
-        filesystem_pool: Some(pool_name),
+        filesystem_pool: pool_name,
         image_source: BlueprintZoneImageSource::InstallDataset,
-    }];
+    });
 
     let mut internal_services_ip_pool_ranges = vec![];
     let mut macs = MacAddr::iter_system();
@@ -413,7 +418,7 @@ pub async fn run_standalone_server(
         let ip = nexus_external_addr.ip();
         let id = OmicronZoneUuid::new_v4();
 
-        zones.push(BlueprintZoneConfig {
+        zones.insert(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
             zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
@@ -442,7 +447,7 @@ pub async fn run_standalone_server(
                 external_tls: false,
                 external_dns_servers: vec![],
             }),
-            filesystem_pool: Some(get_random_zpool()),
+            filesystem_pool: get_random_zpool(),
             image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
@@ -462,14 +467,12 @@ pub async fn run_standalone_server(
         let ip = *external_dns_internal_addr.ip();
         let id = OmicronZoneUuid::new_v4();
         let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
-        zones.push(BlueprintZoneConfig {
+        zones.insert(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
             zone_type: BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns {
-                    dataset: OmicronZoneDataset {
-                        pool_name: pool_name.clone(),
-                    },
+                    dataset: OmicronZoneDataset { pool_name },
                     http_address: external_dns_internal_addr,
                     dns_address: from_sockaddr_to_external_floating_addr(
                         SocketAddr::V6(external_dns_internal_addr),
@@ -494,7 +497,7 @@ pub async fn run_standalone_server(
                 },
             ),
             // Co-locate the filesystem pool with the dataset
-            filesystem_pool: Some(pool_name),
+            filesystem_pool: pool_name,
             image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
@@ -513,10 +516,14 @@ pub async fn run_standalone_server(
         // individuals running this program who then want to log in as this
         // user.  For more on what's supported, see the API docs for this
         // type and the specific constraints in the nexus-passwords crate.
-        user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
-        RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
-            .parse()
-            .unwrap(),
+        //
+        // The hash was generated via:
+        // `cargo run --example argon2 -- --input oxide`.
+        user_password_hash:
+            "$argon2id$v=19$m=98304,t=23,p=1$Effh/p6M2ZKdnpJFeGqtGQ$\
+             ZtUwcVODAvUAVK6EQ5FJMv+GMlUCo9PQQsy9cagL+EU"
+                .parse()
+                .unwrap(),
     };
 
     let mut crucible_datasets = vec![];
@@ -546,21 +553,17 @@ pub async fn run_standalone_server(
     sled_configs.insert(
         config.id,
         SledConfig {
-            disks: BlueprintPhysicalDisksConfig {
-                generation: omicron_physical_disks_config.generation,
-                disks: omicron_physical_disks_config
-                    .disks
-                    .into_iter()
-                    .map(|config| BlueprintPhysicalDiskConfig {
-                        disposition:
-                            BlueprintPhysicalDiskDisposition::InService,
-                        identity: config.identity,
-                        id: config.id,
-                        pool_id: config.pool_id,
-                    })
-                    .collect(),
-            },
-            datasets: server.sled_agent.datasets_config_list()?,
+            disks: omicron_physical_disks_config
+                .disks
+                .into_iter()
+                .map(|config| BlueprintPhysicalDiskConfig {
+                    disposition: BlueprintPhysicalDiskDisposition::InService,
+                    identity: config.identity,
+                    id: config.id,
+                    pool_id: config.pool_id,
+                })
+                .collect(),
+            datasets: server.sled_agent.datasets_config_list()?.datasets,
             zones,
         },
     );

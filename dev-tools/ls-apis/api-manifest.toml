@@ -255,11 +255,7 @@ versioned_how = "server"
 client_package_name = "dpd-client"
 label = "Dendrite DPD"
 server_package_name = "dpd"
-# TODO We might need to pick this apart more carefully.  DPD invokes and is
-# invoked by several different services.  It's possible that some of them can
-# treat it as server-managed.
-versioned_how = "client"
-versioned_how_reason = "Sled Agent calling DPD creates a circular dependency"
+versioned_how = "server"
 notes = """
 Dendrite's data plane daemon (`dpd`) is the interface to configure and manage \
 the rack switches. It's consumed by sled-agent to get the rack off the \
@@ -268,6 +264,18 @@ rack external network configuration, these changes are synchronized by nexus \
 to `dpd`. The `dpd` API is a auto-generated from it's OpenAPI specification \
 and exists as a client library within omicron. This is because the Dendrite \
 repo is not currently open source.
+"""
+
+[[apis]]
+client_package_name = "ereport-client"
+label = "ereport"
+server_package_name = "ereport-api"
+versioned_how = "server"
+notes = """
+Implemented by sled-agents and by MGS, and consumed by Nexus to collect \
+ereports.
+
+The sled-agent and MGS APIs are server-versioned, so this can be as well.
 """
 
 [[apis]]

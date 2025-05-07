@@ -1,7 +1,7 @@
+use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::lookup;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;
 use uuid::Uuid;

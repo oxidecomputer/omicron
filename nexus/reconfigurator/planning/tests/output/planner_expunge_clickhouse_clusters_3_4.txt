@@ -3,9 +3,9 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
 
  MODIFIED SLEDS:
 
-  sled b340c044-bd87-4a3b-aee3-e6ccd9d3ff02 (active -> decommissioned):
+  sled b340c044-bd87-4a3b-aee3-e6ccd9d3ff02 (active -> decommissioned, config generation 3 -> 4):
 
-    physical disks generation 2 -> 3:
+    physical disks:
     ---------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition   
     ---------------------------------------------------------------------------------------
@@ -31,7 +31,7 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
      └─                                                                      + expunged ✓  
 
 
-    datasets generation 3 -> 4:
+    datasets:
     ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset id                             disposition    quota     reservation   compression
     ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -135,7 +135,7 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
      └─                                                                                                                                                     + expunged                                        
 
 
-    omicron zones generation 3 -> 4:
+    omicron zones:
     --------------------------------------------------------------------------------------------------------------------
     zone type           zone id                                image source      disposition      underlay IP           
     --------------------------------------------------------------------------------------------------------------------
@@ -173,9 +173,9 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
      └─                                                                          + expunged ✓                           
 
 
-  sled cdba3bea-3407-4b6e-a029-19bf4a02fca7 (active):
+  sled cdba3bea-3407-4b6e-a029-19bf4a02fca7 (active, config generation 3 -> 4):
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -191,7 +191,7 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
     fake-vendor   fake-model   serial-e35766ef-789a-4b2f-9a6c-e6626d5ab195   in service 
 
 
-    datasets generation 3 -> 4:
+    datasets:
     ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset id                             disposition   quota     reservation   compression
     ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -250,7 +250,7 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
 +   oxp_2d44b756-94df-45ec-a644-50021248682d/crypt/zone/oxz_internal_dns_7f707d70-deef-42dc-96cc-a76cf6366386        40610ea8-b288-408c-91fd-e40edbba09cf   in service    none      none          off        
 
 
-    omicron zones generation 3 -> 4:
+    omicron zones:
     -----------------------------------------------------------------------------------------------------------------
     zone type           zone id                                image source      disposition   underlay IP           
     -----------------------------------------------------------------------------------------------------------------
@@ -274,9 +274,9 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
 +   internal_dns        7f707d70-deef-42dc-96cc-a76cf6366386   install dataset   in service    fd00:1122:3344:1::1   
 
 
-  sled fe7b9b01-e803-41ea-9e39-db240dcd9029 (active):
+  sled fe7b9b01-e803-41ea-9e39-db240dcd9029 (active, config generation 3 -> 4):
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -292,7 +292,7 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
     fake-vendor   fake-model   serial-fe379ac6-1938-4cc2-93a9-43b1447229ae   in service 
 
 
-    datasets generation 3 -> 4:
+    datasets:
     ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset id                             disposition   quota     reservation   compression
     ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -351,7 +351,7 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
 +   oxp_2acfbb84-5ce0-424e-8d73-44c5071d4430/crypt/zone/oxz_nexus_b2e9a34b-7b15-4f56-836d-b39e474afbc5               a89cea5b-db88-4f12-a2f4-700a04803af1   in service    none      none          off        
 
 
-    omicron zones generation 3 -> 4:
+    omicron zones:
     -----------------------------------------------------------------------------------------------------------------
     zone type           zone id                                image source      disposition   underlay IP           
     -----------------------------------------------------------------------------------------------------------------
@@ -383,6 +383,10 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
  METADATA:
     internal DNS version:   1 (unchanged)
     external DNS version:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
 
  CLICKHOUSE CLUSTER CONFIG:
 *   generation:::::::::::::::::::::::::::::::::::::   2 -> 3

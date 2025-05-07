@@ -5,7 +5,6 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
-use illumos_utils::zone::Zones;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use nexus_client::types::{
     BackgroundTasksActivateRequest, ProbeExternalIp, ProbeInfo,
@@ -65,6 +64,8 @@ pub(crate) struct ProbeManagerInner {
     port_manager: PortManager,
     metrics_queue: MetricsRequestQueue,
     running_probes: Mutex<RunningProbes>,
+
+    zones_api: Arc<dyn illumos_utils::zone::Api>,
 }
 
 impl ProbeManager {
@@ -83,6 +84,7 @@ impl ProbeManager {
                 vnic_allocator: VnicAllocator::new(
                     VNIC_ALLOCATOR_SCOPE,
                     etherstub,
+                    Arc::new(illumos_utils::dladm::Dladm::real_api()),
                 ),
                 running_probes: Mutex::new(RunningProbes {
                     storage_generation: None,
@@ -94,6 +96,7 @@ impl ProbeManager {
                 storage,
                 port_manager,
                 metrics_queue,
+                zones_api: Arc::new(illumos_utils::zone::Zones::real_api()),
             }),
         }
     }
@@ -326,7 +329,7 @@ impl ProbeManagerInner {
             dhcp_config: DhcpCfg::default(),
         })?;
 
-        let installed_zone = ZoneBuilderFactory::default()
+        let installed_zone = ZoneBuilderFactory::new()
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
@@ -354,13 +357,19 @@ impl ProbeManagerInner {
 
         // Notify the sled-agent's metrics task to start tracking the VNIC and
         // any OPTE ports in the zone.
-        if !self.metrics_queue.track_zone_links(&rz).await {
-            error!(
+        match self.metrics_queue.track_zone_links(&rz) {
+            Ok(_) => debug!(
+                self.log,
+                "started tracking zone datalinks";
+                "zone_name" => rz.name(),
+            ),
+            Err(errors) => error!(
                 self.log,
                 "Failed to track one or more datalinks in the zone, \
                 some metrics will not be produced";
                 "zone_name" => rz.name(),
-            );
+                "errors" => ?errors,
+            ),
         }
 
         self.running_probes.lock().await.zones.insert(probe.id, rz);
@@ -403,7 +412,20 @@ impl ProbeManagerInner {
 
                 // Ask the sled-agent to stop tracking our datalinks, and then
                 // delete the OPTE ports.
-                self.metrics_queue.untrack_zone_links(&running_zone).await;
+                match self.metrics_queue.untrack_zone_links(&running_zone) {
+                    Ok(_) => debug!(
+                        self.log,
+                        "stopped tracking zone datalinks";
+                        "zone_name" => running_zone.name(),
+                    ),
+                    Err(errors) => error!(
+                        self.log,
+                        "Failed to stop tracking one or more datalinks in the \
+                        zone, some metrics may still be produced";
+                        "zone_name" => running_zone.name(),
+                        "errors" => ?errors,
+                    ),
+                }
                 running_zone.release_opte_ports();
 
                 if let Err(e) = running_zone.stop().await {
@@ -457,7 +479,9 @@ impl ProbeManagerInner {
 
     /// Collect the current probe state from the running zones on this sled.
     async fn current_state(self: &Arc<Self>) -> Result<HashSet<ProbeState>> {
-        Ok(Zones::get()
+        Ok(self
+            .zones_api
+            .get()
             .await?
             .into_iter()
             .filter_map(|z| ProbeState::try_from(z).ok())

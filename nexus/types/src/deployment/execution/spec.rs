@@ -30,14 +30,15 @@ pub enum ExecutionComponent {
     ExternalNetworking,
     SupportBundles,
     SledList,
+    SledAgent,
     PhysicalDisks,
     OmicronZones,
     FirewallRules,
-    DatasetRecords,
-    Datasets,
     Dns,
     Cockroach,
     Clickhouse,
+    Oximeter,
+    MgsUpdates,
 }
 
 /// Steps for reconfigurator execution.

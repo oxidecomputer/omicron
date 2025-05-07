@@ -10,9 +10,11 @@ use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_reconfigurator_execution::RealizeBlueprintOutput;
+use nexus_reconfigurator_execution::{
+    RealizeBlueprintOutput, RequiredRealizeArgs,
+};
 use nexus_types::deployment::{
-    Blueprint, BlueprintTarget, execution::EventBuffer,
+    Blueprint, BlueprintTarget, PendingMgsUpdates, execution::EventBuffer,
 };
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
@@ -29,6 +31,7 @@ pub struct BlueprintExecutor {
     nexus_id: OmicronZoneUuid,
     tx: watch::Sender<usize>,
     saga_recovery: Activator,
+    mgs_update_tx: watch::Sender<PendingMgsUpdates>,
 }
 
 impl BlueprintExecutor {
@@ -40,6 +43,7 @@ impl BlueprintExecutor {
         >,
         nexus_id: OmicronZoneUuid,
         saga_recovery: Activator,
+        mgs_update_tx: watch::Sender<PendingMgsUpdates>,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
         BlueprintExecutor {
@@ -49,6 +53,7 @@ impl BlueprintExecutor {
             nexus_id,
             tx,
             saga_recovery,
+            mgs_update_tx,
         }
     }
 
@@ -100,12 +105,16 @@ impl BlueprintExecutor {
         });
 
         let result = nexus_reconfigurator_execution::realize_blueprint(
-            opctx,
-            &self.datastore,
-            &self.resolver,
-            blueprint,
-            self.nexus_id,
-            sender,
+            RequiredRealizeArgs {
+                opctx,
+                datastore: &self.datastore,
+                resolver: &self.resolver,
+                creator: self.nexus_id,
+                blueprint,
+                sender,
+                mgs_updates: self.mgs_update_tx.clone(),
+            }
+            .as_nexus(self.nexus_id),
         )
         .await;
 
@@ -168,6 +177,7 @@ mod test {
     use httptest::Expectation;
     use httptest::matchers::{not, request};
     use httptest::responders::status_code;
+    use id_map::IdMap;
     use itertools::Itertools as _;
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate, Zpool,
@@ -182,13 +192,13 @@ mod test {
         StepOutcome, StepStatus,
     };
     use nexus_types::deployment::{
-        Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
-        BlueprintSledConfig, BlueprintTarget, BlueprintZoneConfig,
+        Blueprint, BlueprintSledConfig, BlueprintTarget, BlueprintZoneConfig,
         BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
-        BlueprintZonesConfig, CockroachDbPreserveDowngrade,
+        CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
         blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
+    use omicron_common::api::external;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -211,21 +221,22 @@ mod test {
     async fn create_blueprint(
         datastore: &DataStore,
         opctx: &OpContext,
-        blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
+        blueprint_zones: BTreeMap<SledUuid, IdMap<BlueprintZoneConfig>>,
         dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = BlueprintUuid::new_v4();
         // Assume all sleds are active with no disks or datasets.
         let blueprint_sleds = blueprint_zones
             .into_iter()
-            .map(|(sled_id, zones_config)| {
+            .map(|(sled_id, zones)| {
                 (
                     sled_id,
                     BlueprintSledConfig {
                         state: SledState::Active,
-                        zones_config,
-                        disks_config: BlueprintPhysicalDisksConfig::default(),
-                        datasets_config: BlueprintDatasetsConfig::default(),
+                        sled_agent_generation: Generation::new().next(),
+                        disks: IdMap::new(),
+                        datasets: IdMap::new(),
+                        zones,
                     },
                 )
             })
@@ -247,6 +258,7 @@ mod test {
         let blueprint = Blueprint {
             id,
             sleds: blueprint_sleds,
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: Some(current_target.target_id),
@@ -254,6 +266,8 @@ mod test {
             external_dns_version: dns_version,
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: chrono::Utc::now(),
             creator: "test".to_string(),
             comment: "test blueprint".to_string(),
@@ -272,7 +286,7 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn test_deploy_omicron_zones(cptestctx: &ControlPlaneTestContext) {
+    async fn test_deploy_omicron_config(cptestctx: &ControlPlaneTestContext) {
         // Set up the test.
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
@@ -290,14 +304,14 @@ mod test {
         let mut s2 = httptest::Server::run();
 
         // The only sled-agent endpoint we care about in this test is `PUT
-        // /omicron-zones`. Add a closure to avoid repeating it multiple times
+        // /omicron-config`. Add a closure to avoid repeating it multiple times
         // below. We don't do a careful check of the _contents_ of what's being
         // sent; for that, see the tests in nexus-reconfigurator-execution.
-        let match_put_omicron_zones =
-            || request::method_path("PUT", "/omicron-zones");
+        let match_put_omicron_config =
+            || request::method_path("PUT", "/omicron-config");
 
         // Helper for our mock sled-agent http servers to blanket ignore and
-        // return 200 OK for anything _except_ `PUT /omciron-zones`, which is
+        // return 200 OK for anything _except_ `PUT /omicron-config`, which is
         // the endpoint we care about in this test.
         //
         // Other Nexus background tasks created by our test context may notice
@@ -308,7 +322,7 @@ mod test {
         let mock_server_ignore_spurious_http_requests =
             |s: &mut httptest::Server| {
                 s.expect(
-                    Expectation::matching(not(match_put_omicron_zones()))
+                    Expectation::matching(not(match_put_omicron_config()))
                         .times(..)
                         .respond_with(status_code(200)),
                 );
@@ -351,12 +365,14 @@ mod test {
         }
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
+        let (dummy_tx, _dummy_rx) = watch::channel(PendingMgsUpdates::new());
         let mut task = BlueprintExecutor::new(
             datastore.clone(),
             resolver.clone(),
             blueprint_rx,
             OmicronZoneUuid::new_v4(),
             Activator::new(),
+            dummy_tx,
         );
 
         // Now we're ready.
@@ -397,33 +413,30 @@ mod test {
         // reporting success.
         fn make_zones(
             disposition: BlueprintZoneDisposition,
-        ) -> BlueprintZonesConfig {
+        ) -> IdMap<BlueprintZoneConfig> {
             let pool_id = ZpoolUuid::new_v4();
             let zone_id = OmicronZoneUuid::new_v4();
-            BlueprintZonesConfig {
-                generation: Generation::new(),
-                zones: [BlueprintZoneConfig {
-                    disposition,
-                    id: zone_id,
-                    filesystem_pool: Some(ZpoolName::new_external(pool_id)),
-                    zone_type: BlueprintZoneType::InternalDns(
-                        blueprint_zone_type::InternalDns {
-                            dataset: OmicronZoneDataset {
-                                pool_name: format!("oxp_{}", pool_id)
-                                    .parse()
-                                    .unwrap(),
-                            },
-                            dns_address: "[::1]:0".parse().unwrap(),
-                            gz_address: "::1".parse().unwrap(),
-                            gz_address_index: 0,
-                            http_address: "[::1]:12345".parse().unwrap(),
+            [BlueprintZoneConfig {
+                disposition,
+                id: zone_id,
+                filesystem_pool: ZpoolName::new_external(pool_id),
+                zone_type: BlueprintZoneType::InternalDns(
+                    blueprint_zone_type::InternalDns {
+                        dataset: OmicronZoneDataset {
+                            pool_name: format!("oxp_{}", pool_id)
+                                .parse()
+                                .unwrap(),
                         },
-                    ),
-                    image_source: BlueprintZoneImageSource::InstallDataset,
-                }]
-                .into_iter()
-                .collect(),
-            }
+                        dns_address: "[::1]:0".parse().unwrap(),
+                        gz_address: "::1".parse().unwrap(),
+                        gz_address_index: 0,
+                        http_address: "[::1]:12345".parse().unwrap(),
+                    },
+                ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            }]
+            .into_iter()
+            .collect()
         }
 
         let generation = generation.next();
@@ -455,6 +468,7 @@ mod test {
                 pool_id.into_untyped_uuid(),
                 sled_id.into_untyped_uuid(),
                 PhysicalDiskUuid::new_v4(),
+                external::ByteCount::from(0).into(),
             );
             datastore
                 .zpool_insert(&opctx, zpool)
@@ -467,7 +481,7 @@ mod test {
         // Make sure that requests get made to the sled agent.
         for s in [&mut s1, &mut s2] {
             s.expect(
-                Expectation::matching(match_put_omicron_zones())
+                Expectation::matching(match_put_omicron_config())
                     .respond_with(status_code(204)),
             );
             mock_server_ignore_spurious_http_requests(s);
@@ -501,7 +515,7 @@ mod test {
 
         // Now, disable the target and make sure that we _don't_ invoke the sled
         // agent. It's enough to just not set expectations on
-        // match_put_omicron_zones().
+        // match_put_omicron_config().
         blueprint.1.internal_dns_version =
             blueprint.1.internal_dns_version.next();
         blueprint.0.enabled = false;
@@ -530,27 +544,28 @@ mod test {
         blueprint.0.enabled = true;
         blueprint_tx.send(Some(Arc::new(blueprint))).unwrap();
         s1.expect(
-            Expectation::matching(match_put_omicron_zones())
+            Expectation::matching(match_put_omicron_config())
                 .respond_with(status_code(204)),
         );
         s2.expect(
-            Expectation::matching(match_put_omicron_zones())
+            Expectation::matching(match_put_omicron_config())
                 .respond_with(status_code(500)),
         );
 
         let mut value = task.activate(&opctx).await;
         let event_buffer = extract_event_buffer(&mut value);
 
-        let ensure_zones_outcome = {
+        let ensure_configs_outcome = {
             let ensure_id =
                 serde_json::to_value(ExecutionStepId::Ensure).unwrap();
-            let zones_component =
-                serde_json::to_value(ExecutionComponent::OmicronZones).unwrap();
+            let sled_agent_component =
+                serde_json::to_value(ExecutionComponent::SledAgent).unwrap();
             match event_buffer
                 .iter_steps_recursive()
                 .filter_map(|(_, step)| {
                     let info = step.step_info();
-                    if info.id == ensure_id && info.component == zones_component
+                    if info.id == ensure_id
+                        && info.component == sled_agent_component
                     {
                         match step.step_status() {
                             StepStatus::Completed {
@@ -574,14 +589,14 @@ mod test {
             }
         };
 
-        match ensure_zones_outcome {
+        match ensure_configs_outcome {
             StepOutcome::Warning { message, .. } => {
                 assert!(
-                    message.contains("Failed to put OmicronZonesConfig"),
+                    message.contains("Failed to put OmicronSledConfig"),
                     "unexpected warning message: {message}"
                 );
             }
-            other => panic!("unexpected zones outcome: {other:?}"),
+            other => panic!("unexpected outcome: {other:?}"),
         }
 
         s1.verify_and_clear();

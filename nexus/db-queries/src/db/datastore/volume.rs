@@ -6,13 +6,10 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::DbConnection;
 use crate::db::datastore::OpContext;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Asset;
 use crate::db::model::CrucibleDataset;
 use crate::db::model::Disk;
@@ -31,13 +28,16 @@ use crate::db::model::VolumeResourceUsageType;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use crate::transaction_retry::OptionalError;
 use anyhow::anyhow;
 use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::OptionalExtension;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -198,6 +198,9 @@ impl FreedCrucibleResources {
     }
 }
 
+pub struct SourceVolume(pub VolumeUuid);
+pub struct DestVolume(pub VolumeUuid);
+
 impl DataStore {
     async fn volume_create_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
@@ -206,7 +209,7 @@ impl DataStore {
         vcr: VolumeConstructionRequest,
         crucible_targets: CrucibleTargets,
     ) -> Result<Volume, diesel::result::Error> {
-        use db::schema::volume::dsl;
+        use nexus_db_schema::schema::volume::dsl;
 
         let maybe_volume: Option<Volume> = dsl::volume
             .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
@@ -244,7 +247,7 @@ impl DataStore {
             })?;
 
         // Increase the usage count for the read-only Crucible resources
-        use db::schema::volume_resource_usage::dsl as ru_dsl;
+        use nexus_db_schema::schema::volume_resource_usage::dsl as ru_dsl;
 
         for read_only_target in crucible_targets.read_only_targets {
             let read_only_target = read_only_target.parse().map_err(|e| {
@@ -296,8 +299,8 @@ impl DataStore {
     ) -> Result<Option<Region>, diesel::result::Error> {
         let ip: db::model::Ipv6Addr = target.ip().into();
 
-        use db::schema::crucible_dataset::dsl as dataset_dsl;
-        use db::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
 
         let read_only = match region_type {
             RegionType::ReadWrite => false,
@@ -330,7 +333,7 @@ impl DataStore {
         // address directly
 
         let maybe_region_snapshot = {
-            use db::schema::region_snapshot::dsl;
+            use nexus_db_schema::schema::region_snapshot::dsl;
             dsl::region_snapshot
                 .filter(dsl::snapshot_addr.eq(read_only_target.to_string()))
                 .filter(dsl::deleting.eq(false))
@@ -439,7 +442,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         volume_id: VolumeUuid,
     ) -> Result<Option<Volume>, diesel::result::Error> {
-        use db::schema::volume::dsl;
+        use nexus_db_schema::schema::volume::dsl;
         dsl::volume
             .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
             .select(Volume::as_select())
@@ -465,7 +468,7 @@ impl DataStore {
         &self,
         volume_id: VolumeUuid,
     ) -> DeleteResult {
-        use db::schema::volume::dsl;
+        use nexus_db_schema::schema::volume::dsl;
 
         diesel::delete(dsl::volume)
             .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
@@ -478,7 +481,7 @@ impl DataStore {
     fn volume_usage_records_for_resource_query(
         resource: VolumeResourceUsage,
     ) -> impl RunnableQuery<VolumeResourceUsageRecord> {
-        use db::schema::volume_resource_usage::dsl;
+        use nexus_db_schema::schema::volume_resource_usage::dsl;
 
         match resource {
             VolumeResourceUsage::ReadOnlyRegion { region_id } => {
@@ -530,7 +533,7 @@ impl DataStore {
         from_volume_id: VolumeUuid,
         to_volume_id: VolumeUuid,
     ) -> Result<(), diesel::result::Error> {
-        use db::schema::volume_resource_usage::dsl;
+        use nexus_db_schema::schema::volume_resource_usage::dsl;
 
         match resource {
             VolumeResourceUsage::ReadOnlyRegion { region_id } => {
@@ -837,7 +840,7 @@ impl DataStore {
         volume_id: VolumeUuid,
         reason: VolumeCheckoutReason,
     ) -> Result<Volume, diesel::result::Error> {
-        use db::schema::volume::dsl;
+        use nexus_db_schema::schema::volume::dsl;
 
         // Grab the volume in question.
         let volume = dsl::volume
@@ -860,8 +863,8 @@ impl DataStore {
         // over is intended.
 
         let (maybe_disk, maybe_instance) = {
-            use db::schema::disk::dsl as disk_dsl;
-            use db::schema::instance::dsl as instance_dsl;
+            use nexus_db_schema::schema::disk::dsl as disk_dsl;
+            use nexus_db_schema::schema::instance::dsl as instance_dsl;
 
             let maybe_disk: Option<Disk> = disk_dsl::disk
                 .filter(disk_dsl::time_deleted.is_null())
@@ -961,7 +964,7 @@ impl DataStore {
                         .map_err(|e| err.bail(VolumeGetError::SerdeError(e)))?;
 
                     // Update the original volume_id with the new volume.data.
-                    use db::schema::volume::dsl as volume_dsl;
+                    use nexus_db_schema::schema::volume::dsl as volume_dsl;
                     let num_updated = diesel::update(volume_dsl::volume)
                         .filter(volume_dsl::id.eq(to_db_typed_uuid(volume_id)))
                         .set(volume_dsl::data.eq(new_volume_data))
@@ -1121,10 +1124,11 @@ impl DataStore {
     /// returned by `read_only_resources_associated_with_volume`.
     pub async fn volume_checkout_randomize_ids(
         &self,
-        volume_id: VolumeUuid,
+        source_volume_id: SourceVolume,
+        dest_volume_id: DestVolume,
         reason: VolumeCheckoutReason,
     ) -> CreateResult<Volume> {
-        let volume = self.volume_checkout(volume_id, reason).await?;
+        let volume = self.volume_checkout(source_volume_id.0, reason).await?;
 
         let vcr: sled_agent_client::VolumeConstructionRequest =
             serde_json::from_str(volume.data())?;
@@ -1132,7 +1136,7 @@ impl DataStore {
         let randomized_vcr = Self::randomize_ids(&vcr)
             .map_err(|e| Error::internal_error(&e.to_string()))?;
 
-        self.volume_create(VolumeUuid::new_v4(), randomized_vcr).await
+        self.volume_create(dest_volume_id.0, randomized_vcr).await
     }
 
     /// Find read/write regions for deleted volumes that do not have associated
@@ -1153,10 +1157,10 @@ impl DataStore {
     async fn find_deleted_volume_regions_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<FreedCrucibleResources, diesel::result::Error> {
-        use db::schema::crucible_dataset::dsl as dataset_dsl;
-        use db::schema::region::dsl as region_dsl;
-        use db::schema::region_snapshot::dsl;
-        use db::schema::volume::dsl as volume_dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::region_snapshot::dsl;
+        use nexus_db_schema::schema::volume::dsl as volume_dsl;
 
         // Find all read-write regions (read-only region cleanup is taken care
         // of in soft_delete_volume_in_txn!) and their associated datasets
@@ -1346,7 +1350,7 @@ impl DataStore {
         // the transaction, and returning the previously serialized list of
         // resources to clean up.
         let volume = {
-            use db::schema::volume::dsl;
+            use nexus_db_schema::schema::volume::dsl;
 
             let volume = dsl::volume
                 .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
@@ -1455,7 +1459,7 @@ impl DataStore {
 
             // Filter out regions that have any region-snapshots
             let region_snapshot_count: i64 = {
-                use db::schema::region_snapshot::dsl;
+                use nexus_db_schema::schema::region_snapshot::dsl;
                 dsl::region_snapshot
                     .filter(dsl::region_id.eq(region.id()))
                     .count()
@@ -1469,7 +1473,7 @@ impl DataStore {
         }
 
         for read_only_target in &crucible_targets.read_only_targets {
-            use db::schema::volume_resource_usage::dsl as ru_dsl;
+            use nexus_db_schema::schema::volume_resource_usage::dsl as ru_dsl;
 
             let read_only_target = read_only_target
                 .parse()
@@ -1555,7 +1559,7 @@ impl DataStore {
                         // However, don't forget to set `deleting`! These
                         // regions will be returned to the calling function for
                         // garbage collection.
-                        use db::schema::region::dsl;
+                        use nexus_db_schema::schema::region::dsl;
                         let updated_rows = diesel::update(dsl::region)
                             .filter(dsl::id.eq(region_id))
                             .filter(dsl::read_only.eq(true))
@@ -1644,7 +1648,7 @@ impl DataStore {
 
                     if region_snapshot_usage_left == 0 {
                         // Don't forget to set `deleting`! see: omicron#4095
-                        use db::schema::region_snapshot::dsl;
+                        use nexus_db_schema::schema::region_snapshot::dsl;
                         let updated_rows = diesel::update(dsl::region_snapshot)
                             .filter(
                                 dsl::dataset_id
@@ -1690,7 +1694,7 @@ impl DataStore {
             .map_err(|e| err.bail(e.into()))?;
 
         {
-            use db::schema::volume::dsl;
+            use nexus_db_schema::schema::volume::dsl;
             let updated_rows = diesel::update(dsl::volume)
                 .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
                 .set((
@@ -1753,7 +1757,7 @@ impl DataStore {
         // Grab the volume in question. If the volume record was already deleted
         // then we can just return.
         let volume = {
-            use db::schema::volume::dsl;
+            use nexus_db_schema::schema::volume::dsl;
 
             let volume = dsl::volume
                 .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
@@ -1810,7 +1814,7 @@ impl DataStore {
                         .map_err(|e| err.bail(RemoveRopError::SerdeError(e)))?;
 
                     // Update the original volume_id with the new volume.data.
-                    use db::schema::volume::dsl as volume_dsl;
+                    use nexus_db_schema::schema::volume::dsl as volume_dsl;
                     let num_updated = diesel::update(volume_dsl::volume)
                         .filter(volume_dsl::id.eq(to_db_typed_uuid(volume_id)))
                         .set(volume_dsl::data.eq(new_volume_data))
@@ -1994,7 +1998,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let dataset = {
-            use db::schema::crucible_dataset::dsl;
+            use nexus_db_schema::schema::crucible_dataset::dsl;
 
             dsl::crucible_dataset
                 .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
@@ -2039,7 +2043,7 @@ impl DataStore {
         opctx: &OpContext,
         record: UpstairsRepairNotification,
     ) -> Result<(), Error> {
-        use db::schema::upstairs_repair_notification::dsl;
+        use nexus_db_schema::schema::upstairs_repair_notification::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
@@ -2143,8 +2147,8 @@ impl DataStore {
         repair_id: TypedUuid<UpstairsRepairKind>,
         repair_progress: RepairProgress,
     ) -> Result<(), diesel::result::Error> {
-        use db::schema::upstairs_repair_notification::dsl as notification_dsl;
-        use db::schema::upstairs_repair_progress::dsl;
+        use nexus_db_schema::schema::upstairs_repair_notification::dsl as notification_dsl;
+        use nexus_db_schema::schema::upstairs_repair_progress::dsl;
 
         // Check that there is a repair id for the upstairs id
         let matching_repair: Option<UpstairsRepairNotification> =
@@ -2229,7 +2233,7 @@ impl DataStore {
         downstairs_id: TypedUuid<DownstairsKind>,
         downstairs_client_stop_request: DownstairsClientStopRequest,
     ) -> Result<(), Error> {
-        use db::schema::downstairs_client_stop_request_notification::dsl;
+        use nexus_db_schema::schema::downstairs_client_stop_request_notification::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -2262,7 +2266,7 @@ impl DataStore {
         downstairs_id: TypedUuid<DownstairsKind>,
         downstairs_client_stopped: DownstairsClientStopped,
     ) -> Result<(), Error> {
-        use db::schema::downstairs_client_stopped_notification::dsl;
+        use nexus_db_schema::schema::downstairs_client_stopped_notification::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -2296,7 +2300,7 @@ impl DataStore {
     ) -> Result<Option<UpstairsRepairNotification>, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::upstairs_repair_notification::dsl;
+        use nexus_db_schema::schema::upstairs_repair_notification::dsl;
 
         dsl::upstairs_repair_notification
             .filter(dsl::region_id.eq(region_id))
@@ -2321,7 +2325,7 @@ impl DataStore {
     ) -> Result<Vec<UpstairsRepairNotification>, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::upstairs_repair_notification::dsl;
+        use nexus_db_schema::schema::upstairs_repair_notification::dsl;
 
         dsl::upstairs_repair_notification
             .filter(dsl::region_id.eq(region_id))
@@ -2340,7 +2344,7 @@ impl DataStore {
     ) -> Result<Option<UpstairsRepairProgress>, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::upstairs_repair_progress::dsl;
+        use nexus_db_schema::schema::upstairs_repair_progress::dsl;
 
         dsl::upstairs_repair_progress
             .filter(
@@ -2437,8 +2441,8 @@ impl DataStore {
             }
 
             CrucibleResources::V3(crucible_resources) => {
-                use db::schema::crucible_dataset::dsl as dataset_dsl;
-                use db::schema::region::dsl as region_dsl;
+                use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+                use nexus_db_schema::schema::region::dsl as region_dsl;
 
                 region_dsl::region
                     .filter(
@@ -2473,7 +2477,7 @@ impl DataStore {
             }
 
             CrucibleResources::V2(crucible_resources) => {
-                use db::schema::crucible_dataset::dsl;
+                use nexus_db_schema::schema::crucible_dataset::dsl;
 
                 let mut result: Vec<_> = Vec::with_capacity(
                     crucible_resources.snapshots_to_delete.len(),
@@ -2510,8 +2514,8 @@ impl DataStore {
             }
 
             CrucibleResources::V3(crucible_resources) => {
-                use db::schema::crucible_dataset::dsl as dataset_dsl;
-                use db::schema::region_snapshot::dsl;
+                use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+                use nexus_db_schema::schema::region_snapshot::dsl;
 
                 let mut datasets_and_snapshots = Vec::with_capacity(
                     crucible_resources.region_snapshots.len(),
@@ -2945,8 +2949,8 @@ impl DataStore {
             )));
         }
 
-        use db::schema::region::dsl as region_dsl;
-        use db::schema::volume::dsl as volume_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::volume::dsl as volume_dsl;
 
         // Set the existing region's volume id to the replacement's volume id
         diesel::update(region_dsl::region)
@@ -3075,8 +3079,8 @@ impl DataStore {
         replacement: ReplacementTarget,
         volume_to_delete_id: VolumeToDelete,
     ) -> Result<VolumeReplaceResult, diesel::result::Error> {
-        use db::schema::volume::dsl as volume_dsl;
-        use db::schema::volume_resource_usage::dsl as ru_dsl;
+        use nexus_db_schema::schema::volume::dsl as volume_dsl;
+        use nexus_db_schema::schema::volume_resource_usage::dsl as ru_dsl;
 
         // Grab the old volume first
         let maybe_old_volume = {
@@ -3777,6 +3781,167 @@ fn find_matching_rw_regions_in_volume(
     Ok(())
 }
 
+fn region_sets(
+    vcr: &VolumeConstructionRequest,
+    region_sets: &mut Vec<Vec<SocketAddrV6>>,
+) {
+    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(vcr);
+
+    while let Some(work) = parts.pop_front() {
+        match work {
+            VolumeConstructionRequest::Volume {
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(&sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(&read_only_parent);
+                }
+            }
+
+            VolumeConstructionRequest::Url { .. } => {
+                // nothing required
+            }
+
+            VolumeConstructionRequest::Region { opts, .. } => {
+                let mut targets = vec![];
+
+                for target in &opts.target {
+                    match target {
+                        SocketAddr::V6(v6) => {
+                            targets.push(*v6);
+                        }
+                        SocketAddr::V4(_) => {}
+                    }
+                }
+
+                if targets.len() == opts.target.len() {
+                    region_sets.push(targets);
+                }
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // nothing required
+            }
+        }
+    }
+}
+
+/// Check if an ipv6 address is referenced in a Volume Construction Request
+fn ipv6_addr_referenced_in_vcr(
+    vcr: &VolumeConstructionRequest,
+    ip: &std::net::Ipv6Addr,
+) -> bool {
+    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(vcr);
+
+    while let Some(vcr_part) = parts.pop_front() {
+        match vcr_part {
+            VolumeConstructionRequest::Volume {
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(read_only_parent);
+                }
+            }
+
+            VolumeConstructionRequest::Url { .. } => {
+                // nothing required
+            }
+
+            VolumeConstructionRequest::Region { opts, .. } => {
+                for target in &opts.target {
+                    match target {
+                        SocketAddr::V6(t) => {
+                            if t.ip() == ip {
+                                return true;
+                            }
+                        }
+
+                        SocketAddr::V4(_) => {}
+                    }
+                }
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // nothing required
+            }
+        }
+    }
+
+    false
+}
+
+/// Check if an ipv6 net is referenced in a Volume Construction Request
+fn ipv6_net_referenced_in_vcr(
+    vcr: &VolumeConstructionRequest,
+    net: &oxnet::Ipv6Net,
+) -> bool {
+    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(vcr);
+
+    while let Some(vcr_part) = parts.pop_front() {
+        match vcr_part {
+            VolumeConstructionRequest::Volume {
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(read_only_parent);
+                }
+            }
+
+            VolumeConstructionRequest::Url { .. } => {
+                // nothing required
+            }
+
+            VolumeConstructionRequest::Region { opts, .. } => {
+                for target in &opts.target {
+                    match target {
+                        SocketAddr::V6(t) => {
+                            if net.contains(*t.ip()) {
+                                return true;
+                            }
+                        }
+
+                        SocketAddr::V4(_) => {}
+                    }
+                }
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // nothing required
+            }
+        }
+    }
+
+    false
+}
+
+pub enum VolumeCookedResult {
+    HardDeleted,
+    Ok,
+    RegionSetWithAllExpungedMembers { region_set: Vec<SocketAddrV6> },
+    MultipleSomeReturned { target: SocketAddrV6 },
+    TargetNotFound { target: SocketAddrV6 },
+}
+
 impl DataStore {
     pub async fn find_volumes_referencing_socket_addr(
         &self,
@@ -3800,7 +3965,7 @@ impl DataStore {
         };
 
         while let Some(p) = paginator.next() {
-            use db::schema::volume::dsl;
+            use nexus_db_schema::schema::volume::dsl;
 
             let haystack =
                 paginated(dsl::volume, dsl::id, &p.current_pagparams())
@@ -3832,6 +3997,100 @@ impl DataStore {
                     .map_err(|e| Error::internal_error(&e.to_string()))?;
 
                 if rw_reference || ro_reference {
+                    volumes.push(volume);
+                }
+            }
+        }
+
+        Ok(volumes)
+    }
+
+    pub async fn find_volumes_referencing_ipv6_addr(
+        &self,
+        opctx: &OpContext,
+        needle: std::net::Ipv6Addr,
+    ) -> ListResultVec<Volume> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut volumes = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        while let Some(p) = paginator.next() {
+            use nexus_db_schema::schema::volume::dsl;
+
+            let haystack =
+                paginated(dsl::volume, dsl::id, &p.current_pagparams())
+                    .select(Volume::as_select())
+                    .get_results_async::<Volume>(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+            paginator =
+                p.found_batch(&haystack, &|r| *r.id().as_untyped_uuid());
+
+            for volume in haystack {
+                let vcr: VolumeConstructionRequest =
+                    match serde_json::from_str(&volume.data()) {
+                        Ok(vcr) => vcr,
+                        Err(e) => {
+                            return Err(Error::internal_error(&format!(
+                                "cannot deserialize volume data for {}: {e}",
+                                volume.id(),
+                            )));
+                        }
+                    };
+
+                if ipv6_addr_referenced_in_vcr(&vcr, &needle) {
+                    volumes.push(volume);
+                }
+            }
+        }
+
+        Ok(volumes)
+    }
+
+    pub async fn find_volumes_referencing_ipv6_net(
+        &self,
+        opctx: &OpContext,
+        needle: oxnet::Ipv6Net,
+    ) -> ListResultVec<Volume> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut volumes = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        while let Some(p) = paginator.next() {
+            use nexus_db_schema::schema::volume::dsl;
+
+            let haystack =
+                paginated(dsl::volume, dsl::id, &p.current_pagparams())
+                    .select(Volume::as_select())
+                    .get_results_async::<Volume>(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+            paginator =
+                p.found_batch(&haystack, &|r| *r.id().as_untyped_uuid());
+
+            for volume in haystack {
+                let vcr: VolumeConstructionRequest =
+                    match serde_json::from_str(&volume.data()) {
+                        Ok(vcr) => vcr,
+                        Err(e) => {
+                            return Err(Error::internal_error(&format!(
+                                "cannot deserialize volume data for {}: {e}",
+                                volume.id(),
+                            )));
+                        }
+                    };
+
+                if ipv6_net_referenced_in_vcr(&vcr, &needle) {
                     volumes.push(volume);
                 }
             }
@@ -3873,6 +4132,159 @@ impl DataStore {
 
         Ok(Some(reference))
     }
+
+    pub async fn volume_cooked(
+        &self,
+        opctx: &OpContext,
+        volume_id: VolumeUuid,
+    ) -> LookupResult<VolumeCookedResult> {
+        let Some(volume) = self.volume_get(volume_id).await? else {
+            return Ok(VolumeCookedResult::HardDeleted);
+        };
+
+        let vcr: VolumeConstructionRequest =
+            match serde_json::from_str(&volume.data()) {
+                Ok(vcr) => vcr,
+
+                Err(e) => {
+                    return Err(Error::internal_error(&format!(
+                        "cannot deserialize volume data for {}: {e}",
+                        volume.id(),
+                    )));
+                }
+            };
+
+        let expunged_regions: Vec<Region> = vec![
+            self.find_read_only_regions_on_expunged_physical_disks(opctx)
+                .await?,
+            self.find_read_write_regions_on_expunged_physical_disks(opctx)
+                .await?,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        let expunged_region_snapshots: Vec<RegionSnapshot> = self
+            .find_region_snapshots_on_expunged_physical_disks(opctx)
+            .await?;
+
+        let region_sets = {
+            let mut result = vec![];
+            region_sets(&vcr, &mut result);
+            result
+        };
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        #[derive(PartialEq)]
+        enum Checked {
+            Expunged,
+            Ok,
+        }
+
+        for region_set in region_sets {
+            let mut checked_region_set = Vec::with_capacity(region_set.len());
+
+            for target in &region_set {
+                let maybe_ro_usage =
+                    Self::read_only_target_to_volume_resource_usage(
+                        &conn, &target,
+                    )
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+                let maybe_region = Self::target_to_region(
+                    &conn,
+                    &target,
+                    RegionType::ReadWrite,
+                )
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                let check = match (maybe_ro_usage, maybe_region) {
+                    (Some(usage), None) => match usage {
+                        VolumeResourceUsage::ReadOnlyRegion { region_id } => {
+                            if expunged_regions
+                                .iter()
+                                .any(|region| region.id() == region_id)
+                            {
+                                Checked::Expunged
+                            } else {
+                                Checked::Ok
+                            }
+                        }
+
+                        VolumeResourceUsage::RegionSnapshot {
+                            dataset_id,
+                            region_id,
+                            snapshot_id,
+                        } => {
+                            if expunged_region_snapshots.iter().any(
+                                |region_snapshot| {
+                                    region_snapshot.dataset_id
+                                        == dataset_id.into()
+                                        && region_snapshot.region_id
+                                            == region_id
+                                        && region_snapshot.snapshot_id
+                                            == snapshot_id
+                                },
+                            ) {
+                                Checked::Expunged
+                            } else {
+                                Checked::Ok
+                            }
+                        }
+                    },
+
+                    (None, Some(region)) => {
+                        let region_id = region.id();
+                        if expunged_regions
+                            .iter()
+                            .any(|region| region.id() == region_id)
+                        {
+                            Checked::Expunged
+                        } else {
+                            Checked::Ok
+                        }
+                    }
+
+                    (Some(_), Some(_)) => {
+                        // This is an error: multiple resources (read/write
+                        // region, read-only region, and/or a region snapshot)
+                        // share the same target addr.
+                        return Ok(VolumeCookedResult::MultipleSomeReturned {
+                            target: *target,
+                        });
+                    }
+
+                    // volume may have been deleted after `volume_get` at
+                    // beginning of function, and before grabbing the expunged
+                    // resources
+                    (None, None) => {
+                        return Ok(VolumeCookedResult::TargetNotFound {
+                            target: *target,
+                        });
+                    }
+                };
+
+                checked_region_set.push(check);
+            }
+
+            if checked_region_set.iter().all(|x| *x == Checked::Expunged) {
+                return Ok(
+                    VolumeCookedResult::RegionSetWithAllExpungedMembers {
+                        region_set,
+                    },
+                );
+            }
+        }
+
+        Ok(VolumeCookedResult::Ok)
+    }
 }
 
 // Add some validation that runs only for tests
@@ -3895,7 +4307,7 @@ impl DataStore {
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
 
         while let Some(p) = paginator.next() {
-            use db::schema::volume::dsl;
+            use nexus_db_schema::schema::volume::dsl;
             let haystack =
                 paginated(dsl::volume, dsl::id, &p.current_pagparams())
                     .select(Volume::as_select())
@@ -3906,14 +4318,16 @@ impl DataStore {
                 p.found_batch(&haystack, &|v| *v.id().as_untyped_uuid());
 
             for volume in haystack {
-                Self::validate_volume_has_all_resources(&conn, volume).await?;
+                Self::validate_volume_has_all_resources(&conn, &volume).await?;
+                Self::validate_volume_region_sets_have_unique_targets(&volume)
+                    .await?;
             }
         }
 
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
 
         while let Some(p) = paginator.next() {
-            use db::schema::region::dsl;
+            use nexus_db_schema::schema::region::dsl;
             let haystack =
                 paginated(dsl::region, dsl::id, &p.current_pagparams())
                     .select(Region::as_select())
@@ -3935,7 +4349,7 @@ impl DataStore {
     /// been prematurely deleted.
     async fn validate_volume_has_all_resources(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        volume: Volume,
+        volume: &Volume,
     ) -> Result<(), diesel::result::Error> {
         if volume.time_deleted.is_some() {
             // Do not need to validate resources for soft-deleted volumes
@@ -4026,6 +4440,62 @@ impl DataStore {
         Ok(())
     }
 
+    /// Assert that all the region sets have three distinct targets
+    async fn validate_volume_region_sets_have_unique_targets(
+        volume: &Volume,
+    ) -> Result<(), diesel::result::Error> {
+        let vcr: VolumeConstructionRequest =
+            serde_json::from_str(&volume.data()).unwrap();
+
+        let mut parts = VecDeque::new();
+        parts.push_back(&vcr);
+
+        while let Some(part) = parts.pop_front() {
+            match part {
+                VolumeConstructionRequest::Volume {
+                    sub_volumes,
+                    read_only_parent,
+                    ..
+                } => {
+                    for sub_volume in sub_volumes {
+                        parts.push_back(sub_volume);
+                    }
+                    if let Some(read_only_parent) = read_only_parent {
+                        parts.push_back(read_only_parent);
+                    }
+                }
+
+                VolumeConstructionRequest::Url { .. } => {
+                    // nothing required
+                }
+
+                VolumeConstructionRequest::Region { opts, .. } => {
+                    let mut set = HashSet::new();
+                    let mut count = 0;
+
+                    for target in &opts.target {
+                        set.insert(target);
+                        count += 1;
+                    }
+
+                    if set.len() != count {
+                        return Err(Self::volume_invariant_violated(format!(
+                            "volume {} has a region set with {} unique targets",
+                            volume.id(),
+                            set.len(),
+                        )));
+                    }
+                }
+
+                VolumeConstructionRequest::File { .. } => {
+                    // nothing required
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Assert that read-only regions do not have any associated region
     /// snapshots (see associated comment in `soft_delete_volume_in_txn`)
     async fn validate_read_only_region_has_no_snapshots(
@@ -4036,7 +4506,7 @@ impl DataStore {
             return Ok(());
         }
 
-        use db::schema::volume_resource_usage::dsl;
+        use nexus_db_schema::schema::volume_resource_usage::dsl;
 
         let matching_usage_records: Vec<VolumeResourceUsage> =
             dsl::volume_resource_usage
@@ -4109,7 +4579,7 @@ mod tests {
         // ResourceSnapshot.
 
         {
-            use db::schema::volume::dsl;
+            use nexus_db_schema::schema::volume::dsl;
 
             let conn = datastore.pool_connection_unauthorized().await.unwrap();
 
@@ -4220,7 +4690,7 @@ mod tests {
         for (i, (_, region)) in datasets_and_regions.iter().enumerate() {
             // `disk_region_allocate` won't put any ports in, so add fake ones
             // here
-            use nexus_db_model::schema::region::dsl;
+            use nexus_db_schema::schema::region::dsl;
             diesel::update(dsl::region)
                 .filter(dsl::id.eq(region.id()))
                 .set(dsl::port.eq(Some::<SqlU16>((100 + i as u16).into())))
@@ -4247,7 +4717,7 @@ mod tests {
                 false, // read-write
             );
 
-            use nexus_db_model::schema::region::dsl;
+            use nexus_db_schema::schema::region::dsl;
             diesel::insert_into(dsl::region)
                 .values(region.clone())
                 .execute_async(&*conn)
@@ -4457,7 +4927,7 @@ mod tests {
         for (i, (_, region)) in datasets_and_regions.iter().enumerate() {
             // `disk_region_allocate` won't put any ports in, so add fake ones
             // here
-            use nexus_db_model::schema::region::dsl;
+            use nexus_db_schema::schema::region::dsl;
             diesel::update(dsl::region)
                 .filter(dsl::id.eq(region.id()))
                 .set(dsl::port.eq(Some::<SqlU16>((100 + i as u16).into())))
@@ -4484,7 +4954,7 @@ mod tests {
                 true, // read-only
             );
 
-            use nexus_db_model::schema::region::dsl;
+            use nexus_db_schema::schema::region::dsl;
             diesel::insert_into(dsl::region)
                 .values(region.clone())
                 .execute_async(&*conn)

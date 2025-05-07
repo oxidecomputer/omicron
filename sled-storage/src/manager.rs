@@ -17,9 +17,10 @@ use futures::Stream;
 use futures::StreamExt;
 use futures::future::FutureExt;
 use illumos_utils::zfs::{
-    DatasetEnsureArgs, DatasetProperties, Mountpoint, WhichDatasets, Zfs,
+    CanMount, DatasetEnsureArgs, DatasetProperties, Mountpoint, WhichDatasets,
+    Zfs,
 };
-use illumos_utils::zpool::{ZPOOL_MOUNTPOINT_ROOT, ZpoolName};
+use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::{
     DatasetConfig, DatasetManagementStatus, DatasetName, DatasetsConfig,
@@ -30,6 +31,7 @@ use omicron_common::ledger::Ledger;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog::{Logger, error, info, o, warn};
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::future::Future;
@@ -135,7 +137,10 @@ pub struct NestedDatasetLocation {
 }
 
 impl NestedDatasetLocation {
-    pub fn mountpoint(&self, root: &Utf8Path) -> Utf8PathBuf {
+    /// Returns the desired mountpoint of this dataset.
+    ///
+    /// Does not ensure that the dataset is mounted.
+    pub fn mountpoint(&self, mount_root: &Utf8Path) -> Utf8PathBuf {
         let mut path = Utf8Path::new(&self.path);
 
         // This path must be nested, so we need it to be relative to
@@ -151,9 +156,31 @@ impl NestedDatasetLocation {
                 .expect("Path is absolute, but we cannot strip '/' character");
         }
 
-        self.root.mountpoint(root).join(path)
+        // mount_root: Usually "/", but can be a tmp dir for tests
+        // self.root:  Parent dataset mountpoint
+        // path:       Path to nested dataset within parent dataset
+        self.root.mountpoint(mount_root).join(path)
     }
 
+    /// Access the mountpoint of this nested dataset, and ensure it's mounted.
+    ///
+    /// If it is not mounted, or cannot be mounted, return an error.
+    pub async fn ensure_mounted_and_get_mountpoint(
+        &self,
+        mount_root: &Utf8Path,
+    ) -> Result<Utf8PathBuf, Error> {
+        let mountpoint = self.mountpoint(mount_root);
+        Zfs::ensure_dataset_mounted_and_exists(
+            &self.full_name(),
+            &Mountpoint(mountpoint.clone()),
+        )?;
+
+        return Ok(mountpoint);
+    }
+
+    /// Returns the full name of the nested dataset.
+    ///
+    /// This is a combination of the parent and child dataset names.
     pub fn full_name(&self) -> String {
         if self.path.is_empty() {
             self.root.full_name().to_string()
@@ -250,14 +277,20 @@ struct DatasetCreationDetails {
 pub struct StorageHandle {
     tx: mpsc::Sender<StorageRequest>,
     disk_updates: watch::Receiver<AllDisks>,
+    mount_config: MountConfig,
 }
 
 impl StorageHandle {
     pub(crate) fn new(
         tx: mpsc::Sender<StorageRequest>,
         disk_updates: watch::Receiver<AllDisks>,
+        mount_config: MountConfig,
     ) -> Self {
-        Self { tx, disk_updates }
+        Self { tx, disk_updates, mount_config }
+    }
+
+    pub fn mount_config(&self) -> &MountConfig {
+        &self.mount_config
     }
 
     /// Adds a disk and associated zpool to the storage manager.
@@ -393,6 +426,15 @@ impl StorageHandle {
         rx.await.unwrap()
     }
 
+    /// Ensures that a dataset exists, nested somewhere arbitrary within
+    /// a Nexus-controlled dataset.
+    ///
+    /// This function does mount the dataset according to `config`.
+    /// However, this dataset is not automatically mounted on reboot.
+    ///
+    /// If you're trying to access a nested dataset later, consider
+    /// using the [NestedDatasetLocation::ensure_mounted_and_get_mountpoint]
+    /// function.
     pub async fn nested_dataset_ensure(
         &self,
         config: NestedDatasetConfig,
@@ -555,7 +597,8 @@ impl StorageManager {
         key_requester: StorageKeyRequester,
     ) -> (StorageManager, StorageHandle) {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
-        let resources = StorageResources::new(log, mount_config, key_requester);
+        let resources =
+            StorageResources::new(log, mount_config.clone(), key_requester);
         let disk_updates = resources.watch_disks();
         (
             StorageManager {
@@ -564,7 +607,7 @@ impl StorageManager {
                 rx,
                 resources,
             },
-            StorageHandle::new(tx, disk_updates),
+            StorageHandle::new(tx, disk_updates, mount_config),
         )
     }
 
@@ -1028,6 +1071,17 @@ impl StorageManager {
             );
             return Ok(false);
         }
+
+        if !config.name.kind().zoned() && !old_dataset.mounted {
+            info!(
+                log,
+                "Dataset might need to be mounted";
+                "old_dataset" => ?old_dataset,
+                "requested_props" => ?config.inner,
+            );
+            return Ok(false);
+        }
+
         info!(log, "No changes necessary, returning early");
         return Ok(true);
     }
@@ -1054,11 +1108,12 @@ impl StorageManager {
             }
         }
 
-        let mountpoint_root = &self.resources.disks().mount_config().root;
+        let disks = self.resources.disks();
+        let mountpoint_root = &disks.mount_config().root;
         let mountpoint_path = config.name.mountpoint(mountpoint_root);
         let details = DatasetCreationDetails {
             zoned: config.name.kind().zoned(),
-            mountpoint: Mountpoint::Path(mountpoint_path),
+            mountpoint: Mountpoint(mountpoint_path),
             full_name: config.name.full_name(),
         };
 
@@ -1072,7 +1127,7 @@ impl StorageManager {
             .await
         {
             warn!(log, "Failed to ensure dataset"; "dataset" => ?status.dataset_name, "err" => ?err);
-            status.err = Some(err.to_string());
+            status.err = Some(InlineErrorChain::new(&err).to_string());
         };
 
         status
@@ -1133,14 +1188,20 @@ impl StorageManager {
         config: NestedDatasetConfig,
     ) -> Result<(), Error> {
         let log = self.log.new(o!("request" => "nested_dataset_ensure"));
-        info!(log, "Ensuring nested dataset");
 
-        let mountpoint_path =
-            config.name.mountpoint(ZPOOL_MOUNTPOINT_ROOT.into());
+        let disks = self.resources.disks();
+        let root = &disks.mount_config().root;
+        let mountpoint_path = config.name.mountpoint(root);
+
+        info!(
+            log,
+            "Ensuring nested dataset";
+            "mountpoint" => ?mountpoint_path.as_path()
+        );
 
         let details = DatasetCreationDetails {
             zoned: false,
-            mountpoint: Mountpoint::Path(mountpoint_path),
+            mountpoint: Mountpoint(mountpoint_path),
             full_name: config.name.full_name(),
         };
 
@@ -1182,6 +1243,8 @@ impl StorageManager {
         let log = self.log.new(o!("request" => "nested_dataset_list"));
         info!(log, "Listing nested datasets");
 
+        // Observe all propreties for this nested datasets, including
+        // children. We'll apply user-specified filters later.
         let full_name = name.full_name();
         let properties = Zfs::get_dataset_properties(
             &[full_name],
@@ -1462,6 +1525,7 @@ impl StorageManager {
         Zfs::ensure_dataset(DatasetEnsureArgs {
             name: &full_name,
             mountpoint: mountpoint.clone(),
+            can_mount: CanMount::On,
             zoned: *zoned,
             encryption_details,
             size_details,
@@ -1496,7 +1560,8 @@ impl StorageManager {
         let size_details = None;
         Zfs::ensure_dataset(DatasetEnsureArgs {
             name: fs_name,
-            mountpoint: Mountpoint::Path(Utf8PathBuf::from("/data")),
+            mountpoint: Mountpoint(Utf8PathBuf::from("/data")),
+            can_mount: CanMount::On,
             zoned,
             encryption_details,
             size_details,
@@ -1544,7 +1609,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_control_plane_disks_requires_keymanager() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx =
             test_setup_log("add_control_plane_disks_requires_keymanager");
 
@@ -1636,7 +1700,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_raw_u2_does_not_create_zpool() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("add_raw_u2_does_not_create_zpool");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
         harness.handle().key_manager_ready().await;
@@ -1658,7 +1721,6 @@ mod tests {
     #[tokio::test]
     async fn update_rawdisk_firmware() {
         const FW_REV: &str = "firmware-2.0";
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("update_u2_firmware");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
         harness.handle().key_manager_ready().await;
@@ -1708,7 +1770,6 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_boot_disk() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("wait_for_boot_disk");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
         let _raw_disks = harness.add_vdevs(&["u2_under_test.vdev"]).await;
@@ -1751,7 +1812,6 @@ mod tests {
 
     #[tokio::test]
     async fn disks_automatically_managed_after_key_manager_ready() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log(
             "disks_automatically_managed_after_key_manager_ready",
         );
@@ -1798,7 +1858,6 @@ mod tests {
 
     #[tokio::test]
     async fn queued_disks_get_requeued_on_secret_retriever_error() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log(
             "queued_disks_get_requeued_on_secret_retriever_error",
         );
@@ -1854,7 +1913,6 @@ mod tests {
 
     #[tokio::test]
     async fn detected_raw_disk_removal_triggers_notification() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx =
             test_setup_log("detected_raw_disk_removal_triggers_notification");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
@@ -1881,7 +1939,6 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_using_exactly_these_disks() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("ensure_using_exactly_these_disks");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -1968,7 +2025,6 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_filesystem() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("upsert_filesystem");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -1990,8 +2046,7 @@ mod tests {
         // We can call "upsert_filesystem" both with and without a UUID.
         let dataset_id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let dataset_name =
-            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        let dataset_name = DatasetName::new(zpool_name, DatasetKind::Crucible);
         harness
             .handle()
             .upsert_filesystem(Some(dataset_id), dataset_name.clone())
@@ -2025,7 +2080,6 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_filesystem_no_uuid() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("upsert_filesystem");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -2044,8 +2098,7 @@ mod tests {
 
         // Create a filesystem on the newly formatted U.2, without a UUID
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let dataset_name =
-            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        let dataset_name = DatasetName::new(zpool_name, DatasetKind::Crucible);
         harness
             .handle()
             .upsert_filesystem(None, dataset_name.clone())
@@ -2078,7 +2131,6 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_datasets() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("ensure_datasets");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -2098,7 +2150,7 @@ mod tests {
         // Create a dataset on the newly formatted U.2
         let id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let name = DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        let name = DatasetName::new(zpool_name, DatasetKind::Crucible);
         let datasets = BTreeMap::from([(
             id,
             DatasetConfig { id, name, inner: SharedDatasetConfig::default() },
@@ -2151,9 +2203,183 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    async fn is_mounted(dataset: &DatasetName) -> bool {
+        let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
+        let cmd =
+            command.args(&["list", "-Hpo", "mounted", &dataset.full_name()]);
+        let output = cmd.output().await.unwrap();
+        assert!(output.status.success(), "Failed to list dataset: {output:?}");
+        String::from_utf8_lossy(&output.stdout).trim() == "yes"
+    }
+
+    async fn unmount(dataset: &DatasetName) {
+        let mut command = tokio::process::Command::new(illumos_utils::PFEXEC);
+        let cmd = command.args(&[
+            illumos_utils::zfs::ZFS,
+            "unmount",
+            "-f",
+            &dataset.full_name(),
+        ]);
+        let output = cmd.output().await.unwrap();
+        assert!(
+            output.status.success(),
+            "Failed to unmount dataset: {output:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_datasets_get_mounted() {
+        let logctx = test_setup_log("ensure_datasets_get_mounted");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+
+        // Test setup: Add a U.2 and M.2, adopt them into the "control plane"
+        // for usage.
+        harness.handle().key_manager_ready().await;
+        let raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+        let config = harness.make_config(1, &raw_disks);
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        assert!(!result.has_error(), "{:?}", result);
+
+        // Create a dataset on the newly formatted U.2
+        let id = DatasetUuid::new_v4();
+        let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
+        let name = DatasetName::new(zpool_name, DatasetKind::Debug);
+        let datasets = BTreeMap::from([(
+            id,
+            DatasetConfig {
+                id,
+                name: name.clone(),
+                inner: SharedDatasetConfig::default(),
+            },
+        )]);
+        // "Generation = 1" is reserved as "no requests seen yet", so we jump
+        // past it.
+        let generation = Generation::new().next();
+        let config = DatasetsConfig { generation, datasets };
+
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error());
+
+        // Creating the dataset should have mounted it
+        assert!(is_mounted(&name).await);
+
+        // We can unmount the dataset manually
+        unmount(&name).await;
+        assert!(!is_mounted(&name).await);
+
+        // We can re-apply the same config...
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error());
+
+        // ... and doing so mounts the dataset again.
+        assert!(is_mounted(&name).await);
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn ensure_datasets_get_mounted_even_with_data() {
+        let logctx =
+            test_setup_log("ensure_datasets_get_mounted_even_with_data");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+
+        // Test setup: Add a U.2 and M.2, adopt them into the "control plane"
+        // for usage.
+        harness.handle().key_manager_ready().await;
+        let raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+        let config = harness.make_config(1, &raw_disks);
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        assert!(!result.has_error(), "{:?}", result);
+
+        // Create a dataset on the newly formatted U.2.
+        let id = DatasetUuid::new_v4();
+        let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
+        let kind = DatasetKind::TransientZone { name: "foo".to_string() };
+        // If we use the "Debug" dataset, it'll get created and made immutable
+        // during our call to "omicron_physical_disks_ensure".
+        // So: We pick a different non-zoned dataset.
+        assert!(
+            !kind.zoned(),
+            "We need to use a non-zoned dataset for this test"
+        );
+        let name = DatasetName::new(zpool_name, kind);
+        let datasets = BTreeMap::from([(
+            id,
+            DatasetConfig {
+                id,
+                name: name.clone(),
+                inner: SharedDatasetConfig::default(),
+            },
+        )]);
+        // "Generation = 1" is reserved as "no requests seen yet", so we jump
+        // past it.
+        let generation = Generation::new().next();
+        let config = DatasetsConfig { generation, datasets };
+
+        // Before we actually make the dataset - create the mountpoint, and
+        // stick a file there.
+        let mountpoint = name.mountpoint(&harness.mount_config().root);
+        std::fs::create_dir_all(&mountpoint).unwrap();
+        std::fs::write(mountpoint.join("marker.txt"), "hello").unwrap();
+        assert!(mountpoint.join("marker.txt").exists());
+
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error(), "{status:?}");
+
+        // Creating the dataset should have mounted it
+        assert!(is_mounted(&name).await);
+
+        // Creating the dataset should have moved the marker file
+        let mount_parent = mountpoint.parent().unwrap();
+        let old_data_dir = mount_parent
+            .read_dir_utf8()
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .find(|entry| entry.file_name().starts_with("old-under-mountpoint"))
+            .expect("Could not find relocated data directory");
+        assert!(
+            old_data_dir.path().join("marker.txt").exists(),
+            "Missing marker file"
+        );
+        // Test meta-note: If you try to keep this open across the call to
+        // "harness.cleanup()", you'll see "device busy" errors. Drop it now.
+        drop(old_data_dir);
+
+        // We can unmount the dataset manually
+        unmount(&name).await;
+        assert!(!is_mounted(&name).await);
+
+        // After unmounting the dataset, the directory underneath should
+        // exist, but be immutable.
+        assert!(mountpoint.exists(), "Mountpoint {mountpoint} does not exist?");
+        let err =
+            std::fs::write(mountpoint.join("another-marker.txt"), "goodbye")
+                .unwrap_err();
+        assert!(
+            matches!(err.kind(), std::io::ErrorKind::PermissionDenied),
+            "err: {err}"
+        );
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
     #[tokio::test]
     async fn ensure_many_datasets() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("ensure_many_datasets");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -2197,33 +2423,30 @@ mod tests {
             let zpool_name = ZpoolName::new_external(config.disks[i].pool_id);
 
             let id = DatasetUuid::new_v4();
+            let name = DatasetName::new(zpool_name, DatasetKind::Crucible);
+            datasets.insert(
+                id,
+                DatasetConfig {
+                    id,
+                    name,
+                    inner: SharedDatasetConfig::default(),
+                },
+            );
+
+            let id = DatasetUuid::new_v4();
+            let name = DatasetName::new(zpool_name, DatasetKind::Debug);
+            datasets.insert(
+                id,
+                DatasetConfig {
+                    id,
+                    name,
+                    inner: SharedDatasetConfig::default(),
+                },
+            );
+
+            let id = DatasetUuid::new_v4();
             let name =
-                DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
-            datasets.insert(
-                id,
-                DatasetConfig {
-                    id,
-                    name,
-                    inner: SharedDatasetConfig::default(),
-                },
-            );
-
-            let id = DatasetUuid::new_v4();
-            let name = DatasetName::new(zpool_name.clone(), DatasetKind::Debug);
-            datasets.insert(
-                id,
-                DatasetConfig {
-                    id,
-                    name,
-                    inner: SharedDatasetConfig::default(),
-                },
-            );
-
-            let id = DatasetUuid::new_v4();
-            let name = DatasetName::new(
-                zpool_name.clone(),
-                DatasetKind::TransientZoneRoot,
-            );
+                DatasetName::new(zpool_name, DatasetKind::TransientZoneRoot);
             datasets.insert(
                 id,
                 DatasetConfig {
@@ -2258,7 +2481,6 @@ mod tests {
 
     #[tokio::test]
     async fn nested_dataset() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("nested_dataset");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -2277,7 +2499,7 @@ mod tests {
 
         // Use the dataset on the newly formatted U.2
         let all_disks = harness.handle().get_latest_disks().await;
-        let zpool = all_disks.all_u2_zpools()[0].clone();
+        let zpool = all_disks.all_u2_zpools()[0];
         let datasets = harness.handle().datasets_list(zpool).await.unwrap();
 
         let dataset = datasets
@@ -2401,7 +2623,8 @@ mod tests {
             .expect_err(
                 "Should not be able to destroy nested dataset a second time",
             );
-        assert!(err.to_string().contains("Dataset not found"), "{err:?}");
+        let err = InlineErrorChain::new(&err).to_string();
+        assert!(err.contains("Dataset not found"), "{err:?}");
 
         // The nested dataset should now be gone
         let nested_datasets = harness

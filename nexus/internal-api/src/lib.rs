@@ -5,18 +5,21 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dropshot::{
-    HttpError, HttpResponseCreated, HttpResponseDeleted, HttpResponseOk,
+    Body, HttpError, HttpResponseCreated, HttpResponseDeleted, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, ResultsPage,
     TypedBody,
 };
+use http::Response;
 use nexus_types::{
     deployment::{
         Blueprint, BlueprintMetadata, BlueprintTarget, BlueprintTargetSet,
-        ClickhousePolicy,
+        ClickhousePolicy, OximeterReadPolicy,
     },
     external_api::{
-        params::{PhysicalDiskPath, SledSelector, UninitializedSledId},
-        shared::{ProbeInfo, UninitializedSled},
+        params::{self, PhysicalDiskPath, SledSelector, UninitializedSledId},
+        shared::{self, ProbeInfo, UninitializedSled},
+        views::Ping,
+        views::PingStatus,
         views::SledPolicy,
     },
     internal_api::{
@@ -24,7 +27,10 @@ use nexus_types::{
             InstanceMigrateRequest, OximeterInfo, RackInitializationRequest,
             SledAgentInfo, SwitchPutRequest, SwitchPutResponse,
         },
-        views::{BackgroundTask, DemoSaga, Ipv4NatEntryView, Saga},
+        views::{
+            BackgroundTask, DemoSaga, Ipv4NatEntryView, MgsUpdateDriverStatus,
+            Saga,
+        },
     },
 };
 use omicron_common::api::{
@@ -48,6 +54,19 @@ const RACK_INITIALIZATION_REQUEST_MAX_BYTES: usize = 10 * 1024 * 1024;
 #[dropshot::api_description]
 pub trait NexusInternalApi {
     type Context;
+
+    /// Ping API
+    ///
+    /// Always responds with Ok if it responds at all.
+    #[endpoint {
+        method = GET,
+        path = "/v1/ping",
+    }]
+    async fn ping(
+        _rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Ping>, HttpError> {
+        Ok(HttpResponseOk(Ping { status: PingStatus::Ok }))
+    }
 
     /// Return information about the given sled agent
     #[endpoint {
@@ -261,7 +280,7 @@ pub trait NexusInternalApi {
         downstairs_client_stopped: TypedBody<DownstairsClientStopped>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    // Sagas
+    // Debug interfaces for sagas
 
     /// List sagas
     #[endpoint {
@@ -308,7 +327,7 @@ pub trait NexusInternalApi {
         path_params: Path<DemoSagaPathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    // Background Tasks
+    // Debug interfaces for background Tasks
 
     /// List background tasks
     ///
@@ -344,6 +363,17 @@ pub trait NexusInternalApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<BackgroundTasksActivateRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // Debug interfaces for ongoing MGS updates
+
+    /// Fetch information about ongoing MGS updates
+    #[endpoint {
+        method = GET,
+        path = "/mgs-updates",
+    }]
+    async fn mgs_updates(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MgsUpdateDriverStatus>, HttpError>;
 
     // NAT RPW internal APIs
 
@@ -510,6 +540,100 @@ pub trait NexusInternalApi {
         disk: TypedBody<PhysicalDiskPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    // Support bundles (experimental)
+
+    /// List all support bundles
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles",
+    }]
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>;
+
+    /// View a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}",
+    }]
+    async fn support_bundle_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
+
+    /// Download the index of a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/index",
+    }]
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the contents of a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
+    }]
+    async fn support_bundle_download(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download a file within a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
+    }]
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the metadata of a support bundle
+    #[endpoint {
+        method = HEAD,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
+    }]
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the metadata of a file within the support bundle
+    #[endpoint {
+        method = HEAD,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
+    }]
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Create a new support bundle
+    #[endpoint {
+        method = POST,
+        path = "/experimental/v1/system/support-bundles",
+    }]
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError>;
+
+    /// Delete an existing support bundle
+    ///
+    /// May also be used to cancel a support bundle which is currently being
+    /// collected, or to remove metadata for a support bundle that has failed.
+    #[endpoint {
+        method = DELETE,
+        path = "/experimental/v1/system/support-bundles/{support_bundle}",
+    }]
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
     /// Get all the probes associated with a given sled.
     #[endpoint {
         method = GET,
@@ -538,6 +662,25 @@ pub trait NexusInternalApi {
     async fn clickhouse_policy_set(
         rqctx: RequestContext<Self::Context>,
         policy: TypedBody<ClickhousePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get the current oximeter read policy
+    #[endpoint {
+            method = GET,
+            path = "/oximeter/read-policy"
+            }]
+    async fn oximeter_read_policy_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OximeterReadPolicy>, HttpError>;
+
+    /// Set the new oximeter read policy
+    #[endpoint {
+               method = POST,
+               path = "/oximeter/read-policy"
+           }]
+    async fn oximeter_read_policy_set(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<OximeterReadPolicy>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 

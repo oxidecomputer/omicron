@@ -19,7 +19,8 @@ use omicron_common::disk::{
     CompressionAlgorithm, DatasetName, DiskIdentity, DiskVariant, GzipLevel,
 };
 use rand::distributions::{Alphanumeric, DistString};
-use slog::{Logger, debug, info};
+use slog::{Logger, debug, info, warn};
+use slog_error_chain::InlineErrorChain;
 use std::process::Stdio;
 use std::str::FromStr;
 use std::sync::OnceLock;
@@ -262,14 +263,24 @@ pub(crate) async fn ensure_zpool_has_datasets(
             log,
             "Ensuring encrypted filesystem: {} for epoch {}", dataset, epoch
         );
+        let name = format!("{}/{}", zpool_name, dataset);
         let result = Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
-            name: &format!("{}/{}", zpool_name, dataset),
-            mountpoint: Mountpoint::Path(mountpoint),
+            name: &name,
+            mountpoint: Mountpoint(mountpoint),
+            can_mount: zfs::CanMount::On,
             zoned,
             encryption_details: Some(encryption_details),
             size_details: None,
             id: None,
             additional_options: None,
+        })
+        .inspect_err(|err| {
+            warn!(
+                log,
+                "Failed to ensure encrypted root filesystem";
+                "name" => ?name,
+                "err" => InlineErrorChain::new(&err),
+            );
         });
 
         keyfile.zero_and_unlink().await.map_err(|error| {
@@ -326,12 +337,21 @@ pub(crate) async fn ensure_zpool_has_datasets(
         });
         Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
             name,
-            mountpoint: Mountpoint::Path(mountpoint),
+            mountpoint: Mountpoint(mountpoint),
+            can_mount: zfs::CanMount::On,
             zoned,
             encryption_details,
             size_details,
             id: None,
             additional_options: None,
+        })
+        .inspect_err(|err| {
+            warn!(
+                log,
+                "Failed to ensure dataset";
+                "name" => ?name,
+                "err" => InlineErrorChain::new(&err),
+            );
         })?;
 
         if dataset.wipe {
@@ -343,6 +363,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             )?;
         }
     }
+    info!(log, "Finished ensuring zpool has datasets"; "zpool" => ?zpool_name, "disk_identity" => ?disk_identity);
     Ok(())
 }
 
@@ -481,7 +502,7 @@ async fn ensure_zpool_dataset_is_encrypted(
     }
     info!(log, "Dataset should be encrypted");
 
-    let encrypted_dataset = DatasetName::new(zpool_name.clone(), kind);
+    let encrypted_dataset = DatasetName::new(*zpool_name, kind);
     let encrypted_dataset = encrypted_dataset.full_name();
 
     let (unencrypted_dataset_exists, encrypted_dataset_exists) = (

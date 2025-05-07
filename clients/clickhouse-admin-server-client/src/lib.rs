@@ -4,10 +4,10 @@
 
 //! Interface for making API requests to a clickhouse-admin-server server
 //! running in an omicron zone.
-use std::clone::Clone;
 
 progenitor::generate_api!(
     spec = "../../openapi/clickhouse-admin-server.json",
+    interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";

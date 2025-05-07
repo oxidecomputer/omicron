@@ -6,6 +6,7 @@
 
 progenitor::generate_api!(
     spec = "../../openapi/wicketd.json",
+    interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -33,6 +34,7 @@ progenitor::generate_api!(
     replace = {
         AbortUpdateOptions = wicket_common::rack_update::AbortUpdateOptions,
         AllowedSourceIps = omicron_common::api::internal::shared::AllowedSourceIps,
+        ArtifactId = omicron_common::update::ArtifactId,
         Baseboard = sled_hardware_types::Baseboard,
         BgpAuthKey = wicket_common::rack_setup::BgpAuthKey,
         BgpAuthKeyId = wicket_common::rack_setup::BgpAuthKeyId,

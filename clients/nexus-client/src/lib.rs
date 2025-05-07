@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 progenitor::generate_api!(
     spec = "../../openapi/nexus-internal.json",
+    interface = Positional,
     derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
@@ -30,8 +31,8 @@ progenitor::generate_api!(
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
         BlueprintPhysicalDiskConfig = nexus_types::deployment::BlueprintPhysicalDiskConfig,
-        BlueprintPhysicalDisksConfig = nexus_types::deployment::BlueprintPhysicalDisksConfig,
         BlueprintPhysicalDiskDisposition = nexus_types::deployment::BlueprintPhysicalDiskDisposition,
+        BlueprintZoneImageSource = nexus_types::deployment::BlueprintZoneImageSource,
         Certificate = omicron_common::api::internal::nexus::Certificate,
         ClickhouseMode = nexus_types::deployment::ClickhouseMode,
         ClickhousePolicy = nexus_types::deployment::ClickhousePolicy,
@@ -42,12 +43,15 @@ progenitor::generate_api!(
         Generation = omicron_common::api::external::Generation,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         MacAddr = omicron_common::api::external::MacAddr,
+        MgsUpdateDriverStatus = nexus_types::internal_api::views::MgsUpdateDriverStatus,
         Name = omicron_common::api::external::Name,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
         OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
         OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
+        OximeterReadMode = nexus_types::deployment::OximeterReadMode,
+        OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
         RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         Srv = nexus_types::internal_api::params::Srv,
         TypedUuidForBlueprintKind = omicron_uuid_kinds::BlueprintUuid,

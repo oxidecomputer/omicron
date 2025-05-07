@@ -7,13 +7,18 @@
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 
 use daft::Diffable;
+use id_map::IdMap;
+use id_map::IdMappable;
+use omicron_common::ledger::Ledgerable;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
-    disk::DiskVariant,
-    update::ArtifactHash,
+    disk::{
+        DatasetConfig, DatasetManagementStatus, DiskManagementStatus,
+        DiskVariant, OmicronPhysicalDiskConfig,
+    },
     zpool_name::ZpoolName,
 };
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
@@ -24,6 +29,7 @@ use serde::{Deserialize, Serialize};
 // depend on sled-hardware-types.
 pub use sled_hardware_types::Baseboard;
 use strum::EnumIter;
+use tufaceous_artifact::ArtifactHash;
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -124,6 +130,38 @@ pub enum SledRole {
     Scrimlet,
 }
 
+/// Describes the set of Reconfigurator-managed configuration elements of a sled
+// TODO this struct should have a generation number; at the moment, each of
+// the fields has a separete one internally.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct OmicronSledConfig {
+    pub generation: Generation,
+    pub disks: IdMap<OmicronPhysicalDiskConfig>,
+    pub datasets: IdMap<DatasetConfig>,
+    pub zones: IdMap<OmicronZoneConfig>,
+}
+
+impl Ledgerable for OmicronSledConfig {
+    fn is_newer_than(&self, other: &Self) -> bool {
+        self.generation > other.generation
+    }
+
+    fn generation_bump(&mut self) {
+        // DO NOTHING!
+        //
+        // Generation bumps must only ever come from nexus and will be encoded
+        // in the struct itself
+    }
+}
+
+/// Result of the currently-synchronous `omicron_config_put` endpoint.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[must_use = "this `DatasetManagementResult` may contain errors, which should be handled"]
+pub struct OmicronSledConfigResult {
+    pub disks: Vec<DiskManagementStatus>,
+    pub datasets: Vec<DatasetManagementStatus>,
+}
+
 /// Describes the set of Omicron-managed zones running on a sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
@@ -165,6 +203,14 @@ pub struct OmicronZoneConfig {
     // blueprint or ledger.
     #[serde(default = "deserialize_image_source_default")]
     pub image_source: OmicronZoneImageSource,
+}
+
+impl IdMappable for OmicronZoneConfig {
+    type Id = OmicronZoneUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
 }
 
 impl OmicronZoneConfig {
@@ -629,6 +675,18 @@ pub enum OmicronZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     Artifact { hash: ArtifactHash },
+}
+
+impl OmicronZoneImageSource {
+    /// Return the artifact hash used for the zone image, if the zone's image
+    /// source is from the artifact store.
+    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
+        if let OmicronZoneImageSource::Artifact { hash } = self {
+            Some(*hash)
+        } else {
+            None
+        }
+    }
 }
 
 // See `OmicronZoneConfig`. This is a separate function instead of being `impl

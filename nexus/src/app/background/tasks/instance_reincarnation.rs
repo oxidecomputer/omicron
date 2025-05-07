@@ -99,7 +99,7 @@ impl BackgroundTask for InstanceReincarnation {
                 ));
             }
 
-            if !status.total_errors() > 0 {
+            if status.total_errors() > 0 {
                 warn!(
                     &opctx.log,
                     "instance reincarnation completed with errors";
@@ -307,14 +307,15 @@ mod test {
     use crate::app::sagas::test_helpers;
     use crate::external_api::params;
     use chrono::Utc;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
+    use nexus_db_model::InstanceIntendedState;
     use nexus_db_model::InstanceRuntimeState;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_db_queries::authz;
-    use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::{
         create_default_ip_pool, create_project, object_create,
     };
@@ -354,6 +355,7 @@ mod test {
         name: &str,
         auto_restart: impl Into<Option<InstanceAutoRestartPolicy>>,
         state: InstanceState,
+        intent: InstanceIntendedState,
     ) -> authz::Instance {
         let auto_restart_policy = auto_restart.into();
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
@@ -387,28 +389,29 @@ mod test {
                     ssh_public_keys: None,
                     start: state == InstanceState::Vmm,
                     auto_restart_policy,
+                    anti_affinity_groups: Vec::new(),
                 },
             )
             .await;
 
         let id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        let authz_instance = if state != InstanceState::Vmm
-            && state != InstanceState::NoVmm
-        {
-            put_instance_in_state(cptestctx, opctx, id, state).await
-        } else {
-            let datastore = cptestctx.server.server_context().nexus.datastore();
-            let (_, _, authz_instance) = LookupPath::new(&opctx, datastore)
-                .instance_id(id.into_untyped_uuid())
-                .lookup_for(authz::Action::Modify)
-                .await
-                .expect("instance must exist");
-            authz_instance
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let (_, _, authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("instance must exist");
+        if state != InstanceState::Vmm && state != InstanceState::NoVmm {
+            put_instance_in_state(cptestctx, opctx, id, state).await;
         };
+        datastore
+            .instance_set_intended_state(opctx, &authz_instance, intent)
+            .await
+            .unwrap();
 
         eprintln!(
             "instance {id}: auto_restart_policy={auto_restart_policy:?}; \
-             state={state:?}"
+             state={state:?}; intent={intent}"
         );
         authz_instance
     }
@@ -566,6 +569,7 @@ mod test {
             "my-cool-instance",
             InstanceAutoRestartPolicy::BestEffort,
             InstanceState::Failed,
+            InstanceIntendedState::Running,
         )
         .await;
 
@@ -611,6 +615,7 @@ mod test {
             "my-cool-instance",
             None,
             InstanceState::Failed,
+            InstanceIntendedState::Running,
         )
         .await;
 
@@ -659,6 +664,7 @@ mod test {
                 &format!("sotapanna-{i}"),
                 InstanceAutoRestartPolicy::BestEffort,
                 InstanceState::Failed,
+                InstanceIntendedState::Running,
             )
             .await;
             will_reincarnate.insert(failed(instance.id()));
@@ -674,6 +680,7 @@ mod test {
                 &format!("sadakagami-{i}"),
                 InstanceAutoRestartPolicy::BestEffort,
                 InstanceState::NoVmm,
+                InstanceIntendedState::Running,
             )
             .await;
             // Now, give the instance an active VMM which is SagaUnwound.
@@ -695,6 +702,7 @@ mod test {
                 &format!("arahant-{i}"),
                 InstanceAutoRestartPolicy::Never,
                 InstanceState::Failed,
+                InstanceIntendedState::Running,
             )
             .await;
 
@@ -710,6 +718,7 @@ mod test {
                 &format!("arahant-{i}"),
                 InstanceAutoRestartPolicy::Never,
                 InstanceState::NoVmm,
+                InstanceIntendedState::Running,
             )
             .await;
 
@@ -730,10 +739,35 @@ mod test {
                 &format!("anagami-{i}"),
                 InstanceAutoRestartPolicy::BestEffort,
                 state,
+                InstanceIntendedState::Running,
             )
             .await;
             will_not_reincarnate.insert(instance.id());
         }
+
+        // Some `Failed` instances with policies permitting them to be
+        // reincarnated, but whose intended state is not `Running`.
+        let failed_stopped = create_instance(
+            &cptestctx,
+            &opctx,
+            "anagami-4",
+            InstanceAutoRestartPolicy::BestEffort,
+            InstanceState::Failed,
+            InstanceIntendedState::Stopped,
+        )
+        .await;
+        will_not_reincarnate.insert(failed_stopped.id());
+        let unwound_stopped = create_instance(
+            &cptestctx,
+            &opctx,
+            "anagami-5",
+            InstanceAutoRestartPolicy::BestEffort,
+            InstanceState::NoVmm,
+            InstanceIntendedState::Stopped,
+        )
+        .await;
+        attach_saga_unwound_vmm(&cptestctx, &opctx, &unwound_stopped).await;
+        will_not_reincarnate.insert(unwound_stopped.id());
 
         // Activate the task again, and check that our instance had an
         // instance-start saga started.
@@ -805,6 +839,7 @@ mod test {
             "victor",
             InstanceAutoRestartPolicy::BestEffort,
             InstanceState::Failed,
+            InstanceIntendedState::Running,
         )
         .await;
         let instance1_id = InstanceUuid::from_untyped_uuid(instance1.id());
@@ -828,6 +863,7 @@ mod test {
             "frankenstein",
             InstanceAutoRestartPolicy::BestEffort,
             InstanceState::Vmm,
+            InstanceIntendedState::Running,
         )
         .await;
         let instance2_id = InstanceUuid::from_untyped_uuid(instance2.id());

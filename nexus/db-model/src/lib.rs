@@ -38,6 +38,7 @@ mod image;
 mod instance;
 mod instance_auto_restart_policy;
 mod instance_cpu_count;
+mod instance_intended_state;
 mod instance_state;
 mod internet_gateway;
 mod inventory;
@@ -52,6 +53,7 @@ mod migration_state;
 mod name;
 mod network_interface;
 mod oximeter_info;
+mod oximeter_read_policy;
 mod physical_disk;
 mod physical_disk_kind;
 mod physical_disk_policy;
@@ -61,11 +63,19 @@ mod producer_endpoint;
 mod project;
 mod rendezvous_debug_dataset;
 mod semver_version;
+mod serde_time_delta;
 mod switch_interface;
 mod switch_port;
 mod target_release;
 mod v2p_mapping;
 mod vmm_state;
+mod webhook_delivery;
+mod webhook_delivery_attempt_result;
+mod webhook_delivery_state;
+mod webhook_delivery_trigger;
+mod webhook_event;
+mod webhook_event_class;
+mod webhook_rx;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
@@ -83,7 +93,6 @@ mod region_snapshot_replacement_step;
 mod role_assignment;
 mod role_builtin;
 pub mod saga_types;
-pub mod schema;
 mod schema_versions;
 mod service_kind;
 mod silo;
@@ -160,6 +169,7 @@ pub use image::*;
 pub use instance::*;
 pub use instance_auto_restart_policy::*;
 pub use instance_cpu_count::*;
+pub use instance_intended_state::*;
 pub use instance_state::*;
 pub use internet_gateway::*;
 pub use inventory::*;
@@ -174,6 +184,7 @@ pub use migration_state::*;
 pub use name::*;
 pub use network_interface::*;
 pub use oximeter_info::*;
+pub use oximeter_read_policy::*;
 pub use physical_disk::*;
 pub use physical_disk_kind::*;
 pub use physical_disk_policy::*;
@@ -232,6 +243,13 @@ pub use vpc_firewall_rule::*;
 pub use vpc_route::*;
 pub use vpc_router::*;
 pub use vpc_subnet::*;
+pub use webhook_delivery::*;
+pub use webhook_delivery_attempt_result::*;
+pub use webhook_delivery_state::*;
+pub use webhook_delivery_trigger::*;
+pub use webhook_event::*;
+pub use webhook_event_class::*;
+pub use webhook_rx::*;
 pub use zpool::*;
 
 // TODO: The existence of both impl_enum_type and impl_enum_wrapper is a
@@ -248,20 +266,17 @@ pub use zpool::*;
 /// sample usage.
 macro_rules! impl_enum_wrapper {
     (
-        $(#[$enum_meta:meta])*
-        pub struct $diesel_type:ident;
+        $diesel_type:ident:
 
         $(#[$model_meta:meta])*
         pub struct $model_type:ident(pub $ext_type:ty);
         $($enum_item:ident => $sql_value:literal)+
     ) => {
-        $(#[$enum_meta])*
-        pub struct $diesel_type;
-
         $(#[$model_meta])*
+        #[diesel(sql_type = ::nexus_db_schema::enums::$diesel_type)]
         pub struct $model_type(pub $ext_type);
 
-        impl ::diesel::serialize::ToSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
+        impl ::diesel::serialize::ToSql<::nexus_db_schema::enums::$diesel_type, ::diesel::pg::Pg> for $model_type {
             fn to_sql<'a>(
                 &'a self,
                 out: &mut ::diesel::serialize::Output<'a, '_, ::diesel::pg::Pg>,
@@ -277,7 +292,7 @@ macro_rules! impl_enum_wrapper {
             }
         }
 
-        impl ::diesel::deserialize::FromSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
+        impl ::diesel::deserialize::FromSql<::nexus_db_schema::enums::$diesel_type, ::diesel::pg::Pg> for $model_type {
             fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>) -> ::diesel::deserialize::Result<Self> {
                 match <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue::<'_>::as_bytes(&bytes) {
                     $(
@@ -299,29 +314,25 @@ macro_rules! impl_enum_wrapper {
 pub(crate) use impl_enum_wrapper;
 
 /// This macro implements serialization and deserialization of an enum type from
-/// our database into our model types. See [`VpcRouterKindEnum`] and
-/// [`VpcRouterKind`] for a sample usage
+/// our database into our model types. See [`VpcRouterKind`] for a sample usage.
 macro_rules! impl_enum_type {
     (
-        $(#[$enum_meta:meta])*
-        pub struct $diesel_type:ident;
+        $diesel_type:ident:
 
         $(#[$model_meta:meta])*
         pub enum $model_type:ident;
 
         $($enum_item:ident => $sql_value:literal)+
     ) => {
-        $(#[$enum_meta])*
-        pub struct $diesel_type;
-
         $(#[$model_meta])*
+        #[diesel(sql_type = ::nexus_db_schema::enums::$diesel_type)]
         pub enum $model_type {
             $(
                 $enum_item,
             )*
         }
 
-        impl ::diesel::serialize::ToSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
+        impl ::diesel::serialize::ToSql<::nexus_db_schema::enums::$diesel_type, ::diesel::pg::Pg> for $model_type {
             fn to_sql<'a>(
                 &'a self,
                 out: &mut ::diesel::serialize::Output<'a, '_, ::diesel::pg::Pg>,
@@ -338,7 +349,7 @@ macro_rules! impl_enum_type {
             }
         }
 
-        impl ::diesel::deserialize::FromSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
+        impl ::diesel::deserialize::FromSql<::nexus_db_schema::enums::$diesel_type, ::diesel::pg::Pg> for $model_type {
             fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>) -> ::diesel::deserialize::Result<Self> {
                 match <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue::<'_>::as_bytes(&bytes) {
                     $(

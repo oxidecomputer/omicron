@@ -300,6 +300,7 @@ mod test {
     use crate::Sled;
     use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
+    use id_map::IdMap;
     use internal_dns_resolver::Resolver;
     use internal_dns_types::config::Host;
     use internal_dns_types::config::Zone;
@@ -326,25 +327,27 @@ mod test {
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
-    use nexus_types::deployment::BlueprintDatasetsConfig;
-    use nexus_types::deployment::BlueprintPhysicalDisksConfig;
     use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
-    use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
     pub use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
     pub use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     pub use nexus_types::deployment::OmicronZoneExternalSnatIp;
+    use nexus_types::deployment::OximeterReadMode;
+    use nexus_types::deployment::OximeterReadPolicy;
+    use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
@@ -355,6 +358,7 @@ mod test {
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::RACK_PREFIX;
+    use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::address::get_sled_address;
     use omicron_common::address::get_switch_zone_address;
@@ -602,7 +606,14 @@ mod test {
         Ok(BlueprintZoneConfig {
             disposition,
             id: config.id,
-            filesystem_pool: config.filesystem_pool,
+            // This is *VERY* incorrect, in terms of a real system, but is not
+            // harmful to our DNS tests below. We should not introduce any new
+            // callers of
+            // `deprecated_omicron_zone_config_to_blueprint_zone_config`, so
+            // hopefully this doesn't cause us too much pain in the future.
+            filesystem_pool: config.filesystem_pool.unwrap_or_else(|| {
+                ZpoolName::new_external(ZpoolUuid::new_v4())
+            }),
             zone_type,
             image_source,
         })
@@ -645,34 +656,32 @@ mod test {
 
         for (sled_id, sa) in collection.sled_agents {
             // Convert the inventory `OmicronZonesConfig`s into
-            // `BlueprintZonesConfig`. This is going to get more painful over
+            // `BlueprintZoneConfig`s. This is going to get more painful over
             // time as we add to blueprints, but for now we can make this work.
-            let zones_config = BlueprintZonesConfig {
-                generation: sa.omicron_zones.generation,
-                zones: sa
-                    .omicron_zones
-                    .zones
-                    .into_iter()
-                    .map(|config| -> BlueprintZoneConfig {
-                        deprecated_omicron_zone_config_to_blueprint_zone_config(
-                            config,
-                            BlueprintZoneDisposition::InService,
-                            // We don't get external IP IDs in inventory
-                            // collections. We'll just make one up for every
-                            // zone that needs one here. This is gross.
-                            Some(ExternalIpUuid::new_v4()),
-                        )
-                        .expect("failed to convert zone config")
-                    })
-                    .collect(),
-            };
+            let zones = sa
+                .omicron_zones
+                .zones
+                .into_iter()
+                .map(|config| -> BlueprintZoneConfig {
+                    deprecated_omicron_zone_config_to_blueprint_zone_config(
+                        config,
+                        BlueprintZoneDisposition::InService,
+                        // We don't get external IP IDs in inventory
+                        // collections. We'll just make one up for every
+                        // zone that needs one here. This is gross.
+                        Some(ExternalIpUuid::new_v4()),
+                    )
+                    .expect("failed to convert zone config")
+                })
+                .collect();
             blueprint_sleds.insert(
                 sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
-                    disks_config: BlueprintPhysicalDisksConfig::default(),
-                    datasets_config: BlueprintDatasetsConfig::default(),
-                    zones_config,
+                    sled_agent_generation: sa.omicron_zones.generation,
+                    disks: IdMap::new(),
+                    datasets: IdMap::new(),
+                    zones,
                 },
             );
         }
@@ -682,6 +691,7 @@ mod test {
         let mut blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: blueprint_sleds,
+            pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -689,6 +699,8 @@ mod test {
             external_dns_version: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
+            oximeter_read_version: Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: "test-suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -698,16 +710,14 @@ mod test {
         // not currently in service.
         let out_of_service_id = OmicronZoneUuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
-        blueprint.sleds.values_mut().next().unwrap().zones_config.zones.insert(
+        blueprint.sleds.values_mut().next().unwrap().zones.insert(
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Expunged {
                     as_of_generation: Generation::new(),
                     ready_for_cleanup: false,
                 },
                 id: out_of_service_id,
-                filesystem_pool: Some(ZpoolName::new_external(
-                    ZpoolUuid::new_v4(),
-                )),
+                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
                 zone_type: BlueprintZoneType::Oximeter(
                     blueprint_zone_type::Oximeter {
                         address: SocketAddrV6::new(
@@ -732,7 +742,11 @@ mod test {
             .map(|(i, (sled_id, subnet))| {
                 let sled_info = Sled::new(
                     *sled_id,
+                    SledPolicy::InService {
+                        provision_policy: SledProvisionPolicy::Provisionable,
+                    },
                     get_sled_address(Ipv6Subnet::new(subnet.network())),
+                    REPO_DEPOT_PORT,
                     // The first two of these (arbitrarily) will be marked
                     // Scrimlets.
                     if i < 2 { SledRole::Scrimlet } else { SledRole::Gimlet },
@@ -758,7 +772,8 @@ mod test {
         //
         // 2. Every SRV record that we find should have a "target" that points
         //    to another name within the DNS configuration, and that name should
-        //    be one of the ones with a AAAA record pointing to an Omicron zone.
+        //    be one of the ones with a AAAA record pointing to either an
+        //    Omicron zone or a global zone.
         //
         // 3. There is at least one SRV record for each service that we expect
         //    to appear in the representative system that we're working with.
@@ -783,7 +798,7 @@ mod test {
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
 
-        // Check to see that the out-of-service zone was actually excluded
+        // Check to see that the out-of-service zone was actually excluded.
         assert!(
             omicron_zones_by_ip.values().all(|id| *id != out_of_service_id)
         );
@@ -801,6 +816,17 @@ mod test {
                 } else {
                     None
                 }
+            })
+            .collect();
+
+        // We also want a mapping from underlay IP to each sled global zone.
+        // In this case, the value is the sled id.
+        let mut all_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
+            .keys()
+            .map(|sled_id| {
+                let sled_subnet = sleds_by_id.get(sled_id).unwrap().subnet();
+                let global_zone_ip = *get_sled_address(sled_subnet).ip();
+                (global_zone_ip, *sled_id)
             })
             .collect();
 
@@ -871,9 +897,23 @@ mod test {
                     continue;
                 }
 
+                if let Some(sled_id) = all_sleds_by_ip.remove(addr) {
+                    println!(
+                        "IP {} found in DNS corresponds with global zone \
+                        for sled {}",
+                        addr, sled_id
+                    );
+                    expected_srv_targets.insert(format!(
+                        "{}.{}",
+                        name, blueprint_dns_zone.zone_name
+                    ));
+                    continue;
+                }
+
                 println!(
                     "note: found IP ({}) not corresponding to any \
-                    Omicron zone or switch zone (name {:?})",
+                    Omicron zone, switch zone, or global zone \
+                    (name {:?})",
                     addr, name
                 );
             }
@@ -923,6 +963,7 @@ mod test {
             ServiceName::CruciblePantry,
             ServiceName::BoundaryNtp,
             ServiceName::InternalNtp,
+            ServiceName::RepoDepot,
         ]);
 
         for (name, records) in &blueprint_dns_zone.records {
@@ -1051,9 +1092,8 @@ mod test {
         // Change the zone disposition to expunged for the nexus zone on the
         // first sled. This should ensure we don't get an external DNS record
         // back for that sled.
-        let bp_zones_config =
-            &mut blueprint.sleds.values_mut().next().unwrap().zones_config;
-        let mut nexus_zone = bp_zones_config
+        let bp_sled_config = &mut blueprint.sleds.values_mut().next().unwrap();
+        let mut nexus_zone = bp_sled_config
             .zones
             .iter_mut()
             .find(|z| z.zone_type.is_nexus())
@@ -1383,6 +1423,7 @@ mod test {
                     CockroachDbClusterVersion::POLICY,
                 target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
                 clickhouse_policy: None,
+                oximeter_read_policy: OximeterReadPolicy::new(1),
                 log,
             }
             .build()

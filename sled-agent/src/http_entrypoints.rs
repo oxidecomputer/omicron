@@ -18,7 +18,7 @@ use dropshot::{
     Query, RequestContext, StreamingBody, TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronZonesConfig, SledRole,
+    Inventory, OmicronSledConfig, OmicronSledConfigResult, SledRole,
 };
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
@@ -27,10 +27,8 @@ use omicron_common::api::internal::shared::{
     SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
 };
 use omicron_common::disk::{
-    DatasetsConfig, DatasetsManagementResult, DiskVariant,
-    DisksManagementResult, M2Slot, OmicronPhysicalDisksConfig,
+    DatasetsConfig, DiskVariant, M2Slot, OmicronPhysicalDisksConfig,
 };
-use omicron_common::update::ArtifactHash;
 use range_requests::RequestContextEx;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::{
@@ -91,19 +89,6 @@ impl SledAgentApi for SledAgentImpl {
         sa.list_zone_bundles(&zone_name)
             .await
             .map(HttpResponseOk)
-            .map_err(HttpError::from)
-    }
-
-    async fn zone_bundle_create(
-        rqctx: RequestContext<Self::Context>,
-        params: Path<ZonePathParam>,
-    ) -> Result<HttpResponseCreated<ZoneBundleMetadata>, HttpError> {
-        let params = params.into_inner();
-        let zone_name = params.zone_name;
-        let sa = rqctx.context();
-        sa.create_zone_bundle(&zone_name)
-            .await
-            .map(HttpResponseCreated)
             .map_err(HttpError::from)
     }
 
@@ -415,16 +400,6 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseDeleted())
     }
 
-    async fn datasets_put(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<DatasetsConfig>,
-    ) -> Result<HttpResponseOk<DatasetsManagementResult>, HttpError> {
-        let sa = rqctx.context();
-        let body_args = body.into_inner();
-        let result = sa.datasets_ensure(body_args).await?;
-        Ok(HttpResponseOk(result))
-    }
-
     async fn datasets_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
@@ -450,14 +425,16 @@ impl SledAgentApi for SledAgentImpl {
         sa.zones_list().await.map(HttpResponseOk).map_err(HttpError::from)
     }
 
-    async fn omicron_zones_put(
+    async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<OmicronZonesConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        body: TypedBody<OmicronSledConfig>,
+    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-        sa.omicron_zones_ensure(body_args).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        sa.set_omicron_config(body_args)
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
     }
 
     async fn omicron_physical_disks_get(
@@ -465,16 +442,6 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(sa.omicron_physical_disks_list().await?))
-    }
-
-    async fn omicron_physical_disks_put(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<OmicronPhysicalDisksConfig>,
-    ) -> Result<HttpResponseOk<DisksManagementResult>, HttpError> {
-        let sa = rqctx.context();
-        let body_args = body.into_inner();
-        let result = sa.omicron_physical_disks_ensure(body_args).await?;
-        Ok(HttpResponseOk(result))
     }
 
     async fn zpools_get(
@@ -489,14 +456,6 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<SledRole>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(sa.get_role()))
-    }
-
-    async fn cockroachdb_init(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = rqctx.context();
-        sa.cockroachdb_initialize().await?;
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn vmm_register(
@@ -586,22 +545,44 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<BTreeMap<ArtifactHash, usize>>, HttpError> {
+    ) -> Result<HttpResponseOk<ArtifactListResponse>, HttpError> {
         Ok(HttpResponseOk(rqctx.context().artifact_store().list().await?))
+    }
+
+    async fn artifact_config_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ArtifactConfig>, HttpError> {
+        match rqctx.context().artifact_store().get_config() {
+            Some(config) => Ok(HttpResponseOk(config)),
+            None => Err(HttpError::for_not_found(
+                None,
+                "No artifact configuration present".to_string(),
+            )),
+        }
+    }
+
+    async fn artifact_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ArtifactConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        rqctx.context().artifact_store().put_config(body.into_inner()).await?;
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn artifact_copy_from_depot(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
+        query_params: Query<ArtifactQueryParam>,
         body: TypedBody<ArtifactCopyFromDepotBody>,
     ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>
     {
         let sha256 = path_params.into_inner().sha256;
+        let generation = query_params.into_inner().generation;
         let depot_base_url = body.into_inner().depot_base_url;
         rqctx
             .context()
             .artifact_store()
-            .copy_from_depot(sha256, &depot_base_url)
+            .copy_from_depot(sha256, generation, &depot_base_url)
             .await?;
         Ok(HttpResponseAccepted(ArtifactCopyFromDepotResponse {}))
     }
@@ -609,21 +590,18 @@ impl SledAgentApi for SledAgentImpl {
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
+        query_params: Query<ArtifactQueryParam>,
         body: StreamingBody,
     ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError> {
         let sha256 = path_params.into_inner().sha256;
+        let generation = query_params.into_inner().generation;
         Ok(HttpResponseOk(
-            rqctx.context().artifact_store().put_body(sha256, body).await?,
+            rqctx
+                .context()
+                .artifact_store()
+                .put_body(sha256, generation, body)
+                .await?,
         ))
-    }
-
-    async fn artifact_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<ArtifactPathParam>,
-    ) -> Result<HttpResponseDeleted, HttpError> {
-        let sha256 = path_params.into_inner().sha256;
-        rqctx.context().artifact_store().delete(sha256).await?;
-        Ok(HttpResponseDeleted())
     }
 
     async fn vmm_issue_disk_snapshot_request(
@@ -992,6 +970,14 @@ impl SledAgentApi for SledAgentImpl {
         ))
     }
 
+    async fn support_nvmeadm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
+        let sa = request_context.context();
+        let res = sa.support_nvmeadm_info().await;
+        Ok(HttpResponseOk(res.get_output()))
+    }
+
     async fn support_pargs_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
@@ -1032,5 +1018,49 @@ impl SledAgentApi for SledAgentImpl {
                 .map(|cmd| cmd.get_output())
                 .collect::<Vec<_>>(),
         ))
+    }
+
+    async fn support_zfs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
+        let sa = request_context.context();
+        let res = sa.support_zfs_info().await;
+        Ok(HttpResponseOk(res.get_output()))
+    }
+
+    async fn support_zpool_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
+        let sa = request_context.context();
+        let res = sa.support_zpool_info().await;
+        Ok(HttpResponseOk(res.get_output()))
+    }
+
+    async fn support_logs(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
+        let sa = request_context.context();
+        sa.as_support_bundle_logs()
+            .zones_list()
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
+    }
+
+    async fn support_logs_download(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
+        query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = request_context.context();
+        let SledDiagnosticsLogsDownloadPathParm { zone } =
+            path_params.into_inner();
+        let SledDiagnosticsLogsDownloadQueryParam { max_rotated } =
+            query_params.into_inner();
+
+        sa.as_support_bundle_logs()
+            .get_logs_for_zone(zone, max_rotated)
+            .await
+            .map_err(HttpError::from)
     }
 }

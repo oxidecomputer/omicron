@@ -4,22 +4,19 @@
 
 use super::{Generation, Name, RouterRoute, impl_enum_type};
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{router_route, vpc_router, vpc_subnet};
 use crate::{DatastoreAttachTargetConfig, VpcSubnet};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_db_schema::schema::{router_route, vpc_router, vpc_subnet};
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_router_kind", schema = "public"))]
-    pub struct VpcRouterKindEnum;
+    VpcRouterKindEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = VpcRouterKindEnum)]
     pub enum VpcRouterKind;
 
     // Enum values

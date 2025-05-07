@@ -3,9 +3,9 @@ to:   blueprint 665dc34a-dbf2-4d13-9ceb-9542d434ab0e
 
  MODIFIED SLEDS:
 
-  sled 216f8913-f977-46da-8803-e6b98db7f437 (active):
+  sled 216f8913-f977-46da-8803-e6b98db7f437 (active, config generation 2 -> 3):
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -21,7 +21,7 @@ to:   blueprint 665dc34a-dbf2-4d13-9ceb-9542d434ab0e
     fake-vendor   fake-model   serial-fc204a4e-b343-449e-9a11-366bed48ad1a   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -80,7 +80,7 @@ to:   blueprint 665dc34a-dbf2-4d13-9ceb-9542d434ab0e
     oxp_fc204a4e-b343-449e-9a11-366bed48ad1a/crypt/debug                                                           094fc07c-51b3-4ec1-95e6-911b2b7e774e   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones generation 2 -> 3:
+    omicron zones:
     -------------------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source                disposition   underlay IP           
     -------------------------------------------------------------------------------------------------------------------------
@@ -113,4 +113,8 @@ to:   blueprint 665dc34a-dbf2-4d13-9ceb-9542d434ab0e
  METADATA:
     internal DNS version:   1 (unchanged)
     external DNS version:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
 

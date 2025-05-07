@@ -19,7 +19,7 @@ use omicron_common::disk::{
     OmicronPhysicalDisksConfig,
 };
 use sled_hardware::DiskFirmware;
-use slog::{Logger, info, o, warn};
+use slog::{Logger, error, info, o, warn};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -100,7 +100,7 @@ impl AllDisks {
         for (id, disk) in self.inner.values.iter() {
             if let ManagedDisk::ImplicitlyManaged(disk) = disk {
                 if disk.is_boot_disk() {
-                    return Some((id.clone(), disk.zpool_name().clone()));
+                    return Some((id.clone(), *disk.zpool_name()));
                 }
             }
         }
@@ -147,7 +147,7 @@ impl AllDisks {
             .filter_map(|disk| match disk {
                 ManagedDisk::ExplicitlyManaged(disk)
                 | ManagedDisk::ImplicitlyManaged(disk) => {
-                    Some((disk.zpool_name().clone(), disk.variant()))
+                    Some((*disk.zpool_name(), disk.variant()))
                 }
                 ManagedDisk::Unmanaged(_) => None,
             })
@@ -165,7 +165,7 @@ impl AllDisks {
                 ManagedDisk::ExplicitlyManaged(disk)
                 | ManagedDisk::ImplicitlyManaged(disk) => {
                     if disk.variant() == variant {
-                        return Some(disk.zpool_name().clone());
+                        return Some(*disk.zpool_name());
                     }
                     None
                 }
@@ -180,6 +180,15 @@ impl AllDisks {
             .into_iter()
             .map(|p| p.join(BUNDLE_DIRECTORY).join(ZONE_BUNDLE_DIRECTORY))
             .collect()
+    }
+
+    /// Return the directories that can be used for temporary sled-diagnostics
+    /// file storage.
+    pub fn all_sled_diagnostics_directories(&self) -> Vec<Utf8PathBuf> {
+        // These directories are currently used for tempfile storage when
+        // zipping up zone logs before shuffling them off to a nexus collecting
+        // a support bundle.
+        self.all_m2_mountpoints(M2_DEBUG_DATASET).into_iter().collect()
     }
 
     /// Returns an iterator over all managed disks.
@@ -219,16 +228,12 @@ pub struct StorageResources {
     key_requester: StorageKeyRequester,
 
     // All disks, real and synthetic, that exist within this sled
-    disks: AllDisks,
+    disks: watch::Sender<AllDisks>,
 
     // The last set of disks the control plane explicitly told us to manage.
     //
     // Only includes external storage (U.2s).
-    control_plane_disks: BTreeMap<DiskIdentity, OmicronPhysicalDiskConfig>,
-
-    // Many clients are interested when changes in the set of [AllDisks]
-    // might occur. This watch channel is updated once these disks get updated.
-    disk_updates: watch::Sender<AllDisks>,
+    control_plane_config: ControlPlaneConfig,
 }
 
 impl StorageResources {
@@ -245,20 +250,19 @@ impl StorageResources {
         Self {
             log: log.new(o!("component" => "StorageResources")),
             key_requester,
-            disks: disks.clone(),
-            control_plane_disks: BTreeMap::new(),
-            disk_updates: watch::Sender::new(disks),
+            disks: watch::Sender::new(disks),
+            control_plane_config: ControlPlaneConfig::new(),
         }
     }
 
     /// Monitors the set of disks for any updates
     pub fn watch_disks(&self) -> watch::Receiver<AllDisks> {
-        self.disk_updates.subscribe()
+        self.disks.subscribe()
     }
 
     /// Gets the set of all disks
-    pub fn disks(&self) -> &AllDisks {
-        &self.disks
+    pub fn disks(&self) -> AllDisks {
+        self.disks.borrow().clone()
     }
 
     /// Sets the "control plane disk" state, as last requested by Nexus.
@@ -267,22 +271,16 @@ impl StorageResources {
     /// observed. To synchronize the "set of requested disks" with the "set of
     /// observed disks", call [Self::synchronize_disk_management].
     pub fn set_config(&mut self, config: &OmicronPhysicalDisksConfig) {
-        let our_gen = &mut self.disks.generation;
-        if *our_gen > config.generation {
+        if self.control_plane_config.generation > config.generation {
             return;
         }
-        *our_gen = config.generation;
-        self.control_plane_disks = config
-            .disks
-            .iter()
-            .map(|disk| (disk.identity.clone(), disk.clone()))
-            .collect();
+        self.control_plane_config = ControlPlaneConfig::from_config(config);
     }
 
     pub fn get_config(
         &self,
     ) -> &BTreeMap<DiskIdentity, OmicronPhysicalDiskConfig> {
-        &self.control_plane_disks
+        &self.control_plane_config.disks
     }
 
     /// Attempts to "manage" all the U.2 disks requested by the control plane.
@@ -297,9 +295,43 @@ impl StorageResources {
     pub async fn synchronize_disk_management(
         &mut self,
     ) -> DisksManagementResult {
-        let mut updated = false;
-        let disks = Arc::make_mut(&mut self.disks.inner);
-        info!(self.log, "Synchronizing disk managment");
+        self.disks_send_if_modified(async |self_, all_disks| {
+            Self::synchronize_disk_management_impl(
+                all_disks,
+                &mut self_.control_plane_config,
+                &self_.key_requester,
+                &self_.log,
+            )
+            .await
+        })
+        .await
+    }
+
+    async fn synchronize_disk_management_impl(
+        all_disks: &mut AllDisks,
+        control_plane_config: &mut ControlPlaneConfig,
+        key_requester: &StorageKeyRequester,
+        log: &Logger,
+    ) -> DisksManagementResult {
+        let disks = Arc::make_mut(&mut all_disks.inner);
+        info!(log, "Synchronizing disk managment");
+
+        if all_disks.generation < control_plane_config.generation {
+            all_disks.generation = control_plane_config.generation;
+        } else if all_disks.generation > control_plane_config.generation {
+            // This should never happen; `set_config()` rejects updates to
+            // `control_plane_config` that go backwards. This could probably be
+            // an `assert!`, but there's enough action-at-a-distance between
+            // `set_config` and this function that I'm worried we could actually
+            // see this; we'll log an error and return an empty set of results.
+            error!(
+                log,
+                "refusing to downgrade disk config generation";
+                "in-memory generation" => %all_disks.generation,
+                "incoming generation" => %control_plane_config.generation,
+            );
+            return DisksManagementResult::default();
+        }
 
         // "Unmanage" all disks no longer requested by the control plane.
         //
@@ -310,10 +342,9 @@ impl StorageResources {
                 // This leaves the presence of the disk still in "Self", but
                 // downgrades the disk to an unmanaged status.
                 ManagedDisk::ExplicitlyManaged(disk) => {
-                    if !self.control_plane_disks.contains_key(identity) {
+                    if !control_plane_config.disks.contains_key(identity) {
                         *managed_disk =
                             ManagedDisk::Unmanaged(RawDisk::from(disk.clone()));
-                        updated = true;
                     }
                 }
                 _ => (),
@@ -326,10 +357,10 @@ impl StorageResources {
         // formatted with a zpool identified by the Nexus-specified
         // configuration.
         let mut result = DisksManagementResult::default();
-        for (identity, config) in &self.control_plane_disks {
+        for (identity, config) in &control_plane_config.disks {
             let Some(managed_disk) = disks.values.get_mut(identity) else {
                 warn!(
-                    self.log,
+                    log,
                     "Control plane disk requested, but not detected within sled";
                     "disk_identity" => ?identity
                 );
@@ -339,27 +370,26 @@ impl StorageResources {
                 });
                 continue;
             };
-            info!(self.log, "Managing disk"; "disk_identity" => ?identity);
+            info!(log, "Managing disk"; "disk_identity" => ?identity);
             match managed_disk {
                 // Disk is currently unmanaged. Try to adopt the disk, which may
                 // involve formatting it, and emplacing the zpool.
                 ManagedDisk::Unmanaged(raw_disk) => {
                     match Self::begin_disk_management(
-                        &self.log,
-                        &self.disks.mount_config,
+                        &log,
+                        &all_disks.mount_config,
                         raw_disk,
                         config,
-                        Some(&self.key_requester),
+                        Some(key_requester),
                     )
                     .await
                     {
                         Ok(disk) => {
-                            info!(self.log, "Disk management started successfully"; "disk_identity" => ?identity);
+                            info!(log, "Disk management started successfully"; "disk_identity" => ?identity);
                             *managed_disk = disk;
-                            updated = true;
                         }
                         Err(err) => {
-                            warn!(self.log, "Cannot parse disk"; "err" => ?err);
+                            warn!(log, "Cannot parse disk"; "err" => ?err);
                             result.status.push(DiskManagementStatus {
                                 identity: identity.clone(),
                                 err: Some(err),
@@ -375,7 +405,7 @@ impl StorageResources {
                     let observed = disk.zpool_name().id();
                     if expected != observed {
                         warn!(
-                            self.log,
+                            log,
                             "Observed an unexpected zpool uuid";
                             "expected" => ?expected, "observed" => ?observed
                         );
@@ -388,7 +418,7 @@ impl StorageResources {
                         });
                         continue;
                     }
-                    info!(self.log, "Disk already managed successfully"; "disk_identity" => ?identity);
+                    info!(log, "Disk already managed successfully"; "disk_identity" => ?identity);
                 }
                 // Skip disks that are managed implicitly
                 ManagedDisk::ImplicitlyManaged(_) => continue,
@@ -399,12 +429,7 @@ impl StorageResources {
                 err: None,
             });
         }
-
-        if updated {
-            self.disk_updates.send_replace(self.disks.clone());
-        }
-
-        return result;
+        result
     }
 
     // Helper function to help transition an "unmanaged" disk to a "managed"
@@ -426,7 +451,7 @@ impl StorageResources {
         )
         .await
         .map_err(|err| {
-            warn!(log, "Disk::new failed"; "err" => ?err);
+            error!(log, "Disk::new failed"; "err" => ?err);
             match err {
                 // We pick this error out and identify it separately because
                 // it may be transient, and should sometimes be handled with
@@ -453,12 +478,30 @@ impl StorageResources {
         &mut self,
         disk: RawDisk,
     ) -> Result<(), Error> {
+        self.disks_send_if_modified(async |self_, all_disks| {
+            Self::insert_or_update_disk_impl(
+                disk,
+                all_disks,
+                &self_.key_requester,
+                &self_.log,
+            )
+            .await
+        })
+        .await
+    }
+
+    async fn insert_or_update_disk_impl(
+        disk: RawDisk,
+        all_disks: &mut AllDisks,
+        key_requester: &StorageKeyRequester,
+        log: &Logger,
+    ) -> Result<(), Error> {
         let disk_identity = disk.identity().clone();
-        info!(self.log, "Inserting disk"; "identity" => ?disk_identity);
+        info!(log, "Inserting disk"; "identity" => ?disk_identity);
 
         // This is a trade-off for simplicity even though we may be potentially
         // cloning data before we know if there is a write action to perform.
-        let disks = Arc::make_mut(&mut self.disks.inner);
+        let disks = Arc::make_mut(&mut all_disks.inner);
 
         // First check if there are any updates we need to apply to existing
         // managed disks.
@@ -481,10 +524,8 @@ impl StorageResources {
                 }
             };
 
-            if updated {
-                self.disk_updates.send_replace(self.disks.clone());
-            } else {
-                info!(self.log, "Disk already exists and has no updates";
+            if !updated {
+                info!(log, "Disk already exists and has no updates";
                     "identity" => ?disk_identity);
             }
 
@@ -500,11 +541,11 @@ impl StorageResources {
             }
             DiskVariant::M2 => {
                 let managed_disk = Disk::new(
-                    &self.log,
-                    &self.disks.mount_config,
+                    &log,
+                    &all_disks.mount_config,
                     disk,
                     None,
-                    Some(&self.key_requester),
+                    Some(key_requester),
                 )
                 .await?;
                 disks.values.insert(
@@ -513,8 +554,6 @@ impl StorageResources {
                 );
             }
         }
-
-        self.disk_updates.send_replace(self.disks.clone());
 
         Ok(())
     }
@@ -526,10 +565,20 @@ impl StorageResources {
     /// Note: We never allow removal of synthetic disks in production as they
     /// are only added once.
     pub(crate) fn remove_disk(&mut self, id: &DiskIdentity) {
-        info!(self.log, "Removing disk"; "identity" => ?id);
-        let Some(entry) = self.disks.inner.values.get(id) else {
-            info!(self.log, "Disk not found by id, exiting"; "identity" => ?id);
-            return;
+        self.disks.send_if_modified(|all_disks| {
+            Self::remove_disk_impl(id, all_disks, &self.log)
+        });
+    }
+
+    pub(crate) fn remove_disk_impl(
+        id: &DiskIdentity,
+        all_disks: &mut AllDisks,
+        log: &Logger,
+    ) -> bool {
+        info!(log, "Removing disk"; "identity" => ?id);
+        let Some(entry) = all_disks.inner.values.get(id) else {
+            info!(log, "Disk not found by id, exiting"; "identity" => ?id);
+            return false;
         };
 
         let synthetic = match entry {
@@ -547,16 +596,67 @@ impl StorageResources {
                 // In production, we disallow removal of synthetic disks as they
                 // are only added once.
                 if synthetic {
-                    info!(self.log, "Not removing synthetic disk"; "identity" => ?id);
-                    return;
+                    info!(log, "Not removing synthetic disk"; "identity" => ?id);
+                    return false;
                 }
             }
         }
 
         // Safe to unwrap as we just checked the key existed above
-        let disks = Arc::make_mut(&mut self.disks.inner);
+        let disks = Arc::make_mut(&mut all_disks.inner);
         disks.values.remove(id).unwrap();
+        true
+    }
 
-        self.disk_updates.send_replace(self.disks.clone());
+    // This is a wrapper around `self.disks.send_if_modified()` with two
+    // nontrivial changes:
+    //
+    // 1. We take an async closure instead of a sync closure
+    // 2. The closure does not have to return a `bool` indicating whether or not
+    //    it made changes; instead, we compare the `AllDisks` value before and
+    //    after the closure is called to see if any changes were made.
+    async fn disks_send_if_modified<F, T>(&mut self, op: F) -> T
+    where
+        F: AsyncFnOnce(&mut StorageResources, &mut AllDisks) -> T,
+    {
+        // Make a clone of our disks (held in a watch channel). We'll do all our
+        // modifications to that clone, then update the channel if needed.
+        let mut all_disks = self.disks();
+        let result = op(self, &mut all_disks).await;
+
+        // Update the watch channel if `op` made any changes.
+        self.disks.send_if_modified(|previous| {
+            if *previous != all_disks {
+                *previous = all_disks;
+                true
+            } else {
+                false
+            }
+        });
+
+        result
+    }
+}
+
+#[derive(Debug)]
+struct ControlPlaneConfig {
+    generation: Generation,
+    disks: BTreeMap<DiskIdentity, OmicronPhysicalDiskConfig>,
+}
+
+impl ControlPlaneConfig {
+    fn new() -> Self {
+        Self { generation: Generation::new(), disks: BTreeMap::new() }
+    }
+
+    fn from_config(config: &OmicronPhysicalDisksConfig) -> Self {
+        Self {
+            generation: config.generation,
+            disks: config
+                .disks
+                .iter()
+                .map(|disk| (disk.identity.clone(), disk.clone()))
+                .collect(),
+        }
     }
 }

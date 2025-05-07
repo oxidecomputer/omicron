@@ -26,11 +26,13 @@ serde.workspace = true
 serde_json.workspace = true
 sled-hardware.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+xshell.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
@@ -39,4 +41,4 @@ omicron-test-utils.workspace = true
 
 [features]
 # Quotas and the like can be shrunk via this feature
-testing = []
+testing = ["sled-hardware/testing"]

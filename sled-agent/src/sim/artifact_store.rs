@@ -5,21 +5,29 @@
 //! Implementation of `crate::artifact_store::StorageBackend` for our simulated
 //! storage.
 
+use std::sync::Arc;
+
 use camino_tempfile::Utf8TempDir;
 use dropshot::{
     Body, ConfigDropshot, FreeformBody, HttpError, HttpResponseOk, HttpServer,
     Path, RequestContext, ServerBuilder,
 };
 use repo_depot_api::*;
-use sled_storage::error::Error as StorageError;
-use std::sync::Arc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::artifact_store::{ArtifactStore, DatasetsManager};
 
+// Semaphore mostly uses usize but in `acquire_many` it unfortunately uses u32.
+const MAX_PERMITS: u32 = u32::MAX >> 3;
+
 #[derive(Clone)]
-pub(super) struct SimArtifactStorage {
+pub struct SimArtifactStorage {
     // We simulate the two M.2s with two separate temporary directories.
     dirs: Arc<[Utf8TempDir; 2]>,
+
+    // Semaphore to keep track of how many copy requests are in flight, and to
+    // be able to await on their completion. Used in integration tests.
+    copy_semaphore: Arc<Semaphore>,
 }
 
 impl SimArtifactStorage {
@@ -29,6 +37,9 @@ impl SimArtifactStorage {
                 camino_tempfile::tempdir().unwrap(),
                 camino_tempfile::tempdir().unwrap(),
             ]),
+            copy_semaphore: Arc::new(
+                const { Semaphore::const_new(MAX_PERMITS as usize) },
+            ),
         }
     }
 }
@@ -36,27 +47,41 @@ impl SimArtifactStorage {
 impl DatasetsManager for SimArtifactStorage {
     async fn artifact_storage_paths(
         &self,
-    ) -> Result<impl Iterator<Item = camino::Utf8PathBuf> + '_, StorageError>
-    {
-        Ok(self.dirs.iter().map(|tempdir| tempdir.path().to_owned()))
+    ) -> impl Iterator<Item = camino::Utf8PathBuf> + '_ {
+        self.dirs.iter().map(|tempdir| tempdir.path().to_owned())
+    }
+
+    async fn copy_permit(&self) -> Option<OwnedSemaphorePermit> {
+        Some(self.copy_semaphore.clone().acquire_owned().await.unwrap())
     }
 }
 
 impl ArtifactStore<SimArtifactStorage> {
     pub(super) fn start(
-        &self,
+        self,
         log: &slog::Logger,
         dropshot_config: &ConfigDropshot,
     ) -> HttpServer<Self> {
         ServerBuilder::new(
             repo_depot_api_mod::api_description::<RepoDepotImpl>()
                 .expect("registered entrypoints"),
-            self.clone(),
+            self,
             log.new(o!("component" => "dropshot (Repo Depot)")),
         )
         .config(dropshot_config.clone())
         .start()
         .unwrap()
+    }
+
+    pub async fn wait_for_copy_tasks(&self) {
+        // Acquire a permit for MAX_PERMITS, which requires that all copy tasks
+        // have dropped their permits. Then immediately drop it.
+        let _permit = self
+            .storage
+            .copy_semaphore
+            .acquire_many(MAX_PERMITS)
+            .await
+            .unwrap();
     }
 }
 

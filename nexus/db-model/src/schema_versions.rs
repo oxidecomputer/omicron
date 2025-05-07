@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(129, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(140, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -28,6 +28,17 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(140, "instance-intended-state"),
+        KnownVersion::new(139, "webhooks"),
+        KnownVersion::new(138, "saga-abandoned-state"),
+        KnownVersion::new(137, "oximeter-read-policy"),
+        KnownVersion::new(136, "do-not-provision-flag-for-crucible-dataset"),
+        KnownVersion::new(135, "blueprint-zone-image-source"),
+        KnownVersion::new(134, "crucible-agent-reservation-overhead"),
+        KnownVersion::new(133, "delete-defunct-reservations"),
+        KnownVersion::new(132, "bp-omicron-zone-filesystem-pool-not-null"),
+        KnownVersion::new(131, "tuf-generation"),
+        KnownVersion::new(130, "bp-sled-agent-generation"),
         KnownVersion::new(129, "create-target-release"),
         KnownVersion::new(128, "sled-resource-for-vmm"),
         KnownVersion::new(127, "bp-disk-disposition-expunged-cleanup"),

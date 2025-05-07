@@ -7,6 +7,7 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use daft::Diffable;
+use id_map::IdMappable;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -40,6 +41,14 @@ pub struct OmicronPhysicalDiskConfig {
     pub identity: DiskIdentity,
     pub id: PhysicalDiskUuid,
     pub pool_id: ZpoolUuid,
+}
+
+impl IdMappable for OmicronPhysicalDiskConfig {
+    type Id = PhysicalDiskUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
 }
 
 #[derive(
@@ -337,6 +346,14 @@ pub struct DatasetConfig {
     pub inner: SharedDatasetConfig,
 }
 
+impl IdMappable for DatasetConfig {
+    type Id = DatasetUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
+}
+
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
@@ -375,7 +392,7 @@ impl Ledgerable for DatasetsConfig {
 
 /// Identifies how a single dataset management operation may have succeeded or
 /// failed.
-#[derive(Debug, JsonSchema, Serialize, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct DatasetManagementStatus {
     pub dataset_name: DatasetName,
@@ -450,7 +467,7 @@ impl From<ZpoolKind> for DiskVariant {
 
 /// Identifies how a single disk management operation may have succeeded or
 /// failed.
-#[derive(Debug, JsonSchema, Serialize, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct DiskManagementStatus {
     pub identity: DiskIdentity,
@@ -493,7 +510,9 @@ impl DisksManagementResult {
     }
 }
 
-#[derive(Debug, thiserror::Error, JsonSchema, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, thiserror::Error, JsonSchema, Serialize, Deserialize,
+)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum DiskManagementError {
     #[error("Disk requested by control plane, but not found on device")]

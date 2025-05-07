@@ -14,18 +14,20 @@ use installinator_common::{
     StepWarning, UpdateEngine,
 };
 use omicron_common::FileKv;
-use omicron_common::update::{ArtifactHash, ArtifactHashId};
 use sha2::{Digest, Sha256};
 use slog::{Drain, error, warn};
-use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
+use tufaceous_artifact::{
+    ArtifactHash, ArtifactHashId, ArtifactKind, KnownArtifactKind,
+};
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 
 use crate::{
+    ArtifactWriter, WriteDestination,
     artifact::ArtifactIdOpts,
-    peers::{DiscoveryMechanism, FetchedArtifact, Peers},
-    reporter::ProgressReporter,
-    write::{ArtifactWriter, WriteDestination},
+    fetch::{FetchArtifactBackend, FetchedArtifact, HttpFetchBackend},
+    peers::DiscoveryMechanism,
+    reporter::{HttpProgressBackend, ProgressReporter, ReportProgressBackend},
 };
 
 /// Installinator app.
@@ -89,12 +91,15 @@ struct DebugDiscoverOpts {
 
 impl DebugDiscoverOpts {
     async fn exec(self, log: &slog::Logger) -> Result<()> {
-        let peers = Peers::new(
+        let backend = FetchArtifactBackend::new(
             log,
-            self.opts.mechanism.discover_peers(log).await?,
+            Box::new(HttpFetchBackend::new(
+                &log,
+                self.opts.mechanism.discover_peers(&log).await?,
+            )),
             Duration::from_secs(10),
         );
-        println!("discovered peers: {}", peers.display());
+        println!("discovered peers: {}", backend.peers().display());
         Ok(())
     }
 }
@@ -181,19 +186,14 @@ impl InstallOpts {
         let image_id = self.artifact_ids.resolve()?;
 
         let discovery = self.discover_opts.mechanism.clone();
-        let discovery_log = log.clone();
-        let (progress_reporter, event_sender) =
-            ProgressReporter::new(log, image_id.update_id, move || {
-                let log = discovery_log.clone();
-                let discovery = discovery.clone();
-                async move {
-                    Ok(Peers::new(
-                        &log,
-                        discovery.discover_peers(&log).await?,
-                        Duration::from_secs(10),
-                    ))
-                }
-            });
+        let (progress_reporter, event_sender) = ProgressReporter::new(
+            log,
+            image_id.update_id,
+            ReportProgressBackend::new(
+                log,
+                HttpProgressBackend::new(log, discovery),
+            ),
+        );
         let progress_handle = progress_reporter.start();
         let discovery = &self.discover_opts.mechanism;
 
@@ -211,7 +211,7 @@ impl InstallOpts {
                 InstallinatorComponent::HostPhase2,
                 InstallinatorStepId::Download,
                 "Downloading host phase 2 artifact",
-                |cx| async move {
+                async move |cx| {
                     let host_phase_2_artifact =
                         fetch_artifact(&cx, &host_phase_2_id, discovery, log)
                             .await?;
@@ -233,7 +233,7 @@ impl InstallOpts {
                     )
                     .await?;
 
-                    let address = host_phase_2_artifact.addr;
+                    let address = host_phase_2_artifact.peer.address();
 
                     StepSuccess::new(host_phase_2_artifact)
                         .with_metadata(
@@ -256,7 +256,7 @@ impl InstallOpts {
                 InstallinatorComponent::ControlPlane,
                 InstallinatorStepId::Download,
                 "Downloading control plane artifact",
-                |cx| async move {
+                async move |cx| {
                     let control_plane_artifact =
                         fetch_artifact(&cx, &control_plane_id, discovery, log)
                             .await?;
@@ -272,7 +272,7 @@ impl InstallOpts {
                     )
                     .await?;
 
-                    let address = control_plane_artifact.addr;
+                    let address = control_plane_artifact.peer.address();
 
                     StepSuccess::new(control_plane_artifact)
                         .with_metadata(
@@ -292,9 +292,7 @@ impl InstallOpts {
                     InstallinatorComponent::Both,
                     InstallinatorStepId::Scan,
                     "Scanning hardware to find M.2 disks",
-                    move |cx| async move {
-                        scan_hardware_with_retries(&cx, &log).await
-                    },
+                    async move |cx| scan_hardware_with_retries(&cx, &log).await,
                 )
                 .register()
         } else {
@@ -309,7 +307,7 @@ impl InstallOpts {
                 InstallinatorComponent::ControlPlane,
                 InstallinatorStepId::UnpackControlPlaneArtifact,
                 "Unpacking composite control plane artifact",
-                move |cx| async move {
+                async move |cx| {
                     let control_plane_artifact =
                         control_plane_artifact.into_value(cx.token()).await;
                     let zones = tokio::task::spawn_blocking(|| {
@@ -333,7 +331,7 @@ impl InstallOpts {
                 InstallinatorComponent::Both,
                 InstallinatorStepId::Write,
                 "Writing host and control plane artifacts",
-                |cx| async move {
+                async move |cx| {
                     let destination = destination.into_value(cx.token()).await;
                     let host_phase_2_artifact =
                         host_phase_2_artifact.into_value(cx.token()).await;
@@ -494,9 +492,12 @@ async fn fetch_artifact(
         cx,
         &log,
         || async {
-            Ok(Peers::new(
+            Ok(FetchArtifactBackend::new(
                 &log,
-                discovery.discover_peers(&log).await?,
+                Box::new(HttpFetchBackend::new(
+                    &log,
+                    discovery.discover_peers(&log).await?,
+                )),
                 Duration::from_secs(10),
             ))
         },
@@ -509,7 +510,7 @@ async fn fetch_artifact(
         log,
         "fetched {} bytes from {}",
         artifact.artifact.num_bytes(),
-        artifact.addr,
+        artifact.peer,
     );
 
     Ok(artifact)

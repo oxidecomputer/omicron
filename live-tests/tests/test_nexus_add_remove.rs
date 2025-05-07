@@ -9,10 +9,13 @@ use common::LiveTestContext;
 use common::reconfigurator::blueprint_edit_current_target;
 use futures::TryStreamExt;
 use live_tests_macros::live_test;
+use nexus_client::types::BackgroundTasksActivateRequest;
+use nexus_client::types::BlueprintTargetSet;
 use nexus_client::types::Saga;
 use nexus_client::types::SagaState;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::SledFilter;
@@ -156,7 +159,94 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     .await
     .unwrap();
 
-    // Wait for some other Nexus instance to pick up the saga.
+    // We want to see another Nexus instance pick up the saga.
+    //
+    // For that to happen, inventory must first reflect that the Nexus we
+    // expunged is really gone.  Then we must run through another planning
+    // round.
+    //
+    // First, kick one Nexus instance's inventory collector.  Otherwise, it
+    // might take a while for the system to notice this zone is gone.  Having
+    // activated the task, it shouldn't take too long to get an inventory
+    info!(log, "activating inventory collector");
+    nexus
+        .bgtask_activate(&BackgroundTasksActivateRequest {
+            bgtask_names: vec![String::from("inventory_collection")],
+        })
+        .await
+        .expect("activating inventory background task");
+    let latest_collection = wait_for_condition(
+        || async {
+            let latest_collection = datastore
+                .inventory_get_latest_collection(opctx)
+                .await
+                .expect("latest inventory collection")
+                .expect("have a latest inventory collection");
+            debug!(log, "got inventory"; "id" => %latest_collection.id);
+            let agent = latest_collection.sled_agents.get(&sled_id).expect(
+                "collection information for the sled we added a Nexus to",
+            );
+            if agent.omicron_zones.zones.iter().any(|z| z.id == new_zone.id) {
+                debug!(log, "zone still present in inventory");
+                return Err(CondCheckError::<()>::NotYet);
+            }
+            return Ok(latest_collection);
+        },
+        &Duration::from_millis(3000),
+        &Duration::from_secs(90),
+    )
+    .await
+    .expect("waiting for zone to be gone from inventory");
+
+    // Now run through the planner.
+    info!(log, "running through planner");
+    let planning_input = PlanningInputFromDb::assemble(&opctx, &datastore)
+        .await
+        .expect("planning input");
+    let (_, parent_blueprint) = datastore
+        .blueprint_target_get_current_full(opctx)
+        .await
+        .expect("getting latest target blueprint");
+    let planner = Planner::new_based_on(
+        log.clone(),
+        &parent_blueprint,
+        &planning_input,
+        "live test suite",
+        &latest_collection,
+    )
+    .expect("constructing planner");
+    let new_blueprint = planner.plan().expect("creating blueprint");
+
+    // The new blueprint ought to have our zone expunged and ready for cleanup.
+    // We don't need to check this here.  It just provides a better error
+    // message if something has gone wrong up to this point.
+    let (_, expunged_zone_config) = new_blueprint
+        .all_omicron_zones(|_| true)
+        .find(|(_sled_id, zone_config)| zone_config.id == new_zone.id)
+        .expect("expunged zone in new blueprint");
+    assert!(expunged_zone_config.disposition.is_ready_for_cleanup());
+
+    // Now make this the current target.
+    info!(
+        log,
+        "setting new blueprint target";
+        "blueprint_id" => ?new_blueprint.id
+    );
+    nexus
+        .blueprint_import(&new_blueprint)
+        .await
+        .expect("importing new blueprint");
+    nexus
+        .blueprint_target_set(&BlueprintTargetSet {
+            enabled: true,
+            target_id: new_blueprint.id,
+        })
+        .await
+        .expect("setting target blueprint");
+
+    // At this point, blueprint execution should re-assign the saga.
+    // Wait for that to happen and then for another Nexus instance to pick up
+    // the saga.
     let nexus_found = wait_for_condition(
         || async {
             for nexus_client in &initial_nexus_clients {
@@ -173,8 +263,8 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
 
             return Err(CondCheckError::<()>::NotYet);
         },
-        &Duration::from_millis(50),
-        &Duration::from_secs(60),
+        &Duration::from_millis(1000),
+        &Duration::from_secs(120),
     )
     .await
     .unwrap();

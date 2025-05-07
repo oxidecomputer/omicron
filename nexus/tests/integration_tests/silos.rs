@@ -4,6 +4,7 @@
 
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use dropshot::ResultsPage;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::authn::silos::AuthenticatedSubject;
 use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use nexus_db_queries::authz::{self};
@@ -11,7 +12,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Asset;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_ip_pool, create_local_user, create_project, create_silo, grant_iam,
@@ -299,7 +299,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
     let authn_opctx = nexus.opctx_external_authn();
 
     let (authz_silo, db_silo) =
-        LookupPath::new(&authn_opctx, &nexus.datastore())
+        LookupPath::new(&authn_opctx, nexus.datastore())
             .silo_name(&silo.identity.name.into())
             .fetch()
             .await
@@ -330,7 +330,6 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     let group_memberships = nexus
@@ -808,7 +807,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
         let authn_opctx = nexus.opctx_external_authn();
 
         let (authz_silo, db_silo) =
-            LookupPath::new(&authn_opctx, &nexus.datastore())
+            LookupPath::new(&authn_opctx, nexus.datastore())
                 .silo_name(&silo.identity.name.into())
                 .fetch()
                 .await
@@ -824,13 +823,12 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
                     groups: vec![],
                 },
             )
-            .await
-            .unwrap();
+            .await;
 
         if test_case.expect_user {
-            assert!(existing_silo_user.is_some());
+            assert!(existing_silo_user.is_ok());
         } else {
-            assert!(existing_silo_user.is_none());
+            assert!(existing_silo_user.is_err());
         }
 
         NexusRequest::object_delete(&client, &"/v1/system/silos/test-silo")
@@ -862,7 +860,7 @@ async fn test_silo_user_fetch_by_external_id(
         nexus.datastore().clone(),
     );
 
-    let (authz_silo, _) = LookupPath::new(&opctx, &nexus.datastore())
+    let (authz_silo, _) = LookupPath::new(&opctx, nexus.datastore())
         .silo_name(&Name::try_from("test-silo".to_string()).unwrap().into())
         .fetch_for(authz::Action::Read)
         .await
@@ -1045,7 +1043,7 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
     let authn_opctx = nexus.opctx_external_authn();
 
     let (authz_silo, db_silo) =
-        LookupPath::new(&authn_opctx, &nexus.datastore())
+        LookupPath::new(&authn_opctx, nexus.datastore())
             .silo_name(&silo.identity.name.into())
             .fetch()
             .await
@@ -1063,7 +1061,6 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     let group_memberships = nexus
@@ -1119,7 +1116,7 @@ async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
     let authn_opctx = nexus.opctx_external_authn();
 
     let (authz_silo, db_silo) =
-        LookupPath::new(&authn_opctx, &nexus.datastore())
+        LookupPath::new(&authn_opctx, nexus.datastore())
             .silo_name(&silo.identity.name.into())
             .fetch()
             .await
@@ -1137,7 +1134,6 @@ async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     let group_memberships = nexus
@@ -1175,7 +1171,7 @@ async fn test_silo_groups_remove_from_one_group(
     let authn_opctx = nexus.opctx_external_authn();
 
     let (authz_silo, db_silo) =
-        LookupPath::new(&authn_opctx, &nexus.datastore())
+        LookupPath::new(&authn_opctx, nexus.datastore())
             .silo_name(&silo.identity.name.into())
             .fetch()
             .await
@@ -1193,7 +1189,6 @@ async fn test_silo_groups_remove_from_one_group(
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     // Check those groups were created and the user was added
@@ -1236,7 +1231,6 @@ async fn test_silo_groups_remove_from_one_group(
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     let group_memberships = nexus
@@ -1288,7 +1282,7 @@ async fn test_silo_groups_remove_from_both_groups(
     let authn_opctx = nexus.opctx_external_authn();
 
     let (authz_silo, db_silo) =
-        LookupPath::new(&authn_opctx, &nexus.datastore())
+        LookupPath::new(&authn_opctx, nexus.datastore())
             .silo_name(&silo.identity.name.into())
             .fetch()
             .await
@@ -1306,7 +1300,6 @@ async fn test_silo_groups_remove_from_both_groups(
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     // Check those groups were created and the user was added
@@ -1349,7 +1342,6 @@ async fn test_silo_groups_remove_from_both_groups(
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     let group_memberships = nexus
@@ -1400,7 +1392,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
         nexus.datastore().clone(),
     );
 
-    let (authz_silo, db_silo) = LookupPath::new(&opctx, &nexus.datastore())
+    let (authz_silo, db_silo) = LookupPath::new(&opctx, nexus.datastore())
         .silo_name(&silo.identity.name.into())
         .fetch()
         .await
@@ -1418,8 +1410,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
             },
         )
         .await
-        .expect("silo_user_from_authenticated_subject")
-        .unwrap();
+        .expect("silo_user_from_authenticated_subject");
 
     // Delete the silo
     NexusRequest::object_delete(&client, &"/v1/system/silos/test-silo")
@@ -1456,7 +1447,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
     assert!(memberships.is_empty());
 
     // Expect the user is gone
-    LookupPath::new(&opctx_external_authn, &nexus.datastore())
+    LookupPath::new(&opctx_external_authn, nexus.datastore())
         .silo_user_id(silo_user.id())
         .fetch()
         .await
@@ -1483,7 +1474,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
         nexus.datastore().clone(),
     );
 
-    let (authz_silo, db_silo) = LookupPath::new(&opctx, &nexus.datastore())
+    let (authz_silo, db_silo) = LookupPath::new(&opctx, nexus.datastore())
         .silo_name(&silo.identity.name.into())
         .fetch()
         .await
@@ -1501,8 +1492,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
             },
         )
         .await
-        .expect("silo_user_from_authenticated_subject 1")
-        .unwrap();
+        .expect("silo_user_from_authenticated_subject 1");
 
     // Add the first user with a group membership
     let _silo_user_2 = nexus
@@ -1516,8 +1506,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
             },
         )
         .await
-        .expect("silo_user_from_authenticated_subject 2")
-        .unwrap();
+        .expect("silo_user_from_authenticated_subject 2");
 
     // TODO-coverage were we intending to verify something here?
 }

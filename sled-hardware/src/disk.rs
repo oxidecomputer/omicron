@@ -4,6 +4,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::fstyp::Fstyp;
+use illumos_utils::zpool::Api;
 use illumos_utils::zpool::Zpool;
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_common::zpool_name::ZpoolName;
@@ -253,6 +254,11 @@ impl UnparsedDisk {
     pub fn firmware(&self) -> &DiskFirmware {
         &self.firmware
     }
+
+    #[cfg(feature = "testing")]
+    pub fn firmware_mut(&mut self) -> &mut DiskFirmware {
+        &mut self.firmware
+    }
 }
 
 /// A physical disk that is partitioned to contain exactly one zpool
@@ -387,7 +393,7 @@ pub fn ensure_zpool_exists(
                 DiskVariant::M2 => ZpoolName::new_internal(id),
                 DiskVariant::U2 => ZpoolName::new_external(id),
             };
-            Zpool::create(&zpool_name, &zpool_path)?;
+            Zpool::real_api().create(&zpool_name, &zpool_path)?;
             zpool_name
         }
     };

@@ -5,10 +5,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::pagination::{Paginator, paginated, paginated_multicolumn};
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use anyhow::Context;
@@ -28,12 +24,12 @@ use diesel::expression::SelectableHelper;
 use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use nexus_db_model::CabooseWhichEnum;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::HwPowerState;
-use nexus_db_model::HwPowerStateEnum;
 use nexus_db_model::HwRotSlot;
-use nexus_db_model::HwRotSlotEnum;
 use nexus_db_model::InvCaboose;
 use nexus_db_model::InvClickhouseKeeperMembership;
 use nexus_db_model::InvCollection;
@@ -50,17 +46,20 @@ use nexus_db_model::InvSledAgent;
 use nexus_db_model::InvSledOmicronZones;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
-use nexus_db_model::RotImageErrorEnum;
-use nexus_db_model::RotPageWhichEnum;
 use nexus_db_model::SledRole;
-use nexus_db_model::SledRoleEnum;
 use nexus_db_model::SpType;
-use nexus_db_model::SpTypeEnum;
 use nexus_db_model::SqlU16;
 use nexus_db_model::SqlU32;
 use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_schema::enums::CabooseWhichEnum;
+use nexus_db_schema::enums::HwPowerStateEnum;
+use nexus_db_schema::enums::HwRotSlotEnum;
+use nexus_db_schema::enums::RotImageErrorEnum;
+use nexus_db_schema::enums::RotPageWhichEnum;
+use nexus_db_schema::enums::SledRoleEnum;
+use nexus_db_schema::enums::SpTypeEnum;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
@@ -85,7 +84,7 @@ use uuid::Uuid;
 /// We use a [`Paginator`] to guard against single queries returning an
 /// unchecked number of rows.
 // unsafe: `new_unchecked` is only unsound if the argument is 0.
-const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
+const SQL_BATCH_SIZE: NonZeroU32 = NonZeroU32::new(1000).unwrap();
 
 impl DataStore {
     /// Store a complete inventory collection into the database
@@ -292,7 +291,7 @@ impl DataStore {
             // identifiers (part number and model number) and an
             // Omicron-specific primary key (a UUID).
             {
-                use db::schema::hw_baseboard_id::dsl;
+                use nexus_db_schema::schema::hw_baseboard_id::dsl;
                 let _ = diesel::insert_into(dsl::hw_baseboard_id)
                     .values(baseboards)
                     .on_conflict_do_nothing()
@@ -305,7 +304,7 @@ impl DataStore {
             // rows in this table are not scoped to a particular collection
             // because they only map (immutable) identifiers to UUIDs.
             {
-                use db::schema::sw_caboose::dsl;
+                use nexus_db_schema::schema::sw_caboose::dsl;
                 let _ = diesel::insert_into(dsl::sw_caboose)
                     .values(cabooses)
                     .on_conflict_do_nothing()
@@ -318,7 +317,7 @@ impl DataStore {
             // rows in this table are not scoped to a particular collection
             // because they only map (immutable) identifiers to UUIDs.
             {
-                use db::schema::sw_root_of_trust_page::dsl;
+                use nexus_db_schema::schema::sw_root_of_trust_page::dsl;
                 let _ = diesel::insert_into(dsl::sw_root_of_trust_page)
                     .values(rot_pages)
                     .on_conflict_do_nothing()
@@ -328,7 +327,7 @@ impl DataStore {
 
             // Insert a record describing the collection itself.
             {
-                use db::schema::inv_collection::dsl;
+                use nexus_db_schema::schema::inv_collection::dsl;
                 let _ = diesel::insert_into(dsl::inv_collection)
                     .values(row_collection)
                     .execute_async(&conn)
@@ -352,11 +351,11 @@ impl DataStore {
             // This way, we don't need to know the id.  The database looks it up
             // for us as it does the INSERT.
             {
-                use db::schema::hw_baseboard_id::dsl as baseboard_dsl;
-                use db::schema::inv_service_processor::dsl as sp_dsl;
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use nexus_db_schema::schema::inv_service_processor::dsl as sp_dsl;
 
                 for (baseboard_id, sp) in &collection.sps {
-                    let selection = db::schema::hw_baseboard_id::table
+                    let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .select((
                             db_collection_id
                                 .into_sql::<diesel::sql_types::Uuid>(),
@@ -387,7 +386,7 @@ impl DataStore {
                         );
 
                     let _ = diesel::insert_into(
-                        db::schema::inv_service_processor::table,
+                        nexus_db_schema::schema::inv_service_processor::table,
                     )
                     .values(selection)
                     .into_columns((
@@ -436,11 +435,11 @@ impl DataStore {
             // Insert rows for the roots of trust that we found.  Like service
             // processors, we do this using INSERT INTO ... SELECT.
             {
-                use db::schema::hw_baseboard_id::dsl as baseboard_dsl;
-                use db::schema::inv_root_of_trust::dsl as rot_dsl;
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use nexus_db_schema::schema::inv_root_of_trust::dsl as rot_dsl;
 
                 for (baseboard_id, rot) in &collection.rots {
-                    let selection = db::schema::hw_baseboard_id::table
+                    let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .select((
                             db_collection_id
                                 .into_sql::<diesel::sql_types::Uuid>(),
@@ -499,7 +498,7 @@ impl DataStore {
                         );
 
                     let _ = diesel::insert_into(
-                        db::schema::inv_root_of_trust::table,
+                        nexus_db_schema::schema::inv_root_of_trust::table,
                     )
                     .values(selection)
                     .into_columns((
@@ -610,13 +609,13 @@ impl DataStore {
             for (which, tree) in &collection.cabooses_found {
                 let db_which = nexus_db_model::CabooseWhich::from(*which);
                 for (baseboard_id, found_caboose) in tree {
-                    use db::schema::hw_baseboard_id::dsl as dsl_baseboard_id;
-                    use db::schema::inv_caboose::dsl as dsl_inv_caboose;
-                    use db::schema::sw_caboose::dsl as dsl_sw_caboose;
+                    use nexus_db_schema::schema::hw_baseboard_id::dsl as dsl_baseboard_id;
+                    use nexus_db_schema::schema::inv_caboose::dsl as dsl_inv_caboose;
+                    use nexus_db_schema::schema::sw_caboose::dsl as dsl_sw_caboose;
 
-                    let selection = db::schema::hw_baseboard_id::table
+                    let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .inner_join(
-                            db::schema::sw_caboose::table.on(
+                            nexus_db_schema::schema::sw_caboose::table.on(
                                 dsl_baseboard_id::part_number
                                     .eq(baseboard_id.part_number.clone())
                                     .and(
@@ -661,7 +660,7 @@ impl DataStore {
                             db_which.into_sql::<CabooseWhichEnum>(),
                         ));
 
-                    let _ = diesel::insert_into(db::schema::inv_caboose::table)
+                    let _ = diesel::insert_into(nexus_db_schema::schema::inv_caboose::table)
                         .values(selection)
                         .into_columns((
                             dsl_inv_caboose::hw_baseboard_id,
@@ -704,14 +703,14 @@ impl DataStore {
             // and generate an INSERT INTO query that is structurally the same
             // as the caboose query described above.
             for (which, tree) in &collection.rot_pages_found {
-                use db::schema::hw_baseboard_id::dsl as dsl_baseboard_id;
-                use db::schema::inv_root_of_trust_page::dsl as dsl_inv_rot_page;
-                use db::schema::sw_root_of_trust_page::dsl as dsl_sw_rot_page;
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as dsl_baseboard_id;
+                use nexus_db_schema::schema::inv_root_of_trust_page::dsl as dsl_inv_rot_page;
+                use nexus_db_schema::schema::sw_root_of_trust_page::dsl as dsl_sw_rot_page;
                 let db_which = nexus_db_model::RotPageWhich::from(*which);
                 for (baseboard_id, found_rot_page) in tree {
-                    let selection = db::schema::hw_baseboard_id::table
+                    let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .inner_join(
-                            db::schema::sw_root_of_trust_page::table.on(
+                            nexus_db_schema::schema::sw_root_of_trust_page::table.on(
                                 dsl_baseboard_id::part_number
                                     .eq(baseboard_id.part_number.clone())
                                     .and(
@@ -740,7 +739,7 @@ impl DataStore {
                         ));
 
                     let _ = diesel::insert_into(
-                        db::schema::inv_root_of_trust_page::table,
+                        nexus_db_schema::schema::inv_root_of_trust_page::table,
                     )
                     .values(selection)
                     .into_columns((
@@ -771,7 +770,7 @@ impl DataStore {
 
             // Insert rows for all the physical disks we found.
             {
-                use db::schema::inv_physical_disk::dsl;
+                use nexus_db_schema::schema::inv_physical_disk::dsl;
 
                 let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
                 let mut disks = disks.into_iter();
@@ -790,7 +789,7 @@ impl DataStore {
 
             // Insert rows for all the physical disk firmware we found.
             {
-                use db::schema::inv_nvme_disk_firmware::dsl;
+                use nexus_db_schema::schema::inv_nvme_disk_firmware::dsl;
 
                 let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
                 let mut nvme_disk_firmware = nvme_disk_firmware.into_iter();
@@ -811,7 +810,7 @@ impl DataStore {
 
             // Insert rows for all the zpools we found.
             {
-                use db::schema::inv_zpool::dsl;
+                use nexus_db_schema::schema::inv_zpool::dsl;
 
                 let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
                 let mut zpools = zpools.into_iter();
@@ -830,7 +829,7 @@ impl DataStore {
 
             // Insert rows for all the datasets we found.
             {
-                use db::schema::inv_dataset::dsl;
+                use nexus_db_schema::schema::inv_dataset::dsl;
 
                 let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
                 let mut datasets = datasets.into_iter();
@@ -851,8 +850,8 @@ impl DataStore {
             // expect these to all have baseboards (if using Oxide hardware) or
             // none have baseboards (if not).
             {
-                use db::schema::hw_baseboard_id::dsl as baseboard_dsl;
-                use db::schema::inv_sled_agent::dsl as sa_dsl;
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use nexus_db_schema::schema::inv_sled_agent::dsl as sa_dsl;
 
                 // For sleds with a real baseboard id, we have to use the
                 // `INSERT INTO ... SELECT` pattern that we used for other types
@@ -861,7 +860,7 @@ impl DataStore {
                     let baseboard_id = sled_agent.baseboard_id.as_ref().expect(
                         "already selected only sled agents with baseboards",
                     );
-                    let selection = db::schema::hw_baseboard_id::table
+                    let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .select((
                             db_collection_id
                                 .into_sql::<diesel::sql_types::Uuid>(),
@@ -908,7 +907,7 @@ impl DataStore {
                         );
 
                     let _ =
-                        diesel::insert_into(db::schema::inv_sled_agent::table)
+                        diesel::insert_into(nexus_db_schema::schema::inv_sled_agent::table)
                             .values(selection)
                             .into_columns((
                                 sa_dsl::inv_collection_id,
@@ -952,7 +951,7 @@ impl DataStore {
                 // sucks that these are bifurcated code paths, but on
                 // the plus side, this is a much simpler INSERT, and we
                 // can insert all of them in one statement.
-                let _ = diesel::insert_into(db::schema::inv_sled_agent::table)
+                let _ = diesel::insert_into(nexus_db_schema::schema::inv_sled_agent::table)
                     .values(sled_agents_no_baseboards)
                     .execute_async(&conn)
                     .await?;
@@ -960,7 +959,7 @@ impl DataStore {
 
             // Insert all the Omicron zones that we found.
             {
-                use db::schema::inv_sled_omicron_zones::dsl as sled_zones;
+                use nexus_db_schema::schema::inv_sled_omicron_zones::dsl as sled_zones;
                 let _ = diesel::insert_into(sled_zones::inv_sled_omicron_zones)
                     .values(sled_omicron_zones)
                     .execute_async(&conn)
@@ -968,7 +967,7 @@ impl DataStore {
             }
 
             {
-                use db::schema::inv_omicron_zone::dsl as omicron_zone;
+                use nexus_db_schema::schema::inv_omicron_zone::dsl as omicron_zone;
                 let _ = diesel::insert_into(omicron_zone::inv_omicron_zone)
                     .values(omicron_zones)
                     .execute_async(&conn)
@@ -976,7 +975,7 @@ impl DataStore {
             }
 
             {
-                use db::schema::inv_omicron_zone_nic::dsl as omicron_zone_nic;
+                use nexus_db_schema::schema::inv_omicron_zone_nic::dsl as omicron_zone_nic;
                 let _ =
                     diesel::insert_into(omicron_zone_nic::inv_omicron_zone_nic)
                         .values(omicron_zone_nics)
@@ -986,7 +985,7 @@ impl DataStore {
 
             // Insert the clickhouse keeper memberships we've received
             {
-                use db::schema::inv_clickhouse_keeper_membership::dsl;
+                use nexus_db_schema::schema::inv_clickhouse_keeper_membership::dsl;
                 diesel::insert_into(dsl::inv_clickhouse_keeper_membership)
                     .values(inv_clickhouse_keeper_memberships)
                     .execute_async(&conn)
@@ -995,7 +994,7 @@ impl DataStore {
 
             // Finally, insert the list of errors.
             {
-                use db::schema::inv_collection_error::dsl as errors_dsl;
+                use nexus_db_schema::schema::inv_collection_error::dsl as errors_dsl;
                 let _ = diesel::insert_into(errors_dsl::inv_collection_error)
                     .values(error_values)
                     .execute_async(&conn)
@@ -1119,8 +1118,8 @@ impl DataStore {
         // Diesel requires us to use aliases in order to refer to the
         // `inv_collection` table twice in the same query.
         let (inv_collection1, inv_collection2) = diesel::alias!(
-            db::schema::inv_collection as inv_collection1,
-            db::schema::inv_collection as inv_collection2
+            nexus_db_schema::schema::inv_collection as inv_collection1,
+            nexus_db_schema::schema::inv_collection as inv_collection2
         );
 
         // This subquery essentially generates:
@@ -1130,10 +1129,15 @@ impl DataStore {
         // where $1 becomes `nkeep + 1`.  This just lists the `nkeep + 1` oldest
         // collections.
         let subquery = inv_collection1
-            .select(inv_collection1.field(db::schema::inv_collection::id))
+            .select(
+                inv_collection1
+                    .field(nexus_db_schema::schema::inv_collection::id),
+            )
             .order_by(
                 inv_collection1
-                    .field(db::schema::inv_collection::time_started)
+                    .field(
+                        nexus_db_schema::schema::inv_collection::time_started,
+                    )
                     .asc(),
             )
             .limit(i64::from(nkeep) + 1);
@@ -1165,23 +1169,23 @@ impl DataStore {
         //     ...
         //
         let candidates: Vec<(Uuid, i64)> = inv_collection2
-            .left_outer_join(db::schema::inv_collection_error::table)
+            .left_outer_join(nexus_db_schema::schema::inv_collection_error::table)
             .filter(
                 inv_collection2
-                    .field(db::schema::inv_collection::id)
+                    .field(nexus_db_schema::schema::inv_collection::id)
                     .eq_any(subquery),
             )
-            .group_by(inv_collection2.field(db::schema::inv_collection::id))
+            .group_by(inv_collection2.field(nexus_db_schema::schema::inv_collection::id))
             .select((
-                inv_collection2.field(db::schema::inv_collection::id),
+                inv_collection2.field(nexus_db_schema::schema::inv_collection::id),
                 diesel::dsl::count(
-                    db::schema::inv_collection_error::inv_collection_id
+                    nexus_db_schema::schema::inv_collection_error::inv_collection_id
                         .nullable(),
                 ),
             ))
             .order_by(
                 inv_collection2
-                    .field(db::schema::inv_collection::time_started)
+                    .field(nexus_db_schema::schema::inv_collection::time_started)
                     .asc(),
             )
             .load_async(&*conn)
@@ -1268,7 +1272,7 @@ impl DataStore {
                 .transaction(&conn, |conn| async move {
                     // Remove the record describing the collection itself.
                     let ncollections = {
-                        use db::schema::inv_collection::dsl;
+                        use nexus_db_schema::schema::inv_collection::dsl;
                         diesel::delete(
                             dsl::inv_collection
                                 .filter(dsl::id.eq(db_collection_id)),
@@ -1279,7 +1283,7 @@ impl DataStore {
 
                     // Remove rows for service processors.
                     let nsps = {
-                        use db::schema::inv_service_processor::dsl;
+                        use nexus_db_schema::schema::inv_service_processor::dsl;
                         diesel::delete(dsl::inv_service_processor.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1289,7 +1293,7 @@ impl DataStore {
 
                     // Remove rows for roots of trust.
                     let nrots = {
-                        use db::schema::inv_root_of_trust::dsl;
+                        use nexus_db_schema::schema::inv_root_of_trust::dsl;
                         diesel::delete(dsl::inv_root_of_trust.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1299,7 +1303,7 @@ impl DataStore {
 
                     // Remove rows for cabooses found.
                     let ncabooses = {
-                        use db::schema::inv_caboose::dsl;
+                        use nexus_db_schema::schema::inv_caboose::dsl;
                         diesel::delete(dsl::inv_caboose.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1309,7 +1313,7 @@ impl DataStore {
 
                     // Remove rows for root of trust pages found.
                     let nrot_pages = {
-                        use db::schema::inv_root_of_trust_page::dsl;
+                        use nexus_db_schema::schema::inv_root_of_trust_page::dsl;
                         diesel::delete(dsl::inv_root_of_trust_page.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1319,7 +1323,7 @@ impl DataStore {
 
                     // Remove rows for sled agents found.
                     let nsled_agents = {
-                        use db::schema::inv_sled_agent::dsl;
+                        use nexus_db_schema::schema::inv_sled_agent::dsl;
                         diesel::delete(dsl::inv_sled_agent.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1329,7 +1333,7 @@ impl DataStore {
 
                     // Remove rows for datasets
                     let ndatasets = {
-                        use db::schema::inv_dataset::dsl;
+                        use nexus_db_schema::schema::inv_dataset::dsl;
                         diesel::delete(dsl::inv_dataset.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1339,7 +1343,7 @@ impl DataStore {
 
                     // Remove rows for physical disks found.
                     let nphysical_disks = {
-                        use db::schema::inv_physical_disk::dsl;
+                        use nexus_db_schema::schema::inv_physical_disk::dsl;
                         diesel::delete(dsl::inv_physical_disk.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1349,7 +1353,7 @@ impl DataStore {
 
                     // Remove rows for NVMe physical disk firmware found.
                     let nnvme_disk_firwmare = {
-                        use db::schema::inv_nvme_disk_firmware::dsl;
+                        use nexus_db_schema::schema::inv_nvme_disk_firmware::dsl;
                         diesel::delete(dsl::inv_nvme_disk_firmware.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1359,7 +1363,7 @@ impl DataStore {
 
                     // Remove rows associated with Omicron zones
                     let nsled_agent_zones = {
-                        use db::schema::inv_sled_omicron_zones::dsl;
+                        use nexus_db_schema::schema::inv_sled_omicron_zones::dsl;
                         diesel::delete(dsl::inv_sled_omicron_zones.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1368,7 +1372,7 @@ impl DataStore {
                     };
 
                     let nzones = {
-                        use db::schema::inv_omicron_zone::dsl;
+                        use nexus_db_schema::schema::inv_omicron_zone::dsl;
                         diesel::delete(dsl::inv_omicron_zone.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1377,7 +1381,7 @@ impl DataStore {
                     };
 
                     let nnics = {
-                        use db::schema::inv_omicron_zone_nic::dsl;
+                        use nexus_db_schema::schema::inv_omicron_zone_nic::dsl;
                         diesel::delete(dsl::inv_omicron_zone_nic.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1386,7 +1390,7 @@ impl DataStore {
                     };
 
                     let nzpools = {
-                        use db::schema::inv_zpool::dsl;
+                        use nexus_db_schema::schema::inv_zpool::dsl;
                         diesel::delete(dsl::inv_zpool.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1396,7 +1400,7 @@ impl DataStore {
 
                     // Remove rows for errors encountered.
                     let nerrors = {
-                        use db::schema::inv_collection_error::dsl;
+                        use nexus_db_schema::schema::inv_collection_error::dsl;
                         diesel::delete(dsl::inv_collection_error.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
@@ -1406,7 +1410,7 @@ impl DataStore {
 
                     // Remove rows for clickhouse keeper membership
                     let nclickhouse_keeper_membership = {
-                        use db::schema::inv_clickhouse_keeper_membership::dsl;
+                        use nexus_db_schema::schema::inv_clickhouse_keeper_membership::dsl;
                         diesel::delete(
                             dsl::inv_clickhouse_keeper_membership.filter(
                                 dsl::inv_collection_id.eq(db_collection_id),
@@ -1469,7 +1473,7 @@ impl DataStore {
     ) -> Result<Uuid, Error> {
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        use db::schema::hw_baseboard_id::dsl;
+        use nexus_db_schema::schema::hw_baseboard_id::dsl;
         dsl::hw_baseboard_id
             .filter(dsl::serial_number.eq(baseboard_id.serial_number.clone()))
             .filter(dsl::part_number.eq(baseboard_id.part_number.clone()))
@@ -1494,7 +1498,7 @@ impl DataStore {
     ) -> Result<Option<Collection>, Error> {
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        use db::schema::inv_collection::dsl;
+        use nexus_db_schema::schema::inv_collection::dsl;
         let collection_id = dsl::inv_collection
             .select(dsl::id)
             .order_by(dsl::time_started.desc())
@@ -1546,7 +1550,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let db_id = to_db_typed_uuid(id);
         let (time_started, time_done, collector) = {
-            use db::schema::inv_collection::dsl;
+            use nexus_db_schema::schema::inv_collection::dsl;
 
             let collections = dsl::inv_collection
                 .filter(dsl::id.eq(db_id))
@@ -1567,7 +1571,7 @@ impl DataStore {
         };
 
         let errors: Vec<String> = {
-            use db::schema::inv_collection_error::dsl;
+            use nexus_db_schema::schema::inv_collection_error::dsl;
             let mut errors = Vec::new();
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
@@ -1592,7 +1596,7 @@ impl DataStore {
         };
 
         let sps: BTreeMap<_, _> = {
-            use db::schema::inv_service_processor::dsl;
+            use nexus_db_schema::schema::inv_service_processor::dsl;
 
             let mut sps = BTreeMap::new();
 
@@ -1623,7 +1627,7 @@ impl DataStore {
         };
 
         let rots: BTreeMap<_, _> = {
-            use db::schema::inv_root_of_trust::dsl;
+            use nexus_db_schema::schema::inv_root_of_trust::dsl;
 
             let mut rots = BTreeMap::new();
 
@@ -1654,7 +1658,7 @@ impl DataStore {
         };
 
         let sled_agent_rows: Vec<_> = {
-            use db::schema::inv_sled_agent::dsl;
+            use nexus_db_schema::schema::inv_sled_agent::dsl;
 
             let mut rows = Vec::new();
 
@@ -1684,7 +1688,7 @@ impl DataStore {
             SledUuid,
             BTreeMap<i64, nexus_types::inventory::PhysicalDiskFirmware>,
         > = {
-            use db::schema::inv_nvme_disk_firmware::dsl;
+            use nexus_db_schema::schema::inv_nvme_disk_firmware::dsl;
 
             let mut disk_firmware = BTreeMap::<
                 SledUuid,
@@ -1726,7 +1730,7 @@ impl DataStore {
             SledUuid,
             Vec<nexus_types::inventory::PhysicalDisk>,
         > = {
-            use db::schema::inv_physical_disk::dsl;
+            use nexus_db_schema::schema::inv_physical_disk::dsl;
 
             let mut disks = BTreeMap::<
                 SledUuid,
@@ -1774,7 +1778,7 @@ impl DataStore {
 
         // Mapping of "Sled ID" -> "All zpools reported by that sled"
         let zpools: BTreeMap<Uuid, Vec<nexus_types::inventory::Zpool>> = {
-            use db::schema::inv_zpool::dsl;
+            use nexus_db_schema::schema::inv_zpool::dsl;
 
             let mut zpools =
                 BTreeMap::<Uuid, Vec<nexus_types::inventory::Zpool>>::new();
@@ -1805,7 +1809,7 @@ impl DataStore {
 
         // Mapping of "Sled ID" -> "All datasets reported by that sled"
         let datasets: BTreeMap<Uuid, Vec<nexus_types::inventory::Dataset>> = {
-            use db::schema::inv_dataset::dsl;
+            use nexus_db_schema::schema::inv_dataset::dsl;
 
             let mut datasets =
                 BTreeMap::<Uuid, Vec<nexus_types::inventory::Dataset>>::new();
@@ -1846,7 +1850,7 @@ impl DataStore {
             .collect();
         // Fetch the corresponding baseboard records.
         let baseboards_by_id: BTreeMap<_, _> = {
-            use db::schema::hw_baseboard_id::dsl;
+            use nexus_db_schema::schema::hw_baseboard_id::dsl;
 
             let mut bbs = BTreeMap::new();
 
@@ -1906,7 +1910,7 @@ impl DataStore {
 
         // Fetch records of cabooses found.
         let inv_caboose_rows = {
-            use db::schema::inv_caboose::dsl;
+            use nexus_db_schema::schema::inv_caboose::dsl;
 
             let mut cabooses = Vec::new();
 
@@ -1940,7 +1944,7 @@ impl DataStore {
             .collect();
         // Fetch the corresponing records.
         let cabooses_by_id: BTreeMap<_, _> = {
-            use db::schema::sw_caboose::dsl;
+            use nexus_db_schema::schema::sw_caboose::dsl;
 
             let mut cabooses = BTreeMap::new();
 
@@ -2008,7 +2012,7 @@ impl DataStore {
 
         // Fetch records of RoT pages found.
         let inv_rot_page_rows = {
-            use db::schema::inv_root_of_trust_page::dsl;
+            use nexus_db_schema::schema::inv_root_of_trust_page::dsl;
 
             let mut rot_pages = Vec::new();
 
@@ -2042,7 +2046,7 @@ impl DataStore {
             .collect();
         // Fetch the corresponding records.
         let rot_pages_by_id: BTreeMap<_, _> = {
-            use db::schema::sw_root_of_trust_page::dsl;
+            use nexus_db_schema::schema::sw_root_of_trust_page::dsl;
 
             let mut rot_pages = BTreeMap::new();
 
@@ -2122,7 +2126,7 @@ impl DataStore {
         // trying to build, which maps sled ids to objects describing the zones
         // found on each sled.
         let mut omicron_zones: BTreeMap<SledUuid, _> = {
-            use db::schema::inv_sled_omicron_zones::dsl;
+            use nexus_db_schema::schema::inv_sled_omicron_zones::dsl;
 
             let mut zones = BTreeMap::new();
 
@@ -2161,7 +2165,7 @@ impl DataStore {
         // or not used at all.
         let mut omicron_zone_nics: BTreeMap<_, _> =
             {
-                use db::schema::inv_omicron_zone_nic::dsl;
+                use nexus_db_schema::schema::inv_omicron_zone_nic::dsl;
 
                 let mut nics = BTreeMap::new();
 
@@ -2190,7 +2194,7 @@ impl DataStore {
 
         // Now load the actual list of zones from all sleds.
         let omicron_zones_list = {
-            use db::schema::inv_omicron_zone::dsl;
+            use nexus_db_schema::schema::inv_omicron_zone::dsl;
 
             let mut zones = Vec::new();
 
@@ -2260,7 +2264,7 @@ impl DataStore {
 
         // Now load the clickhouse keeper cluster memberships
         let clickhouse_keeper_cluster_membership = {
-            use db::schema::inv_clickhouse_keeper_membership::dsl;
+            use nexus_db_schema::schema::inv_clickhouse_keeper_membership::dsl;
             let mut memberships = BTreeSet::new();
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
@@ -2427,7 +2431,7 @@ impl DataStoreInventoryTest for DataStore {
                     .await
                     .context("failed to allow table scan")?;
 
-                use db::schema::inv_collection::dsl;
+                use nexus_db_schema::schema::inv_collection::dsl;
                 let collections = dsl::inv_collection
                     .select(InvCollection::as_select())
                     .order_by(dsl::time_started)
@@ -2450,13 +2454,13 @@ mod test {
     use crate::db::datastore::inventory::DataStoreInventoryTest;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::{QueryBuilder, TrustedStr};
-    use crate::db::schema;
     use anyhow::{Context, bail};
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::QueryDsl;
     use gateway_client::types::SpType;
+    use nexus_db_schema::schema;
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
@@ -3039,9 +3043,11 @@ mod test {
             .pool_connection_for_tests()
             .await
             .context("Failed to get datastore connection")?;
-        let tables: Vec<String> = QueryBuilder::new().sql(
+        let mut query = QueryBuilder::new();
+        query.sql(
             "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'inv\\_%'"
-            )
+        );
+        let tables: Vec<String> = query
             .query::<diesel::sql_types::Text>()
             .load_async(&*conn)
             .await
@@ -3063,14 +3069,16 @@ mod test {
                 .context("Failed to allow full table scans")?;
 
             for table in tables {
-                let count: i64 = QueryBuilder::new().sql(
-                        // We're scraping the table names dynamically here, so we
-                        // don't know them ahead of time. However, this is also a
-                        // test, so this usage is pretty benign.
-                        TrustedStr::i_take_responsibility_for_validating_this_string(
-                            format!("SELECT COUNT(*) FROM {table}")
-                        )
+                let mut query = QueryBuilder::new();
+                query.sql(
+                    // We're scraping the table names dynamically here, so we
+                    // don't know them ahead of time. However, this is also a
+                    // test, so this usage is pretty benign.
+                    TrustedStr::i_take_responsibility_for_validating_this_string(
+                        format!("SELECT COUNT(*) FROM {table}")
                     )
+                );
+                let count: i64 = query
                     .query::<diesel::sql_types::Int8>()
                     .get_result_async(&conn)
                     .await

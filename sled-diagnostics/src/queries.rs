@@ -22,11 +22,14 @@ use crate::contract_stub::ContractError;
 
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
+const NVMEADM: &str = "/usr/sbin/nvmeadm";
 const PFEXEC: &str = "/usr/bin/pfexec";
 const PFILES: &str = "/usr/bin/pfiles";
 const PSTACK: &str = "/usr/bin/pstack";
 const PARGS: &str = "/usr/bin/pargs";
+const ZFS: &str = "/usr/sbin/zfs";
 const ZONEADM: &str = "/usr/sbin/zoneadm";
+const ZPOOL: &str = "/usr/sbin/zpool";
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -236,6 +239,12 @@ pub fn dladm_show_linkprop() -> Command {
     cmd
 }
 
+pub fn nvmeadm_list() -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(NVMEADM).arg("list");
+    cmd
+}
+
 pub fn pargs_process(pid: i32) -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(PARGS).arg("-ae").arg(pid.to_string());
@@ -251,6 +260,22 @@ pub fn pstack_process(pid: i32) -> Command {
 pub fn pfiles_process(pid: i32) -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(PFILES).arg(pid.to_string());
+    cmd
+}
+
+pub fn zfs_list() -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear()
+        .arg(ZFS)
+        .arg("list")
+        .arg("-o")
+        .arg("name,used,avail,quota,reservation,mountpoint,mounted");
+    cmd
+}
+
+pub fn zpool_status() -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(ZPOOL).arg("status");
     cmd
 }
 

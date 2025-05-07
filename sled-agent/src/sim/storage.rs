@@ -22,6 +22,8 @@ use crucible_agent_client::types::{
 };
 use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
+use illumos_utils::zfs::DatasetProperties;
+use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetManagementStatus;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::DatasetsConfig;
@@ -71,6 +73,53 @@ struct CrucibleDataInner {
     used_ports: HashSet<u16>,
 }
 
+/// Returns Some with a string if there's a mismatch
+pub fn mismatch(params: &CreateRegion, r: &Region) -> Option<String> {
+    if params.block_size != r.block_size {
+        Some(format!(
+            "requested block size {} instead of {}",
+            params.block_size, r.block_size
+        ))
+    } else if params.extent_size != r.extent_size {
+        Some(format!(
+            "requested extent size {} instead of {}",
+            params.extent_size, r.extent_size
+        ))
+    } else if params.extent_count != r.extent_count {
+        Some(format!(
+            "requested extent count {} instead of {}",
+            params.extent_count, r.extent_count
+        ))
+    } else if params.encrypted != r.encrypted {
+        Some(format!(
+            "requested encrypted {} instead of {}",
+            params.encrypted, r.encrypted
+        ))
+    } else if params.cert_pem != r.cert_pem {
+        Some(format!(
+            "requested cert_pem {:?} instead of {:?}",
+            params.cert_pem, r.cert_pem
+        ))
+    } else if params.key_pem != r.key_pem {
+        Some(format!(
+            "requested key_pem {:?} instead of {:?}",
+            params.key_pem, r.key_pem
+        ))
+    } else if params.root_pem != r.root_pem {
+        Some(format!(
+            "requested root_pem {:?} instead of {:?}",
+            params.root_pem, r.root_pem
+        ))
+    } else if params.source != r.source {
+        Some(format!(
+            "requested source {:?} instead of {:?}",
+            params.source, r.source
+        ))
+    } else {
+        None
+    }
+}
+
 impl CrucibleDataInner {
     fn new(log: Logger, start_port: u16, end_port: u16) -> Self {
         Self {
@@ -108,7 +157,7 @@ impl CrucibleDataInner {
         panic!("no free ports for simulated crucible agent!");
     }
 
-    fn create(&mut self, params: CreateRegion) -> Result<Region> {
+    fn create(&mut self, params: CreateRegion) -> Result<Region, HttpError> {
         let id = Uuid::from_str(&params.id.0).unwrap();
 
         let state = if let Some(on_create) = &self.on_create {
@@ -118,7 +167,23 @@ impl CrucibleDataInner {
         };
 
         if self.region_creation_error {
-            bail!("region creation error!");
+            return Err(HttpError::for_internal_error(
+                "region creation error!".to_string(),
+            ));
+        }
+
+        if let Some(region) = self.regions.get(&id) {
+            if let Some(mismatch) = mismatch(&params, &region) {
+                let s = format!(
+                    "region {region:?} already exists as {params:?}: {mismatch}"
+                );
+                warn!(self.log, "{s}");
+                return Err(HttpError::for_client_error(
+                    None,
+                    dropshot::ClientErrorStatusCode::CONFLICT,
+                    s,
+                ));
+            }
         }
 
         let read_only = params.source.is_some();
@@ -131,10 +196,10 @@ impl CrucibleDataInner {
             // NOTE: This is a lie - no server is running.
             port_number: self.get_free_port(),
             state,
-            encrypted: false,
-            cert_pem: None,
-            key_pem: None,
-            root_pem: None,
+            encrypted: params.encrypted,
+            cert_pem: params.cert_pem,
+            key_pem: params.key_pem,
+            root_pem: params.root_pem,
             source: params.source,
             read_only,
         };
@@ -933,7 +998,7 @@ impl CrucibleData {
         self.inner.lock().unwrap().list()
     }
 
-    pub fn create(&self, params: CreateRegion) -> Result<Region> {
+    pub fn create(&self, params: CreateRegion) -> Result<Region, HttpError> {
         self.inner.lock().unwrap().create(params)
     }
 
@@ -1297,6 +1362,54 @@ impl StorageInner {
             ));
         };
         Ok(config.clone())
+    }
+
+    pub fn dataset_get(
+        &self,
+        dataset_name: &String,
+    ) -> Result<DatasetProperties, HttpError> {
+        let Some(config) = self.dataset_config.as_ref() else {
+            return Err(HttpError::for_not_found(
+                None,
+                "No control plane datasets".into(),
+            ));
+        };
+
+        for (id, dataset) in config.datasets.iter() {
+            if dataset.name.full_name().as_str() == dataset_name {
+                return Ok(DatasetProperties {
+                    id: Some(*id),
+                    name: dataset_name.to_string(),
+                    mounted: true,
+                    avail: ByteCount::from_kibibytes_u32(1024),
+                    used: ByteCount::from_kibibytes_u32(1024),
+                    quota: dataset.inner.quota,
+                    reservation: dataset.inner.reservation,
+                    compression: dataset.inner.compression.to_string(),
+                });
+            }
+        }
+
+        for (nested_dataset_name, nested_dataset_storage) in
+            self.nested_datasets.iter()
+        {
+            if nested_dataset_name.full_name().as_str() == dataset_name {
+                let config = &nested_dataset_storage.config.inner;
+
+                return Ok(DatasetProperties {
+                    id: None,
+                    name: dataset_name.to_string(),
+                    mounted: true,
+                    avail: ByteCount::from_kibibytes_u32(1024),
+                    used: ByteCount::from_kibibytes_u32(1024),
+                    quota: config.quota,
+                    reservation: config.reservation,
+                    compression: config.compression.to_string(),
+                });
+            }
+        }
+
+        return Err(HttpError::for_not_found(None, "Dataset not found".into()));
     }
 
     pub fn datasets_ensure(

@@ -19,13 +19,8 @@
 // complicated to do safely and generally compared to what we have now.
 
 use super::Pool;
-use super::pool::DbConnection;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::{
-    self,
-    error::{ErrorHandler, public_error_from_diesel},
-};
 use ::oximeter::types::ProducerRegistry;
 use anyhow::{Context, bail};
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -34,6 +29,8 @@ use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::{ExpressionMethods, QueryDsl};
+use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
+use nexus_db_lookup::{DataStoreConnection, DbConnection};
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
@@ -73,9 +70,11 @@ mod inventory;
 mod ip_pool;
 mod ipv4_nat_entry;
 mod lldp;
+mod lookup_interface;
 mod migration;
 mod network_interface;
 mod oximeter;
+mod oximeter_read_policy;
 mod physical_disk;
 mod probe;
 mod project;
@@ -110,12 +109,17 @@ mod vmm;
 mod volume;
 mod volume_repair;
 mod vpc;
+pub mod webhook_delivery;
+mod webhook_event;
+mod webhook_rx;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
-pub use instance::{InstanceAndActiveVmm, InstanceGestalt};
+pub use instance::{
+    InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
+};
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
 pub use oximeter::CollectorReassignment;
@@ -146,8 +150,7 @@ pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
 /// This value is chosen to be small enough to avoid any queries being too
 /// expensive.
 // unsafe: `new_unchecked` is only unsound if the argument is 0.
-pub const SQL_BATCH_SIZE: NonZeroU32 =
-    unsafe { NonZeroU32::new_unchecked(1000) };
+pub const SQL_BATCH_SIZE: NonZeroU32 = NonZeroU32::new(1000).unwrap();
 
 // Represents a query that is ready to be executed.
 //
@@ -173,9 +176,6 @@ impl<U, T> RunnableQuery<U> for T where
     T: RunnableQueryNoReturn + LoadQuery<'static, DbConnection, U>
 {
 }
-
-pub type DataStoreConnection =
-    qorb::claim::Handle<async_bb8_diesel::Connection<DbConnection>>;
 
 pub struct DataStore {
     log: Logger,
@@ -376,7 +376,7 @@ impl DataStore {
         opctx: &OpContext,
         sled_id: SledUuid,
     ) -> Result<Ipv6Addr, Error> {
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
         let net = diesel::update(
             dsl::sled
                 .find(sled_id.into_untyped_uuid())
@@ -411,7 +411,7 @@ impl DataStore {
 
     #[cfg(test)]
     async fn test_try_table_scan(&self, opctx: &OpContext) -> Error {
-        use db::schema::project::dsl;
+        use nexus_db_schema::schema::project::dsl;
         let conn = self.pool_connection_authorized(opctx).await;
         if let Err(error) = conn {
             return error;
@@ -457,7 +457,6 @@ mod test {
     };
     use crate::db::explain::ExplainableAsync;
     use crate::db::identity::Asset;
-    use crate::db::lookup::LookupPath;
     use crate::db::model::{
         BlockSize, ConsoleSession, CrucibleDataset, ExternalIp, PhysicalDisk,
         PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState, Project, Rack,
@@ -471,6 +470,7 @@ mod test {
     use futures::stream;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::to_db_typed_uuid;
     use nexus_types::deployment::Blueprint;
@@ -530,7 +530,7 @@ mod test {
 
         let authz_silo = opctx.authn.silo_required().unwrap();
 
-        let (.., silo) = LookupPath::new(&opctx, &datastore)
+        let (.., silo) = LookupPath::new(&opctx, datastore)
             .silo_id(authz_silo.id())
             .fetch()
             .await
@@ -548,7 +548,7 @@ mod test {
         datastore.project_create(&opctx, project).await.unwrap();
 
         let (.., silo_after_project_create) =
-            LookupPath::new(&opctx, &datastore)
+            LookupPath::new(&opctx, datastore)
                 .silo_id(authz_silo.id())
                 .fetch()
                 .await
@@ -604,7 +604,7 @@ mod test {
             .await
             .unwrap();
 
-        let (.., db_silo_user) = LookupPath::new(&opctx, &datastore)
+        let (.., db_silo_user) = LookupPath::new(&opctx, datastore)
             .silo_user_id(session.silo_user_id)
             .fetch()
             .await
@@ -612,7 +612,7 @@ mod test {
         assert_eq!(DEFAULT_SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
-        let (.., fetched) = LookupPath::new(&opctx, &datastore)
+        let (.., fetched) = LookupPath::new(&opctx, datastore)
             .console_session_token(&token)
             .fetch()
             .await
@@ -642,7 +642,7 @@ mod test {
         );
 
         // time_last_used change persists in DB
-        let (.., fetched) = LookupPath::new(&opctx, &datastore)
+        let (.., fetched) = LookupPath::new(&opctx, datastore)
             .console_session_token(&token)
             .fetch()
             .await
@@ -655,7 +655,7 @@ mod test {
         let delete =
             datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete, Ok(()));
-        let fetched = LookupPath::new(&opctx, &datastore)
+        let fetched = LookupPath::new(&opctx, datastore)
             .console_session_token(&token)
             .fetch()
             .await;
@@ -676,7 +676,7 @@ mod test {
             .session_hard_delete(&silo_user_opctx, &authz_session)
             .await;
         assert_eq!(delete, Ok(()));
-        let fetched = LookupPath::new(&opctx, &datastore)
+        let fetched = LookupPath::new(&opctx, datastore)
             .console_session_token(&token)
             .fetch()
             .await;
@@ -765,8 +765,12 @@ mod test {
         physical_disk_id: PhysicalDiskUuid,
     ) -> Uuid {
         let zpool_id = Uuid::new_v4();
-        let zpool =
-            Zpool::new(zpool_id, sled_id.into_untyped_uuid(), physical_disk_id);
+        let zpool = Zpool::new(
+            zpool_id,
+            sled_id.into_untyped_uuid(),
+            physical_disk_id,
+            ByteCount::from(0).into(),
+        );
         datastore.zpool_insert(opctx, zpool).await.unwrap();
         zpool_id
     }
@@ -778,7 +782,7 @@ mod test {
         zpool_id: Uuid,
         sled_id: SledUuid,
     ) {
-        use db::schema::inv_zpool::dsl;
+        use nexus_db_schema::schema::inv_zpool::dsl;
 
         let inv_collection_id = CollectionUuid::new_v4();
         let time_collected = Utc::now();
@@ -1646,7 +1650,7 @@ mod test {
             explanation
         );
 
-        let subnet = db::model::VpcSubnet::new(
+        let subnet = nexus_db_model::VpcSubnet::new(
             Uuid::nil(),
             Uuid::nil(),
             external::IdentityMetadataCreateParams {
@@ -1740,7 +1744,7 @@ mod test {
             .await
             .unwrap();
 
-        let (.., authz_user) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_user) = LookupPath::new(&opctx, datastore)
             .silo_user_id(silo_user_id)
             .lookup_for(authz::Action::CreateChild)
             .await
@@ -1769,7 +1773,7 @@ mod test {
 
         // Lookup the key we just created.
         let (authz_silo, authz_silo_user, authz_ssh_key, found) =
-            LookupPath::new(&opctx, &datastore)
+            LookupPath::new(&opctx, datastore)
                 .silo_user_id(silo_user_id)
                 .ssh_key_name(&key_name.into())
                 .fetch()
@@ -1869,7 +1873,7 @@ mod test {
     #[tokio::test]
     async fn test_deallocate_external_ip_by_instance_id_is_idempotent() {
         use crate::db::model::IpKind;
-        use crate::db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         let logctx = dev::test_setup_log(
             "test_deallocate_external_ip_by_instance_id_is_idempotent",
@@ -1936,7 +1940,7 @@ mod test {
     #[tokio::test]
     async fn test_deallocate_external_ip_is_idempotent() {
         use crate::db::model::IpKind;
-        use crate::db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         let logctx =
             dev::test_setup_log("test_deallocate_external_ip_is_idempotent");
@@ -2004,10 +2008,10 @@ mod test {
     #[tokio::test]
     async fn test_external_ip_check_constraints() {
         use crate::db::model::IpKind;
-        use crate::db::schema::external_ip::dsl;
         use diesel::result::DatabaseErrorKind::CheckViolation;
         use diesel::result::DatabaseErrorKind::UniqueViolation;
         use diesel::result::Error::DatabaseError;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         let logctx = dev::test_setup_log("test_external_ip_check_constraints");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
@@ -2079,7 +2083,7 @@ mod test {
                 } else {
                     format!("{v}-with-parent")
                 };
-                db::model::Name(Name::try_from(name).unwrap())
+                nexus_db_model::Name(Name::try_from(name).unwrap())
             });
 
             // We do name duplicate checking on the `Some` branch, don't steal the
@@ -2173,7 +2177,7 @@ mod test {
             &project_ids
         ) {
             let name_local = name.map(|v| {
-                db::model::Name(Name::try_from(v.to_string()).unwrap())
+                nexus_db_model::Name(Name::try_from(v.to_string()).unwrap())
             });
             let state = if parent_id.is_some() {
                 IpAttachState::Attached

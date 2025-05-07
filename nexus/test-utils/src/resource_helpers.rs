@@ -500,7 +500,73 @@ pub async fn delete_disk(
     project_name: &str,
     disk_name: &str,
 ) {
-    let url = format!("/v1/disks/{}?project={}", disk_name, project_name,);
+    let url = format!("/v1/disks/{}?project={}", disk_name, project_name);
+    object_delete(client, &url).await
+}
+
+pub async fn delete_snapshot(
+    client: &ClientTestContext,
+    project_name: &str,
+    snapshot_name: &str,
+) {
+    let url =
+        format!("/v1/snapshots/{}?project={}", snapshot_name, project_name);
+    object_delete(client, &url).await
+}
+
+pub async fn create_alpine_project_image(
+    client: &ClientTestContext,
+    project_name: &str,
+    image_name: &str,
+) -> views::Image {
+    let images_url = format!("/v1/images?project={}", project_name);
+    object_create(
+        client,
+        &images_url,
+        &params::ImageCreate {
+            identity: IdentityMetadataCreateParams {
+                name: image_name.parse().unwrap(),
+                description: String::from(
+                    "you can boot any image, as long as it's alpine",
+                ),
+            },
+            source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+            os: "alpine".to_string(),
+            version: "edge".to_string(),
+        },
+    )
+    .await
+}
+
+pub async fn create_project_image_from_snapshot(
+    client: &ClientTestContext,
+    project_name: &str,
+    image_name: &str,
+    snapshot_id: Uuid,
+) -> views::Image {
+    let images_url = format!("/v1/images?project={}", project_name);
+    object_create(
+        client,
+        &images_url,
+        &params::ImageCreate {
+            identity: IdentityMetadataCreateParams {
+                name: image_name.parse().unwrap(),
+                description: String::from("it's an image alright"),
+            },
+            source: params::ImageSource::Snapshot { id: snapshot_id },
+            os: "os".to_string(),
+            version: "version".to_string(),
+        },
+    )
+    .await
+}
+
+pub async fn delete_image(
+    client: &ClientTestContext,
+    project_name: &str,
+    image_name: &str,
+) {
+    let url = format!("/v1/image/{}?project={}", image_name, project_name);
     object_delete(client, &url).await
 }
 
@@ -563,6 +629,7 @@ pub async fn create_instance_with(
             boot_disk: None,
             start,
             auto_restart_policy,
+            anti_affinity_groups: Vec::new(),
         },
     )
     .await
@@ -1072,7 +1139,33 @@ pub struct TestDataset {
 pub struct TestZpool {
     pub id: ZpoolUuid,
     pub size: ByteCount,
-    pub datasets: Vec<TestDataset>,
+    datasets: Vec<TestDataset>,
+}
+
+impl TestZpool {
+    /// Returns the crucible dataset within a zpool.
+    ///
+    /// Panics if there are zero or more than one crucible datasets within the pool
+    pub fn crucible_dataset(&self) -> &TestDataset {
+        fn is_crucible(d: &&TestDataset) -> bool {
+            d.kind == DatasetKind::Crucible
+        }
+
+        assert_eq!(self.datasets.iter().filter(is_crucible).count(), 1);
+        self.datasets.iter().find(is_crucible).unwrap()
+    }
+
+    /// Returns the debug dataset within a zpool.
+    ///
+    /// Panics if there are zero or more than one debug datasets within the pool
+    pub fn debug_dataset(&self) -> &TestDataset {
+        fn is_debug(d: &&TestDataset) -> bool {
+            d.kind == DatasetKind::Debug
+        }
+
+        assert_eq!(self.datasets.iter().filter(is_debug).count(), 1);
+        self.datasets.iter().find(is_debug).unwrap()
+    }
 }
 
 enum WhichSledAgents {
@@ -1181,10 +1274,11 @@ impl<'a> Iterator for ZpoolIterator<'a> {
 pub struct DiskTest<'a, N: NexusServer> {
     cptestctx: &'a ControlPlaneTestContext<N>,
     sleds: BTreeMap<SledUuid, PerSledDiskState>,
+    generation: Generation,
 }
 
 impl<'a, N: NexusServer> DiskTest<'a, N> {
-    pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
+    pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 16;
     pub const DEFAULT_ZPOOL_COUNT: u32 = 3;
 
     /// Creates a new [DiskTest] with default configuration.
@@ -1213,28 +1307,50 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 .collect(),
         };
 
+        // ControlPlaneTestContext sets up initial configs; find the max
+        // generation of all our sleds and use that as the base for any new
+        // configs we produce.
+        let generation = cptestctx
+            .all_sled_agents()
+            .filter_map(|agent| {
+                if input_sleds.contains(&agent.sled_agent.id) {
+                    Some(agent
+                    .sled_agent
+                    .datasets_config_list()
+                    .expect(
+                        "dataset config populated by ControlPlaneTestContext",
+                    )
+                    .generation)
+                } else {
+                    None
+                }
+            })
+            .max()
+            .expect("at least one sled specified");
+
         let mut sleds = BTreeMap::new();
         for sled_id in input_sleds {
             sleds.insert(sled_id, PerSledDiskState { zpools: vec![] });
         }
 
-        let mut disk_test = Self { cptestctx, sleds };
+        let mut disk_test = Self { cptestctx, sleds, generation };
 
         for sled_id in
             disk_test.sleds.keys().cloned().collect::<Vec<SledUuid>>()
         {
             for _ in 0..zpool_count {
-                disk_test.add_zpool_with_dataset(sled_id).await;
+                disk_test.add_zpool_with_datasets(sled_id).await;
             }
         }
+        disk_test.propagate_datasets_to_sleds().await;
 
         disk_test
     }
 
     pub async fn add_blueprint_disks(&mut self, blueprint: &Blueprint) {
         for (sled_id, sled_config) in blueprint.sleds.iter() {
-            for disk in &sled_config.disks_config.disks {
-                self.add_zpool_with_dataset_ext(
+            for disk in &sled_config.disks {
+                self.add_zpool_with_datasets_ext(
                     *sled_id,
                     disk.id,
                     disk.pool_id,
@@ -1249,35 +1365,38 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         }
     }
 
-    pub async fn add_zpool_with_dataset(&mut self, sled_id: SledUuid) {
-        self.add_zpool_with_dataset_ext(
+    /// Adds the zpool and datasets into the database.
+    ///
+    /// Does not inform sled agents to use these pools.
+    ///
+    /// See: [Self::propagate_datasets_to_sleds] if you want to send
+    /// this configuration to a simulated sled agent.
+    pub async fn add_zpool_with_datasets(&mut self, sled_id: SledUuid) {
+        self.add_zpool_with_datasets_ext(
             sled_id,
             PhysicalDiskUuid::new_v4(),
             ZpoolUuid::new_v4(),
-            vec![TestDataset {
-                id: DatasetUuid::new_v4(),
-                kind: DatasetKind::Crucible,
-            }],
+            vec![
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::Crucible,
+                },
+                TestDataset {
+                    id: DatasetUuid::new_v4(),
+                    kind: DatasetKind::Debug,
+                },
+            ],
             Self::DEFAULT_ZPOOL_SIZE_GIB,
         )
         .await
     }
 
-    // Propagate the dataset configuration to all Sled Agents.
-    //
-    // # Panics
-    //
-    // This function will panic if any of the Sled Agents have already
-    // applied dataset configuration.
-    //
+    /// Propagate the dataset configuration to all Sled Agents.
     // TODO: Ideally, we should do the following:
-    // 1. Also call a similar method to invoke the "omicron_physical_disks_ensure" API. Right now,
-    //    we aren't calling this at all for the simulated sled agent, which only works because
-    //    the simulated sled agent simply treats this as a stored config, rather than processing it
-    //    to actually provide a different view of storage.
-    // 2. Re-work the DiskTestBuilder API to automatically deploy the "disks + datasets" config
-    //    to sled agents exactly once. Adding new zpools / datasets after the DiskTest has been
-    //    started will need to also make a decision about re-deploying this configuration.
+    // Also call a similar method to invoke the "omicron_physical_disks_ensure" API. Right now,
+    // we aren't calling this at all for the simulated sled agent, which only works because
+    // the simulated sled agent simply treats this as a stored config, rather than processing it
+    // to actually provide a different view of storage.
     pub async fn propagate_datasets_to_sleds(&mut self) {
         let cptestctx = self.cptestctx;
 
@@ -1314,7 +1433,8 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 })
                 .collect();
 
-            let generation = Generation::new();
+            self.generation = self.generation.next();
+            let generation = self.generation;
             let dataset_config = DatasetsConfig { generation, datasets };
             let res = sled_agent.datasets_ensure(dataset_config).expect(
                 "Should have been able to ensure datasets, but could not.
@@ -1346,7 +1466,14 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         }
     }
 
-    pub async fn add_zpool_with_dataset_ext(
+    /// Adds the zpool and datasets into the database, with additional
+    /// configuration.
+    ///
+    /// Does not inform sled agents to use these pools.
+    ///
+    /// See: [Self::propagate_datasets_to_sleds] if you want to send
+    /// this configuration to a simulated sled agent.
+    pub async fn add_zpool_with_datasets_ext(
         &mut self,
         sled_id: SledUuid,
         physical_disk_id: PhysicalDiskUuid,
@@ -1507,10 +1634,15 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         zpools.push(zpool);
     }
 
+    /// Configures all region requests within Crucible datasets to return
+    /// "Requested", then "Created".
     pub async fn set_requested_then_created_callback(&self) {
         for (sled_id, state) in &self.sleds {
             for zpool in &state.zpools {
                 for dataset in &zpool.datasets {
+                    if !matches!(dataset.kind, DatasetKind::Crucible) {
+                        continue;
+                    }
                     let crucible = self
                         .get_sled(*sled_id)
                         .get_crucible_dataset(zpool.id, dataset.id);
@@ -1531,10 +1663,14 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         }
     }
 
+    /// Configures all region requests within Crucible datasets to fail
     pub async fn set_always_fail_callback(&self) {
         for (sled_id, state) in &self.sleds {
             for zpool in &state.zpools {
                 for dataset in &zpool.datasets {
+                    if !matches!(dataset.kind, DatasetKind::Crucible) {
+                        continue;
+                    }
                     let crucible = self
                         .get_sled(*sled_id)
                         .get_crucible_dataset(zpool.id, dataset.id);
@@ -1554,6 +1690,9 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         for (sled_id, state) in &self.sleds {
             for zpool in &state.zpools {
                 for dataset in &zpool.datasets {
+                    if !matches!(dataset.kind, DatasetKind::Crucible) {
+                        continue;
+                    }
                     let crucible = self
                         .get_sled(*sled_id)
                         .get_crucible_dataset(zpool.id, dataset.id);

@@ -3,17 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::Responsiveness;
-use crate::SIM_ROT_BOARD;
 use crate::SimulatedSp;
 use crate::config::GimletConfig;
 use crate::config::SpComponentConfig;
-use crate::helpers::rot_slot_id_from_u16;
-use crate::helpers::rot_slot_id_to_u16;
+use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
 use crate::serial_number_padded;
 use crate::server;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
+use crate::update::BaseboardKind;
 use crate::update::SimSpUpdate;
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -22,13 +21,16 @@ use futures::future;
 use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
+use gateway_messages::DumpCompression;
+use gateway_messages::DumpError;
+use gateway_messages::DumpSegment;
+use gateway_messages::DumpTask;
 use gateway_messages::Header;
 use gateway_messages::MgsRequest;
 use gateway_messages::MgsResponse;
 use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
 use gateway_messages::RotResponse;
-use gateway_messages::RotSlotId;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
 use gateway_messages::SpPort;
@@ -59,19 +61,6 @@ use tokio::sync::watch;
 use tokio::task::{self, JoinHandle};
 
 pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
-const SP_GITC0: &[u8] = b"ffffffff";
-const SP_GITC1: &[u8] = b"fefefefe";
-const SP_BORD: &[u8] = SIM_GIMLET_BOARD.as_bytes();
-const SP_NAME: &[u8] = b"SimGimlet";
-const SP_VERS0: &[u8] = b"0.0.2";
-const SP_VERS1: &[u8] = b"0.0.1";
-
-const ROT_GITC0: &[u8] = b"eeeeeeee";
-const ROT_GITC1: &[u8] = b"edededed";
-const ROT_BORD: &[u8] = SIM_ROT_BOARD.as_bytes();
-const ROT_NAME: &[u8] = b"SimGimletRot";
-const ROT_VERS0: &[u8] = b"0.0.4";
-const ROT_VERS1: &[u8] = b"0.0.3";
 
 // Type alias for the remote end of an MGS serial console connection.
 type AttachedMgsSerialConsole =
@@ -637,7 +626,6 @@ struct Handler {
 
     attached_mgs: AttachedMgsSerialConsole,
     incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
-    rot_active_slot: RotSlotId,
     power_state: PowerState,
     startup_options: StartupOptions,
     update_state: SimSpUpdate,
@@ -652,8 +640,8 @@ struct Handler {
     // this, our caller will pass us a function to call if they should ignore
     // whatever result we return and fail to respond at all.
     should_fail_to_respond_signal: Option<Box<dyn FnOnce() + Send>>,
-    no_stage0_caboose: bool,
     old_rot_state: bool,
+    sp_dumps: HashMap<[u8; 16], u32>,
 }
 
 impl Handler {
@@ -680,6 +668,8 @@ impl Handler {
 
         let sensors = Sensors::from_component_configs(&components);
 
+        let sp_dumps = HashMap::new();
+
         Self {
             log,
             components,
@@ -689,15 +679,17 @@ impl Handler {
             serial_number,
             attached_mgs,
             incoming_serial_console,
-            rot_active_slot: RotSlotId::A,
             power_state: PowerState::A2,
             startup_options: StartupOptions::empty(),
-            update_state: SimSpUpdate::default(),
+            update_state: SimSpUpdate::new(
+                BaseboardKind::Gimlet,
+                no_stage0_caboose,
+            ),
             reset_pending: None,
             last_request_handled: None,
             should_fail_to_respond_signal: None,
             old_rot_state,
-            no_stage0_caboose,
+            sp_dumps,
         }
     }
 
@@ -715,14 +707,7 @@ impl Handler {
             revision: 0,
             base_mac_address: [0; 6],
             power_state: self.power_state,
-            rot: Ok(gateway_messages::RotStateV2 {
-                active: RotSlotId::A,
-                persistent_boot_preference: RotSlotId::A,
-                pending_persistent_boot_preference: None,
-                transient_boot_preference: None,
-                slot_a_sha3_256_digest: Some([0x55; 32]),
-                slot_b_sha3_256_digest: Some([0x66; 32]),
-            }),
+            rot: Ok(rot_state_v2(self.update_state.rot_state())),
         }
     }
 }
@@ -990,8 +975,7 @@ impl SpHandler for Handler {
             "received SP update prepare request";
             "update" => ?update,
         );
-        self.update_state.prepare(
-            SpComponent::SP_ITSELF,
+        self.update_state.sp_update_prepare(
             update.id,
             update.sp_image_size.try_into().unwrap(),
         )
@@ -1007,10 +991,11 @@ impl SpHandler for Handler {
             "update" => ?update,
         );
 
-        self.update_state.prepare(
+        self.update_state.component_update_prepare(
             update.component,
             update.id,
             update.total_size.try_into().unwrap(),
+            update.slot,
         )
     }
 
@@ -1203,14 +1188,7 @@ impl SpHandler for Handler {
             &self.log, "asked for component active slot";
             "component" => ?component,
         );
-        match component {
-            SpComponent::ROT => Ok(rot_slot_id_to_u16(self.rot_active_slot)),
-            // The only active component is stage0
-            SpComponent::STAGE0 => Ok(0),
-            // The real SP returns `RequestUnsupportedForComponent` for anything
-            // other than the RoT, including SP_ITSELF.
-            _ => Err(SpError::RequestUnsupportedForComponent),
-        }
+        self.update_state.component_get_active_slot(component)
     }
 
     fn component_set_active_slot(
@@ -1225,28 +1203,7 @@ impl SpHandler for Handler {
             "slot" => slot,
             "persist" => persist,
         );
-        match component {
-            SpComponent::ROT => {
-                self.rot_active_slot = rot_slot_id_from_u16(slot)?;
-                Ok(())
-            }
-            SpComponent::STAGE0 => {
-                if slot == 1 {
-                    return Ok(());
-                } else {
-                    Err(SpError::RequestUnsupportedForComponent)
-                }
-            }
-            SpComponent::HOST_CPU_BOOT_FLASH => {
-                self.update_state.set_active_host_slot(slot);
-                Ok(())
-            }
-            _ => {
-                // The real SP returns `RequestUnsupportedForComponent` for anything
-                // other than the RoT and host boot flash, including SP_ITSELF.
-                Err(SpError::RequestUnsupportedForComponent)
-            }
-        }
+        self.update_state.component_set_active_slot(component, slot, persist)
     }
 
     fn component_action(
@@ -1330,44 +1287,8 @@ impl SpHandler for Handler {
         slot: u16,
         key: [u8; 4],
         buf: &mut [u8],
-    ) -> std::result::Result<usize, SpError> {
-        use crate::SIM_ROT_STAGE0_BOARD;
-
-        const STAGE0_GITC0: &[u8] = b"ddddddddd";
-        const STAGE0_GITC1: &[u8] = b"dadadadad";
-        const STAGE0_BORD: &[u8] = SIM_ROT_STAGE0_BOARD.as_bytes();
-        const STAGE0_NAME: &[u8] = b"SimGimletRot";
-        const STAGE0_VERS0: &[u8] = b"0.0.200";
-        const STAGE0_VERS1: &[u8] = b"0.0.200";
-
-        let val = match (component, &key, slot, self.no_stage0_caboose) {
-            (SpComponent::SP_ITSELF, b"GITC", 0, _) => SP_GITC0,
-            (SpComponent::SP_ITSELF, b"GITC", 1, _) => SP_GITC1,
-            (SpComponent::SP_ITSELF, b"BORD", _, _) => SP_BORD,
-            (SpComponent::SP_ITSELF, b"NAME", _, _) => SP_NAME,
-            (SpComponent::SP_ITSELF, b"VERS", 0, _) => SP_VERS0,
-            (SpComponent::SP_ITSELF, b"VERS", 1, _) => SP_VERS1,
-            (SpComponent::ROT, b"GITC", 0, _) => ROT_GITC0,
-            (SpComponent::ROT, b"GITC", 1, _) => ROT_GITC1,
-            (SpComponent::ROT, b"BORD", _, _) => ROT_BORD,
-            (SpComponent::ROT, b"NAME", _, _) => ROT_NAME,
-            (SpComponent::ROT, b"VERS", 0, _) => ROT_VERS0,
-            (SpComponent::ROT, b"VERS", 1, _) => ROT_VERS1,
-            // gimlet staging/devel hash
-            (SpComponent::ROT, b"SIGN", _, _) => &"11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf".as_bytes(),
-            (SpComponent::STAGE0, b"GITC", 0, false) => STAGE0_GITC0,
-            (SpComponent::STAGE0, b"GITC", 1, false) => STAGE0_GITC1,
-            (SpComponent::STAGE0, b"BORD", _, false) => STAGE0_BORD,
-            (SpComponent::STAGE0, b"NAME", _, false) => STAGE0_NAME,
-            (SpComponent::STAGE0, b"VERS", 0, false) => STAGE0_VERS0,
-            (SpComponent::STAGE0, b"VERS", 1, false) => STAGE0_VERS1,
-            // gimlet staging/devel hash
-            (SpComponent::STAGE0, b"SIGN", _, false) => &"11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf".as_bytes(),
-            _ => return Err(SpError::NoSuchCabooseKey(key)),
-        };
-
-        buf[..val.len()].copy_from_slice(val);
-        Ok(val.len())
+    ) -> Result<usize, SpError> {
+        self.update_state.get_component_caboose_value(component, slot, key, buf)
     }
 
     fn read_sensor(
@@ -1460,45 +1381,72 @@ impl SpHandler for Handler {
         if self.old_rot_state {
             Err(SpError::RequestUnsupportedForSp)
         } else {
-            const SLOT_A_DIGEST: [u8; 32] = [0xaa; 32];
-            const SLOT_B_DIGEST: [u8; 32] = [0xbb; 32];
-            const STAGE0_DIGEST: [u8; 32] = [0xcc; 32];
-            const STAGE0NEXT_DIGEST: [u8; 32] = [0xdd; 32];
-
             match version {
                 0 => Err(SpError::Update(
                     gateway_messages::UpdateError::VersionNotSupported,
                 )),
-                1 => Ok(RotBootInfo::V2(gateway_messages::RotStateV2 {
-                    active: RotSlotId::A,
-                    persistent_boot_preference: RotSlotId::A,
-                    pending_persistent_boot_preference: None,
-                    transient_boot_preference: None,
-                    slot_a_sha3_256_digest: Some(SLOT_A_DIGEST),
-                    slot_b_sha3_256_digest: Some(SLOT_B_DIGEST),
-                })),
-                _ => Ok(RotBootInfo::V3(gateway_messages::RotStateV3 {
-                    active: RotSlotId::A,
-                    persistent_boot_preference: RotSlotId::A,
-                    pending_persistent_boot_preference: None,
-                    transient_boot_preference: None,
-                    slot_a_fwid: gateway_messages::Fwid::Sha3_256(
-                        SLOT_A_DIGEST,
-                    ),
-                    slot_b_fwid: gateway_messages::Fwid::Sha3_256(
-                        SLOT_B_DIGEST,
-                    ),
-                    stage0_fwid: gateway_messages::Fwid::Sha3_256(
-                        STAGE0_DIGEST,
-                    ),
-                    stage0next_fwid: gateway_messages::Fwid::Sha3_256(
-                        STAGE0NEXT_DIGEST,
-                    ),
-                    slot_a_status: Ok(()),
-                    slot_b_status: Ok(()),
-                    stage0_status: Ok(()),
-                    stage0next_status: Ok(()),
-                })),
+                1 => Ok(RotBootInfo::V2(rot_state_v2(
+                    self.update_state.rot_state(),
+                ))),
+                _ => Ok(RotBootInfo::V3(self.update_state.rot_state())),
+            }
+        }
+    }
+
+    fn get_task_dump_count(&mut self) -> Result<u32, SpError> {
+        Ok(1)
+    }
+
+    fn task_dump_read_start(
+        &mut self,
+        index: u32,
+        key: [u8; 16],
+    ) -> Result<DumpTask, SpError> {
+        if index != 0 {
+            return Err(SpError::Dump(DumpError::BadIndex));
+        }
+
+        // Hubris allows clients to reuse existing keys.
+        // Overwrite any in-flight requests using this key.
+        self.sp_dumps.insert(key, 0);
+
+        Ok(DumpTask { time: 1, task: 0, compression: DumpCompression::Lzss })
+    }
+
+    fn task_dump_read_continue(
+        &mut self,
+        key: [u8; 16],
+        seq: u32,
+        buf: &mut [u8],
+    ) -> Result<Option<DumpSegment>, SpError> {
+        let Some(expected_seq) = self.sp_dumps.get_mut(&key) else {
+            return Err(SpError::Dump(DumpError::BadKey));
+        };
+
+        if seq != *expected_seq {
+            return Err(SpError::Dump(DumpError::BadSequenceNumber));
+        }
+
+        const UNCOMPRESSED_MSG: &[u8] = b"my cool SP dump";
+        // "my cool SP dump" encoded with `lzss-cli e 6,4,0x20`
+        const COMPRESSED_MSG: &[u8] = &[
+            0xb6, 0xde, 0x64, 0x16, 0x3b, 0x7d, 0xbe, 0xd9, 0x20, 0xa9, 0xd4,
+            0x24, 0x16, 0x4b, 0xad, 0xb6, 0xe0,
+        ];
+        buf[..COMPRESSED_MSG.len()].copy_from_slice(COMPRESSED_MSG);
+
+        *expected_seq += 1;
+
+        match seq {
+            ..3 => Ok(Some(DumpSegment {
+                address: 1,
+                compressed_length: COMPRESSED_MSG.len() as u16,
+                uncompressed_length: UNCOMPRESSED_MSG.len() as u16,
+                seq,
+            })),
+            3.. => {
+                self.sp_dumps.remove(&key);
+                Ok(None)
             }
         }
     }

@@ -7,12 +7,8 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
-use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::InvPhysicalDisk;
 use crate::db::model::PhysicalDisk;
@@ -23,10 +19,14 @@ use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplyPhysicalDiskFilterExt;
 use nexus_types::deployment::{DiskFilter, SledFilter};
 use omicron_common::api::external::CreateResult;
@@ -115,12 +115,12 @@ impl DataStore {
     }
 
     pub async fn physical_disk_insert_on_connection(
-        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
         disk: PhysicalDisk,
     ) -> Result<PhysicalDisk, TransactionError<Error>> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
 
         let sled_id = disk.sled_id;
         let disk_in_db = Sled::insert_resource(
@@ -153,7 +153,7 @@ impl DataStore {
         policy: PhysicalDiskPolicy,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         let now = Utc::now();
 
         diesel::update(
@@ -174,7 +174,7 @@ impl DataStore {
         state: PhysicalDiskState,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         let now = Utc::now();
 
         diesel::update(
@@ -203,9 +203,9 @@ impl DataStore {
     ) -> ListResultVec<InvPhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        use db::schema::inv_physical_disk::dsl as inv_physical_disk_dsl;
-        use db::schema::physical_disk::dsl as physical_disk_dsl;
-        use db::schema::sled::dsl as sled_dsl;
+        use nexus_db_schema::schema::inv_physical_disk::dsl as inv_physical_disk_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::sled::dsl as sled_dsl;
 
         sled_dsl::sled
             // If the sled is not in-service, drop the list immediately.
@@ -256,7 +256,7 @@ impl DataStore {
         disk_filter: DiskFilter,
     ) -> ListResultVec<PhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         paginated(dsl::physical_disk, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .physical_disk_filter(disk_filter)
@@ -273,7 +273,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<PhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         paginated(dsl::physical_disk, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::sled_id.eq(sled_id))
@@ -292,7 +292,7 @@ impl DataStore {
         id: PhysicalDiskUuid,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         let now = Utc::now();
         let conn = &*self.pool_connection_authorized(&opctx).await?;
         diesel::update(dsl::physical_disk)
@@ -318,7 +318,7 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let now = Utc::now();
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         diesel::update(dsl::physical_disk)
             .filter(dsl::id.eq(to_db_typed_uuid(id)))
             .filter(dsl::time_deleted.is_null())
@@ -333,11 +333,11 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::lookup::LookupPath;
     use crate::db::model::{PhysicalDiskKind, Sled};
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use dropshot::PaginationOrder;
+    use nexus_db_lookup::LookupPath;
     use nexus_sled_agent_shared::inventory::{
         Baseboard, Inventory, InventoryDisk, OmicronZonesConfig, SledRole,
     };
@@ -766,7 +766,12 @@ mod test {
             sled_id,
         );
 
-        let zpool = Zpool::new(Uuid::new_v4(), sled_id, disk.id());
+        let zpool = Zpool::new(
+            Uuid::new_v4(),
+            sled_id,
+            disk.id(),
+            ByteCount::from(0).into(),
+        );
         (disk, zpool)
     }
 
@@ -788,8 +793,7 @@ mod test {
             .unwrap();
 
         // Mark the sled as expunged
-        let sled_lookup =
-            LookupPath::new(&opctx, &datastore).sled_id(sled.id());
+        let sled_lookup = LookupPath::new(&opctx, datastore).sled_id(sled.id());
         let (authz_sled,) =
             sled_lookup.lookup_for(authz::Action::Modify).await.unwrap();
         datastore
@@ -966,7 +970,7 @@ mod test {
 
         // Expunge some disks, observe that they do not re-appear as
         // initialized.
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
 
         // Set a disk to "deleted".
         let now = Utc::now();

@@ -25,14 +25,24 @@ pub fn online_processor_count() -> Result<u32, Error> {
     Ok(u32::try_from(res)?)
 }
 
-/// Returns the amount of RAM on this sled, in bytes.
-pub fn usable_physical_ram_bytes() -> Result<u64, Error> {
-    let phys_pages: u64 = illumos_utils::libc::sysconf(libc::_SC_PHYS_PAGES)
+/// Returns the number of physical RAM pages on this sled.
+pub fn usable_physical_pages() -> Result<u64, Error> {
+    let pages = illumos_utils::libc::sysconf(libc::_SC_PHYS_PAGES)
         .map_err(|e| Error::Sysconf { arg: "physical pages", e })?
         .try_into()?;
+    Ok(pages)
+}
+
+/// Returns the amount of RAM on this sled, in bytes.
+pub fn usable_physical_ram_bytes() -> Result<u64, Error> {
     let page_size: u64 = illumos_utils::libc::sysconf(libc::_SC_PAGESIZE)
         .map_err(|e| Error::Sysconf { arg: "physical page size", e })?
         .try_into()?;
 
-    Ok(phys_pages * page_size)
+    // Note that `_SC_PHYS_PAGES` counts, specifically, the number of
+    // `_SC_PAGESIZE` pages of physical memory. This means the multiplication
+    // below yields the total physical RAM bytes, even if in some sense there
+    // are fewer "actual" physical pages in page tables (such as if there were
+    // 2MiB pages mixed in on x86).
+    Ok(usable_physical_pages()? * page_size)
 }

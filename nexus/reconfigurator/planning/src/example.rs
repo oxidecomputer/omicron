@@ -14,6 +14,7 @@ use crate::planner::rng::PlannerRng;
 use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_inventory::CollectionBuilderRng;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -458,8 +459,7 @@ impl ExampleSystemBuilder {
 
         let blueprint = builder.build();
         for sled_cfg in blueprint.sleds.values() {
-            let zones = &sled_cfg.zones_config;
-            for zone in zones.zones.iter() {
+            for zone in sled_cfg.zones.iter() {
                 let service_id = zone.id;
                 if let Some((external_ip, nic)) =
                     zone.zone_type.external_networking()
@@ -485,13 +485,14 @@ impl ExampleSystemBuilder {
         }
 
         for (sled_id, sled_cfg) in &blueprint.sleds {
+            let sled_cfg = sled_cfg.clone().into_in_service_sled_config();
             system
                 .sled_set_omicron_zones(
                     *sled_id,
-                    sled_cfg
-                        .zones_config
-                        .clone()
-                        .into_running_omicron_zones_config(),
+                    OmicronZonesConfig {
+                        generation: sled_cfg.generation,
+                        zones: sled_cfg.zones.into_iter().collect(),
+                    },
                 )
                 .unwrap();
         }
@@ -504,7 +505,7 @@ impl ExampleSystemBuilder {
         for (sled_id, sled_cfg) in &blueprint.sleds {
             let sled = system.get_sled_mut(*sled_id).unwrap();
 
-            for dataset_config in sled_cfg.datasets_config.datasets.iter() {
+            for dataset_config in sled_cfg.datasets.iter() {
                 let config = dataset_config.clone().try_into().unwrap();
                 sled.add_synthetic_dataset(config);
             }

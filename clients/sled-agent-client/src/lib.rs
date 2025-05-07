@@ -16,7 +16,7 @@ pub use propolis_client::{CrucibleOpts, VolumeConstructionRequest};
 
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent.json",
-    derives = [schemars::JsonSchema, PartialEq],
+    interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -28,6 +28,7 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
+    derives = [schemars::JsonSchema, PartialEq],
     patch = {
         BfdPeerConfig = { derives = [Eq, Hash] },
         BgpConfig = { derives = [Eq, Hash] },
@@ -47,14 +48,15 @@ progenitor::generate_api!(
         Baseboard = nexus_sled_agent_shared::inventory::Baseboard,
         ByteCount = omicron_common::api::external::ByteCount,
         DatasetsConfig = omicron_common::disk::DatasetsConfig,
+        DatasetManagementStatus = omicron_common::disk::DatasetManagementStatus,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DiskIdentity = omicron_common::disk::DiskIdentity,
-        DisksManagementResult = omicron_common::disk::DisksManagementResult,
         DiskManagementStatus = omicron_common::disk::DiskManagementStatus,
         DiskManagementError = omicron_common::disk::DiskManagementError,
         DiskVariant = omicron_common::disk::DiskVariant,
         ExternalIpGatewayMap = omicron_common::api::internal::shared::ExternalIpGatewayMap,
         Generation = omicron_common::api::external::Generation,
+        Hostname = omicron_common::api::external::Hostname,
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         Inventory = nexus_sled_agent_shared::inventory::Inventory,
         InventoryDisk = nexus_sled_agent_shared::inventory::InventoryDisk,
@@ -64,6 +66,8 @@ progenitor::generate_api!(
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
         OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
+        OmicronSledConfig = nexus_sled_agent_shared::inventory::OmicronSledConfig,
+        OmicronSledConfigResult = nexus_sled_agent_shared::inventory::OmicronSledConfigResult,
         OmicronZoneConfig = nexus_sled_agent_shared::inventory::OmicronZoneConfig,
         OmicronZoneDataset = nexus_sled_agent_shared::inventory::OmicronZoneDataset,
         OmicronZoneImageSource = nexus_sled_agent_shared::inventory::OmicronZoneImageSource,
@@ -111,14 +115,6 @@ impl From<omicron_common::api::internal::nexus::VmmState> for types::VmmState {
             Input::Failed => types::VmmState::Failed,
             Input::Destroyed => types::VmmState::Destroyed,
         }
-    }
-}
-
-impl From<omicron_common::api::external::InstanceCpuCount>
-    for types::InstanceCpuCount
-{
-    fn from(s: omicron_common::api::external::InstanceCpuCount) -> Self {
-        Self(s.0)
     }
 }
 
@@ -182,14 +178,6 @@ impl From<types::MigrationState>
             types::MigrationState::Failed => Output::Failed,
             types::MigrationState::Completed => Output::Completed,
         }
-    }
-}
-
-impl From<types::InstanceCpuCount>
-    for omicron_common::api::external::InstanceCpuCount
-{
-    fn from(s: types::InstanceCpuCount) -> Self {
-        Self(s.0)
     }
 }
 

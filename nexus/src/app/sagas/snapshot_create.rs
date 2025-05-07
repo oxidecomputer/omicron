@@ -100,9 +100,9 @@ use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
 use anyhow::anyhow;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::Generation;
 use nexus_db_queries::db::identity::{Asset, Resource};
-use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_common::{
@@ -384,7 +384,7 @@ async fn ssc_take_volume_lock(
     // is blocked by a snapshot being created, and snapshot creation is blocked
     // by region replacement.
 
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch()
         .await
@@ -411,7 +411,7 @@ async fn ssc_take_volume_lock_undo(
         &params.serialized_authn,
     );
 
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch()
         .await?;
@@ -448,7 +448,7 @@ async fn ssc_alloc_regions(
         &params.serialized_authn,
     );
 
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch()
         .await
@@ -660,7 +660,7 @@ async fn ssc_create_snapshot_record(
 
     info!(log, "grabbing disk by name {}", params.create_params.disk);
 
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch()
         .await
@@ -685,7 +685,7 @@ async fn ssc_create_snapshot_record(
         size: disk.size,
     };
 
-    let (.., authz_project) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_project) = LookupPath::new(&opctx, osagactx.datastore())
         .project_id(params.project_id)
         .lookup_for(authz::Action::CreateChild)
         .await
@@ -717,7 +717,7 @@ async fn ssc_create_snapshot_record_undo(
     info!(log, "deleting snapshot {}", snapshot_id);
 
     let (.., authz_snapshot, db_snapshot) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .snapshot_id(snapshot_id)
             .fetch_for(authz::Action::Delete)
             .await
@@ -814,7 +814,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
         &params.serialized_authn,
     );
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., authz_instance) = LookupPath::new(&opctx, osagactx.datastore())
         .instance_id(attach_instance_id)
         .lookup_for(authz::Action::Read)
         .await
@@ -896,7 +896,7 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
     info!(log, "Undoing snapshot request for {snapshot_id}");
 
     // Lookup the regions used by the source disk...
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch()
         .await?;
@@ -928,7 +928,7 @@ async fn ssc_get_pantry_address(
     // If the disk is already attached to a Pantry, use that, otherwise get a
     // random one. Return boolean indicating if additional saga nodes need to
     // attach this disk to that random pantry.
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch()
         .await
@@ -968,7 +968,7 @@ async fn ssc_attach_disk_to_pantry(
     );
 
     let (.., authz_disk, db_disk) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .disk_id(params.disk_id)
             .fetch_for(authz::Action::Modify)
             .await
@@ -1029,7 +1029,7 @@ async fn ssc_attach_disk_to_pantry(
     // Record the disk's new generation number as this saga node's output. It
     // will be important later to *only* transition this disk out of maintenance
     // if the generation number matches what *this* saga is doing.
-    let (.., db_disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., db_disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch_for(authz::Action::Read)
         .await
@@ -1050,7 +1050,7 @@ async fn ssc_attach_disk_to_pantry_undo(
     );
 
     let (.., authz_disk, db_disk) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .disk_id(params.disk_id)
             .fetch_for(authz::Action::Modify)
             .await
@@ -1244,7 +1244,7 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
     info!(log, "Undoing pantry snapshot request for {snapshot_id}");
 
     // Lookup the regions used by the source disk...
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch()
         .await?;
@@ -1308,7 +1308,7 @@ async fn ssc_detach_disk_from_pantry(
     );
 
     let (.., authz_disk, db_disk) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .disk_id(params.disk_id)
             .fetch_for(authz::Action::Modify)
             .await
@@ -1385,7 +1385,7 @@ async fn ssc_start_running_snapshot(
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "starting running snapshot"; "snapshot_id" => %snapshot_id);
 
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch()
         .await
@@ -1476,7 +1476,7 @@ async fn ssc_start_running_snapshot_undo(
     info!(log, "Undoing snapshot start running request for {snapshot_id}");
 
     // Lookup the regions used by the source disk...
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch()
         .await?;
@@ -1520,7 +1520,7 @@ async fn ssc_create_volume_record(
         &params.serialized_authn,
     );
 
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch()
         .await
@@ -1614,7 +1614,7 @@ async fn ssc_finalize_snapshot_record(
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     let (.., authz_snapshot, db_snapshot) =
-        LookupPath::new(&opctx, &osagactx.datastore())
+        LookupPath::new(&opctx, osagactx.datastore())
             .snapshot_id(snapshot_id)
             .fetch_for(authz::Action::Modify)
             .await
@@ -1650,7 +1650,7 @@ async fn ssc_release_volume_lock(
         &params.serialized_authn,
     );
 
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+    let (.., disk) = LookupPath::new(&opctx, osagactx.datastore())
         .disk_id(params.disk_id)
         .fetch()
         .await
@@ -2088,7 +2088,7 @@ mod test {
 
     async fn no_snapshot_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Snapshot;
-        use nexus_db_queries::db::schema::snapshot::dsl;
+        use nexus_db_schema::schema::snapshot::dsl;
 
         dsl::snapshot
             .filter(dsl::time_deleted.is_null())
@@ -2104,7 +2104,7 @@ mod test {
 
     async fn no_region_snapshot_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::RegionSnapshot;
-        use nexus_db_queries::db::schema::region_snapshot::dsl;
+        use nexus_db_schema::schema::region_snapshot::dsl;
 
         dsl::region_snapshot
             .select(RegionSnapshot::as_select())
@@ -2174,6 +2174,7 @@ mod test {
                 external_ips: vec![],
                 start: true,
                 auto_restart_policy: Default::default(),
+                anti_affinity_groups: Vec::new(),
             },
         )
         .await;

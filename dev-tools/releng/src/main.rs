@@ -42,7 +42,7 @@ use crate::job::Jobs;
 /// to as "v8", "version 8", or "release 8" to customers). The use of semantic
 /// versioning is mostly to hedge for perhaps wanting something more granular in
 /// the future.
-const BASE_VERSION: Version = Version::new(13, 0, 0);
+const BASE_VERSION: Version = Version::new(15, 0, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -72,8 +72,9 @@ const RECOVERY_IMAGE_PACKAGES: [(&PackageName, InstallMethod); 2] = [
     (&PackageName::new_const("installinator"), InstallMethod::Install),
     (&PackageName::new_const("mg-ddm-gz"), InstallMethod::Install),
 ];
-const TUF_PACKAGES: [&PackageName; 11] = [
+const TUF_PACKAGES: [&PackageName; 12] = [
     &PackageName::new_const("clickhouse_keeper"),
+    &PackageName::new_const("clickhouse_server"),
     &PackageName::new_const("clickhouse"),
     &PackageName::new_const("cockroachdb"),
     &PackageName::new_const("crucible-pantry-zone"),

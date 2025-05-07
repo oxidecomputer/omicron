@@ -19,6 +19,7 @@ use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
+use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
@@ -30,11 +31,9 @@ use dropshot::HttpError;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use illumos_utils::opte::PortManager;
-use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use illumos_utils::zone::ZONE_PREFIX;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronZonesConfig, SledRole,
+    OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
 };
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
@@ -69,7 +68,7 @@ use sled_agent_types::zone_bundle::{
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
 use sled_diagnostics::{SledDiagnosticsCmdError, SledDiagnosticsCmdOutput};
-use sled_hardware::{HardwareManager, underlay};
+use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::manager::StorageHandle;
@@ -80,11 +79,9 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use illumos_utils::running_zone::ZoneBuilderFactory;
-#[cfg(not(test))]
-use illumos_utils::{dladm::Dladm, zone::Zones};
-#[cfg(test)]
-use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
+use illumos_utils::dladm::Dladm;
+use illumos_utils::zone::Api;
+use illumos_utils::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -418,6 +415,12 @@ impl SledAgent {
         ));
         info!(&log, "SledAgent::new(..) starting");
 
+        // Cleanup any old sled-diagnostics ZFS snapshots
+        sled_diagnostics::LogsHandle::new(
+            log.new(o!("component" => "sled-diagnostics-cleanup")),
+        )
+        .cleanup_snapshots();
+
         let storage_manager = &long_running_task_handles.storage_manager;
         let boot_disk = storage_manager
             .get_latest_disks()
@@ -483,16 +486,35 @@ impl SledAgent {
 
         // Start tracking the underlay physical links.
         for link in underlay::find_chelsio_links(&config.data_links)? {
-            metrics_manager
+            match metrics_manager
                 .request_queue()
                 .track_physical("global", &link.0)
-                .await;
+            {
+                Ok(_) => {
+                    debug!(log, "started tracking global zone underlay links")
+                }
+                Err(e) => error!(
+                    log,
+                    "failed to track global zone underlay link";
+                    "error" => slog_error_chain::InlineErrorChain::new(&e),
+                ),
+            }
         }
 
         // Create the PortManager to manage all the OPTE ports on the sled.
         let port_manager = PortManager::new(
             parent_log.new(o!("component" => "PortManager")),
             *sled_address.ip(),
+        );
+
+        // The VMM reservoir is configured with respect to what's left after
+        // accounting for relatively fixed and predictable uses.
+        // We expect certain amounts of memory to be set aside for kernel,
+        // buffer, or control plane uses.
+        let memory_sizes = MemoryReservations::new(
+            parent_log.new(o!("component" => "MemoryReservations")),
+            long_running_task_handles.hardware_manager.clone(),
+            config.control_plane_memory_earmark_mb,
         );
 
         // Configure the VMM reservoir as either a percentage of DRAM or as an
@@ -502,20 +524,21 @@ impl SledAgent {
             config.vmm_reservoir_size_mb,
         );
 
-        let vmm_reservoir_manager = VmmReservoirManager::spawn(
-            &log,
-            long_running_task_handles.hardware_manager.clone(),
-            reservoir_mode,
-        );
+        let vmm_reservoir_manager =
+            VmmReservoirManager::spawn(&log, memory_sizes, reservoir_mode);
 
+        let instance_vnic_allocator = illumos_utils::link::VnicAllocator::new(
+            "Instance",
+            etherstub.clone(),
+            Arc::new(illumos_utils::dladm::Dladm::real_api()),
+        );
         let instances = InstanceManager::new(
             parent_log.clone(),
             nexus_client.clone(),
-            etherstub.clone(),
+            instance_vnic_allocator,
             port_manager.clone(),
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
-            ZoneBuilderFactory::default(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
         )?;
@@ -577,9 +600,14 @@ impl SledAgent {
             )
             .await?;
 
-        let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
-            .start(sled_address, &config.dropshot)
-            .await?;
+        let repo_depot = ArtifactStore::new(
+            &log,
+            storage_manager.clone(),
+            Some(services.clone()),
+        )
+        .await
+        .start(sled_address, &config.dropshot)
+        .await?;
 
         // Spawn a background task for managing notifications to nexus
         // about this sled-agent.
@@ -703,6 +731,11 @@ impl SledAgent {
         SupportBundleManager::new(&self.log, self.storage())
     }
 
+    /// Accesses the [SupportBundleLogs] API.
+    pub(crate) fn as_support_bundle_logs(&self) -> SupportBundleLogs<'_> {
+        SupportBundleLogs::new(&self.log, self.storage())
+    }
+
     pub(crate) fn switch_zone_underlay_info(
         &self,
     ) -> (Ipv6Addr, Option<&RackNetworkConfig>) {
@@ -761,28 +794,6 @@ impl SledAgent {
         self.inner.zone_bundler.list_for_zone(name).await.map_err(Error::from)
     }
 
-    /// Create a zone bundle for the provided zone.
-    pub async fn create_zone_bundle(
-        &self,
-        name: &str,
-    ) -> Result<ZoneBundleMetadata, Error> {
-        if name.starts_with(PROPOLIS_ZONE_PREFIX) {
-            self.inner
-                .instances
-                .create_zone_bundle(name)
-                .await
-                .map_err(Error::from)
-        } else if name.starts_with(ZONE_PREFIX) {
-            self.inner
-                .services
-                .create_zone_bundle(name)
-                .await
-                .map_err(Error::from)
-        } else {
-            Err(Error::from(BundleError::NoSuchZone { name: name.to_string() }))
-        }
-    }
-
     /// Fetch the paths to all zone bundles with the provided name and ID.
     pub async fn get_zone_bundle_paths(
         &self,
@@ -798,7 +809,8 @@ impl SledAgent {
 
     /// List the zones that the sled agent is currently managing.
     pub async fn zones_list(&self) -> Result<Vec<String>, Error> {
-        Zones::get()
+        Zones::real_api()
+            .get()
             .await
             .map(|zones| {
                 let mut zn: Vec<_> = zones
@@ -854,7 +866,7 @@ impl SledAgent {
         Ok(self.storage().datasets_config_list().await?)
     }
 
-    pub async fn datasets_ensure(
+    async fn datasets_ensure(
         &self,
         config: DatasetsConfig,
     ) -> Result<DatasetsManagementResult, Error> {
@@ -888,7 +900,7 @@ impl SledAgent {
     /// on this sled, and that no other disks are being used by the control
     /// plane (with the exception of M.2s, which are always automatically
     /// in-use).
-    pub async fn omicron_physical_disks_ensure(
+    async fn omicron_physical_disks_ensure(
         &self,
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, Error> {
@@ -948,9 +960,64 @@ impl SledAgent {
         Ok(disk_result)
     }
 
+    /// Ensures that the specific sets of disks, datasets, and zones specified
+    /// by `config` are running.
+    ///
+    /// This method currently blocks while each of disks, datasets, and zones
+    /// are ensured in that order; a failure on one prevents any attempt to
+    /// ensure the subsequent step(s).
+    pub async fn set_omicron_config(
+        &self,
+        config: OmicronSledConfig,
+    ) -> Result<OmicronSledConfigResult, Error> {
+        // Until the config-reconciler work lands: unpack the unified config
+        // into the three split configs for indepenedent ledgering.
+        let disks_config = OmicronPhysicalDisksConfig {
+            generation: config.generation,
+            disks: config.disks.into_iter().collect(),
+        };
+
+        let disks = self.omicron_physical_disks_ensure(disks_config).await?;
+
+        // If we only had partial success deploying disks, don't proceed.
+        if disks.has_error() {
+            return Ok(OmicronSledConfigResult {
+                disks: disks.status,
+                datasets: Vec::new(),
+            });
+        }
+
+        let datasets_config = DatasetsConfig {
+            generation: config.generation,
+            datasets: config.datasets.into_iter().map(|d| (d.id, d)).collect(),
+        };
+
+        let datasets = self.datasets_ensure(datasets_config).await?;
+
+        // If we only had partial success deploying datasets, don't proceed.
+        if datasets.has_error() {
+            return Ok(OmicronSledConfigResult {
+                disks: disks.status,
+                datasets: datasets.status,
+            });
+        }
+
+        let zones_config = OmicronZonesConfig {
+            generation: config.generation,
+            zones: config.zones.into_iter().collect(),
+        };
+
+        self.omicron_zones_ensure(zones_config).await?;
+
+        Ok(OmicronSledConfigResult {
+            disks: disks.status,
+            datasets: datasets.status,
+        })
+    }
+
     /// Ensures that the specific set of Omicron zones are running as configured
     /// (and that no other zones are running)
-    pub async fn omicron_zones_ensure(
+    async fn omicron_zones_ensure(
         &self,
         requested_zones: OmicronZonesConfig,
     ) -> Result<(), Error> {
@@ -983,13 +1050,8 @@ impl SledAgent {
 
         self.inner
             .services
-            .ensure_all_omicron_zones_persistent(requested_zones, None)
+            .ensure_all_omicron_zones_persistent(requested_zones)
             .await?;
-        Ok(())
-    }
-
-    pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
-        self.inner.services.cockroachdb_initialize().await?;
         Ok(())
     }
 
@@ -1325,21 +1387,20 @@ impl SledAgent {
                 total_size: ByteCount::try_from(info.size())?,
             });
 
-            let inv_props =
-                match self.storage().datasets_list(zpool.clone()).await {
-                    Ok(props) => props
-                        .into_iter()
-                        .map(|prop| InventoryDataset::from(prop)),
-                    Err(err) => {
-                        warn!(
-                            self.log,
-                            "Failed to access dataset info within zpool";
-                            "zpool" => %zpool,
-                            "err" => %err
-                        );
-                        continue;
-                    }
-                };
+            let inv_props = match self.storage().datasets_list(zpool).await {
+                Ok(props) => {
+                    props.into_iter().map(|prop| InventoryDataset::from(prop))
+                }
+                Err(err) => {
+                    warn!(
+                        self.log,
+                        "Failed to access dataset info within zpool";
+                        "zpool" => %zpool,
+                        "err" => %err
+                    );
+                    continue;
+                }
+            };
             datasets.extend(inv_props);
         }
 
@@ -1377,6 +1438,12 @@ impl SledAgent {
         sled_diagnostics::dladm_info().await
     }
 
+    pub(crate) async fn support_nvmeadm_info(
+        &self,
+    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+        sled_diagnostics::nvmeadm_info().await
+    }
+
     pub(crate) async fn support_pargs_info(
         &self,
     ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
@@ -1393,6 +1460,18 @@ impl SledAgent {
         &self,
     ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
         sled_diagnostics::pfiles_oxide_processes(&self.log).await
+    }
+
+    pub(crate) async fn support_zfs_info(
+        &self,
+    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+        sled_diagnostics::zfs_info().await
+    }
+
+    pub(crate) async fn support_zpool_info(
+        &self,
+    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+        sled_diagnostics::zpool_info().await
     }
 }
 

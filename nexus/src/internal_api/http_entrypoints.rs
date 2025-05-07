@@ -5,8 +5,11 @@
 //! Handler functions (entrypoints) for HTTP APIs internal to the control plane
 
 use super::params::{OximeterInfo, RackInitializationRequest};
+use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::ApiContext;
+use crate::external_api::shared;
 use dropshot::ApiDescription;
+use dropshot::Body;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
@@ -17,14 +20,18 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
+use http::Response;
 use nexus_internal_api::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::ClickhousePolicy;
+use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
+use nexus_types::external_api::params::SupportBundleFilePath;
+use nexus_types::external_api::params::SupportBundlePath;
 use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::external_api::shared::UninitializedSled;
@@ -36,6 +43,7 @@ use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::BackgroundTask;
 use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::Ipv4NatEntryView;
+use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::Saga;
 use nexus_types::internal_api::views::to_list;
 use omicron_common::api::external::Instance;
@@ -54,6 +62,8 @@ use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
+use range_requests::RequestContextEx;
 use std::collections::BTreeMap;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
@@ -501,7 +511,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    // Sagas
+    // Debug interfaces for Sagas
 
     async fn saga_list(
         rqctx: RequestContext<Self::Context>,
@@ -581,7 +591,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    // Background Tasks
+    // Debug interfaces for Background Tasks
 
     async fn bgtask_list(
         rqctx: RequestContext<Self::Context>,
@@ -632,6 +642,24 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let body = body.into_inner();
             nexus.bgtask_activate(&opctx, body.bgtask_names).await?;
             Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    // Debug interfaces for MGS updates
+
+    async fn mgs_updates(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<MgsUpdateDriverStatus>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let nexus = &apictx.nexus;
+            Ok(HttpResponseOk(nexus.mgs_updates(&opctx).await?))
         };
         apictx
             .internal_latencies
@@ -899,6 +927,282 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
+    async fn support_bundle_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+
+            let bundles = nexus
+                .support_bundle_list(&opctx, &pagparams)
+                .await?
+                .into_iter()
+                .map(|p| p.into())
+                .collect();
+
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                bundles,
+                &|_, bundle: &shared::SupportBundleInfo| {
+                    bundle.id.into_untyped_uuid()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePath>,
+    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+
+            let bundle = nexus
+                .support_bundle_view(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                )
+                .await?;
+
+            Ok(HttpResponseOk(bundle.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+
+            let head = false;
+            let range = rqctx.range();
+
+            let body = nexus
+                .support_bundle_download(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleQueryType::Index,
+                    head,
+                    range,
+                )
+                .await?;
+            Ok(body)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_download(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+
+            let head = false;
+            let range = rqctx.range();
+
+            let body = nexus
+                .support_bundle_download(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleQueryType::Whole,
+                    head,
+                    range,
+                )
+                .await?;
+            Ok(body)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let head = false;
+            let range = rqctx.range();
+
+            let body = nexus
+                .support_bundle_download(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(
+                        path.bundle.support_bundle,
+                    ),
+                    SupportBundleQueryType::Path { file_path: path.file },
+                    head,
+                    range,
+                )
+                .await?;
+            Ok(body)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let head = true;
+            let range = rqctx.range();
+
+            let body = nexus
+                .support_bundle_download(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleQueryType::Whole,
+                    head,
+                    range,
+                )
+                .await?;
+            Ok(body)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let head = true;
+            let range = rqctx.range();
+
+            let body = nexus
+                .support_bundle_download(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(
+                        path.bundle.support_bundle,
+                    ),
+                    SupportBundleQueryType::Path { file_path: path.file },
+                    head,
+                    range,
+                )
+                .await?;
+            Ok(body)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+
+            let bundle = nexus
+                .support_bundle_create(&opctx, "Created by internal API")
+                .await?;
+            Ok(HttpResponseCreated(bundle.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+
+            nexus
+                .support_bundle_delete(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                )
+                .await?;
+
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn probes_get(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ProbePathParam>,
@@ -959,6 +1263,50 @@ impl NexusInternalApi for NexusInternalApiImpl {
             nexus
                 .datastore()
                 .clickhouse_policy_insert_latest_version(
+                    &opctx,
+                    &policy.into_inner(),
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn oximeter_read_policy_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OximeterReadPolicy>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let nexus = &apictx.nexus;
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let policy = nexus
+                .datastore()
+                .oximeter_read_policy_get_latest(&opctx)
+                .await?;
+            Ok(HttpResponseOk(policy))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn oximeter_read_policy_set(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<OximeterReadPolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            nexus
+                .datastore()
+                .oximeter_read_policy_insert_latest_version(
                     &opctx,
                     &policy.into_inner(),
                 )

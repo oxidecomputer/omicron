@@ -7,11 +7,11 @@
 //! These largely side-step Diesel's type system,
 //! and are recommended for more complex CTE
 
-use crate::db::pool::DbConnection;
 use diesel::RunQueryDsl;
 use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
 use diesel::sql_types;
+use nexus_db_lookup::DbConnection;
 use std::cell::Cell;
 use std::marker::PhantomData;
 
@@ -88,14 +88,14 @@ type BoxedQuery = diesel::query_builder::BoxedSqlQuery<
 //
 // But this relies on nightly features.
 pub struct QueryBuilder {
-    query: BoxedQuery,
+    query: Option<BoxedQuery>,
     bind_counter: BindParamCounter,
 }
 
 impl QueryBuilder {
     pub fn new() -> Self {
         Self {
-            query: diesel::sql_query("").into_boxed(),
+            query: Some(diesel::sql_query("").into_boxed()),
             bind_counter: BindParamCounter::new(),
         }
     }
@@ -107,14 +107,12 @@ impl QueryBuilder {
     /// however, a distinct method, as "identifying bind params" should be
     /// decoupled from "using bind parameters" to have an efficient statement
     /// cache.
-    pub fn param(self) -> Self {
-        Self {
-            query: self
-                .query
-                .sql("$")
-                .sql(self.bind_counter.next().to_string()),
-            bind_counter: self.bind_counter,
-        }
+    pub fn param(&mut self) -> &mut Self {
+        self.query = self
+            .query
+            .take()
+            .map(|q| q.sql("$").sql(self.bind_counter.next().to_string()));
+        self
     }
 
     /// Slightly more strict than the "sql" method of Diesel's SqlQuery.
@@ -122,27 +120,28 @@ impl QueryBuilder {
     /// susceptibility to SQL injection.
     ///
     /// See the documentation of [TrustedStr] for more details.
-    pub fn sql<S: Into<TrustedStr>>(self, s: S) -> Self {
-        let query = match s.into().0 {
-            TrustedStrVariants::Static(s) => self.query.sql(s),
-            TrustedStrVariants::ValidatedExplicitly(s) => self.query.sql(s),
-        };
-        Self { query, bind_counter: self.bind_counter }
+    pub fn sql<S: Into<TrustedStr>>(&mut self, s: S) -> &mut Self {
+        self.query = self.query.take().map(|q| match s.into().0 {
+            TrustedStrVariants::Static(s) => q.sql(s),
+            TrustedStrVariants::ValidatedExplicitly(s) => q.sql(s),
+        });
+        self
     }
 
     /// A call-through function to [diesel::query_builder::BoxedSqlQuery].
-    pub fn bind<BindSt, Value>(self, b: Value) -> Self
+    pub fn bind<BindSt, Value>(&mut self, b: Value) -> &mut Self
     where
         Pg: sql_types::HasSqlType<BindSt>,
         Value: diesel::serialize::ToSql<BindSt, Pg> + Send + 'static,
         BindSt: Send + 'static,
     {
-        Self { query: self.query.bind(b), bind_counter: self.bind_counter }
+        self.query = self.query.take().map(|q| q.bind(b));
+        self
     }
 
     /// Takes the final boxed query
     pub fn query<T>(self) -> TypedSqlQuery<T> {
-        TypedSqlQuery { inner: self.query, _phantom: PhantomData }
+        TypedSqlQuery { inner: self.query.unwrap(), _phantom: PhantomData }
     }
 }
 

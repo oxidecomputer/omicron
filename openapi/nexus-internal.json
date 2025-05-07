@@ -744,6 +744,302 @@
         }
       }
     },
+    "/experimental/v1/system/support-bundles": {
+      "get": {
+        "summary": "List all support bundles",
+        "operationId": "support_bundle_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfoResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "summary": "Create a new support bundle",
+        "operationId": "support_bundle_create",
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{support_bundle}": {
+      "get": {
+        "summary": "View a support bundle",
+        "operationId": "support_bundle_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete an existing support bundle",
+        "description": "May also be used to cancel a support bundle which is currently being collected, or to remove metadata for a support bundle that has failed.",
+        "operationId": "support_bundle_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{support_bundle}/download": {
+      "get": {
+        "summary": "Download the contents of a support bundle",
+        "operationId": "support_bundle_download",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "summary": "Download the metadata of a support bundle",
+        "operationId": "support_bundle_head",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}": {
+      "get": {
+        "summary": "Download a file within a support bundle",
+        "operationId": "support_bundle_download_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "summary": "Download the metadata of a file within the support bundle",
+        "operationId": "support_bundle_head_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{support_bundle}/index": {
+      "get": {
+        "summary": "Download the index of a support bundle",
+        "operationId": "support_bundle_index",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/instances/{instance_id}/migrate": {
       "post": {
         "operationId": "instance_migrate",
@@ -915,6 +1211,30 @@
         }
       }
     },
+    "/mgs-updates": {
+      "get": {
+        "summary": "Fetch information about ongoing MGS updates",
+        "operationId": "mgs_updates",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MgsUpdateDriverStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/nat/ipv4/changeset/{from_gen}": {
       "get": {
         "summary": "Fetch NAT ChangeSet",
@@ -956,6 +1276,55 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/oximeter/read-policy": {
+      "get": {
+        "summary": "Get the current oximeter read policy",
+        "operationId": "oximeter_read_policy_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OximeterReadPolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set the new oximeter read policy",
+        "operationId": "oximeter_read_policy_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OximeterReadPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1427,6 +1796,31 @@
         }
       }
     },
+    "/v1/ping": {
+      "get": {
+        "summary": "Ping API",
+        "description": "Always responds with Ok if it responds at all.",
+        "operationId": "ping",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ping"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/vmms/{propolis_id}": {
       "put": {
         "summary": "Report updated state for a VMM.",
@@ -1546,6 +1940,11 @@
           }
         ]
       },
+      "ArtifactVersion": {
+        "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9._+-]{1,63}$"
+      },
       "BackgroundTask": {
         "description": "Background tasks\n\nThese are currently only intended for observability by developers.  We will eventually want to flesh this out into something more observable for end users.",
         "type": "object",
@@ -1627,6 +2026,24 @@
           "part",
           "revision",
           "serial"
+        ]
+      },
+      "BaseboardId": {
+        "description": "A unique baseboard id found during a collection\n\nBaseboard ids are the keys used to link up information from disparate sources (like a service processor and a sled agent).\n\nThese are normalized in the database.  Each distinct baseboard id is assigned a uuid and shared across the many possible collections that reference it.\n\nUsually, the part number and serial number are combined with a revision number.  We do not include that here.  If we ever did find a baseboard with the same part number and serial number but a new revision number, we'd want to treat that as the same baseboard as one with a different revision number.",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
         ]
       },
       "BfdMode": {
@@ -1908,12 +2325,36 @@
               }
             ]
           },
+          "oximeter_read_mode": {
+            "description": "Whether oximeter should read from a single node or a cluster",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OximeterReadMode"
+              }
+            ]
+          },
+          "oximeter_read_version": {
+            "description": "Oximeter read policy version when this blueprint was created",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "parent_blueprint_id": {
             "nullable": true,
             "description": "which blueprint this blueprint is based on",
             "allOf": [
               {
                 "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
+          },
+          "pending_mgs_updates": {
+            "description": "List of pending MGS-mediated updates",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingMgsUpdates"
               }
             ]
           },
@@ -1938,6 +2379,9 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
+          "oximeter_read_mode",
+          "oximeter_read_version",
+          "pending_mgs_updates",
           "sleds",
           "time_created"
         ]
@@ -2007,22 +2451,6 @@
               "expunged"
             ]
           }
-        ]
-      },
-      "BlueprintDatasetsConfig": {
-        "description": "Information about Omicron datasets as recorded in a blueprint.",
-        "type": "object",
-        "properties": {
-          "datasets": {
-            "$ref": "#/components/schemas/IdMapBlueprintDatasetConfig"
-          },
-          "generation": {
-            "$ref": "#/components/schemas/Generation"
-          }
-        },
-        "required": [
-          "datasets",
-          "generation"
         ]
       },
       "BlueprintMetadata": {
@@ -2193,44 +2621,37 @@
           }
         ]
       },
-      "BlueprintPhysicalDisksConfig": {
-        "description": "Information about Omicron physical disks as recorded in a blueprint.\n\nPart of [`Blueprint`].",
-        "type": "object",
-        "properties": {
-          "disks": {
-            "$ref": "#/components/schemas/IdMapBlueprintPhysicalDiskConfig"
-          },
-          "generation": {
-            "$ref": "#/components/schemas/Generation"
-          }
-        },
-        "required": [
-          "disks",
-          "generation"
-        ]
-      },
       "BlueprintSledConfig": {
         "description": "Information about the configuration of a sled as recorded in a blueprint.\n\nPart of [`Blueprint`].",
         "type": "object",
         "properties": {
-          "datasets_config": {
-            "$ref": "#/components/schemas/BlueprintDatasetsConfig"
+          "datasets": {
+            "$ref": "#/components/schemas/IdMapBlueprintDatasetConfig"
           },
-          "disks_config": {
-            "$ref": "#/components/schemas/BlueprintPhysicalDisksConfig"
+          "disks": {
+            "$ref": "#/components/schemas/IdMapBlueprintPhysicalDiskConfig"
+          },
+          "sled_agent_generation": {
+            "description": "Generation number used when this type is converted into an `OmicronSledConfig` for use by sled-agent.\n\nThis field is explicitly named `sled_agent_generation` to indicate that it is only required to cover information that changes what Reconfigurator sends to sled agent. For example, changing the sled `state` from `Active` to `Decommissioned` would not require a bump to `sled_agent_generation`, because a `Decommissioned` sled will never be sent an `OmicronSledConfig`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
           },
           "state": {
             "$ref": "#/components/schemas/SledState"
           },
-          "zones_config": {
-            "$ref": "#/components/schemas/BlueprintZonesConfig"
+          "zones": {
+            "$ref": "#/components/schemas/IdMapBlueprintZoneConfig"
           }
         },
         "required": [
-          "datasets_config",
-          "disks_config",
+          "datasets",
+          "disks",
+          "sled_agent_generation",
           "state",
-          "zones_config"
+          "zones"
         ]
       },
       "BlueprintTarget": {
@@ -2278,7 +2699,7 @@
         ]
       },
       "BlueprintZoneConfig": {
-        "description": "Describes one Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintZonesConfig`].",
+        "description": "Describes one Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintSledConfig`].",
         "type": "object",
         "properties": {
           "disposition": {
@@ -2290,7 +2711,6 @@
             ]
           },
           "filesystem_pool": {
-            "nullable": true,
             "description": "zpool used for the zone's (transient) root filesystem",
             "allOf": [
               {
@@ -2310,6 +2730,7 @@
         },
         "required": [
           "disposition",
+          "filesystem_pool",
           "id",
           "image_source",
           "zone_type"
@@ -2397,14 +2818,52 @@
                 ]
               },
               "version": {
-                "type": "string",
-                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+                "$ref": "#/components/schemas/BlueprintZoneImageVersion"
               }
             },
             "required": [
               "hash",
               "type",
               "version"
+            ]
+          }
+        ]
+      },
+      "BlueprintZoneImageVersion": {
+        "description": "The version of a blueprint zone image in use.\n\nThis is used for debugging output.",
+        "oneOf": [
+          {
+            "description": "A specific version of the image is available.",
+            "type": "object",
+            "properties": {
+              "image_version": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "version": {
+                "$ref": "#/components/schemas/ArtifactVersion"
+              }
+            },
+            "required": [
+              "image_version",
+              "version"
+            ]
+          },
+          {
+            "description": "The version could not be determined. This is non-fatal.",
+            "type": "object",
+            "properties": {
+              "image_version": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "image_version"
             ]
           }
         ]
@@ -2760,32 +3219,6 @@
           }
         ]
       },
-      "BlueprintZonesConfig": {
-        "description": "Information about an Omicron zone as recorded in a blueprint.\n\nCurrently, this is similar to [`OmicronZonesConfig`], but also contains a per-zone [`BlueprintZoneDisposition`].\n\nPart of [`Blueprint`].",
-        "type": "object",
-        "properties": {
-          "generation": {
-            "description": "Generation number of this configuration.\n\nThis generation number is owned by the control plane. See [`OmicronZonesConfig::generation`] for more details.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "zones": {
-            "description": "The set of running zones.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IdMapBlueprintZoneConfig"
-              }
-            ]
-          }
-        },
-        "required": [
-          "generation",
-          "zones"
-        ]
-      },
       "ByteCount": {
         "description": "Byte count to express memory or storage capacity.",
         "type": "integer",
@@ -3043,6 +3476,67 @@
               "data"
             ]
           }
+        ]
+      },
+      "CompletedAttempt": {
+        "description": "externally-exposed status for a completed attempt",
+        "type": "object",
+        "properties": {
+          "elapsed": {
+            "$ref": "#/components/schemas/Duration"
+          },
+          "nattempts_done": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "request": {
+            "$ref": "#/components/schemas/PendingMgsUpdate"
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/UpdateCompletedHow"
+                  }
+                },
+                "required": [
+                  "ok"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "time_done": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_started": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "elapsed",
+          "nattempts_done",
+          "request",
+          "result",
+          "time_done",
+          "time_started"
         ]
       },
       "CompressionAlgorithm": {
@@ -3728,6 +4222,45 @@
           "request_id"
         ]
       },
+      "ExpectedVersion": {
+        "description": "Describes the version that we expect to find in some firmware slot",
+        "oneOf": [
+          {
+            "description": "We expect to find _no_ valid caboose in this slot",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "no_valid_version"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "We expect to find the specified version in this slot",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "version"
+                ]
+              },
+              "version": {
+                "$ref": "#/components/schemas/ArtifactVersion"
+              }
+            },
+            "required": [
+              "kind",
+              "version"
+            ]
+          }
+        ]
+      },
       "ExternalPortDiscovery": {
         "oneOf": [
           {
@@ -3795,6 +4328,12 @@
           "$ref": "#/components/schemas/BlueprintZoneConfig"
         }
       },
+      "IdMapPendingMgsUpdate": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/PendingMgsUpdate"
+        }
+      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -3834,6 +4373,29 @@
               "value"
             ]
           }
+        ]
+      },
+      "InProgressUpdateStatus": {
+        "description": "externally-exposed status for each in-progress update",
+        "type": "object",
+        "properties": {
+          "nattempts_done": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/UpdateAttemptStatus"
+          },
+          "time_started": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "nattempts_done",
+          "status",
+          "time_started"
         ]
       },
       "Instance": {
@@ -4368,6 +4930,35 @@
         "minLength": 5,
         "maxLength": 17
       },
+      "MgsUpdateDriverStatus": {
+        "description": "Status of ongoing update attempts, recently completed attempts, and update requests that are waiting for retry.",
+        "type": "object",
+        "properties": {
+          "in_progress": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/InProgressUpdateStatus"
+            }
+          },
+          "recent": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletedAttempt"
+            }
+          },
+          "waiting": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/WaitingStatus"
+            }
+          }
+        },
+        "required": [
+          "in_progress",
+          "recent",
+          "waiting"
+        ]
+      },
       "MigrationRuntimeState": {
         "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",
         "type": "object",
@@ -4645,6 +5236,161 @@
           "collector_id"
         ]
       },
+      "OximeterReadMode": {
+        "description": "Where oximeter should read from",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "single_node"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cluster"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "OximeterReadPolicy": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/OximeterReadMode"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "mode",
+          "time_created",
+          "version"
+        ]
+      },
+      "PendingMgsUpdate": {
+        "type": "object",
+        "properties": {
+          "artifact_hash": {
+            "description": "which artifact to apply to this device (implies which component is being updated)",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "artifact_version": {
+            "$ref": "#/components/schemas/ArtifactVersion"
+          },
+          "baseboard_id": {
+            "description": "id of the baseboard that we're going to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "details": {
+            "description": "component-specific details of the pending update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingMgsUpdateDetails"
+              }
+            ]
+          },
+          "slot_id": {
+            "description": "last known MGS slot (cubby number) of the baseboard",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "sp_type": {
+            "description": "what type of baseboard this is",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpType"
+              }
+            ]
+          }
+        },
+        "required": [
+          "artifact_hash",
+          "artifact_version",
+          "baseboard_id",
+          "details",
+          "slot_id",
+          "sp_type"
+        ]
+      },
+      "PendingMgsUpdateDetails": {
+        "description": "Describes the component-specific details of a PendingMgsUpdate",
+        "oneOf": [
+          {
+            "description": "the SP itself is being updated",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "sp"
+                ]
+              },
+              "expected_active_version": {
+                "description": "expected contents of the active slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ArtifactVersion"
+                  }
+                ]
+              },
+              "expected_inactive_version": {
+                "description": "expected contents of the inactive slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExpectedVersion"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "expected_active_version",
+              "expected_inactive_version"
+            ]
+          }
+        ]
+      },
+      "PendingMgsUpdates": {
+        "type": "object",
+        "properties": {
+          "by_baseboard": {
+            "$ref": "#/components/schemas/IdMapPendingMgsUpdate"
+          }
+        },
+        "required": [
+          "by_baseboard"
+        ]
+      },
       "PhysicalDiskKind": {
         "description": "Describes the form factor of physical disks.",
         "type": "string",
@@ -4696,6 +5442,28 @@
           "sled_id",
           "variant",
           "vendor"
+        ]
+      },
+      "Ping": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "Whether the external API is reachable. Will always be Ok if the endpoint returns anything at all.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PingStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "PingStatus": {
+        "type": "string",
+        "enum": [
+          "ok"
         ]
       },
       "PortConfigV2": {
@@ -5766,6 +6534,15 @@
           "last_port"
         ]
       },
+      "SpType": {
+        "description": "SpType\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
+        "type": "string",
+        "enum": [
+          "sled",
+          "power",
+          "switch"
+        ]
+      },
       "Srv": {
         "type": "object",
         "properties": {
@@ -5793,6 +6570,87 @@
           "prio",
           "target",
           "weight"
+        ]
+      },
+      "SupportBundleInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+          },
+          "reason_for_creation": {
+            "type": "string"
+          },
+          "reason_for_failure": {
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SupportBundleState"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "reason_for_creation",
+          "state",
+          "time_created"
+        ]
+      },
+      "SupportBundleInfoResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupportBundleInfo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SupportBundleState": {
+        "oneOf": [
+          {
+            "description": "Support Bundle still actively being collected.\n\nThis is the initial state for a Support Bundle, and it will automatically transition to either \"Failing\" or \"Active\".\n\nIf a user no longer wants to access a Support Bundle, they can request cancellation, which will transition to the \"Destroying\" state.",
+            "type": "string",
+            "enum": [
+              "collecting"
+            ]
+          },
+          {
+            "description": "Support Bundle is being destroyed.\n\nOnce backing storage has been freed, this bundle is destroyed.",
+            "type": "string",
+            "enum": [
+              "destroying"
+            ]
+          },
+          {
+            "description": "Support Bundle was not created successfully, or was created and has lost backing storage.\n\nThe record of the bundle still exists for readability, but the only valid operation on these bundles is to destroy them.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "Support Bundle has been processed, and is ready for usage.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          }
         ]
       },
       "SwitchLocation": {
@@ -5901,6 +6759,10 @@
         "type": "string",
         "format": "uuid"
       },
+      "TypedUuidForSupportBundleKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForUpstairsRepairKind": {
         "type": "string",
         "format": "uuid"
@@ -5971,6 +6833,29 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "UpdateAttemptStatus": {
+        "description": "status of a single update attempt",
+        "type": "string",
+        "enum": [
+          "not_started",
+          "fetching_artifact",
+          "precheck",
+          "updating",
+          "update_waiting",
+          "post_update",
+          "post_update_wait",
+          "done"
+        ]
+      },
+      "UpdateCompletedHow": {
+        "type": "string",
+        "enum": [
+          "found_no_changes_needed",
+          "completed_update",
+          "waited_for_concurrent_update",
+          "took_over_concurrent_update"
         ]
       },
       "UplinkAddressConfig": {
@@ -6105,6 +6990,25 @@
         "type": "integer",
         "format": "uint32",
         "minimum": 0
+      },
+      "WaitingStatus": {
+        "description": "externally-exposed status for waiting updates",
+        "type": "object",
+        "properties": {
+          "nattempts_done": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "next_attempt_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "nattempts_done",
+          "next_attempt_time"
+        ]
       },
       "ZpoolName": {
         "title": "The name of a Zpool",

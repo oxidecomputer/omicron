@@ -245,6 +245,14 @@ impl ZoneBundler {
     ) -> Self {
         // This is compiled out in tests because there's no way to set our
         // expectations on the mockall object it uses internally. Not great.
+        //
+        // NOTE: ^ This comment was written when mockall was still used in
+        // Omicron. It has since been removed; it may be possible to use
+        // dependency injection here ("fake" vs "real" implementation of ZFS)
+        // instead of conditional compilation.
+        // See also: The "sled-storage" `StorageManagerTestHarness`, which
+        // might be useful for making ZFS datasets on top of a test-only
+        // temporary directory.
         #[cfg(not(test))]
         initialize_zfs_resources(&log)
             .expect("Failed to initialize existing ZFS resources");
@@ -2025,7 +2033,7 @@ mod illumos_tests {
         let info = insert_fake_bundle(
             &paths[0],
             DaysOfOurBundles::new().next().unwrap(),
-            ZoneBundleCause::ExplicitRequest,
+            ZoneBundleCause::UnexpectedZone,
         )
         .await
         .context("Failed to insert_fake_bundle")?;
@@ -2120,7 +2128,7 @@ mod illumos_tests {
             let it = insert_fake_bundle(
                 bundle_dir,
                 days.next().unwrap(),
-                ZoneBundleCause::ExplicitRequest,
+                ZoneBundleCause::UnexpectedZone,
             )
             .await?;
             info.push(it);
@@ -2171,7 +2179,7 @@ mod illumos_tests {
             let it = insert_fake_bundle_with_zone_name(
                 &ctx.resource_wrapper.dirs[0],
                 days.next().unwrap(),
-                ZoneBundleCause::ExplicitRequest,
+                ZoneBundleCause::UnexpectedZone,
                 format!("oxz_whatever_{i}").as_str(),
             )
             .await?;

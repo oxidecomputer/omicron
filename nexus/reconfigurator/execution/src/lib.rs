@@ -11,8 +11,15 @@ use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::execution::*;
+use nexus_types::deployment::execution::StepSkipped;
+use nexus_types::deployment::execution::overridables;
+use nexus_types::deployment::execution::{
+    ComponentRegistrar, Event, ExecutionComponent, ExecutionStepId,
+    Overridables, ReconfiguratorExecutionSpec, SharedStepHandle, Sled,
+    StepHandle, StepResult, UpdateEngine,
+};
 use nexus_types::identity::Asset;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -22,23 +29,116 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use update_engine::StepSuccess;
 use update_engine::StepWarning;
 use update_engine::merge_anyhow_list;
-
 mod clickhouse;
 mod cockroachdb;
-mod datasets;
 mod dns;
 mod omicron_physical_disks;
+mod omicron_sled_config;
 mod omicron_zones;
 mod sagas;
 mod sled_state;
 #[cfg(test)]
 mod test_utils;
 
-/// The result of calling [`realize_blueprint`] or
-/// [`realize_blueprint_with_overrides`].
+/// Encapsulates arguments used for [`realize_blueprint`]
+///
+/// You probably want to start with `RequiredRealizeArgs` and use the
+/// builder-like methods to tweak it as required.
+pub struct RealizeArgs<'a> {
+    pub opctx: &'a OpContext,
+    pub datastore: &'a DataStore,
+    pub resolver: &'a Resolver,
+    pub blueprint: &'a Blueprint,
+    pub nexus_id: Option<OmicronZoneUuid>,
+    pub creator: OmicronZoneUuid,
+    pub sender: mpsc::Sender<Event>,
+    pub overrides: Option<&'a Overridables>,
+    pub mgs_updates: watch::Sender<PendingMgsUpdates>,
+}
+
+impl<'a> RealizeArgs<'a> {
+    /// See [`Overridables`]
+    ///
+    /// If not specified, no overrides are in place during blueprint execution.
+    pub fn with_overrides(
+        mut self,
+        overrides: &'a Overridables,
+    ) -> RealizeArgs<'a> {
+        self.overrides = Some(overrides);
+        self
+    }
+
+    /// Specifies the `creator` field used when Nexus creates various kinds of
+    /// database records
+    ///
+    /// This generally matches the current Nexus's id.  It's generally only used
+    /// for debugging.
+    pub fn with_creator(mut self, creator: OmicronZoneUuid) -> RealizeArgs<'a> {
+        self.creator = creator;
+        self
+    }
+
+    /// Specifies that we're running as a real Nexus with id `nexus_id`
+    ///
+    /// This enables some steps of blueprint execution that currently assume
+    /// it's running a valid Nexus.
+    pub fn as_nexus(mut self, nexus_id: OmicronZoneUuid) -> RealizeArgs<'a> {
+        self.nexus_id = Some(nexus_id);
+        self
+    }
+}
+
+/// Encapsulates all of the required arguments for [`realize_blueprint`]
+///
+/// You'll need to convert this to a [`RealizeArgs`] to use it with
+/// `realize_blueprint()`.  You can also use the builder-like `with_*` methods
+/// to tweak this as you do so.
+pub struct RequiredRealizeArgs<'a> {
+    pub opctx: &'a OpContext,
+    pub datastore: &'a DataStore,
+    pub resolver: &'a Resolver,
+    pub creator: OmicronZoneUuid,
+    pub blueprint: &'a Blueprint,
+    pub sender: mpsc::Sender<Event>,
+    pub mgs_updates: watch::Sender<PendingMgsUpdates>,
+}
+
+impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
+    fn from(value: RequiredRealizeArgs<'a>) -> Self {
+        RealizeArgs {
+            opctx: value.opctx,
+            datastore: value.datastore,
+            resolver: value.resolver,
+            blueprint: value.blueprint,
+            creator: value.creator,
+            nexus_id: None,
+            sender: value.sender,
+            overrides: None,
+            mgs_updates: value.mgs_updates,
+        }
+    }
+}
+
+impl<'a> RequiredRealizeArgs<'a> {
+    /// See [`RealizeArgs::with_overrides()`]
+    pub fn with_overrides(
+        self,
+        overrides: &'a Overridables,
+    ) -> RealizeArgs<'a> {
+        RealizeArgs::from(self).with_overrides(overrides)
+    }
+
+    /// See [`RealizeArgs::as_nexus()`]
+    pub fn as_nexus(self, nexus_id: OmicronZoneUuid) -> RealizeArgs<'a> {
+        RealizeArgs::from(self).as_nexus(nexus_id)
+    }
+}
+
+/// The result of calling [`realize_blueprint`].
 #[derive(Debug)]
 #[must_use = "the output of realize_blueprint should probably be used"]
 pub struct RealizeBlueprintOutput {
@@ -52,34 +152,20 @@ pub struct RealizeBlueprintOutput {
 /// The assumption is that callers are running this periodically or in a loop to
 /// deal with transient errors or changes in the underlying system state.
 pub async fn realize_blueprint(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    resolver: &Resolver,
-    blueprint: &Blueprint,
-    nexus_id: OmicronZoneUuid,
-    sender: mpsc::Sender<Event>,
+    exec_ctx: RealizeArgs<'_>,
 ) -> Result<RealizeBlueprintOutput, anyhow::Error> {
-    realize_blueprint_with_overrides(
+    let RealizeArgs {
         opctx,
         datastore,
         resolver,
         blueprint,
         nexus_id,
-        &Default::default(),
+        creator,
         sender,
-    )
-    .await
-}
+        overrides,
+        mgs_updates,
+    } = exec_ctx;
 
-pub async fn realize_blueprint_with_overrides(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    resolver: &Resolver,
-    blueprint: &Blueprint,
-    nexus_id: OmicronZoneUuid,
-    overrides: &Overridables,
-    sender: mpsc::Sender<Event>,
-) -> Result<RealizeBlueprintOutput, anyhow::Error> {
     let opctx = opctx.child(BTreeMap::from([(
         "comment".to_string(),
         blueprint.comment.clone(),
@@ -107,22 +193,8 @@ pub async fn realize_blueprint_with_overrides(
     )
     .into_shared();
 
-    register_deploy_disks_step(
-        &engine.for_component(ExecutionComponent::PhysicalDisks),
-        &opctx,
-        blueprint,
-        sled_list.clone(),
-    );
-
-    register_deploy_datasets_step(
-        &engine.for_component(ExecutionComponent::Datasets),
-        &opctx,
-        blueprint,
-        sled_list.clone(),
-    );
-
-    register_deploy_zones_step(
-        &engine.for_component(ExecutionComponent::OmicronZones),
+    register_deploy_sled_configs_step(
+        &engine.for_component(ExecutionComponent::SledAgent),
         &opctx,
         blueprint,
         sled_list.clone(),
@@ -139,8 +211,8 @@ pub async fn realize_blueprint_with_overrides(
         &opctx,
         datastore,
         blueprint,
-        nexus_id,
-        overrides,
+        creator,
+        overrides.unwrap_or(&*overridables::DEFAULT),
         sled_list.clone(),
     );
 
@@ -201,6 +273,12 @@ pub async fn realize_blueprint_with_overrides(
         blueprint,
     );
 
+    register_mgs_update_step(
+        &engine.for_component(ExecutionComponent::MgsUpdates),
+        blueprint,
+        mgs_updates,
+    );
+
     // All steps are registered, so execute the engine.
     let result = engine.execute().await?;
 
@@ -240,7 +318,7 @@ fn register_zone_external_networking_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Ensure external networking resources",
-            move |_cx| async move {
+            async move |_cx| {
                 datastore
                     .blueprint_ensure_external_networking_resources(
                         opctx, blueprint,
@@ -259,14 +337,18 @@ fn register_support_bundle_failure_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-    nexus_id: OmicronZoneUuid,
+    nexus_id: Option<OmicronZoneUuid>,
 ) {
     registrar
         .new_step(
             ExecutionStepId::Cleanup,
             "Mark support bundles as failed if they rely on \
              an expunged disk or sled",
-            move |_cx| async move {
+            async move |_cx| {
+                let Some(nexus_id) = nexus_id else {
+                    return StepSkipped::new((), "not running as Nexus").into();
+                };
+
                 let res = match datastore
                     .support_bundle_fail_expunged(opctx, blueprint, nexus_id)
                     .await
@@ -290,30 +372,23 @@ fn register_sled_list_step<'a>(
     datastore: &'a DataStore,
 ) -> StepHandle<Arc<BTreeMap<SledUuid, Sled>>> {
     registrar
-        .new_step(
-            ExecutionStepId::Fetch,
-            "Fetch sled list",
-            move |_cx| async move {
-                let sleds_by_id: BTreeMap<SledUuid, _> = datastore
-                    .sled_list_all_batched(opctx, SledFilter::InService)
-                    .await
-                    .context("listing all sleds")?
-                    .into_iter()
-                    .map(|db_sled| {
-                        (
-                            SledUuid::from_untyped_uuid(db_sled.id()),
-                            db_sled.into(),
-                        )
-                    })
-                    .collect();
+        .new_step(ExecutionStepId::Fetch, "Fetch sled list", async move |_cx| {
+            let sleds_by_id: BTreeMap<SledUuid, _> = datastore
+                .sled_list_all_batched(opctx, SledFilter::InService)
+                .await
+                .context("listing all sleds")?
+                .into_iter()
+                .map(|db_sled| {
+                    (SledUuid::from_untyped_uuid(db_sled.id()), db_sled.into())
+                })
+                .collect();
 
-                StepSuccess::new(Arc::new(sleds_by_id)).into()
-            },
-        )
+            StepSuccess::new(Arc::new(sleds_by_id)).into()
+        })
         .register()
 }
 
-fn register_deploy_disks_step<'a>(
+fn register_deploy_sled_configs_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
     blueprint: &'a Blueprint,
@@ -322,66 +397,13 @@ fn register_deploy_disks_step<'a>(
     registrar
         .new_step(
             ExecutionStepId::Ensure,
-            "Deploy physical disks",
-            move |cx| async move {
+            "Deploy sled configs",
+            async move |cx| {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
-                let res = omicron_physical_disks::deploy_disks(
+                let res = omicron_sled_config::deploy_sled_configs(
                     opctx,
                     &sleds_by_id,
-                    blueprint
-                        .sleds
-                        .iter()
-                        .map(|(sled_id, sled)| (*sled_id, &sled.disks_config)),
-                )
-                .await
-                .map_err(merge_anyhow_list);
-                Ok(map_err_to_step_warning(res))
-            },
-        )
-        .register();
-}
-
-fn register_deploy_datasets_step<'a>(
-    registrar: &ComponentRegistrar<'_, 'a>,
-    opctx: &'a OpContext,
-    blueprint: &'a Blueprint,
-    sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
-) {
-    registrar
-        .new_step(
-            ExecutionStepId::Ensure,
-            "Deploy datasets",
-            move |cx| async move {
-                let sleds_by_id = sleds.into_value(cx.token()).await;
-                let res =
-                    datasets::deploy_datasets(opctx, &sleds_by_id, blueprint)
-                        .await
-                        .map_err(merge_anyhow_list);
-                Ok(map_err_to_step_warning(res))
-            },
-        )
-        .register();
-}
-
-fn register_deploy_zones_step<'a>(
-    registrar: &ComponentRegistrar<'_, 'a>,
-    opctx: &'a OpContext,
-    blueprint: &'a Blueprint,
-    sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
-) {
-    registrar
-        .new_step(
-            ExecutionStepId::Ensure,
-            "Deploy Omicron zones",
-            move |cx| async move {
-                let sleds_by_id = sleds.into_value(cx.token()).await;
-                let res = omicron_zones::deploy_zones(
-                    opctx,
-                    &sleds_by_id,
-                    blueprint
-                        .sleds
-                        .iter()
-                        .map(|(sled_id, sled)| (*sled_id, &sled.zones_config)),
+                    &blueprint.sleds,
                 )
                 .await
                 .map_err(merge_anyhow_list);
@@ -407,7 +429,7 @@ fn register_plumb_firewall_rules_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Plumb service firewall rules",
-            move |_cx| async move {
+            async move |_cx| {
                 let res = nexus_networking::plumb_service_firewall_rules(
                     datastore,
                     opctx,
@@ -428,7 +450,7 @@ fn register_dns_records_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-    nexus_id: OmicronZoneUuid,
+    creator: OmicronZoneUuid,
     overrides: &'a Overridables,
     sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
 ) {
@@ -436,13 +458,13 @@ fn register_dns_records_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy DNS records",
-            move |cx| async move {
+            async move |cx| {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
 
                 let res = dns::deploy_dns(
                     opctx,
                     datastore,
-                    nexus_id.to_string(),
+                    creator.to_string(),
                     blueprint,
                     &sleds_by_id,
                     overrides,
@@ -466,7 +488,7 @@ fn register_cleanup_expunged_zones_step<'a>(
         .new_step(
             ExecutionStepId::Cleanup,
             "Cleanup expunged zones",
-            move |_cx| async move {
+            async move |_cx| {
                 let res = omicron_zones::clean_up_expunged_zones(
                     opctx, datastore, resolver, blueprint,
                 )
@@ -488,7 +510,7 @@ fn register_decommission_sleds_step<'a>(
         .new_step(
             ExecutionStepId::Cleanup,
             "Decommission sleds",
-            move |_cx| async move {
+            async move |_cx| {
                 let res =
                     sled_state::decommission_sleds(opctx, datastore, blueprint)
                         .await
@@ -509,7 +531,7 @@ fn register_decommission_disks_step<'a>(
         .new_step(
             ExecutionStepId::Cleanup,
             "Decommission expunged disks",
-            move |_cx| async move {
+            async move |_cx| {
                 let res = omicron_physical_disks::decommission_expunged_disks(
                     opctx, datastore, blueprint,
                 )
@@ -530,7 +552,7 @@ fn register_deploy_clickhouse_cluster_nodes_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy clickhouse cluster nodes",
-            move |_cx| async move {
+            async move |_cx| {
                 if let Some(clickhouse_cluster_config) =
                     &blueprint.clickhouse_cluster_config
                 {
@@ -559,7 +581,7 @@ fn register_deploy_clickhouse_single_node_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy single-node clickhouse cluster",
-            move |_cx| async move {
+            async move |_cx| {
                 let res =
                     clickhouse::deploy_single_node(opctx, blueprint).await;
                 Ok(map_err_to_step_warning(res))
@@ -574,13 +596,18 @@ fn register_reassign_sagas_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-    nexus_id: OmicronZoneUuid,
+    nexus_id: Option<OmicronZoneUuid>,
 ) -> StepHandle<bool> {
     registrar
         .new_step(
             ExecutionStepId::Cleanup,
             "Reassign sagas",
-            move |_cx| async move {
+            async move |_cx| {
+                let Some(nexus_id) = nexus_id else {
+                    return StepSkipped::new(false, "not running as Nexus")
+                        .into();
+                };
+
                 // For any expunged Nexus zones, re-assign in-progress sagas to
                 // some other Nexus.  If this fails for some reason, it doesn't
                 // affect anything else.
@@ -613,11 +640,31 @@ fn register_cockroachdb_settings_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Ensure CockroachDB settings",
-            move |_cx| async move {
+            async move |_cx| {
                 let res =
                     cockroachdb::ensure_settings(opctx, datastore, blueprint)
                         .await;
                 Ok(map_err_to_step_warning(res))
+            },
+        )
+        .register();
+}
+
+fn register_mgs_update_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    blueprint: &'a Blueprint,
+    sender: watch::Sender<PendingMgsUpdates>,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Kick off MGS-managed updates",
+            move |_cx| async move {
+                let result =
+                    sender.send(blueprint.pending_mgs_updates.clone()).context(
+                        "failed to send to MgsUpdateDriver on watch channel",
+                    );
+                Ok(map_err_to_step_warning(result))
             },
         )
         .register();

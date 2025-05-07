@@ -2,18 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
-use omicron_common::update::ArtifactHash;
+use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::WebhookDeliveryUuid;
+use omicron_uuid_kinds::WebhookEventUuid;
+use omicron_uuid_kinds::WebhookReceiverUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 /// The status of a `region_replacement` background task activation
@@ -243,6 +248,7 @@ impl SupportBundleCollectionReport {
 /// The status of a `tuf_artifact_replication` background task activation
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct TufArtifactReplicationStatus {
+    pub generation: Generation,
     pub last_run_counters: TufArtifactReplicationCounters,
     pub lifetime_counters: TufArtifactReplicationCounters,
     pub request_debug_ringbuf: Arc<VecDeque<TufArtifactReplicationRequest>>,
@@ -254,7 +260,6 @@ impl TufArtifactReplicationStatus {
         self.last_run_counters.list_err == 0
             && self.last_run_counters.put_err == 0
             && self.last_run_counters.copy_err == 0
-            && self.last_run_counters.delete_err == 0
     }
 }
 
@@ -269,19 +274,25 @@ impl TufArtifactReplicationStatus {
     derive_more::AddAssign,
 )]
 pub struct TufArtifactReplicationCounters {
+    pub put_config_ok: usize,
+    pub put_config_err: usize,
     pub list_ok: usize,
     pub list_err: usize,
     pub put_ok: usize,
     pub put_err: usize,
     pub copy_ok: usize,
     pub copy_err: usize,
-    pub delete_ok: usize,
-    pub delete_err: usize,
 }
 
 impl TufArtifactReplicationCounters {
     pub fn inc(&mut self, request: &TufArtifactReplicationRequest) {
         match (&request.operation, &request.error) {
+            (TufArtifactReplicationOperation::PutConfig { .. }, Some(_)) => {
+                self.put_config_err += 1
+            }
+            (TufArtifactReplicationOperation::PutConfig { .. }, None) => {
+                self.put_config_ok += 1
+            }
             (TufArtifactReplicationOperation::List, Some(_)) => {
                 self.list_err += 1
             }
@@ -298,27 +309,21 @@ impl TufArtifactReplicationCounters {
             (TufArtifactReplicationOperation::Copy { .. }, None) => {
                 self.copy_ok += 1
             }
-            (TufArtifactReplicationOperation::Delete { .. }, Some(_)) => {
-                self.delete_err += 1
-            }
-            (TufArtifactReplicationOperation::Delete { .. }, None) => {
-                self.delete_ok += 1
-            }
         }
     }
 
     pub fn ok(&self) -> usize {
-        self.list_ok
+        self.put_config_ok
+            .saturating_add(self.list_ok)
             .saturating_add(self.put_ok)
             .saturating_add(self.copy_ok)
-            .saturating_add(self.delete_ok)
     }
 
     pub fn err(&self) -> usize {
-        self.list_err
+        self.put_config_err
+            .saturating_add(self.list_err)
             .saturating_add(self.put_err)
             .saturating_add(self.copy_err)
-            .saturating_add(self.delete_err)
     }
 
     pub fn sum(&self) -> usize {
@@ -343,10 +348,10 @@ pub struct TufArtifactReplicationRequest {
 )]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum TufArtifactReplicationOperation {
+    PutConfig { generation: Generation },
     List,
     Put { hash: ArtifactHash },
     Copy { hash: ArtifactHash, source_sled: SledUuid },
-    Delete { hash: ArtifactHash },
 }
 
 /// The status of an `blueprint_rendezvous` background task activation.
@@ -448,6 +453,69 @@ impl slog::KV for DebugDatasetsRendezvousStats {
         )?;
         Ok(())
     }
+}
+
+/// The status of a `webhook_dispatcher` background task activation.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WebhookDispatcherStatus {
+    pub globs_reprocessed: BTreeMap<WebhookReceiverUuid, ReprocessedGlobs>,
+
+    pub glob_version: semver::Version,
+
+    /// The webhook events dispatched on this activation.
+    pub dispatched: Vec<WebhookDispatched>,
+
+    /// Webhook events which did not have receivers.
+    pub no_receivers: Vec<WebhookEventUuid>,
+
+    /// Any errors that occurred during activation.
+    pub errors: Vec<String>,
+}
+
+type ReprocessedGlobs = BTreeMap<String, Result<WebhookGlobStatus, String>>;
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub enum WebhookGlobStatus {
+    AlreadyReprocessed,
+    Reprocessed {
+        created: usize,
+        deleted: usize,
+        prev_version: Option<semver::Version>,
+    },
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WebhookDispatched {
+    pub event_id: WebhookEventUuid,
+    pub subscribed: usize,
+    pub dispatched: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookDeliveratorStatus {
+    pub by_rx: BTreeMap<WebhookReceiverUuid, WebhookRxDeliveryStatus>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WebhookRxDeliveryStatus {
+    pub ready: usize,
+    pub delivered_ok: usize,
+    pub already_delivered: usize,
+    pub in_progress: usize,
+    pub failed_deliveries: Vec<WebhookDeliveryFailure>,
+    pub delivery_errors: BTreeMap<WebhookDeliveryUuid, String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookDeliveryFailure {
+    pub delivery_id: WebhookDeliveryUuid,
+    pub event_id: WebhookEventUuid,
+    pub attempt: usize,
+    pub result: views::WebhookDeliveryAttemptResult,
+    pub response_status: Option<u16>,
+    pub response_duration: Option<chrono::TimeDelta>,
 }
 
 /// The status of a `read_only_region_replacement_start` background task

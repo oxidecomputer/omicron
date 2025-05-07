@@ -9,10 +9,7 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::TransactionError;
 use crate::db::datastore::ValidateTransition;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::AffinityPolicy;
 use crate::db::model::Sled;
 use crate::db::model::SledResourceVmm;
@@ -21,16 +18,17 @@ use crate::db::model::SledUpdate;
 use crate::db::model::to_db_sled_policy;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
-use crate::db::pool::DbConnection;
-use crate::db::queries::affinity::lookup_affinity_sleds_query;
-use crate::db::queries::affinity::lookup_anti_affinity_sleds_query;
+use crate::db::queries::sled_reservation::sled_find_targets_query;
+use crate::db::queries::sled_reservation::sled_insert_resource_query;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use itertools::Either;
-use itertools::Itertools;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledPolicy;
@@ -207,27 +205,12 @@ enum SledReservationTransactionError {
 // - Fail, no targets are available.
 fn pick_sled_reservation_target(
     log: &Logger,
-    mut targets: HashSet<SledUuid>,
-    anti_affinity_sleds: Vec<(AffinityPolicy, Uuid)>,
-    affinity_sleds: Vec<(AffinityPolicy, Uuid)>,
+    targets: &HashSet<SledUuid>,
+    banned: &HashSet<SledUuid>,
+    unpreferred: &HashSet<SledUuid>,
+    required: &HashSet<SledUuid>,
+    preferred: &HashSet<SledUuid>,
 ) -> Result<SledUuid, SledReservationError> {
-    let (banned, mut unpreferred): (HashSet<_>, HashSet<_>) =
-        anti_affinity_sleds.into_iter().partition_map(|(policy, id)| {
-            let id = SledUuid::from_untyped_uuid(id);
-            match policy {
-                AffinityPolicy::Fail => Either::Left(id),
-                AffinityPolicy::Allow => Either::Right(id),
-            }
-        });
-    let (required, mut preferred): (HashSet<_>, HashSet<_>) =
-        affinity_sleds.into_iter().partition_map(|(policy, id)| {
-            let id = SledUuid::from_untyped_uuid(id);
-            match policy {
-                AffinityPolicy::Fail => Either::Left(id),
-                AffinityPolicy::Allow => Either::Right(id),
-            }
-        });
-
     if !banned.is_empty() {
         info!(
             log,
@@ -260,12 +243,15 @@ fn pick_sled_reservation_target(
     }
 
     // We have no "required" sleds, but might have preferences.
-    targets = targets.difference(&banned).cloned().collect();
+    let mut targets: HashSet<_> =
+        targets.difference(&banned).cloned().collect();
 
     // Only consider "preferred" sleds that are viable targets
-    preferred = targets.intersection(&preferred).cloned().collect();
+    let preferred: HashSet<_> =
+        targets.intersection(&preferred).cloned().collect();
     // Only consider "unpreferred" sleds that are viable targets
-    unpreferred = targets.intersection(&unpreferred).cloned().collect();
+    let mut unpreferred: HashSet<_> =
+        targets.intersection(&unpreferred).cloned().collect();
 
     // If a target is both preferred and unpreferred, it is not considered
     // a part of either set.
@@ -301,7 +287,7 @@ impl DataStore {
         &self,
         sled_update: SledUpdate,
     ) -> CreateResult<(Sled, bool)> {
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
         // required for conditional upsert
         use diesel::query_dsl::methods::FilterDsl;
 
@@ -365,7 +351,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         sled_id: SledUuid,
     ) -> Result<(), TransactionError<Error>> {
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
         let sled_exists_and_in_service = diesel::select(diesel::dsl::exists(
             dsl::sled
                 .filter(dsl::time_deleted.is_null())
@@ -391,7 +377,7 @@ impl DataStore {
         sled_filter: SledFilter,
     ) -> ListResultVec<Sled> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
             .sled_filter(sled_filter)
@@ -460,156 +446,124 @@ impl DataStore {
         constraints: db::model::SledReservationConstraints,
     ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
     {
-        let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        self.transaction_retry_wrapper("sled_reservation_create")
-            .transaction(&conn, |conn| {
-                // Clone variables into retryable function
-                let err = err.clone();
-                let constraints = constraints.clone();
-                let resources = resources.clone();
+        // Check if resource ID already exists - if so, return it.
+        //
+        // This check makes this function idempotent. Beyond this point, however
+        // we rely on primary key constraints in the database to prevent
+        // concurrent reservations for same propolis_id.
+        use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
+        let old_resource = resource_dsl::sled_resource_vmm
+            .filter(resource_dsl::id.eq(*propolis_id.as_untyped_uuid()))
+            .select(SledResourceVmm::as_select())
+            .limit(1)
+            .load_async(&*conn)
+            .await?;
+        if !old_resource.is_empty() {
+            return Ok(old_resource[0].clone());
+        }
 
-                async move {
-                    use db::schema::sled_resource_vmm::dsl as resource_dsl;
-                    // Check if resource ID already exists - if so, return it.
-                    let old_resource = resource_dsl::sled_resource_vmm
-                        .filter(resource_dsl::id.eq(*propolis_id.as_untyped_uuid()))
-                        .select(SledResourceVmm::as_select())
-                        .limit(1)
-                        .load_async(&conn)
-                        .await?;
+        let must_use_sleds: HashSet<SledUuid> = constraints
+            .must_select_from()
+            .into_iter()
+            .flatten()
+            .map(|id| SledUuid::from_untyped_uuid(*id))
+            .collect();
 
-                    if !old_resource.is_empty() {
-                        return Ok(old_resource[0].clone());
-                    }
+        // Query for the set of possible sleds using a CTE.
+        //
+        // Note that this is not transactional, to reduce contention.
+        // However, that lack of transactionality means we need to validate
+        // our constraints again when we later try to INSERT the reservation.
+        let possible_sleds = sled_find_targets_query(instance_id, &resources)
+            .get_results_async::<(
+                // Sled UUID
+                Uuid,
+                // Would an allocation to this sled fit?
+                bool,
+                // Affinity policy on this sled
+                Option<AffinityPolicy>,
+                // Anti-affinity policy on this sled
+                Option<AffinityPolicy>,
+            )>(&*conn).await?;
 
-                    // If it doesn't already exist, find a sled with enough space
-                    // for the resources we're requesting.
-                    use db::schema::sled::dsl as sled_dsl;
-                    // This answers the boolean question:
-                    // "Does the SUM of all hardware thread usage, plus the one we're trying
-                    // to allocate, consume less threads than exists on the sled?"
-                    let sled_has_space_for_threads =
-                        (diesel::dsl::sql::<diesel::sql_types::BigInt>(
-                            &format!(
-                                "COALESCE(SUM(CAST({} as INT8)), 0)",
-                                resource_dsl::hardware_threads::NAME
-                            ),
-                        ) + resources.hardware_threads)
-                            .le(sled_dsl::usable_hardware_threads);
+        // Translate the database results into a format which we can use to pick
+        // a sled using more complex rules.
+        //
+        // See: `pick_sled_reservation_target(...)`
+        let mut sled_targets = HashSet::new();
+        let mut banned = HashSet::new();
+        let mut unpreferred = HashSet::new();
+        let mut required = HashSet::new();
+        let mut preferred = HashSet::new();
+        for (sled_id, fits, affinity_policy, anti_affinity_policy) in
+            possible_sleds
+        {
+            let sled_id = SledUuid::from_untyped_uuid(sled_id);
 
-                    // This answers the boolean question:
-                    // "Does the SUM of all RAM usage, plus the one we're trying
-                    // to allocate, consume less RAM than exists on the sled?"
-                    let sled_has_space_for_rss =
-                        (diesel::dsl::sql::<diesel::sql_types::BigInt>(
-                            &format!(
-                                "COALESCE(SUM(CAST({} as INT8)), 0)",
-                                resource_dsl::rss_ram::NAME
-                            ),
-                        ) + resources.rss_ram)
-                            .le(sled_dsl::usable_physical_ram);
+            if fits
+                && (must_use_sleds.is_empty()
+                    || must_use_sleds.contains(&sled_id))
+            {
+                sled_targets.insert(sled_id);
+            }
+            if let Some(policy) = affinity_policy {
+                match policy {
+                    AffinityPolicy::Fail => required.insert(sled_id),
+                    AffinityPolicy::Allow => preferred.insert(sled_id),
+                };
+            }
+            if let Some(policy) = anti_affinity_policy {
+                match policy {
+                    AffinityPolicy::Fail => banned.insert(sled_id),
+                    AffinityPolicy::Allow => unpreferred.insert(sled_id),
+                };
+            }
+        }
 
-                    // Determine whether adding this service's reservoir allocation
-                    // to what's allocated on the sled would avoid going over quota.
-                    let sled_has_space_in_reservoir =
-                        (diesel::dsl::sql::<diesel::sql_types::BigInt>(
-                            &format!(
-                                "COALESCE(SUM(CAST({} as INT8)), 0)",
-                                resource_dsl::reservoir_ram::NAME
-                            ),
-                        ) + resources.reservoir_ram)
-                            .le(sled_dsl::reservoir_size);
+        // We loop here because our attempts to INSERT may be violated by
+        // concurrent operations. We'll respond by looking through a slightly
+        // smaller set of possible sleds.
+        //
+        // In the uncontended case, however, we'll only iterate through this
+        // loop once.
+        loop {
+            // Pick a reservation target, given the constraints we previously
+            // saw in the database.
+            let sled_target = pick_sled_reservation_target(
+                &opctx.log,
+                &sled_targets,
+                &banned,
+                &unpreferred,
+                &required,
+                &preferred,
+            )?;
 
-                    // Generate a query describing all of the sleds that have space
-                    // for this reservation.
-                    let mut sled_targets = sled_dsl::sled
-                        .left_join(
-                            resource_dsl::sled_resource_vmm
-                                .on(resource_dsl::sled_id.eq(sled_dsl::id)),
-                        )
-                        .group_by(sled_dsl::id)
-                        .having(
-                            sled_has_space_for_threads
-                                .and(sled_has_space_for_rss)
-                                .and(sled_has_space_in_reservoir),
-                        )
-                        .filter(sled_dsl::time_deleted.is_null())
-                        // Ensure that reservations can be created on the sled.
-                        .sled_filter(SledFilter::ReservationCreate)
-                        .select(sled_dsl::id)
-                        .into_boxed();
+            // Create a SledResourceVmm record, associate it with the target
+            // sled.
+            let resource = SledResourceVmm::new(
+                propolis_id,
+                instance_id,
+                sled_target,
+                resources.clone(),
+            );
 
-                    // Further constrain the sled IDs according to any caller-
-                    // supplied constraints.
-                    if let Some(must_select_from) =
-                        constraints.must_select_from()
-                    {
-                        sled_targets = sled_targets.filter(
-                            sled_dsl::id.eq_any(must_select_from.to_vec()),
-                        );
-                    }
+            // Try to INSERT the record. If this is still a valid target, we'll
+            // use it. If it isn't a valid target, we'll shrink the set of
+            // viable sled targets and try again.
+            let rows_inserted = sled_insert_resource_query(&resource)
+                .execute_async(&*conn)
+                .await?;
+            if rows_inserted > 0 {
+                return Ok(resource);
+            }
 
-                    define_sql_function!(fn random() -> diesel::sql_types::Float);
-
-                    // Fetch all viable sled targets
-                    let sled_targets = sled_targets
-                        .order(random())
-                        .get_results_async::<Uuid>(&conn)
-                        .await?;
-
-                    info!(
-                        opctx.log,
-                        "found {} available sled targets before considering affinity", sled_targets.len();
-                        "sled_ids" => ?sled_targets,
-                    );
-
-                    let anti_affinity_sleds = lookup_anti_affinity_sleds_query(
-                        instance_id,
-                    ).get_results_async::<(AffinityPolicy, Uuid)>(&conn).await?;
-
-                    let affinity_sleds = lookup_affinity_sleds_query(
-                        instance_id,
-                    ).get_results_async::<(AffinityPolicy, Uuid)>(&conn).await?;
-
-                    let targets: HashSet<SledUuid> = sled_targets
-                        .into_iter()
-                        .map(|id| SledUuid::from_untyped_uuid(id))
-                        .collect();
-
-                    let sled_target = pick_sled_reservation_target(
-                        &opctx.log,
-                        targets,
-                        anti_affinity_sleds,
-                        affinity_sleds,
-                    ).map_err(|e| {
-                        err.bail(e)
-                    })?;
-
-                    // Create a SledResourceVmm record, associate it with the target
-                    // sled.
-                    let resource = SledResourceVmm::new(
-                        propolis_id,
-                        instance_id,
-                        sled_target,
-                        resources,
-                    );
-
-                    diesel::insert_into(resource_dsl::sled_resource_vmm)
-                        .values(resource)
-                        .returning(SledResourceVmm::as_returning())
-                        .get_result_async(&conn)
-                        .await
-                }
-            })
-            .await
-            .map_err(|e| {
-                if let Some(err) = err.take() {
-                    return SledReservationTransactionError::Reservation(err);
-                }
-                SledReservationTransactionError::Diesel(e)
-            })
+            sled_targets.remove(&sled_target);
+            banned.remove(&sled_target);
+            unpreferred.remove(&sled_target);
+            preferred.remove(&sled_target);
+        }
     }
 
     pub async fn sled_reservation_delete(
@@ -617,7 +571,7 @@ impl DataStore {
         opctx: &OpContext,
         vmm_id: PropolisUuid,
     ) -> DeleteResult {
-        use db::schema::sled_resource_vmm::dsl as resource_dsl;
+        use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
         diesel::delete(resource_dsl::sled_resource_vmm)
             .filter(resource_dsl::id.eq(vmm_id.into_untyped_uuid()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -699,7 +653,7 @@ impl DataStore {
                     let valid_old_policies = t.valid_old_policies();
                     let valid_old_states = t.valid_old_states();
 
-                    use db::schema::sled::dsl;
+                    use nexus_db_schema::schema::sled::dsl;
                     let query = diesel::update(dsl::sled)
                         .filter(dsl::time_deleted.is_null())
                         .filter(dsl::id.eq(sled_id));
@@ -777,7 +731,7 @@ impl DataStore {
                         }
                     };
                     if let Some(new_disk_policy) = new_disk_policy {
-                        use db::schema::physical_disk::dsl as physical_disk_dsl;
+                        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
                         diesel::update(physical_disk_dsl::physical_disk)
                             .filter(physical_disk_dsl::time_deleted.is_null())
                             .filter(physical_disk_dsl::sled_id.eq(sled_id))
@@ -838,7 +792,7 @@ impl DataStore {
         new_sled_state: SledState,
         check: ValidateTransition,
     ) -> Result<SledState, TransitionError> {
-        use db::schema::sled::dsl;
+        use nexus_db_schema::schema::sled::dsl;
 
         opctx.authorize(authz::Action::Modify, authz_sled).await?;
 
@@ -934,7 +888,7 @@ impl DataStore {
                         ),
                     };
                     if let Some(new_disk_state) = new_disk_state {
-                        use db::schema::physical_disk::dsl as physical_disk_dsl;
+                        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
                         diesel::update(physical_disk_dsl::physical_disk)
                             .filter(physical_disk_dsl::time_deleted.is_null())
                             .filter(physical_disk_dsl::sled_id.eq(sled_id))
@@ -1114,7 +1068,6 @@ pub(in crate::db::datastore) mod test {
     use crate::db::datastore::test_utils::{
         Expected, IneligibleSleds, sled_set_policy, sled_set_state,
     };
-    use crate::db::lookup::LookupPath;
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
     use crate::db::model::to_db_typed_uuid;
@@ -1126,6 +1079,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::pub_test_utils::helpers::small_resource_request;
     use anyhow::{Context, Result};
     use itertools::Itertools;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::Generation;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
@@ -1263,7 +1217,7 @@ pub(in crate::db::datastore) mod test {
         assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
 
         // The sled should not have been updated.
-        let (_, observed_sled_2) = LookupPath::new(&opctx, &datastore)
+        let (_, observed_sled_2) = LookupPath::new(&opctx, datastore)
             .sled_id(observed_sled.id())
             .fetch_for(authz::Action::Modify)
             .await
@@ -1395,7 +1349,7 @@ pub(in crate::db::datastore) mod test {
         instance_id: InstanceUuid,
     ) {
         use db::model::AntiAffinityGroupInstanceMembership;
-        use db::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
+        use nexus_db_schema::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
 
         diesel::insert_into(
             membership_dsl::anti_affinity_group_instance_membership,
@@ -1416,7 +1370,7 @@ pub(in crate::db::datastore) mod test {
         instance_id: InstanceUuid,
     ) {
         use db::model::AffinityGroupInstanceMembership;
-        use db::schema::affinity_group_instance_membership::dsl as membership_dsl;
+        use nexus_db_schema::schema::affinity_group_instance_membership::dsl as membership_dsl;
 
         diesel::insert_into(membership_dsl::affinity_group_instance_membership)
             .values(AffinityGroupInstanceMembership::new(group_id, instance_id))
@@ -1520,6 +1474,13 @@ pub(in crate::db::datastore) mod test {
         resources: db::model::Resources,
     }
 
+    struct FindTargetsOutput {
+        id: SledUuid,
+        fits: bool,
+        affinity_policy: Option<AffinityPolicy>,
+        anti_affinity_policy: Option<AffinityPolicy>,
+    }
+
     impl Instance {
         fn new() -> Self {
             Self {
@@ -1528,6 +1489,58 @@ pub(in crate::db::datastore) mod test {
                 force_onto_sled: None,
                 resources: small_resource_request(),
             }
+        }
+
+        // This is the first half of creating a sled reservation.
+        // It can be called during tests trying to invoke contention manually.
+        async fn find_targets(
+            &self,
+            datastore: &DataStore,
+        ) -> Vec<FindTargetsOutput> {
+            assert!(self.force_onto_sled.is_none());
+
+            sled_find_targets_query(self.id, &self.resources)
+                .get_results_async::<(
+                    Uuid,
+                    bool,
+                    Option<AffinityPolicy>,
+                    Option<AffinityPolicy>,
+                )>(&*datastore.pool_connection_for_tests().await.unwrap())
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(id, fits, affinity_policy, anti_affinity_policy)| {
+                    FindTargetsOutput { id: SledUuid::from_untyped_uuid(id), fits, affinity_policy, anti_affinity_policy }
+                })
+                .collect()
+        }
+
+        // This is the second half of creating a sled reservation.
+        // It can be called during tests trying to invoke contention manually.
+        //
+        // Returns "true" if the INSERT succeeded
+        async fn insert_resource(
+            &self,
+            datastore: &DataStore,
+            propolis_id: PropolisUuid,
+            sled_id: SledUuid,
+        ) -> bool {
+            assert!(self.force_onto_sled.is_none());
+
+            let resource = SledResourceVmm::new(
+                propolis_id,
+                self.id,
+                sled_id,
+                self.resources.clone(),
+            );
+
+            sled_insert_resource_query(&resource)
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
+                .await
+                .unwrap()
+                > 0
         }
 
         fn use_many_resources(mut self) -> Self {
@@ -2347,11 +2360,295 @@ pub(in crate::db::datastore) mod test {
         logctx.cleanup_successful();
     }
 
+    // Test that concurrent provisioning of an affinity group can cause
+    // the INSERT of a sled_resource_vmm to fail.
+    #[tokio::test]
+    async fn sled_reservation_concurrent_affinity_requirement() {
+        let logctx = dev::test_setup_log(
+            "sled_reservation_concurrent_affinity_requirement",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 4;
+        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+
+        let test_instance = Instance::new().group("affinity");
+
+        // We manually call the first half of sled reservation: finding targets.
+        //
+        // All sleds should be available.
+        let possible_sleds = test_instance.find_targets(&datastore).await;
+        assert_eq!(possible_sleds.len(), SLED_COUNT);
+        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(
+            possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
+        );
+        assert!(
+            possible_sleds
+                .iter()
+                .all(|sled| sled.anti_affinity_policy.is_none())
+        );
+
+        // Concurrently create an instance on sleds[0].
+        let groups = [Group {
+            affinity: Affinity::Positive,
+            name: "affinity",
+            policy: external::AffinityPolicy::Fail,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances = [Instance::new().group("affinity").sled(sleds[0].id())];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        // Put the instance-under-test in the "affinity" group.
+        test_instance.add_to_groups(&datastore, &all_groups).await;
+
+        // Now if we try to find targets again, the result will change.
+        let possible_sleds = test_instance.find_targets(&datastore).await;
+        assert_eq!(possible_sleds.len(), SLED_COUNT);
+        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(
+            possible_sleds
+                .iter()
+                .all(|sled| sled.anti_affinity_policy.is_none())
+        );
+        let affine_sled = possible_sleds
+            .iter()
+            .find(|sled| sled.id.into_untyped_uuid() == sleds[0].id())
+            .unwrap();
+        assert!(matches!(
+            affine_sled.affinity_policy.expect("Sled 0 should be affine"),
+            AffinityPolicy::Fail
+        ));
+
+        // Inserting onto sleds[1..3] should fail -- the affinity requirement
+        // should bind us to sleds[0].
+        for i in 1..=3 {
+            assert!(
+                !test_instance
+                    .insert_resource(
+                        &datastore,
+                        PropolisUuid::new_v4(),
+                        SledUuid::from_untyped_uuid(sleds[i].id()),
+                    )
+                    .await,
+                "Shouldn't have been able to insert into sled {i}"
+            )
+        }
+
+        // Inserting into sleds[0] should succeed
+        assert!(
+            test_instance
+                .insert_resource(
+                    &datastore,
+                    PropolisUuid::new_v4(),
+                    SledUuid::from_untyped_uuid(sleds[0].id()),
+                )
+                .await
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Test that concurrent provisioning of an anti-affinity group can cause
+    // the INSERT of a sled_resource_vmm to fail.
+    #[tokio::test]
+    async fn sled_reservation_concurrent_anti_affinity_requirement() {
+        let logctx = dev::test_setup_log(
+            "sled_reservation_concurrent_anti_affinity_requirement",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 4;
+        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+
+        let test_instance = Instance::new().group("anti-affinity");
+
+        // We manually call the first half of sled reservation: finding targets.
+        //
+        // All sleds should be available.
+        let possible_sleds = test_instance.find_targets(&datastore).await;
+        assert_eq!(possible_sleds.len(), SLED_COUNT);
+        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(
+            possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
+        );
+        assert!(
+            possible_sleds
+                .iter()
+                .all(|sled| sled.anti_affinity_policy.is_none())
+        );
+
+        // Concurrently create an instance on sleds[0].
+        let groups = [Group {
+            affinity: Affinity::Negative,
+            name: "anti-affinity",
+            policy: external::AffinityPolicy::Fail,
+        }];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances =
+            [Instance::new().group("anti-affinity").sled(sleds[0].id())];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        // Put the instance-under-test in the "anti-affinity" group.
+        test_instance.add_to_groups(&datastore, &all_groups).await;
+
+        // Now if we try to find targets again, the result will change.
+        let possible_sleds = test_instance.find_targets(&datastore).await;
+        assert_eq!(possible_sleds.len(), SLED_COUNT);
+        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(
+            possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
+        );
+        let anti_affine_sled = possible_sleds
+            .iter()
+            .find(|sled| sled.id.into_untyped_uuid() == sleds[0].id())
+            .unwrap();
+        assert!(matches!(
+            anti_affine_sled
+                .anti_affinity_policy
+                .expect("Sled 0 should be anti-affine"),
+            AffinityPolicy::Fail
+        ));
+
+        // Inserting onto sleds[0] should fail -- the anti-affinity requirement
+        // should prevent us from inserting there.
+        assert!(
+            !test_instance
+                .insert_resource(
+                    &datastore,
+                    PropolisUuid::new_v4(),
+                    SledUuid::from_untyped_uuid(sleds[0].id()),
+                )
+                .await,
+            "Shouldn't have been able to insert into sleds[0]"
+        );
+
+        // Inserting into sleds[1] should succeed
+        assert!(
+            test_instance
+                .insert_resource(
+                    &datastore,
+                    PropolisUuid::new_v4(),
+                    SledUuid::from_untyped_uuid(sleds[1].id()),
+                )
+                .await
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn sled_reservation_concurrent_space_requirement() {
+        let logctx = dev::test_setup_log(
+            "sled_reservation_concurrent_space_requirement",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore, "project").await;
+
+        const SLED_COUNT: usize = 4;
+        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+
+        let test_instance = Instance::new().use_many_resources();
+
+        // We manually call the first half of sled reservation: finding targets.
+        //
+        // All sleds should be available.
+        let possible_sleds = test_instance.find_targets(&datastore).await;
+        assert_eq!(possible_sleds.len(), SLED_COUNT);
+        assert!(possible_sleds.iter().all(|sled| sled.fits));
+        assert!(
+            possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
+        );
+        assert!(
+            possible_sleds
+                .iter()
+                .all(|sled| sled.anti_affinity_policy.is_none())
+        );
+
+        // Concurrently create large instances on sleds 0, 2, 3.
+        let groups = [];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        let instances = [
+            Instance::new().use_many_resources().sled(sleds[0].id()),
+            Instance::new().use_many_resources().sled(sleds[2].id()),
+            Instance::new().use_many_resources().sled(sleds[3].id()),
+        ];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        // Now if we try to find targets again, the result will change.
+        let possible_sleds = test_instance.find_targets(&datastore).await;
+        assert_eq!(possible_sleds.len(), 1);
+        assert!(possible_sleds[0].affinity_policy.is_none());
+        assert!(possible_sleds[0].anti_affinity_policy.is_none());
+        assert!(possible_sleds[0].fits);
+        assert_eq!(possible_sleds[0].id.into_untyped_uuid(), sleds[1].id());
+
+        // Inserting onto sleds[0, 2, 3] should fail - there shouldn't
+        // be enough space on these sleds.
+        for i in [0, 2, 3] {
+            assert!(
+                !test_instance
+                    .insert_resource(
+                        &datastore,
+                        PropolisUuid::new_v4(),
+                        SledUuid::from_untyped_uuid(sleds[i].id()),
+                    )
+                    .await,
+                "Shouldn't have been able to insert into sleds[i]"
+            );
+        }
+
+        // Inserting into sleds[1] should succeed
+        assert!(
+            test_instance
+                .insert_resource(
+                    &datastore,
+                    PropolisUuid::new_v4(),
+                    SledUuid::from_untyped_uuid(sleds[1].id()),
+                )
+                .await
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
     async fn lookup_physical_disk(
         datastore: &DataStore,
         id: PhysicalDiskUuid,
     ) -> PhysicalDisk {
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         dsl::physical_disk
             .filter(dsl::id.eq(to_db_typed_uuid(id)))
             .filter(dsl::time_deleted.is_null())
@@ -2718,7 +3015,7 @@ pub(in crate::db::datastore) mod test {
         let values_to_insert: Vec<_> =
             new_sleds.into_iter().map(|s| s.into_insertable()).collect();
         let ninserted = {
-            use db::schema::sled::dsl;
+            use nexus_db_schema::schema::sled::dsl;
             diesel::insert_into(dsl::sled)
                 .values(values_to_insert)
                 .execute_async(

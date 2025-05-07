@@ -5,25 +5,23 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::instance::Instance;
+use crate::instance::VmmStateOwner;
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
-use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use omicron_common::api::external::ByteCount;
 
-use anyhow::anyhow;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::PropolisUuid;
 use sled_agent_types::instance::*;
-use sled_agent_types::zone_bundle::ZoneBundleMetadata;
 use sled_storage::manager::StorageHandle;
 use sled_storage::resources::AllDisks;
 use slog::Logger;
@@ -95,7 +93,35 @@ impl InstanceManager {
     pub fn new(
         log: Logger,
         nexus_client: NexusClient,
-        etherstub: Etherstub,
+        vnic_allocator: VnicAllocator<Etherstub>,
+        port_manager: PortManager,
+        storage: StorageHandle,
+        zone_bundler: ZoneBundler,
+        vmm_reservoir_manager: VmmReservoirManagerHandle,
+        metrics_queue: MetricsRequestQueue,
+    ) -> Result<InstanceManager, Error> {
+        Self::new_inner(
+            log,
+            nexus_client,
+            vnic_allocator,
+            port_manager,
+            storage,
+            zone_bundler,
+            ZoneBuilderFactory::new(),
+            vmm_reservoir_manager,
+            metrics_queue,
+        )
+    }
+
+    /// Initializes a new [`InstanceManager`] object, with more control
+    /// over internal interfaces.
+    ///
+    /// Prefer [InstanceManager::new] unless you're writing tests.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_inner(
+        log: Logger,
+        nexus_client: NexusClient,
+        vnic_allocator: VnicAllocator<Etherstub>,
         port_manager: PortManager,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
@@ -114,7 +140,7 @@ impl InstanceManager {
             terminate_rx,
             nexus_client,
             jobs: BTreeMap::new(),
-            vnic_allocator: VnicAllocator::new("Instance", etherstub),
+            vnic_allocator,
             port_manager,
             storage_generation: None,
             storage,
@@ -224,23 +250,6 @@ impl InstanceManager {
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
-    }
-
-    /// Create a zone bundle from a named instance zone, if it exists.
-    pub async fn create_zone_bundle(
-        &self,
-        name: &str,
-    ) -> Result<ZoneBundleMetadata, BundleError> {
-        let (tx, rx) = oneshot::channel();
-        self.inner
-            .tx
-            .send(InstanceManagerRequest::CreateZoneBundle {
-                name: name.to_string(),
-                tx,
-            })
-            .await
-            .map_err(|err| BundleError::FailedSend(anyhow!(err)))?;
-        rx.await.map_err(|err| BundleError::DroppedRequest(anyhow!(err)))?
     }
 
     pub async fn add_external_ip(
@@ -360,10 +369,6 @@ enum InstanceManagerRequest {
         snapshot_id: Uuid,
         tx: oneshot::Sender<Result<(), Error>>,
     },
-    CreateZoneBundle {
-        name: String,
-        tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
-    },
     AddExternalIp {
         propolis_id: PropolisUuid,
         ip: InstanceExternalIpBody,
@@ -389,7 +394,7 @@ enum InstanceManagerRequest {
 
 // Requests that the instance manager stop processing information about a
 // particular instance.
-struct InstanceDeregisterRequest {
+pub(crate) struct InstanceDeregisterRequest {
     id: PropolisUuid,
 }
 
@@ -473,9 +478,6 @@ impl InstanceManagerRunner {
                         Some(IssueDiskSnapshot { propolis_id, disk_id, snapshot_id, tx }) => {
                             self.issue_disk_snapshot_request(tx, propolis_id, disk_id, snapshot_id)
                         },
-                        Some(CreateZoneBundle { name, tx }) => {
-                            self.create_zone_bundle(tx, &name).map_err(Error::from)
-                        },
                         Some(AddExternalIp { propolis_id, ip, tx }) => {
                             self.add_external_ip(tx, propolis_id, &ip)
                         },
@@ -545,20 +547,22 @@ impl InstanceManagerRunner {
         sled_identifiers: SledIdentifiers,
     ) -> Result<SledVmmState, Error> {
         let InstanceEnsureBody {
+            vmm_spec,
+            local_config,
             instance_id,
             migration_id,
             propolis_addr,
-            hardware,
             vmm_runtime,
             metadata,
         } = instance;
         info!(
             &self.log,
             "ensuring instance is registered";
+            "propolis_spec" => ?vmm_spec,
             "instance_id" => %instance_id,
             "propolis_id" => %propolis_id,
             "migration_id" => ?migration_id,
-            "hardware" => ?hardware,
+            "local_config" => ?local_config,
             "vmm_runtime" => ?vmm_runtime,
             "propolis_addr" => ?propolis_addr,
             "metadata" => ?metadata,
@@ -610,7 +614,8 @@ impl InstanceManagerRunner {
                 };
 
                 let state = crate::instance::InstanceInitialState {
-                    hardware,
+                    vmm_spec,
+                    local_config,
                     vmm_runtime,
                     propolis_addr,
                     migration_id,
@@ -653,8 +658,7 @@ impl InstanceManagerRunner {
 
         // Otherwise, we pipeline the request, and send it to the instance,
         // where it can receive an appropriate response.
-        let mark_failed = false;
-        instance.terminate(tx, mark_failed)?;
+        instance.terminate(tx, VmmStateOwner::Nexus)?;
         Ok(())
     }
 
@@ -688,33 +692,6 @@ impl InstanceManagerRunner {
         instance
             .issue_snapshot_request(tx, disk_id, snapshot_id)
             .map_err(Error::from)
-    }
-
-    /// Create a zone bundle from a named instance zone, if it exists.
-    fn create_zone_bundle(
-        &self,
-        tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
-        name: &str,
-    ) -> Result<(), BundleError> {
-        // A well-formed Propolis zone name must consist of
-        // `PROPOLIS_ZONE_PREFIX` and the Propolis ID. If the prefix is not
-        // present or the Propolis ID portion of the supplied zone name isn't
-        // parseable as a UUID, there is no Propolis zone with the specified
-        // name to capture into a bundle, so return a `NoSuchZone` error.
-        let vmm_id: PropolisUuid = name
-            .strip_prefix(PROPOLIS_ZONE_PREFIX)
-            .and_then(|uuid_str| uuid_str.parse::<PropolisUuid>().ok())
-            .ok_or_else(|| BundleError::NoSuchZone {
-                name: name.to_string(),
-            })?;
-
-        let Some(instance) = self.jobs.get(&vmm_id) else {
-            return Err(BundleError::NoSuchZone { name: name.to_string() });
-        };
-        instance
-            .request_zone_bundle(tx)
-            .map_err(|e| BundleError::FailedSend(anyhow!(e)))?;
-        Ok(())
     }
 
     fn add_external_ip(
@@ -824,8 +801,7 @@ impl InstanceManagerRunner {
             info!(self.log, "use_only_these_disks: Removing instance"; "instance_id" => ?id);
             if let Some(instance) = self.jobs.remove(&id) {
                 let (tx, rx) = oneshot::channel();
-                let mark_failed = true;
-                if let Err(e) = instance.terminate(tx, mark_failed) {
+                if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
                     warn!(self.log, "use_only_these_disks: Failed to request instance removal"; "err" => ?e);
                     continue;
                 }
@@ -847,7 +823,7 @@ pub struct InstanceTicket {
 impl InstanceTicket {
     // Creates a new instance ticket for the Propolis job with the supplied `id`
     // to be removed from the manager on destruction.
-    fn new(
+    pub(crate) fn new(
         id: PropolisUuid,
         terminate_tx: mpsc::UnboundedSender<InstanceDeregisterRequest>,
     ) -> Self {
@@ -859,10 +835,9 @@ impl InstanceTicket {
         Self { id, terminate_tx: None }
     }
 
-    /// Idempotently removes this instance from the tracked set of
-    /// instances. This acts as an "upcall" for instances to remove
-    /// themselves after stopping.
-    pub fn deregister(&mut self) {
+    /// Informs this instance's manager that it should release the instance.
+    /// Does nothing if the ticket has already been deregistered.
+    pub(crate) fn deregister(&mut self) {
         if let Some(terminate_tx) = self.terminate_tx.take() {
             let _ =
                 terminate_tx.send(InstanceDeregisterRequest { id: self.id });
