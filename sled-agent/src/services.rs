@@ -1757,7 +1757,7 @@ impl ServiceManager {
                     all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
                 // This iterator starts with the zpool for the boot disk (if it
                 // exists), and then is followed by all other zpools.
-                let zpool_iter = boot_zpool.clone().into_iter().chain(
+                let zpool_iter = boot_zpool.into_iter().chain(
                     all_disks
                         .all_m2_zpools()
                         .into_iter()
@@ -2179,11 +2179,9 @@ impl ServiceManager {
                     &[*address.ip()],
                 )?;
 
-                let dataset_name = DatasetName::new(
-                    dataset.pool_name.clone(),
-                    DatasetKind::Crucible,
-                )
-                .full_name();
+                let dataset_name =
+                    DatasetName::new(dataset.pool_name, DatasetKind::Crucible)
+                        .full_name();
                 let uuid = &Uuid::new_v4().to_string();
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("dataset", "astring", &dataset_name)
@@ -4055,16 +4053,15 @@ impl ServiceManager {
         let filesystem_pool = match (&zone.filesystem_pool, zone.dataset_name())
         {
             // If a pool was explicitly requested, use it.
-            (Some(pool), _) => pool.clone(),
+            (Some(pool), _) => *pool,
             // NOTE: The following cases are for backwards compatibility.
             //
             // If no pool was selected, prefer to use the same pool as the
             // durable dataset. Otherwise, pick one randomly.
-            (None, Some(dataset)) => dataset.pool().clone(),
-            (None, None) => all_u2_pools
+            (None, Some(dataset)) => *dataset.pool(),
+            (None, None) => *all_u2_pools
                 .choose(&mut rand::thread_rng())
-                .ok_or_else(|| Error::U2NotFound)?
-                .clone(),
+                .ok_or_else(|| Error::U2NotFound)?,
         };
 
         if !all_u2_pools.contains(&filesystem_pool) {
@@ -5086,7 +5083,7 @@ fn reconcile_running_zones_with_new_request_impl<'a>(
                 // match the new request; if they now match, that's the only
                 // field that's different.
                 let mut existing = existing_zone.clone();
-                existing.filesystem_pool = Some(new_filesystem_pool.clone());
+                existing.filesystem_pool = Some(*new_filesystem_pool);
                 existing == zone
             };
 
@@ -5141,8 +5138,8 @@ fn reconcile_running_zones_with_new_request_impl<'a>(
                     );
                     return Err(Error::InvalidFilesystemPoolZoneConfig {
                         zone_id: zone.id,
-                        expected_pool: runtime_zpool.clone(),
-                        got_pool: new_filesystem_pool.clone(),
+                        expected_pool: *runtime_zpool,
+                        got_pool: *new_filesystem_pool,
                     });
                 }
             }
@@ -6027,15 +6024,15 @@ mod test {
             let mut existing = vec![
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0]),
                 ),
                 (
                     make_omicron_zone_config(Some(&some_zpools[1])),
-                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1]),
                 ),
                 (
                     make_omicron_zone_config(Some(&some_zpools[2])),
-                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2]),
                 ),
             ];
             let new_request = OmicronZonesConfig {
@@ -6062,15 +6059,15 @@ mod test {
             let mut existing = vec![
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2]),
                 ),
             ];
             let new_request = OmicronZonesConfig {
@@ -6080,7 +6077,7 @@ mod test {
                     .enumerate()
                     .map(|(i, (zone, _))| {
                         let mut zone = zone.clone();
-                        zone.filesystem_pool = Some(some_zpools[i].clone());
+                        zone.filesystem_pool = Some(some_zpools[i]);
                         zone
                     })
                     .collect(),
@@ -6107,15 +6104,15 @@ mod test {
             let mut existing = vec![
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2]),
                 ),
             ];
             let new_request = OmicronZonesConfig {
@@ -6125,7 +6122,7 @@ mod test {
                     .enumerate()
                     .map(|(i, (zone, _))| {
                         let mut zone = zone.clone();
-                        zone.filesystem_pool = Some(some_zpools[i].clone());
+                        zone.filesystem_pool = Some(some_zpools[i]);
                         if i == 2 {
                             zone.zone_type = OmicronZoneType::Oximeter {
                                 address: "[::1]:10000".parse().unwrap(),
@@ -6164,15 +6161,15 @@ mod test {
             let mut existing = vec![
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2]),
                 ),
             ];
             let existing_orig =
@@ -6185,9 +6182,9 @@ mod test {
                     .map(|(i, (zone, _))| {
                         let mut zone = zone.clone();
                         if i < 2 {
-                            zone.filesystem_pool = Some(some_zpools[i].clone());
+                            zone.filesystem_pool = Some(some_zpools[i]);
                         } else {
-                            zone.filesystem_pool = Some(some_zpools[4].clone());
+                            zone.filesystem_pool = Some(some_zpools[4]);
                         }
                         zone
                     })
@@ -6230,15 +6227,15 @@ mod test {
             let mut existing = vec![
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2]),
                 ),
             ];
             let new_request = OmicronZonesConfig {
@@ -6246,7 +6243,7 @@ mod test {
                 zones: vec![
                     {
                         let mut z = existing[0].0.clone();
-                        z.filesystem_pool = Some(some_zpools[0].clone());
+                        z.filesystem_pool = Some(some_zpools[0]);
                         z
                     },
                     make_omicron_zone_config(None),

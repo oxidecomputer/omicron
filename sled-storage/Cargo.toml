@@ -41,4 +41,4 @@ omicron-test-utils.workspace = true
 
 [features]
 # Quotas and the like can be shrunk via this feature
-testing = []
+testing = ["sled-hardware/testing"]

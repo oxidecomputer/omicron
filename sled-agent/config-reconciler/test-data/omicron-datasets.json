@@ -1,0 +1,543 @@
+{
+  "generation": 5,
+  "datasets": {
+    "010e5295-84de-4820-b7ae-c68c6fd5fbba": {
+      "id": "010e5295-84de-4820-b7ae-c68c6fd5fbba",
+      "name": {
+        "pool_name": "oxp_0ae29053-29a2-489e-a1e6-6aec0ecd05f8",
+        "kind": "debug"
+      },
+      "compression": {
+        "type": "gzip_n",
+        "level": 9
+      },
+      "quota": 107374182400,
+      "reservation": null
+    },
+    "056fd7c9-56ab-4c27-93ed-c7ae716567e1": {
+      "id": "056fd7c9-56ab-4c27-93ed-c7ae716567e1",
+      "name": {
+        "pool_name": "oxp_d1cb6b7d-2b92-4b7d-8a4d-551987f0277e",
+        "kind": "zone"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "18ffa6fb-99f7-49fd-a192-bf10499c5654": {
+      "id": "18ffa6fb-99f7-49fd-a192-bf10499c5654",
+      "name": {
+        "pool_name": "oxp_57650e05-36ff-4de8-865f-b9562bdb67f5",
+        "kind": "debug"
+      },
+      "compression": {
+        "type": "gzip_n",
+        "level": 9
+      },
+      "quota": 107374182400,
+      "reservation": null
+    },
+    "239245eb-2917-4be3-94ea-f38adb70ed9a": {
+      "id": "239245eb-2917-4be3-94ea-f38adb70ed9a",
+      "name": {
+        "pool_name": "oxp_4358f47f-f21e-4cc8-829e-0c7fc2400a59",
+        "kind": "zone"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "23dca27d-c79b-4930-a817-392e8aeaa4c1": {
+      "id": "23dca27d-c79b-4930-a817-392e8aeaa4c1",
+      "name": {
+        "pool_name": "oxp_57650e05-36ff-4de8-865f-b9562bdb67f5",
+        "kind": "crucible"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "240f0791-4b3c-4506-a2ff-43f567095b87": {
+      "id": "240f0791-4b3c-4506-a2ff-43f567095b87",
+      "name": {
+        "pool_name": "oxp_0ae29053-29a2-489e-a1e6-6aec0ecd05f8",
+        "kind": "zone/oxz_crucible_pantry_375296e5-0a23-466c-b605-4204080f8103"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "25368942-b0a1-4063-8a54-f929d694f49e": {
+      "id": "25368942-b0a1-4063-8a54-f929d694f49e",
+      "name": {
+        "pool_name": "oxp_57650e05-36ff-4de8-865f-b9562bdb67f5",
+        "kind": "zone/oxz_crucible_23dca27d-c79b-4930-a817-392e8aeaa4c1"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "36a1bb9a-5985-43ab-ac3c-cfe168431fa9": {
+      "id": "36a1bb9a-5985-43ab-ac3c-cfe168431fa9",
+      "name": {
+        "pool_name": "oxp_d1cb6b7d-2b92-4b7d-8a4d-551987f0277e",
+        "kind": "debug"
+      },
+      "compression": {
+        "type": "gzip_n",
+        "level": 9
+      },
+      "quota": 107374182400,
+      "reservation": null
+    },
+    "3aaed2d8-7581-427f-9b0c-9b3d316b33a0": {
+      "id": "3aaed2d8-7581-427f-9b0c-9b3d316b33a0",
+      "name": {
+        "pool_name": "oxp_17eff217-f0b1-4353-b133-0f68bbd5ceaa",
+        "kind": "zone/oxz_crucible_9470ea7d-1920-4b4b-8fca-e7659a1ef733"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "3c14b954-e3b4-4cdd-bc02-b597b133e564": {
+      "id": "3c14b954-e3b4-4cdd-bc02-b597b133e564",
+      "name": {
+        "pool_name": "oxp_b358fb1e-f52a-4a63-9aab-170225509b37",
+        "kind": "zone/oxz_crucible_912346a2-d7e6-427e-b373-e8dcbe4fcea9"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "3d420dff-c616-4c7d-bab1-0f9c2b5396bf": {
+      "id": "3d420dff-c616-4c7d-bab1-0f9c2b5396bf",
+      "name": {
+        "pool_name": "oxp_4eb2e4eb-41d8-496c-9a5a-687d7e004aa4",
+        "kind": "crucible"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "3e26445a-b225-4432-b947-445139e29815": {
+      "id": "3e26445a-b225-4432-b947-445139e29815",
+      "name": {
+        "pool_name": "oxp_d1cb6b7d-2b92-4b7d-8a4d-551987f0277e",
+        "kind": "zone/oxz_crucible_f9c1deca-1898-429e-8c93-254c7aa7bae6"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "4090f4ca-89d5-403e-a8fb-8e2dcb9c5229": {
+      "id": "4090f4ca-89d5-403e-a8fb-8e2dcb9c5229",
+      "name": {
+        "pool_name": "oxp_57650e05-36ff-4de8-865f-b9562bdb67f5",
+        "kind": "zone/oxz_ntp_76b79b96-eaa2-4341-9aba-e77cfc92e0a9"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "419b3c50-17d0-438e-a456-b94acc9aee0d": {
+      "id": "419b3c50-17d0-438e-a456-b94acc9aee0d",
+      "name": {
+        "pool_name": "oxp_4eb2e4eb-41d8-496c-9a5a-687d7e004aa4",
+        "kind": "zone/oxz_crucible_3d420dff-c616-4c7d-bab1-0f9c2b5396bf"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "4c3ef132-ec83-4b1b-9574-7c7d3035f9e9": {
+      "id": "4c3ef132-ec83-4b1b-9574-7c7d3035f9e9",
+      "name": {
+        "pool_name": "oxp_b358fb1e-f52a-4a63-9aab-170225509b37",
+        "kind": "cockroachdb"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "4e83fc2f-4a80-4049-bcbb-a53cf017540c": {
+      "id": "4e83fc2f-4a80-4049-bcbb-a53cf017540c",
+      "name": {
+        "pool_name": "oxp_eb1234a5-fdf7-4977-94d5-2eef25ce56a1",
+        "kind": "zone"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "5c35e44c-0c03-4f9c-9387-59f5bee29e84": {
+      "id": "5c35e44c-0c03-4f9c-9387-59f5bee29e84",
+      "name": {
+        "pool_name": "oxp_4358f47f-f21e-4cc8-829e-0c7fc2400a59",
+        "kind": "zone/oxz_crucible_ce8563f3-4a93-45ff-b727-cbfbee6aa413"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "5e08effd-c18a-48da-857d-c90f48564281": {
+      "id": "5e08effd-c18a-48da-857d-c90f48564281",
+      "name": {
+        "pool_name": "oxp_aadf48eb-6ff0-40b5-a092-1fdd06c03e11",
+        "kind": "zone/oxz_crucible_9c5d88c9-8ff1-4f23-9438-7b81322eaf68"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "6b195654-0073-407d-a49a-e2bbfde71f9e": {
+      "id": "6b195654-0073-407d-a49a-e2bbfde71f9e",
+      "name": {
+        "pool_name": "oxp_b358fb1e-f52a-4a63-9aab-170225509b37",
+        "kind": "zone"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "731613cc-081e-4f7c-ae64-8d4345b6389e": {
+      "id": "731613cc-081e-4f7c-ae64-8d4345b6389e",
+      "name": {
+        "pool_name": "oxp_aadf48eb-6ff0-40b5-a092-1fdd06c03e11",
+        "kind": "zone"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "777aca07-5b08-451f-8f86-a41943941922": {
+      "id": "777aca07-5b08-451f-8f86-a41943941922",
+      "name": {
+        "pool_name": "oxp_17eff217-f0b1-4353-b133-0f68bbd5ceaa",
+        "kind": "zone"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "7dc65f64-984b-4aef-87cd-3d3596023b0e": {
+      "id": "7dc65f64-984b-4aef-87cd-3d3596023b0e",
+      "name": {
+        "pool_name": "oxp_b358fb1e-f52a-4a63-9aab-170225509b37",
+        "kind": "zone/oxz_cockroachdb_4c3ef132-ec83-4b1b-9574-7c7d3035f9e9"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "8c5473f1-3168-4ce6-b680-ad9159fa729d": {
+      "id": "8c5473f1-3168-4ce6-b680-ad9159fa729d",
+      "name": {
+        "pool_name": "oxp_17eff217-f0b1-4353-b133-0f68bbd5ceaa",
+        "kind": "debug"
+      },
+      "compression": {
+        "type": "gzip_n",
+        "level": 9
+      },
+      "quota": 107374182400,
+      "reservation": null
+    },
+    "8d7214d8-168c-42de-9ab6-8c4480f3ca88": {
+      "id": "8d7214d8-168c-42de-9ab6-8c4480f3ca88",
+      "name": {
+        "pool_name": "oxp_aadf48eb-6ff0-40b5-a092-1fdd06c03e11",
+        "kind": "debug"
+      },
+      "compression": {
+        "type": "gzip_n",
+        "level": 9
+      },
+      "quota": 107374182400,
+      "reservation": null
+    },
+    "912346a2-d7e6-427e-b373-e8dcbe4fcea9": {
+      "id": "912346a2-d7e6-427e-b373-e8dcbe4fcea9",
+      "name": {
+        "pool_name": "oxp_b358fb1e-f52a-4a63-9aab-170225509b37",
+        "kind": "crucible"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "92d3e4e9-0768-4772-83c1-23cce52190e9": {
+      "id": "92d3e4e9-0768-4772-83c1-23cce52190e9",
+      "name": {
+        "pool_name": "oxp_eb1234a5-fdf7-4977-94d5-2eef25ce56a1",
+        "kind": "crucible"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "9470ea7d-1920-4b4b-8fca-e7659a1ef733": {
+      "id": "9470ea7d-1920-4b4b-8fca-e7659a1ef733",
+      "name": {
+        "pool_name": "oxp_17eff217-f0b1-4353-b133-0f68bbd5ceaa",
+        "kind": "crucible"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "9c5d88c9-8ff1-4f23-9438-7b81322eaf68": {
+      "id": "9c5d88c9-8ff1-4f23-9438-7b81322eaf68",
+      "name": {
+        "pool_name": "oxp_aadf48eb-6ff0-40b5-a092-1fdd06c03e11",
+        "kind": "crucible"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "9f20b123-0bfe-4e00-bfe7-4ac45e1c3982": {
+      "id": "9f20b123-0bfe-4e00-bfe7-4ac45e1c3982",
+      "name": {
+        "pool_name": "oxp_f8b11629-ced6-412a-9c3f-d169b99ee996",
+        "kind": "zone/oxz_crucible_f9940969-b0e8-4e8c-86c7-4bc49cd15a5f"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "a23fbf9f-e215-4624-a472-52935ac43c38": {
+      "id": "a23fbf9f-e215-4624-a472-52935ac43c38",
+      "name": {
+        "pool_name": "oxp_57650e05-36ff-4de8-865f-b9562bdb67f5",
+        "kind": "zone"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "b3e9fee2-24d2-44e7-8539-a6918e85cf2b": {
+      "id": "b3e9fee2-24d2-44e7-8539-a6918e85cf2b",
+      "name": {
+        "pool_name": "oxp_0ae29053-29a2-489e-a1e6-6aec0ecd05f8",
+        "kind": "crucible"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "bc9ed1d3-6f10-40d5-b7b2-ad93495e3052": {
+      "id": "bc9ed1d3-6f10-40d5-b7b2-ad93495e3052",
+      "name": {
+        "pool_name": "oxp_b358fb1e-f52a-4a63-9aab-170225509b37",
+        "kind": "debug"
+      },
+      "compression": {
+        "type": "gzip_n",
+        "level": 9
+      },
+      "quota": 107374182400,
+      "reservation": null
+    },
+    "be805bfe-01f0-479e-8b9b-869926caaa22": {
+      "id": "be805bfe-01f0-479e-8b9b-869926caaa22",
+      "name": {
+        "pool_name": "oxp_eb1234a5-fdf7-4977-94d5-2eef25ce56a1",
+        "kind": "debug"
+      },
+      "compression": {
+        "type": "gzip_n",
+        "level": 9
+      },
+      "quota": 107374182400,
+      "reservation": null
+    },
+    "ce8563f3-4a93-45ff-b727-cbfbee6aa413": {
+      "id": "ce8563f3-4a93-45ff-b727-cbfbee6aa413",
+      "name": {
+        "pool_name": "oxp_4358f47f-f21e-4cc8-829e-0c7fc2400a59",
+        "kind": "crucible"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "cf636ba2-5214-4c3b-8b8d-fc64a555a0fe": {
+      "id": "cf636ba2-5214-4c3b-8b8d-fc64a555a0fe",
+      "name": {
+        "pool_name": "oxp_f8b11629-ced6-412a-9c3f-d169b99ee996",
+        "kind": "debug"
+      },
+      "compression": {
+        "type": "gzip_n",
+        "level": 9
+      },
+      "quota": 107374182400,
+      "reservation": null
+    },
+    "d86ea9ef-a941-4a6d-a44e-a202fe2f1bca": {
+      "id": "d86ea9ef-a941-4a6d-a44e-a202fe2f1bca",
+      "name": {
+        "pool_name": "oxp_4eb2e4eb-41d8-496c-9a5a-687d7e004aa4",
+        "kind": "debug"
+      },
+      "compression": {
+        "type": "gzip_n",
+        "level": 9
+      },
+      "quota": 107374182400,
+      "reservation": null
+    },
+    "dc36c11c-c0ee-4138-a305-65969a1b839b": {
+      "id": "dc36c11c-c0ee-4138-a305-65969a1b839b",
+      "name": {
+        "pool_name": "oxp_eb1234a5-fdf7-4977-94d5-2eef25ce56a1",
+        "kind": "zone/oxz_crucible_92d3e4e9-0768-4772-83c1-23cce52190e9"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "dc3d5ac2-346f-464a-9995-fcbbb4cb5ed8": {
+      "id": "dc3d5ac2-346f-464a-9995-fcbbb4cb5ed8",
+      "name": {
+        "pool_name": "oxp_4358f47f-f21e-4cc8-829e-0c7fc2400a59",
+        "kind": "debug"
+      },
+      "compression": {
+        "type": "gzip_n",
+        "level": 9
+      },
+      "quota": 107374182400,
+      "reservation": null
+    },
+    "e05a0149-5d58-4e7b-89d1-5a27ce869883": {
+      "id": "e05a0149-5d58-4e7b-89d1-5a27ce869883",
+      "name": {
+        "pool_name": "oxp_0ae29053-29a2-489e-a1e6-6aec0ecd05f8",
+        "kind": "zone"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "f3d28ea4-930d-4e96-aef9-97fa34a7f76c": {
+      "id": "f3d28ea4-930d-4e96-aef9-97fa34a7f76c",
+      "name": {
+        "pool_name": "oxp_4eb2e4eb-41d8-496c-9a5a-687d7e004aa4",
+        "kind": "zone"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "f7ede72f-fd43-4d91-8043-b35b541276ff": {
+      "id": "f7ede72f-fd43-4d91-8043-b35b541276ff",
+      "name": {
+        "pool_name": "oxp_f8b11629-ced6-412a-9c3f-d169b99ee996",
+        "kind": "zone"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "f9940969-b0e8-4e8c-86c7-4bc49cd15a5f": {
+      "id": "f9940969-b0e8-4e8c-86c7-4bc49cd15a5f",
+      "name": {
+        "pool_name": "oxp_f8b11629-ced6-412a-9c3f-d169b99ee996",
+        "kind": "crucible"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "f9c1deca-1898-429e-8c93-254c7aa7bae6": {
+      "id": "f9c1deca-1898-429e-8c93-254c7aa7bae6",
+      "name": {
+        "pool_name": "oxp_d1cb6b7d-2b92-4b7d-8a4d-551987f0277e",
+        "kind": "crucible"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    },
+    "fd94b5a1-ca44-4aab-923e-bf9ff29b79df": {
+      "id": "fd94b5a1-ca44-4aab-923e-bf9ff29b79df",
+      "name": {
+        "pool_name": "oxp_0ae29053-29a2-489e-a1e6-6aec0ecd05f8",
+        "kind": "zone/oxz_crucible_b3e9fee2-24d2-44e7-8539-a6918e85cf2b"
+      },
+      "compression": {
+        "type": "off"
+      },
+      "quota": null,
+      "reservation": null
+    }
+  }
+}

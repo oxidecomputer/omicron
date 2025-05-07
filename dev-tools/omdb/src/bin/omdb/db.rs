@@ -70,6 +70,7 @@ use nexus_db_model::ExternalIp;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Image;
 use nexus_db_model::Instance;
+use nexus_db_model::InstanceIntendedState;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvPhysicalDisk;
@@ -4351,6 +4352,7 @@ async fn cmd_db_instance_info(
     const BOOT_DISK: &'static str = "boot disk";
     const AUTO_RESTART: &'static str = "auto-restart";
     const STATE: &'static str = "nexus state";
+    const INTENDED_STATE: &'static str = "intended state";
     const LAST_MODIFIED: &'static str = "last modified at";
     const LAST_UPDATED: &'static str = "last updated at";
     const LAST_AUTO_RESTART: &'static str = "  last reincarnated at";
@@ -4376,6 +4378,7 @@ async fn cmd_db_instance_info(
         AUTO_RESTART,
         STATE,
         API_STATE,
+        INTENDED_STATE,
         LAST_UPDATED,
         LAST_MODIFIED,
         LAST_AUTO_RESTART,
@@ -4435,6 +4438,7 @@ async fn cmd_db_instance_info(
         "{} {API_STATE:>WIDTH$}: {effective_state:?}",
         if effective_state == InstanceState::Failed { "/!\\" } else { "(i)" }
     );
+    println!("    {INTENDED_STATE:>WIDTH$}: {}", instance.intended_state);
     println!(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
         r#gen.0
@@ -4442,9 +4446,7 @@ async fn cmd_db_instance_info(
 
     // Reincarnation status
     let InstanceKarmicStatus { needs_reincarnation, can_reincarnate } =
-        instance
-            .auto_restart
-            .status(&instance.runtime_state, active_vmm.as_ref());
+        instance.auto_restart_status(active_vmm.as_ref());
     println!(
         "{} {NEEDS_REINCARNATION:>WIDTH$}: {needs_reincarnation}",
         if needs_reincarnation { "(i)" } else { "   " }
@@ -4790,6 +4792,7 @@ struct VmmStateRow {
 struct CustomerInstanceRow {
     id: String,
     state: String,
+    intent: InstanceIntendedState,
     propolis_id: MaybePropolisId,
     sled_id: MaybeSledId,
     host_serial: String,
@@ -4867,6 +4870,7 @@ async fn cmd_db_instances(
             id: i.instance().id().to_string(),
             name: i.instance().name().to_string(),
             state: i.effective_state().to_string(),
+            intent: i.instance().intended_state,
             propolis_id: (&i).into(),
             sled_id: (&i).into(),
             host_serial,
