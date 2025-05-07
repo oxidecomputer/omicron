@@ -314,6 +314,10 @@ impl CurrentRssConfig {
                 .allowed_source_ips
                 .clone()
                 .unwrap_or(AllowedSourceIps::Any),
+            // Reserve a set amount of space for non-Crucible (i.e. control
+            // plane) storage. See oxidecomputer/omicron#7875 for the size
+            // determination.
+            control_plane_storage_buffer_gib: 250,
         };
 
         Ok(request)

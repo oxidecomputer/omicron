@@ -87,6 +87,7 @@ pub mod region_snapshot_replacement;
 mod rendezvous_debug_dataset;
 mod role;
 mod saga;
+mod setting;
 mod silo;
 mod silo_group;
 mod silo_user;

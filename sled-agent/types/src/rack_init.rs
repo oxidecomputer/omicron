@@ -110,6 +110,7 @@ pub mod back_compat {
                 recovery_silo: v1.recovery_silo,
                 rack_network_config: v1.rack_network_config.into(),
                 allowed_source_ips: v1.allowed_source_ips,
+                control_plane_storage_buffer_gib: 0,
             }
         }
     }
@@ -131,6 +132,8 @@ struct UnvalidatedRackInitializeRequest {
     rack_network_config: RackNetworkConfig,
     #[serde(default = "default_allowed_source_ips")]
     allowed_source_ips: AllowedSourceIps,
+    #[serde(default)]
+    control_plane_storage_buffer_gib: u32,
 }
 
 fn validate_external_dns(
@@ -177,6 +180,8 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
             recovery_silo: value.recovery_silo,
             rack_network_config: value.rack_network_config,
             allowed_source_ips: value.allowed_source_ips,
+            control_plane_storage_buffer_gib: value
+                .control_plane_storage_buffer_gib,
         })
     }
 }
@@ -229,6 +234,12 @@ pub struct RackInitializeRequest {
     /// IPs or subnets allowed to make requests to user-facing services
     #[serde(default = "default_allowed_source_ips")]
     pub allowed_source_ips: AllowedSourceIps,
+
+    /// The amount of space to reserve per-disk for non-Crucible storage (i.e.
+    /// control plane storage) in gibibytes. This amount represents a buffer
+    /// that the region allocation query will not use for each U2.
+    #[serde(default)]
+    pub control_plane_storage_buffer_gib: u32,
 }
 
 impl RackInitializeRequest {
@@ -386,6 +397,7 @@ impl std::fmt::Debug for RackInitializeRequest {
             recovery_silo,
             rack_network_config,
             allowed_source_ips,
+            control_plane_storage_buffer_gib,
         } = &self;
 
         f.debug_struct("RackInitializeRequest")
@@ -403,6 +415,10 @@ impl std::fmt::Debug for RackInitializeRequest {
             .field("recovery_silo", recovery_silo)
             .field("rack_network_config", rack_network_config)
             .field("allowed_source_ips", allowed_source_ips)
+            .field(
+                "control_plane_storage_buffer_gib",
+                control_plane_storage_buffer_gib,
+            )
             .finish()
     }
 }
@@ -502,6 +518,7 @@ mod tests {
                 bfd: Vec::new(),
             },
             allowed_source_ips: AllowedSourceIps::Any,
+            control_plane_storage_buffer_gib: 0,
         };
 
         // Valid configs: all external DNS IPs are contained in the IP pool
@@ -631,6 +648,7 @@ mod tests {
                 bfd: Vec::new(),
             },
             allowed_source_ips: AllowedSourceIps::Any,
+            control_plane_storage_buffer_gib: 0,
         };
 
         assert_eq!(

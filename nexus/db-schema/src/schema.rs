@@ -2309,3 +2309,10 @@ allow_tables_to_appear_in_same_query!(
     webhook_delivery_attempt
 );
 joinable!(webhook_delivery_attempt -> webhook_delivery (delivery_id));
+
+table! {
+    setting (name) {
+        name -> crate::enums::SettingNameEnum,
+        int_value -> Nullable<Int8>,
+    }
+}

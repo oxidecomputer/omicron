@@ -189,6 +189,10 @@ pub struct RackInitializationRequest {
     pub rack_network_config: RackNetworkConfig,
     /// IPs or subnets allowed to make requests to user-facing services
     pub allowed_source_ips: AllowedSourceIps,
+    /// The amount of space to reserve per-disk for non-Crucible storage (i.e.
+    /// control plane storage) in gibibytes. This amount represents a buffer
+    /// that the region allocation query will not use for each U2.
+    pub control_plane_storage_buffer_gib: u32,
 }
 
 pub type DnsConfigParams = internal_dns_types::config::DnsConfigParams;
