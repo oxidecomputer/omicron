@@ -41,12 +41,7 @@ impl TryFrom<WebhookReceiverConfig> for views::WebhookReceiver {
     fn try_from(
         WebhookReceiverConfig { rx, secrets, subscriptions }: WebhookReceiverConfig,
     ) -> Result<views::WebhookReceiver, Self::Error> {
-        let secrets = secrets
-            .iter()
-            .map(|WebhookSecret { identity, .. }| views::WebhookSecretId {
-                id: identity.id.into_untyped_uuid(),
-            })
-            .collect();
+        let secrets = secrets.iter().map(views::WebhookSecret::from).collect();
         let subscriptions = subscriptions
             .into_iter()
             .map(shared::WebhookSubscription::try_from)
@@ -156,9 +151,18 @@ impl WebhookSecret {
     }
 }
 
-impl From<WebhookSecret> for views::WebhookSecretId {
+impl From<&'_ WebhookSecret> for views::WebhookSecret {
+    fn from(secret: &WebhookSecret) -> Self {
+        Self {
+            id: secret.identity.id.into_untyped_uuid(),
+            time_created: secret.identity.time_created,
+        }
+    }
+}
+
+impl From<WebhookSecret> for views::WebhookSecret {
     fn from(secret: WebhookSecret) -> Self {
-        Self { id: secret.identity.id.into_untyped_uuid() }
+        Self::from(&secret)
     }
 }
 

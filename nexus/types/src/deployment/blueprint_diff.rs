@@ -8,7 +8,7 @@ use super::blueprint_display::{
     BpClickhouseServersTableSchema, BpDatasetsTableSchema, BpDiffState,
     BpGeneration, BpOmicronZonesTableSchema, BpPendingMgsUpdates,
     BpPhysicalDisksTableSchema, BpTable, BpTableColumn, BpTableData,
-    BpTableRow, KvListWithHeading, KvPair, constants::*, linear_table_modified,
+    BpTableRow, KvList, KvPair, constants::*, linear_table_modified,
     linear_table_unchanged,
 };
 use super::{
@@ -551,7 +551,7 @@ impl ModifiedZone {
                 zone: BlueprintZoneConfig {
                     disposition: *diff.disposition.after,
                     id: *diff.id.after,
-                    filesystem_pool: diff.filesystem_pool.after.clone(),
+                    filesystem_pool: *diff.filesystem_pool.after,
                     zone_type: diff.zone_type.after.clone(),
                     image_source: diff.image_source.after.clone(),
                 },
@@ -1043,7 +1043,7 @@ impl ModifiedDataset {
                 dataset: BlueprintDatasetConfig {
                     disposition: *disposition.after,
                     id: *id.after,
-                    pool: pool.after.clone(),
+                    pool: *pool.after,
                     kind: kind.after.clone(),
                     address: address.after.copied(),
                     quota: quota.after.copied(),
@@ -1074,9 +1074,8 @@ impl BpDiffDatasetsModified {
                 Err(error) => errors.push(error),
             }
         }
-        datasets.sort_unstable_by_key(|d| {
-            (d.dataset.kind.clone(), d.dataset.pool.clone())
-        });
+        datasets
+            .sort_unstable_by_key(|d| (d.dataset.kind.clone(), d.dataset.pool));
         (BpDiffDatasetsModified { datasets }, BpDiffDatasetErrors { errors })
     }
 }
@@ -1096,7 +1095,7 @@ impl BpTableData for BpDiffDatasetsModified {
                 vec![
                     BpTableColumn::value(
                         DatasetName::new(
-                            dataset.dataset.pool.clone(),
+                            dataset.dataset.pool,
                             dataset.dataset.kind.clone(),
                         )
                         .full_name(),
@@ -1187,7 +1186,7 @@ impl BpDiffDatasets {
 /// there is only a single known blueprint with no before or after collection or
 /// bluerpint to compare to.
 pub struct ClickhouseClusterConfigDiffTablesForSingleBlueprint {
-    pub metadata: KvListWithHeading,
+    pub metadata: KvList,
     pub keepers: BpTable,
     pub servers: BpTable,
 }
@@ -1221,7 +1220,7 @@ impl ClickhouseClusterConfigDiffTablesForSingleBlueprint {
         .collect();
 
         let metadata =
-            KvListWithHeading::new(CLICKHOUSE_CLUSTER_CONFIG_HEADING, rows);
+            KvList::new(Some(CLICKHOUSE_CLUSTER_CONFIG_HEADING), rows);
 
         let keepers = BpTable::new(
             BpClickhouseKeepersTableSchema {},
@@ -1260,7 +1259,7 @@ impl From<ClickhouseClusterConfigDiffTablesForSingleBlueprint>
 /// `ClickhouseClusterConfig` tables or a `ClickhouseClusterConfig` table and
 /// its inventory representation.
 pub struct ClickhouseClusterConfigDiffTables {
-    pub metadata: KvListWithHeading,
+    pub metadata: KvList,
     pub keepers: BpTable,
     pub servers: Option<BpTable>,
 }
@@ -1290,8 +1289,8 @@ impl ClickhouseClusterConfigDiffTables {
                 ),
             )
         };
-        let metadata = KvListWithHeading::new(
-            CLICKHOUSE_CLUSTER_CONFIG_HEADING,
+        let metadata = KvList::new(
+            Some(CLICKHOUSE_CLUSTER_CONFIG_HEADING),
             vec![
                 KvPair::new(
                     BpDiffState::Added,
@@ -1435,8 +1434,8 @@ impl ClickhouseClusterConfigDiffTables {
             };
         }
 
-        let metadata = KvListWithHeading::new(
-            CLICKHOUSE_CLUSTER_CONFIG_HEADING,
+        let metadata = KvList::new(
+            Some(CLICKHOUSE_CLUSTER_CONFIG_HEADING),
             vec![
                 diff_row!(generation, GENERATION),
                 diff_row!(max_used_server_id, CLICKHOUSE_MAX_USED_SERVER_ID),
@@ -1524,8 +1523,8 @@ impl ClickhouseClusterConfigDiffTables {
         before: &clickhouse_admin_types::ClickhouseKeeperClusterMembership,
     ) -> Self {
         // There's only so much information in a collection. Show what we can.
-        let metadata = KvListWithHeading::new(
-            CLICKHOUSE_CLUSTER_CONFIG_HEADING,
+        let metadata = KvList::new(
+            Some(CLICKHOUSE_CLUSTER_CONFIG_HEADING),
             vec![KvPair::new(
                 BpDiffState::Removed,
                 CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX,
@@ -1714,7 +1713,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
 
     pub fn make_metadata_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvListWithHeading> {
+    ) -> impl IntoIterator<Item = KvList> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
                 diff_row!($member, $label, std::convert::identity)
@@ -1743,8 +1742,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         }
 
         [
-            KvListWithHeading::new(
-                COCKROACHDB_HEADING,
+            KvList::new(
+                Some(COCKROACHDB_HEADING),
                 vec![
                     diff_row!(
                         cockroachdb_fingerprint,
@@ -1758,8 +1757,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
                     ),
                 ],
             ),
-            KvListWithHeading::new(
-                METADATA_HEADING,
+            KvList::new(
+                Some(METADATA_HEADING),
                 vec![
                     diff_row!(internal_dns_version, INTERNAL_DNS_VERSION),
                     diff_row!(external_dns_version, EXTERNAL_DNS_VERSION),
@@ -1770,7 +1769,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
 
     pub fn make_oximeter_read_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvListWithHeading> {
+    ) -> impl IntoIterator<Item = KvList> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
                 diff_row!($member, $label, std::convert::identity)
@@ -1800,8 +1799,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
             };
         }
 
-        [KvListWithHeading::new(
-            OXIMETER_HEADING,
+        [KvList::new(
+            Some(OXIMETER_HEADING),
             vec![
                 diff_row!(oximeter_read_version, GENERATION),
                 diff_row!(oximeter_read_mode, OXIMETER_READ_FROM),

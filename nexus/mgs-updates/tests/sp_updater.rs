@@ -4,6 +4,7 @@
 
 //! Tests `SpUpdater`'s delivery of updates to SPs via MGS
 
+use gateway_client::SpComponent;
 use gateway_client::types::SpType;
 use gateway_messages::{SpPort, UpdateInProgressStatus, UpdateStatus};
 use gateway_test_utils::setup as mgs_setup;
@@ -24,14 +25,21 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-fn make_fake_sp_image(board: &str) -> Vec<u8> {
-    let caboose = CabooseBuilder::default()
+fn make_fake_sp_archive(board: &str) -> Vec<u8> {
+    let caboose = make_fake_sp_archive_caboose(board);
+    make_fake_sp_archive_with_caboose(&caboose)
+}
+
+fn make_fake_sp_archive_caboose(board: &str) -> hubtools::Caboose {
+    CabooseBuilder::default()
         .git_commit("fake-git-commit")
         .board(board)
         .version("0.0.0")
         .name("fake-name")
-        .build();
+        .build()
+}
 
+fn make_fake_sp_archive_with_caboose(caboose: &hubtools::Caboose) -> Vec<u8> {
     let mut builder = HubrisArchiveBuilder::with_fake_image();
     builder.write_caboose(caboose.as_slice()).unwrap();
     builder.build_to_vec().unwrap()
@@ -45,17 +53,15 @@ async fn test_sp_updater_updates_sled() {
             .await;
 
     // Configure an MGS client.
-    let mut mgs_clients =
-        MgsClients::from_clients([gateway_client::Client::new(
-            &mgstestctx.client.url("/").to_string(),
-            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )]);
+    let mgs_client = mgstestctx.client();
+    let mut mgs_clients = MgsClients::from_clients([mgs_client.clone()]);
 
     // Configure and instantiate an `SpUpdater`.
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
+    let deployed_caboose = make_fake_sp_archive_caboose(SIM_GIMLET_BOARD);
+    let hubris_archive = make_fake_sp_archive_with_caboose(&deployed_caboose);
 
     let sp_updater = SpUpdater::new(
         sp_type,
@@ -64,6 +70,29 @@ async fn test_sp_updater_updates_sled() {
         hubris_archive.clone(),
         &mgstestctx.logctx.log,
     );
+
+    // Grab the initial cabooses so that we can later check that they've
+    // changed.
+    let caboose_active_before = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::SP_ITSELF.const_as_str(),
+            0,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let caboose_inactive_before = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::SP_ITSELF.const_as_str(),
+            1,
+        )
+        .await
+        .unwrap()
+        .into_inner();
 
     // Run the update.
     sp_updater.update(&mut mgs_clients).await.expect("update failed");
@@ -85,6 +114,46 @@ async fn test_sp_updater_updates_sled() {
         hubris_archive.image.data.len()
     );
 
+    // Fetch the final cabooses.
+    let caboose_active_after = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::SP_ITSELF.const_as_str(),
+            0,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let caboose_inactive_after = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::SP_ITSELF.const_as_str(),
+            1,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    // The active caboose should match the one we deployed.
+    assert_ne!(caboose_inactive_before, caboose_active_after);
+    assert_eq!(
+        deployed_caboose.board().unwrap(),
+        caboose_active_after.board.as_bytes()
+    );
+    assert_eq!(
+        deployed_caboose.git_commit().unwrap(),
+        caboose_active_after.git_commit.as_bytes(),
+    );
+    assert_eq!(
+        deployed_caboose.version().unwrap(),
+        caboose_active_after.version.as_bytes(),
+    );
+
+    // The inactive caboose now should match the previously active one.
+    assert_eq!(caboose_inactive_after, caboose_active_before);
+
     mgstestctx.teardown().await;
 }
 
@@ -96,16 +165,15 @@ async fn test_sp_updater_updates_switch() {
             .await;
 
     // Configure an MGS client.
-    let mut mgs_clients =
-        MgsClients::from_clients([gateway_client::Client::new(
-            &mgstestctx.client.url("/").to_string(),
-            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )]);
+    let mgs_client = mgstestctx.client();
+    let mut mgs_clients = MgsClients::from_clients([mgs_client.clone()]);
 
+    // Configure and instantiate an `SpUpdater`.
     let sp_type = SpType::Switch;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_SIDECAR_BOARD);
+    let deployed_caboose = make_fake_sp_archive_caboose(SIM_SIDECAR_BOARD);
+    let hubris_archive = make_fake_sp_archive_with_caboose(&deployed_caboose);
 
     let sp_updater = SpUpdater::new(
         sp_type,
@@ -115,8 +183,33 @@ async fn test_sp_updater_updates_switch() {
         &mgstestctx.logctx.log,
     );
 
+    // Grab the initial cabooses so that we can later check that they've
+    // changed.
+    let caboose_active_before = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::SP_ITSELF.const_as_str(),
+            0,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let caboose_inactive_before = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::SP_ITSELF.const_as_str(),
+            1,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    // Run the update.
     sp_updater.update(&mut mgs_clients).await.expect("update failed");
 
+    // Ensure the SP received the complete update.
     let last_update_image = mgstestctx.simrack.sidecars[sp_slot as usize]
         .last_sp_update_data()
         .await
@@ -132,6 +225,46 @@ async fn test_sp_updater_updates_switch() {
         last_update_image.len(),
         hubris_archive.image.data.len()
     );
+
+    // Fetch the final cabooses.
+    let caboose_active_after = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::SP_ITSELF.const_as_str(),
+            0,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let caboose_inactive_after = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::SP_ITSELF.const_as_str(),
+            1,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    // The active caboose should match the one we deployed.
+    assert_ne!(caboose_inactive_before, caboose_active_after);
+    assert_eq!(
+        deployed_caboose.board().unwrap(),
+        caboose_active_after.board.as_bytes()
+    );
+    assert_eq!(
+        deployed_caboose.git_commit().unwrap(),
+        caboose_active_after.git_commit.as_bytes(),
+    );
+    assert_eq!(
+        deployed_caboose.version().unwrap(),
+        caboose_active_after.version.as_bytes(),
+    );
+
+    // The inactive caboose now should match the previously active one.
+    assert_eq!(caboose_inactive_after, caboose_active_before);
 
     mgstestctx.teardown().await;
 }
@@ -189,7 +322,7 @@ async fn test_sp_updater_remembers_successful_mgs_instance() {
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
+    let hubris_archive = make_fake_sp_archive(SIM_GIMLET_BOARD);
 
     let sp_updater = SpUpdater::new(
         sp_type,
@@ -307,7 +440,7 @@ async fn test_sp_updater_switches_mgs_instances_on_failure() {
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
+    let hubris_archive = make_fake_sp_archive(SIM_GIMLET_BOARD);
 
     let sp_updater = SpUpdater::new(
         sp_type,
@@ -452,16 +585,12 @@ async fn test_sp_updater_delivers_progress() {
     };
 
     // Configure an MGS client.
-    let mut mgs_clients =
-        MgsClients::from_clients([gateway_client::Client::new(
-            &mgstestctx.client.url("/").to_string(),
-            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )]);
+    let mut mgs_clients = MgsClients::from_clients([mgstestctx.client()]);
 
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_sp_image(SIM_GIMLET_BOARD);
+    let hubris_archive = make_fake_sp_archive(SIM_GIMLET_BOARD);
 
     let sp_updater = SpUpdater::new(
         sp_type,
