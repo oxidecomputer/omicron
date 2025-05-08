@@ -12171,6 +12171,8 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "support-bundle-viewer"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "960873bebab69a59f0f8506f78319b924a251bd8fbb24eeca162059cfc3a1fd6"
 dependencies = [
  "anyhow",
  "async-trait",
