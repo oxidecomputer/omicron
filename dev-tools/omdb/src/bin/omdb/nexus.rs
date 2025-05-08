@@ -495,17 +495,31 @@ enum SupportBundleCommands {
     Create,
     /// Delete a support bundle
     Delete(SupportBundleDeleteArgs),
+    /// Download an entire support bundle
+    Download(SupportBundleDownloadArgs),
     /// Download the index of a support bundle
     ///
     /// This is a "list of files", from which individual files can be accessed
     GetIndex(SupportBundleIndexArgs),
-    /// View a file within a support bundle
+    /// Download a single file within a support bundle
     GetFile(SupportBundleFileArgs),
+    /// Creates a dashboard for viewing the contents of a support bundle
+    Inspect(SupportBundleInspectArgs),
 }
 
 #[derive(Debug, Args)]
 struct SupportBundleDeleteArgs {
     id: SupportBundleUuid,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleDownloadArgs {
+    id: SupportBundleUuid,
+
+    /// Optional output path where the file should be written,
+    /// instead of stdout.
+    #[arg(short, long)]
+    output: Option<Utf8PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -521,6 +535,23 @@ struct SupportBundleFileArgs {
     /// instead of stdout.
     #[arg(short, long)]
     output: Option<Utf8PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleInspectArgs {
+    /// A specific bundle to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "path".
+    #[arg(short, long)]
+    id: Option<SupportBundleUuid>,
+
+    /// A local bundle file to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "id".
+    #[arg(short, long)]
+    path: Option<Utf8PathBuf>,
 }
 
 impl NexusArgs {
@@ -732,11 +763,17 @@ impl NexusArgs {
                 cmd_nexus_support_bundles_delete(&client, args, token).await
             }
             NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Download(args),
+            }) => cmd_nexus_support_bundles_download(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::GetIndex(args),
             }) => cmd_nexus_support_bundles_get_index(&client, args).await,
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::GetFile(args),
             }) => cmd_nexus_support_bundles_get_file(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Inspect(args),
+            }) => cmd_nexus_support_bundles_inspect(&client, args).await,
         }
     }
 }
@@ -3832,6 +3869,28 @@ async fn write_stream_to_sink(
     Ok(())
 }
 
+/// Runs `omdb nexus support-bundles download`
+async fn cmd_nexus_support_bundles_download(
+    client: &nexus_client::Client,
+    args: &SupportBundleDownloadArgs,
+) -> Result<(), anyhow::Error> {
+    let stream = client
+        .support_bundle_download(args.id.as_untyped_uuid())
+        .await
+        .with_context(|| format!("downloading support bundle {}", args.id))?
+        .into_inner_stream();
+
+    let sink: Box<dyn std::io::Write> = match &args.output {
+        Some(path) => Box::new(std::fs::File::create(path)?),
+        None => Box::new(std::io::stdout()),
+    };
+
+    write_stream_to_sink(stream, sink)
+        .await
+        .with_context(|| format!("streaming support bundle {}", args.id))?;
+    Ok(())
+}
+
 /// Runs `omdb nexus support-bundles get-index`
 async fn cmd_nexus_support_bundles_get_index(
     client: &nexus_client::Client,
@@ -3879,4 +3938,17 @@ async fn cmd_nexus_support_bundles_get_file(
         format!("streaming support bundle file {}: {}", args.id, args.path)
     })?;
     Ok(())
+}
+
+/// Runs `omdb nexus support-bundles inspect`
+async fn cmd_nexus_support_bundles_inspect(
+    client: &nexus_client::Client,
+    args: &SupportBundleInspectArgs,
+) -> Result<(), anyhow::Error> {
+    support_bundle_reader_lib::run_dashboard(
+        client,
+        args.id,
+        args.path.as_ref(),
+    )
+    .await
 }
