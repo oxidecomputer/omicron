@@ -3375,10 +3375,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.sw_caboose (
     board TEXT NOT NULL,
     git_commit TEXT NOT NULL,
     name TEXT NOT NULL,
-    version TEXT NOT NULL
+    version TEXT NOT NULL,
+    sign TEXT -- nullable
 );
+
+/*
+ * We use a complete and a partial index to ensure uniqueness. 
+ * This is necessary because the sign column is NULLable, but in SQL, NULL values
+ * are considered distinct. That means that a single complete index on all of these
+ * columns would allow duplicate rows where sign is NULL, which we don't want.
+ */
 CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
-    on omicron.public.sw_caboose (board, git_commit, name, version);
+    on omicron.public.sw_caboose (board, git_commit, name, version, sign);
+
+CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties_no_sign
+    on omicron.public.sw_caboose (board, git_commit, name, version)
+    WHERE sign IS NULL;
 
 /* root of trust pages: this table assigns unique ids to distinct RoT CMPA
    and CFPA page contents, each of which is a 512-byte blob */
@@ -5504,7 +5516,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '140.0.0', NULL)
+    (TRUE, NOW(), NOW(), '141.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
