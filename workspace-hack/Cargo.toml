@@ -103,6 +103,7 @@ regex-syntax = { version = "0.8.5" }
 reqwest = { git = "https://github.com/seanmonstar/reqwest", rev = "114d97c1a862567b465cb57f14d584626e1cf30c", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 rustls = { version = "0.23.19", features = ["ring"] }
+rustls-pki-types = { version = "1.10.0", features = ["std"] }
 rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
@@ -226,6 +227,7 @@ regex-syntax = { version = "0.8.5" }
 reqwest = { git = "https://github.com/seanmonstar/reqwest", rev = "114d97c1a862567b465cb57f14d584626e1cf30c", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 rustls = { version = "0.23.19", features = ["ring"] }
+rustls-pki-types = { version = "1.10.0", features = ["std"] }
 rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }

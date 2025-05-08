@@ -7914,6 +7914,7 @@ dependencies = [
  "rsa",
  "rustix 0.38.37",
  "rustls 0.23.19",
+ "rustls-pki-types",
  "rustls-webpki 0.102.8",
  "schemars",
  "scopeguard",
@@ -10072,12 +10073,13 @@ dependencies = [
 
 [[package]]
 name = "rcgen"
-version = "0.12.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48406db8ac1f3cbc7dcdb56ec355343817958a356ff430259bb07baf7607e1e1"
+checksum = "75e669e5202259b5314d1ea5397316ad400819437857b90861765f24c4cf80a2"
 dependencies = [
  "pem",
  "ring",
+ "rustls-pki-types",
  "time",
  "yasna",
 ]

@@ -625,7 +625,7 @@ rand_seeder = "0.3.0"
 range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
 rayon = "1.10"
-rcgen = "0.12.1"
+rcgen = "0.13.2"
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.38.0"
 ref-cast = "1.0"
