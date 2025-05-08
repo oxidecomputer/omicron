@@ -10,6 +10,7 @@ use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use omicron_common::disk::DatasetName;
 use omicron_common::disk::DiskIdentity;
 use sled_agent_api::ArtifactConfig;
 use sled_storage::config::MountConfig;
@@ -36,10 +37,14 @@ use crate::DatasetTaskError;
 use crate::LedgerArtifactConfigError;
 use crate::LedgerNewConfigError;
 use crate::LedgerTaskError;
+use crate::NestedDatasetDestroyError;
+use crate::NestedDatasetEnsureError;
+use crate::NestedDatasetListError;
 use crate::SledAgentArtifactStore;
 use crate::SledAgentFacilities;
 use crate::TimeSyncStatus;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::dataset_serialization_task::NestedDatasetMountError;
 use crate::internal_disks::InternalDisksReceiver;
 use crate::ledger::LedgerTaskHandle;
 use crate::raw_disks;
@@ -106,16 +111,19 @@ impl ConfigReconcilerHandle {
                 base_log,
             );
 
-        // Spawn the task that serializes dataset operations.
-        let dataset_task = DatasetTaskHandle::spawn_dataset_task(
-            Arc::clone(&mount_config),
-            base_log,
-        );
-
         let (reconciler_result_tx, reconciler_result_rx) =
             watch::channel(ReconcilerResult::default());
         let (currently_managed_zpools_tx, currently_managed_zpools_rx) =
             watch::channel(Arc::default());
+        let currently_managed_zpools_rx =
+            CurrentlyManagedZpoolsReceiver::new(currently_managed_zpools_rx);
+
+        // Spawn the task that serializes dataset operations.
+        let dataset_task = DatasetTaskHandle::spawn_dataset_task(
+            Arc::clone(&mount_config),
+            currently_managed_zpools_rx.clone(),
+            base_log,
+        );
 
         (
             Self {
@@ -124,10 +132,7 @@ impl ConfigReconcilerHandle {
                 dataset_task,
                 ledger_task: OnceLock::new(),
                 reconciler_result_rx,
-                currently_managed_zpools_rx:
-                    CurrentlyManagedZpoolsReceiver::new(
-                        currently_managed_zpools_rx,
-                    ),
+                currently_managed_zpools_rx,
             },
             // Stash the dependencies the reconciler task will need in
             // `spawn_reconciliation_task()` inside this token that the caller
@@ -246,7 +251,8 @@ impl ConfigReconcilerHandle {
     pub async fn nested_dataset_ensure_mounted(
         &self,
         dataset: NestedDatasetLocation,
-    ) -> Result<Utf8PathBuf, DatasetTaskError> {
+    ) -> Result<Result<Utf8PathBuf, NestedDatasetMountError>, DatasetTaskError>
+    {
         self.dataset_task.nested_dataset_ensure_mounted(dataset).await
     }
 
@@ -254,7 +260,7 @@ impl ConfigReconcilerHandle {
     pub async fn nested_dataset_ensure(
         &self,
         config: NestedDatasetConfig,
-    ) -> Result<(), DatasetTaskError> {
+    ) -> Result<Result<(), NestedDatasetEnsureError>, DatasetTaskError> {
         self.dataset_task.nested_dataset_ensure(config).await
     }
 
@@ -262,17 +268,20 @@ impl ConfigReconcilerHandle {
     pub async fn nested_dataset_destroy(
         &self,
         name: NestedDatasetLocation,
-    ) -> Result<(), DatasetTaskError> {
+    ) -> Result<Result<(), NestedDatasetDestroyError>, DatasetTaskError> {
         self.dataset_task.nested_dataset_destroy(name).await
     }
 
     /// List a set of nested datasets.
     pub async fn nested_dataset_list(
         &self,
-        name: NestedDatasetLocation,
+        dataset: DatasetName,
         options: NestedDatasetListOptions,
-    ) -> Result<Vec<NestedDatasetConfig>, DatasetTaskError> {
-        self.dataset_task.nested_dataset_list(name, options).await
+    ) -> Result<
+        Result<Vec<NestedDatasetConfig>, NestedDatasetListError>,
+        DatasetTaskError,
+    > {
+        self.dataset_task.nested_dataset_list(dataset, options).await
     }
 
     /// Write a new sled config to the ledger.

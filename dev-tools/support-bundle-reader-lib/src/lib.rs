@@ -2,8 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod artifact_id;
-mod mupdate_override;
+//! Utilities to inspect support bundles
 
-pub use artifact_id::*;
-pub use mupdate_override::*;
+mod bundle_accessor;
+mod dashboard;
+mod index;
+
+pub use dashboard::run_dashboard;
