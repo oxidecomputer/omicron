@@ -78,8 +78,8 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
-use support_bundle_viewer::SupportBundleAccessor;
 use support_bundle_viewer::LocalFileAccess;
+use support_bundle_viewer::SupportBundleAccessor;
 use tabled::Tabled;
 use tabled::settings::Padding;
 use tabled::settings::object::Columns;
@@ -3949,16 +3949,14 @@ async fn cmd_nexus_support_bundles_inspect(
 ) -> Result<(), anyhow::Error> {
     let accessor: Box<dyn SupportBundleAccessor> = match (args.id, &args.path) {
         (None, Some(path)) => Box::new(LocalFileAccess::new(path)?),
-        (maybe_id, None) => {
-            Box::new(crate::support_bundle::access_bundle_from_id(client, maybe_id).await?)
-        }
+        (maybe_id, None) => Box::new(
+            crate::support_bundle::access_bundle_from_id(client, maybe_id)
+                .await?,
+        ),
         (Some(_), Some(_)) => {
             bail!("Cannot specify both UUID and path");
         }
     };
 
-    support_bundle_viewer::run_dashboard(
-        accessor,
-    )
-    .await
+    support_bundle_viewer::run_dashboard(accessor).await
 }

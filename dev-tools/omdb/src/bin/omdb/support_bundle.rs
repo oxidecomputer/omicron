@@ -9,8 +9,8 @@ use anyhow::bail;
 use async_trait::async_trait;
 use bytes::Buf;
 use bytes::Bytes;
-use camino::Utf8PathBuf;
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use futures::Stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
@@ -165,7 +165,8 @@ impl<'c> SupportBundleAccessor for InternalApiAccess<'c> {
         file.start_stream()
             .await
             .with_context(|| "failed to start stream in get_file")?;
-        Ok(Box::new(file)) }
+        Ok(Box::new(file))
+    }
 }
 
 async fn wait_for_bundle_to_be_collected(
@@ -272,4 +273,3 @@ pub async fn access_bundle_from_id(
     };
     Ok(InternalApiAccess::new(client, id))
 }
-
