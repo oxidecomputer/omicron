@@ -931,7 +931,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(delivery.webhook_id.into_untyped_uuid(), webhook.identity.id);
     assert_eq!(delivery.event_id, id);
     assert_eq!(delivery.event_class, "test.foo");
-    assert_eq!(delivery.state, views::WebhookDeliveryState::Pending);
+    assert_eq!(delivery.state, views::AlertDeliveryState::Pending);
     expect_delivery_attempts(
         &delivery.attempts,
         &[ExpectAttempt {
@@ -1007,7 +1007,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(delivery.webhook_id.into_untyped_uuid(), webhook.identity.id);
     assert_eq!(delivery.event_id, id);
     assert_eq!(delivery.event_class, "test.foo");
-    assert_eq!(delivery.state, views::WebhookDeliveryState::Pending);
+    assert_eq!(delivery.state, views::AlertDeliveryState::Pending);
     expect_delivery_attempts(
         &delivery.attempts,
         &[
@@ -1078,7 +1078,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(delivery.webhook_id.into_untyped_uuid(), webhook.identity.id);
     assert_eq!(delivery.event_id, id);
     assert_eq!(delivery.event_class, "test.foo");
-    assert_eq!(delivery.state, views::WebhookDeliveryState::Delivered);
+    assert_eq!(delivery.state, views::AlertDeliveryState::Delivered);
     expect_delivery_attempts(
         &delivery.attempts,
         &[
@@ -1154,8 +1154,8 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
         views::WebhookDeliveryAttemptResult::FailedTimeout
     );
     assert_eq!(probe1.probe.event_class, "probe");
-    assert_eq!(probe1.probe.trigger, views::AlertDeliveryState::Probe);
-    assert_eq!(probe1.probe.state, views::WebhookDeliveryState::Failed);
+    assert_eq!(probe1.probe.trigger, views::AlertDeliveryTrigger::Probe);
+    assert_eq!(probe1.probe.state, views::AlertDeliveryState::Failed);
     assert_eq!(
         probe1.resends_started, None,
         "we did not request events be resent"
@@ -1192,8 +1192,8 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
         views::WebhookDeliveryAttemptResult::FailedHttpError
     );
     assert_eq!(probe2.probe.event_class, "probe");
-    assert_eq!(probe2.probe.trigger, views::AlertDeliveryState::Probe);
-    assert_eq!(probe2.probe.state, views::WebhookDeliveryState::Failed);
+    assert_eq!(probe2.probe.trigger, views::AlertDeliveryTrigger::Probe);
+    assert_eq!(probe2.probe.state, views::AlertDeliveryState::Failed);
     assert_ne!(
         probe2.probe.id, probe1.probe.id,
         "a new delivery ID should be assigned to each probe"
@@ -1233,8 +1233,8 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
         views::WebhookDeliveryAttemptResult::Succeeded
     );
     assert_eq!(probe3.probe.event_class, "probe");
-    assert_eq!(probe3.probe.trigger, views::AlertDeliveryState::Probe);
-    assert_eq!(probe3.probe.state, views::WebhookDeliveryState::Delivered);
+    assert_eq!(probe3.probe.trigger, views::AlertDeliveryTrigger::Probe);
+    assert_eq!(probe3.probe.state, views::AlertDeliveryState::Delivered);
     assert_ne!(
         probe3.probe.id, probe1.probe.id,
         "a new delivery ID should be assigned to each probe"
@@ -1389,7 +1389,7 @@ async fn test_probe_resends_failed_deliveries(
     dbg!(&probe);
     probe_mock.assert_async().await;
     probe_mock.delete_async().await;
-    assert_eq!(probe.probe.state, views::WebhookDeliveryState::Delivered);
+    assert_eq!(probe.probe.state, views::AlertDeliveryState::Delivered);
     assert_eq!(probe.resends_started, Some(2));
 
     // Both events should be resent.

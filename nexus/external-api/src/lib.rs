@@ -168,10 +168,10 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                     url = "http://docs.oxide.computer/api/vpcs"
                 }
             },
-            "system/webhooks" = {
-                description = "Webhooks deliver notifications for audit log events and fault management alerts.",
+            "system/alerts" = {
+                description = "Alerts deliver notifications for events that occur on the Oxide rack",
                 external_docs = {
-                    url = "http://docs.oxide.computer/api/webhooks"
+                    url = "http://docs.oxide.computer/api/alerts"
                 }
             },
             "system/probes" = {

@@ -1159,6 +1159,66 @@
         }
       }
     },
+    "/v1/alerts/classes": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "List alert classes",
+        "operationId": "webhook_event_class_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filter",
+            "description": "An optional glob pattern for filtering alert class names.\n\nIf provided, only alert classes which match this glob pattern will be included in the response.",
+            "schema": {
+              "$ref": "#/components/schemas/WebhookSubscription"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertClassResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/anti-affinity-groups": {
       "get": {
         "tags": [
@@ -12085,7 +12145,7 @@
     "/v1/webhooks/deliveries": {
       "get": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "List delivery attempts to webhook receiver",
         "description": "Optional query parameters to this endpoint may be used to filter deliveries by state. If none of the `failed`, `pending` or `delivered` query parameters are present, all deliveries are returned. If one or more of these parameters are provided, only those which are set to \"true\" are included in the response.",
@@ -12181,7 +12241,7 @@
     "/v1/webhooks/deliveries/{event_id}/resend": {
       "post": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Request re-delivery of webhook event",
         "operationId": "webhook_delivery_resend",
@@ -12226,70 +12286,10 @@
         }
       }
     },
-    "/v1/webhooks/event-classes": {
-      "get": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "List webhook event classes",
-        "operationId": "webhook_event_class_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "filter",
-            "description": "An optional glob pattern for filtering event class names.\n\nIf provided, only event classes which match this glob pattern will be included in the response.",
-            "schema": {
-              "$ref": "#/components/schemas/WebhookSubscription"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventClassResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
     "/v1/webhooks/receivers": {
       "get": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "List webhook receivers",
         "operationId": "webhook_receiver_list",
@@ -12346,7 +12346,7 @@
       },
       "post": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Create webhook receiver",
         "operationId": "webhook_receiver_create",
@@ -12383,7 +12383,7 @@
     "/v1/webhooks/receivers/{receiver}": {
       "get": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Fetch webhook receiver",
         "operationId": "webhook_receiver_view",
@@ -12419,7 +12419,7 @@
       },
       "put": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Update webhook receiver",
         "description": "Note that receiver secrets are NOT added or removed using this endpoint. Instead, use the `/v1/webhooks/{secrets}/?receiver={receiver}` endpoint to add and remove secrets.",
@@ -12459,7 +12459,7 @@
       },
       "delete": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Delete webhook receiver",
         "operationId": "webhook_receiver_delete",
@@ -12490,7 +12490,7 @@
     "/v1/webhooks/receivers/{receiver}/probe": {
       "post": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Send liveness probe to webhook receiver",
         "description": "This endpoint synchronously sends a liveness probe request to the selected webhook receiver. The response message describes the outcome of the probe request: either the response from the receiver endpoint, or an indication of why the probe failed.\n\nNote that the response status is `200 OK` as long as a probe request was able to be sent to the receiver endpoint. If the receiver responds with another status code, including an error, this will be indicated by the response body, *not* the status of the response.\n\nThe `resend` query parameter can be used to request re-delivery of failed events if the liveness probe succeeds. If it is set to true and the webhook receiver responds to the probe request with a `2xx` status code, any events for which delivery to this receiver has failed will be queued for re-delivery.",
@@ -12537,7 +12537,7 @@
     "/v1/webhooks/receivers/{receiver}/subscriptions": {
       "post": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Add webhook receiver subscription",
         "operationId": "webhook_receiver_subscription_add",
@@ -12585,7 +12585,7 @@
     "/v1/webhooks/receivers/{receiver}/subscriptions/{subscription}": {
       "delete": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Remove webhook receiver subscription",
         "operationId": "webhook_receiver_subscription_remove",
@@ -12625,7 +12625,7 @@
     "/v1/webhooks/secrets": {
       "get": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "List webhook receiver secret IDs",
         "operationId": "webhook_secrets_list",
@@ -12661,7 +12661,7 @@
       },
       "post": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Add secret to webhook receiver",
         "operationId": "webhook_secrets_add",
@@ -12709,7 +12709,7 @@
     "/v1/webhooks/secrets/{secret_id}": {
       "delete": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Remove secret from webhook receiver",
         "operationId": "webhook_secrets_delete",
@@ -13214,6 +13214,97 @@
         },
         "required": [
           "switch_histories"
+        ]
+      },
+      "AlertClass": {
+        "description": "A webhook event class.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "A description of what this event class represents.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of the event class.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "AlertClassResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertClass"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AlertDeliveryState": {
+        "description": "The state of a webhook delivery attempt.",
+        "oneOf": [
+          {
+            "description": "The webhook event has not yet been delivered successfully.\n\nEither no delivery attempts have yet been performed, or the delivery has failed at least once but has retries remaining.",
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          },
+          {
+            "description": "The webhook event has been delivered successfully.",
+            "type": "string",
+            "enum": [
+              "delivered"
+            ]
+          },
+          {
+            "description": "The webhook delivery attempt has failed permanently and will not be retried again.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          }
+        ]
+      },
+      "AlertDeliveryTrigger": {
+        "description": "The reason a webhook event was delivered",
+        "oneOf": [
+          {
+            "description": "Delivery was triggered by the event occurring for the first time.",
+            "type": "string",
+            "enum": [
+              "event"
+            ]
+          },
+          {
+            "description": "Delivery was triggered by a request to resend the event.",
+            "type": "string",
+            "enum": [
+              "resend"
+            ]
+          },
+          {
+            "description": "This delivery is a liveness probe.",
+            "type": "string",
+            "enum": [
+              "probe"
+            ]
+          }
         ]
       },
       "AllowList": {
@@ -16668,45 +16759,6 @@
         "required": [
           "message",
           "request_id"
-        ]
-      },
-      "EventClass": {
-        "description": "A webhook event class.",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "A description of what this event class represents.",
-            "type": "string"
-          },
-          "name": {
-            "description": "The name of the event class.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "description",
-          "name"
-        ]
-      },
-      "EventClassResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EventClass"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
         ]
       },
       "ExternalIp": {
@@ -24186,19 +24238,19 @@
           }
         }
       },
+      "TypedUuidForAlertKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForAlertReceiverKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForInstanceKind": {
         "type": "string",
         "format": "uuid"
       },
       "TypedUuidForSupportBundleKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForAlertKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForWebhookReceiverKind": {
         "type": "string",
         "format": "uuid"
       },
@@ -25682,7 +25734,7 @@
             "description": "The state of this delivery.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/WebhookDeliveryState"
+                "$ref": "#/components/schemas/AlertDeliveryState"
               }
             ]
           },
@@ -25695,7 +25747,7 @@
             "description": "Why this delivery was performed.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/AlertDeliveryState"
+                "$ref": "#/components/schemas/AlertDeliveryTrigger"
               }
             ]
           },
@@ -25703,7 +25755,7 @@
             "description": "The UUID of the webhook receiver that this event was delivered to.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForWebhookReceiverKind"
+                "$ref": "#/components/schemas/TypedUuidForAlertReceiverKind"
               }
             ]
           }
@@ -25842,58 +25894,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "WebhookDeliveryState": {
-        "description": "The state of a webhook delivery attempt.",
-        "oneOf": [
-          {
-            "description": "The webhook event has not yet been delivered successfully.\n\nEither no delivery attempts have yet been performed, or the delivery has failed at least once but has retries remaining.",
-            "type": "string",
-            "enum": [
-              "pending"
-            ]
-          },
-          {
-            "description": "The webhook event has been delivered successfully.",
-            "type": "string",
-            "enum": [
-              "delivered"
-            ]
-          },
-          {
-            "description": "The webhook delivery attempt has failed permanently and will not be retried again.",
-            "type": "string",
-            "enum": [
-              "failed"
-            ]
-          }
-        ]
-      },
-      "AlertDeliveryState": {
-        "description": "The reason a webhook event was delivered",
-        "oneOf": [
-          {
-            "description": "Delivery was triggered by the event occurring for the first time.",
-            "type": "string",
-            "enum": [
-              "event"
-            ]
-          },
-          {
-            "description": "Delivery was triggered by a request to resend the event.",
-            "type": "string",
-            "enum": [
-              "resend"
-            ]
-          },
-          {
-            "description": "This delivery is a liveness probe.",
-            "type": "string",
-            "enum": [
-              "probe"
-            ]
-          }
         ]
       },
       "WebhookProbeResult": {
@@ -26314,6 +26314,13 @@
       }
     },
     {
+      "name": "system/alerts",
+      "description": "Alerts deliver notifications for events that occur on the Oxide rack",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/alerts"
+      }
+    },
+    {
       "name": "system/hardware",
       "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "externalDocs": {
@@ -26364,13 +26371,6 @@
     },
     {
       "name": "system/update"
-    },
-    {
-      "name": "system/webhooks",
-      "description": "Webhooks deliver notifications for audit log events and fault management alerts.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/webhooks"
-      }
     },
     {
       "name": "vpcs",
