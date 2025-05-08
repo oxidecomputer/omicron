@@ -16,6 +16,8 @@ use omicron_uuid_kinds::DemoSagaUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_helpers::SnakeCaseResult;
+use serde_helpers::serialize_snake_case_result;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fmt::Display;
@@ -466,28 +468,4 @@ pub enum UpdateAttemptStatus {
 pub struct WaitingStatus {
     pub next_attempt_time: DateTime<Utc>,
     pub nattempts_done: u32,
-}
-
-#[derive(JsonSchema, Serialize)]
-#[serde(rename = "Result{T}Or{E}")]
-#[serde(rename_all = "snake_case")]
-enum SnakeCaseResult<T, E> {
-    Ok(T),
-    Err(E),
-}
-
-fn serialize_snake_case_result<S, T, E>(
-    value: &Result<T, E>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-    T: Serialize,
-    E: Serialize,
-{
-    match value {
-        Ok(val) => SnakeCaseResult::Ok(val),
-        Err(err) => SnakeCaseResult::Err(err),
-    }
-    .serialize(serializer)
 }

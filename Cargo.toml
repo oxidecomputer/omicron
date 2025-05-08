@@ -122,6 +122,7 @@ members = [
     "passwords",
     "range-requests",
     "rpaths",
+    "serde-helpers",
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
@@ -276,6 +277,7 @@ default-members = [
     "passwords",
     "range-requests",
     "rpaths",
+    "serde-helpers",
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
@@ -647,6 +649,7 @@ scopeguard = "1.2.0"
 secrecy = "0.10.0"
 semver = { version = "1.0.25", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
+serde-helpers = { path = "serde-helpers" }
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
 serde_json = "1.0.139"
 serde_tokenstream = "0.2"

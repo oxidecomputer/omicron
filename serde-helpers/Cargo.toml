@@ -1,0 +1,11 @@
+[package]
+name = "serde-helpers"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde.workspace = true
+schemars.workspace = true
+
+[lints]
+workspace = true

@@ -12,6 +12,9 @@ pub use gateway_client::types::{
 use omicron_common::api::external::SwitchLocation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_helpers::{
+    SnakeCaseResult, deserialize_snake_case_result, serialize_snake_case_result,
+};
 use std::{collections::HashMap, time::Duration};
 use transceiver_controller::{
     Datapath, Monitors, PowerMode, VendorInfo, message::ExtendedStatus,
@@ -99,13 +102,48 @@ pub struct Transceiver {
     /// The port in which the transceiver sits.
     pub port: String,
     /// The general status of the transceiver, such as presence and faults.
+    #[serde(
+        serialize_with = "serialize_snake_case_result",
+        deserialize_with = "deserialize_snake_case_result"
+    )]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<ExtendedStatus, String>::json_schema"
+    )]
     pub status: Result<ExtendedStatus, String>,
     /// Information about the power state of the transceiver.
+    #[serde(
+        serialize_with = "serialize_snake_case_result",
+        deserialize_with = "deserialize_snake_case_result"
+    )]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<PowerMode, String>::json_schema"
+    )]
     pub power: Result<PowerMode, String>,
     /// Details about the vendor, part number, and serial number.
+    #[serde(
+        serialize_with = "serialize_snake_case_result",
+        deserialize_with = "deserialize_snake_case_result"
+    )]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<VendorInfo, String>::json_schema"
+    )]
     pub vendor: Result<VendorInfo, String>,
     /// Status of the transceiver's machinery for carrying data, the "datapath".
+    #[serde(
+        serialize_with = "serialize_snake_case_result",
+        deserialize_with = "deserialize_snake_case_result"
+    )]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<Datapath, String>::json_schema"
+    )]
     pub datapath: Result<Datapath, String>,
     /// Environmental monitoring data, such as temperature or optical power.
+    #[serde(
+        serialize_with = "serialize_snake_case_result",
+        deserialize_with = "deserialize_snake_case_result"
+    )]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<Monitors, String>::json_schema"
+    )]
     pub monitors: Result<Monitors, String>,
 }
