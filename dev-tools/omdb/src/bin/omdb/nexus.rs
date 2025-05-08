@@ -12,7 +12,7 @@ use crate::helpers::ConfirmationPrompt;
 use crate::helpers::const_max_len;
 use crate::helpers::display_option_blank;
 use crate::helpers::should_colorize;
-use anyhow::Context;
+use anyhow::Context as _;
 use anyhow::bail;
 use camino::Utf8PathBuf;
 use chrono::DateTime;
@@ -78,6 +78,8 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
+use support_bundle_viewer::SupportBundleAccessor;
+use support_bundle_viewer::LocalFileAccess;
 use tabled::Tabled;
 use tabled::settings::Padding;
 use tabled::settings::object::Columns;
@@ -3945,10 +3947,18 @@ async fn cmd_nexus_support_bundles_inspect(
     client: &nexus_client::Client,
     args: &SupportBundleInspectArgs,
 ) -> Result<(), anyhow::Error> {
-    support_bundle_reader_lib::run_dashboard(
-        client,
-        args.id,
-        args.path.as_ref(),
+    let accessor: Box<dyn SupportBundleAccessor> = match (args.id, &args.path) {
+        (None, Some(path)) => Box::new(LocalFileAccess::new(path)?),
+        (maybe_id, None) => {
+            Box::new(crate::support_bundle::access_bundle_from_id(client, maybe_id).await?)
+        }
+        (Some(_), Some(_)) => {
+            bail!("Cannot specify both UUID and path");
+        }
+    };
+
+    support_bundle_viewer::run_dashboard(
+        accessor,
     )
     .await
 }

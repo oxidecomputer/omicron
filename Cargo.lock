@@ -7399,6 +7399,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-bb8-diesel",
+ "async-trait",
  "bytes",
  "camino",
  "camino-tempfile",
@@ -7459,7 +7460,7 @@ dependencies = [
  "steno",
  "strum",
  "subprocess",
- "support-bundle-reader-lib",
+ "support-bundle-viewer",
  "supports-color",
  "tabled 0.15.0",
  "textwrap",
@@ -12168,7 +12169,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
-name = "support-bundle-reader-lib"
+name = "support-bundle-viewer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -12176,12 +12177,7 @@ dependencies = [
  "bytes",
  "camino",
  "crossterm",
- "futures",
- "nexus-client",
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
  "ratatui",
- "reqwest",
  "tokio",
  "zip 2.6.1",
 ]
