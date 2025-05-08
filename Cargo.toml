@@ -49,6 +49,7 @@ members = [
     "dev-tools/releng",
     "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
+    "dev-tools/support-bundle-reader-lib",
     "dev-tools/xtask",
     "dns-server",
     "dns-server-api",
@@ -127,6 +128,7 @@ members = [
     "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/zone-images",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -199,6 +201,7 @@ default-members = [
     "dev-tools/releng",
     "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
+    "dev-tools/support-bundle-reader-lib",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
@@ -279,6 +282,7 @@ default-members = [
     "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/zone-images",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -556,7 +560,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.0"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "88adb1a5df689b3e2daddab9325ee94047f6ffad", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "db01858ce12db22079b5776731adbff163a50d91", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.1"
 once_cell = "1.20.3"
@@ -566,7 +570,7 @@ openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "88adb1a5df689b3e2daddab9325ee94047f6ffad" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "db01858ce12db22079b5776731adbff163a50d91" }
 oso = "0.27"
 owo-colors = "4.2.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -666,6 +670,7 @@ sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
+sled-agent-zone-images = { path = "sled-agent/zone-images" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }
@@ -692,6 +697,7 @@ strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
 subtle = "2.6.1"
 supports-color = "3.0.2"
+support-bundle-reader-lib = { path = "dev-tools/support-bundle-reader-lib" }
 swrite = "0.1.0"
 sync-ptr = "0.1.1"
 libsw = { version = "3.4.0", features = ["tokio"] }

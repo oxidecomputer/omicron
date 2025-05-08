@@ -260,6 +260,9 @@ pub struct Caboose {
     pub git_commit: String,
     pub name: String,
     pub version: String,
+    // The sign will generally be present for production RoT and RoT bootloader images.
+    // It's currently absent from SP images and could be absent from RoT images as well.
+    pub sign: Option<String>,
 }
 
 impl From<gateway_client::types::SpComponentCaboose> for Caboose {
@@ -269,6 +272,7 @@ impl From<gateway_client::types::SpComponentCaboose> for Caboose {
             git_commit: c.git_commit,
             name: c.name,
             version: c.version,
+            sign: c.sign,
         }
     }
 }

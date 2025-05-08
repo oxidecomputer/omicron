@@ -59,6 +59,7 @@ slog.workspace = true
 slog-error-chain.workspace = true
 steno.workspace = true
 strum.workspace = true
+support-bundle-reader-lib.workspace = true
 supports-color.workspace = true
 tabled.workspace = true
 textwrap.workspace = true

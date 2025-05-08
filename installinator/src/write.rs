@@ -54,6 +54,21 @@ struct ArtifactDestination {
     control_plane_zpool: Option<ZpoolName>,
 }
 
+impl ArtifactDestination {
+    fn from_directory(dir: &Utf8Path) -> Result<Self> {
+        let control_plane_dir = dir.join("zones");
+        std::fs::create_dir_all(&control_plane_dir)
+            .with_context(|| format!("error creating directories at {dir}"))?;
+
+        Ok(Self {
+            host_phase_2: dir.join(HOST_PHASE_2_FILE_NAME),
+            clean_control_plane_dir: false,
+            control_plane_dir,
+            control_plane_zpool: None,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct WriteDestination {
     drives: BTreeMap<M2Slot, ArtifactDestination>,
@@ -66,23 +81,18 @@ pub(crate) struct WriteDestination {
 pub static HOST_PHASE_2_FILE_NAME: &str = "host_phase_2.bin";
 
 impl WriteDestination {
-    pub(crate) fn in_directory(dir: &Utf8Path) -> Result<Self> {
-        let control_plane_dir = dir.join("zones");
-        std::fs::create_dir_all(&control_plane_dir)
-            .with_context(|| format!("error creating directories at {dir}"))?;
-
-        // `in_directory()` is only used for testing (e.g., on
-        // not-really-gimlets); pretend we're only writing to M.2 A.
+    pub(crate) fn in_directories(
+        a_dir: &Utf8Path,
+        b_dir: Option<&Utf8Path>,
+    ) -> Result<Self> {
         let mut drives = BTreeMap::new();
-        drives.insert(
-            M2Slot::A,
-            ArtifactDestination {
-                host_phase_2: dir.join(HOST_PHASE_2_FILE_NAME),
-                clean_control_plane_dir: false,
-                control_plane_dir,
-                control_plane_zpool: None,
-            },
-        );
+
+        drives.insert(M2Slot::A, ArtifactDestination::from_directory(a_dir)?);
+        if let Some(dir) = b_dir {
+            // b_dir can fail after we insert a_dir into drives, but that's okay
+            // because we drop drives.
+            drives.insert(M2Slot::B, ArtifactDestination::from_directory(dir)?);
+        }
 
         Ok(Self { drives, is_host_phase_2_block_device: false })
     }
@@ -201,6 +211,13 @@ impl<'a> ArtifactWriter<'a> {
             .into_iter()
             .map(|(key, value)| (key, (value, DriveWriteProgress::Unstarted)))
             .collect();
+
+        // The mupdate override UUID is freshly generated within installinator.
+        // At the moment, there's no reason to have it be passed in via Wicket
+        // or some other means, though there are conceivably reasons to do so in
+        // the future.
+        let mupdate_uuid = MupdateOverrideUuid::new_v4();
+
         Self {
             drives,
             is_host_phase_2_block_device: destination
@@ -210,6 +227,7 @@ impl<'a> ArtifactWriter<'a> {
                 host_phase_2_data,
                 control_plane_id,
                 control_plane_zones,
+                mupdate_uuid,
             },
         }
     }
@@ -515,6 +533,7 @@ struct ArtifactsToWrite<'a> {
     host_phase_2_data: &'a BufList,
     control_plane_id: &'a ArtifactHashId,
     control_plane_zones: &'a ControlPlaneZoneImages,
+    mupdate_uuid: MupdateOverrideUuid,
 }
 
 impl ArtifactsToWrite<'_> {
@@ -562,6 +581,7 @@ impl ArtifactsToWrite<'_> {
             zones: self.control_plane_zones,
             host_phase_2_id: self.host_phase_2_id,
             control_plane_id: self.control_plane_id,
+            mupdate_uuid: self.mupdate_uuid,
         };
         cx.with_nested_engine(|engine| {
             inner_cx.register_steps(
@@ -597,6 +617,7 @@ struct ControlPlaneZoneWriteContext<'a> {
     zones: &'a ControlPlaneZoneImages,
     host_phase_2_id: &'a ArtifactHashId,
     control_plane_id: &'a ArtifactHashId,
+    mupdate_uuid: MupdateOverrideUuid,
 }
 
 impl ControlPlaneZoneWriteContext<'_> {
@@ -609,6 +630,7 @@ impl ControlPlaneZoneWriteContext<'_> {
         use update_engine::StepHandle;
 
         let slot = self.slot;
+        let mupdate_uuid = self.mupdate_uuid;
 
         // If we're on a gimlet, remove any files in the control plane
         // destination directory.
@@ -655,7 +677,6 @@ impl ControlPlaneZoneWriteContext<'_> {
                 "Writing MUPdate override file",
                 async move |cx| {
                     let transport = transport.into_value(cx.token()).await;
-                    let mupdate_uuid = MupdateOverrideUuid::new_v4();
                     let mupdate_json =
                         self.mupdate_override_artifact(mupdate_uuid);
 

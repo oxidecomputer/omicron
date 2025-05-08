@@ -4546,7 +4546,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=88adb1a5df689b3e2daddab9325ee94047f6ffad#88adb1a5df689b3e2daddab9325ee94047f6ffad"
+source = "git+https://github.com/oxidecomputer/opte?rev=db01858ce12db22079b5776731adbff163a50d91#db01858ce12db22079b5776731adbff163a50d91"
 dependencies = [
  "bitflags 2.9.0",
 ]
@@ -4662,7 +4662,8 @@ checksum = "f4c7245a08504955605670dbf141fceab975f15ca21570696aebe9d2e71576bd"
 [[package]]
 name = "ingot"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/ingot.git?rev=bff93247fe75ff889121e39d494cc3805fc01906#bff93247fe75ff889121e39d494cc3805fc01906"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bf487a5cb3a9d3346e5b7dac34193ba0b2aefe5d1c196e8caf454c19e200a04"
 dependencies = [
  "bitflags 2.9.0",
  "ingot-macros",
@@ -4675,7 +4676,8 @@ dependencies = [
 [[package]]
 name = "ingot-macros"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/ingot.git?rev=bff93247fe75ff889121e39d494cc3805fc01906#bff93247fe75ff889121e39d494cc3805fc01906"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f13f59bddb02b9927bdf5e20a7204c92bcff649496f54a591091c0c2cb27cbf"
 dependencies = [
  "darling",
  "itertools 0.13.0",
@@ -4688,7 +4690,8 @@ dependencies = [
 [[package]]
 name = "ingot-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/ingot.git?rev=bff93247fe75ff889121e39d494cc3805fc01906#bff93247fe75ff889121e39d494cc3805fc01906"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a31cffa0c771a619697bc33dff4fb4771a6f87b0f6864793a3efac4e8ee50c78"
 dependencies = [
  "ingot-macros",
  "macaddr",
@@ -5116,7 +5119,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=88adb1a5df689b3e2daddab9325ee94047f6ffad#88adb1a5df689b3e2daddab9325ee94047f6ffad"
+source = "git+https://github.com/oxidecomputer/opte?rev=db01858ce12db22079b5776731adbff163a50d91#db01858ce12db22079b5776731adbff163a50d91"
 dependencies = [
  "quote",
  "syn 2.0.98",
@@ -7458,6 +7461,7 @@ dependencies = [
  "steno",
  "strum",
  "subprocess",
+ "support-bundle-reader-lib",
  "supports-color",
  "tabled 0.15.0",
  "textwrap",
@@ -7726,6 +7730,7 @@ dependencies = [
  "sled-agent-client",
  "sled-agent-config-reconciler",
  "sled-agent-types",
+ "sled-agent-zone-images",
  "sled-diagnostics",
  "sled-hardware",
  "sled-hardware-types",
@@ -8128,7 +8133,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=88adb1a5df689b3e2daddab9325ee94047f6ffad#88adb1a5df689b3e2daddab9325ee94047f6ffad"
+source = "git+https://github.com/oxidecomputer/opte?rev=db01858ce12db22079b5776731adbff163a50d91#db01858ce12db22079b5776731adbff163a50d91"
 dependencies = [
  "bitflags 2.9.0",
  "cfg-if",
@@ -8147,7 +8152,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=88adb1a5df689b3e2daddab9325ee94047f6ffad#88adb1a5df689b3e2daddab9325ee94047f6ffad"
+source = "git+https://github.com/oxidecomputer/opte?rev=db01858ce12db22079b5776731adbff163a50d91#db01858ce12db22079b5776731adbff163a50d91"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -8160,7 +8165,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=88adb1a5df689b3e2daddab9325ee94047f6ffad#88adb1a5df689b3e2daddab9325ee94047f6ffad"
+source = "git+https://github.com/oxidecomputer/opte?rev=db01858ce12db22079b5776731adbff163a50d91#db01858ce12db22079b5776731adbff163a50d91"
 dependencies = [
  "libc",
  "libnet",
@@ -8229,7 +8234,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=88adb1a5df689b3e2daddab9325ee94047f6ffad#88adb1a5df689b3e2daddab9325ee94047f6ffad"
+source = "git+https://github.com/oxidecomputer/opte?rev=db01858ce12db22079b5776731adbff163a50d91#db01858ce12db22079b5776731adbff163a50d91"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -11433,10 +11438,12 @@ name = "sled-agent-config-reconciler"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-trait",
  "camino",
  "camino-tempfile",
  "chrono",
+ "debug-ignore",
  "derive_more",
  "dropshot",
  "expectorate",
@@ -11464,6 +11471,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tufaceous-artifact",
+ "xshell",
  "zone 0.3.1",
 ]
 
@@ -11496,6 +11504,17 @@ dependencies = [
  "thiserror 1.0.69",
  "toml 0.8.20",
  "uuid",
+]
+
+[[package]]
+name = "sled-agent-zone-images"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "nexus-sled-agent-shared",
+ "omicron-workspace-hack",
+ "sled-storage",
 ]
 
 [[package]]
@@ -12149,6 +12168,25 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "support-bundle-reader-lib"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "camino",
+ "crossterm",
+ "futures",
+ "nexus-client",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "ratatui",
+ "reqwest",
+ "tokio",
+ "zip 2.6.1",
+]
 
 [[package]]
 name = "supports-color"
