@@ -5306,7 +5306,7 @@ dependencies = [
  "socket2",
  "thiserror 1.0.69",
  "tracing",
- "winnow 0.6.20",
+ "winnow 0.6.26",
 ]
 
 [[package]]
@@ -7948,7 +7948,7 @@ dependencies = [
  "usdt",
  "usdt-impl",
  "uuid",
- "winnow 0.6.20",
+ "winnow 0.6.26",
  "x509-cert",
  "zerocopy 0.7.35",
  "zerocopy 0.8.10",
@@ -11927,7 +11927,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0d7b3e8a3b6f2ee93ac391a0f757c13790caa0147892e3545cd549dd5b54bc0"
 dependencies = [
  "unicode_categories",
- "winnow 0.6.20",
+ "winnow 0.6.26",
 ]
 
 [[package]]
@@ -14578,9 +14578,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.6.20"
+version = "0.6.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36c1fec1a2bb5866f07c25f68c26e565c4c200aebb96d7e55710c19d3e8ac49b"
+checksum = "1e90edd2ac1aa278a5c4599b1d89cf03074b610800f866d4026dc199d7929a28"
 dependencies = [
  "memchr",
 ]
