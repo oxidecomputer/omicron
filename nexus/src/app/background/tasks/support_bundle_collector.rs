@@ -573,7 +573,9 @@ impl BundleCollection {
             // or a task operating on that data (tasks)...
             while sleds_iter.peek().is_some() || !tasks.is_empty() {
                 // Spawn tasks up to the concurrency limit
-                while tasks.len() < MAX_CONCURRENT_SLED_REQUESTS {
+                while tasks.len() < MAX_CONCURRENT_SLED_REQUESTS
+                    && sleds_iter.peek().is_some()
+                {
                     if let Some(sled) = sleds_iter.next() {
                         let collection: Arc<BundleCollection> = self.clone();
                         let dir = dir.path().to_path_buf();
