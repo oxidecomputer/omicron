@@ -99,13 +99,13 @@ pub struct Transceiver {
     /// The port in which the transceiver sits.
     pub port: String,
     /// The general status of the transceiver, such as presence and faults.
-    pub status: Option<ExtendedStatus>,
+    pub status: Result<ExtendedStatus, String>,
     /// Information about the power state of the transceiver.
-    pub power: Option<PowerMode>,
+    pub power: Result<PowerMode, String>,
     /// Details about the vendor, part number, and serial number.
-    pub vendor: Option<VendorInfo>,
+    pub vendor: Result<VendorInfo, String>,
     /// Status of the transceiver's machinery for carrying data, the "datapath".
-    pub datapath: Option<Datapath>,
+    pub datapath: Result<Datapath, String>,
     /// Environmental monitoring data, such as temperature or optical power.
-    pub monitors: Option<Monitors>,
+    pub monitors: Result<Monitors, String>,
 }
