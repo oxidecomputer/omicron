@@ -7948,6 +7948,7 @@ dependencies = [
  "usdt",
  "usdt-impl",
  "uuid",
+ "winnow 0.6.20",
  "x509-cert",
  "zerocopy 0.7.35",
  "zerocopy 0.8.10",
@@ -11921,12 +11922,12 @@ dependencies = [
 
 [[package]]
 name = "sqlformat"
-version = "0.2.6"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bba3a93db0cc4f7bdece8bb09e77e2e785c20bfebf79eb8340ed80708048790"
+checksum = "a0d7b3e8a3b6f2ee93ac391a0f757c13790caa0147892e3545cd549dd5b54bc0"
 dependencies = [
- "nom",
  "unicode_categories",
+ "winnow 0.6.20",
 ]
 
 [[package]]
