@@ -256,6 +256,10 @@ struct ReconcilerTask<T> {
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
     sled_agent_facilities: T,
     log: Logger,
+    // TODO where do we want to do dump setup? Needs both internal and external
+    // disks. Maybe this task, or maybe a task just for dump setup?
+    // Invokes dumpadm(8) and savecore(8) when new disks are encountered
+    // dump_setup: DumpSetup,
 }
 
 impl<T: SledAgentFacilities> ReconcilerTask<T> {

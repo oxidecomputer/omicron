@@ -243,7 +243,7 @@ impl ConfigReconcilerHandle {
     }
 
     /// Wait for the internal disks task to start managing the boot disk.
-    pub async fn wait_for_boot_disk(&mut self) -> DiskIdentity {
+    pub async fn wait_for_boot_disk(&mut self) -> Arc<DiskIdentity> {
         self.internal_disks_rx.wait_for_boot_disk().await
     }
 
