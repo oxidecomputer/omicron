@@ -10,7 +10,7 @@ use std::fmt;
 use std::str::FromStr;
 
 impl_enum_type!(
-    WebhookDeliveryStateEnum:
+    AlertDeliveryStateEnum:
 
     #[derive(
         Copy,
@@ -24,7 +24,7 @@ impl_enum_type!(
         strum::VariantArray,
     )]
     #[serde(rename_all = "snake_case")]
-    pub enum WebhookDeliveryState;
+    pub enum AlertDeliveryState;
 
     Pending => b"pending"
     Failed => b"failed"
@@ -32,36 +32,36 @@ impl_enum_type!(
 
 );
 
-impl fmt::Display for WebhookDeliveryState {
+impl fmt::Display for AlertDeliveryState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // Forward to the canonical implementation in nexus-types.
-        views::WebhookDeliveryState::from(*self).fmt(f)
+        views::AlertDeliveryState::from(*self).fmt(f)
     }
 }
 
-impl From<WebhookDeliveryState> for views::WebhookDeliveryState {
-    fn from(trigger: WebhookDeliveryState) -> Self {
+impl From<AlertDeliveryState> for views::AlertDeliveryState {
+    fn from(trigger: AlertDeliveryState) -> Self {
         match trigger {
-            WebhookDeliveryState::Pending => Self::Pending,
-            WebhookDeliveryState::Failed => Self::Failed,
-            WebhookDeliveryState::Delivered => Self::Delivered,
+            AlertDeliveryState::Pending => Self::Pending,
+            AlertDeliveryState::Failed => Self::Failed,
+            AlertDeliveryState::Delivered => Self::Delivered,
         }
     }
 }
 
-impl From<views::WebhookDeliveryState> for WebhookDeliveryState {
-    fn from(trigger: views::WebhookDeliveryState) -> Self {
+impl From<views::AlertDeliveryState> for AlertDeliveryState {
+    fn from(trigger: views::AlertDeliveryState) -> Self {
         match trigger {
-            views::WebhookDeliveryState::Pending => Self::Pending,
-            views::WebhookDeliveryState::Failed => Self::Failed,
-            views::WebhookDeliveryState::Delivered => Self::Delivered,
+            views::AlertDeliveryState::Pending => Self::Pending,
+            views::AlertDeliveryState::Failed => Self::Failed,
+            views::AlertDeliveryState::Delivered => Self::Delivered,
         }
     }
 }
 
-impl FromStr for WebhookDeliveryState {
+impl FromStr for AlertDeliveryState {
     type Err = omicron_common::api::external::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        views::WebhookDeliveryState::from_str(s).map(Into::into)
+        views::AlertDeliveryState::from_str(s).map(Into::into)
     }
 }

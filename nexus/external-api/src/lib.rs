@@ -3542,21 +3542,21 @@ pub trait NexusExternalApi {
         params: TypedBody<params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError>;
 
-    // Webhooks
+    // Alerts
 
-    /// List webhook event classes
+    /// List alert classes
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/event-classes",
-        tags = ["system/webhooks"],
+        path = "/v1/alerts/classes",
+        tags = ["system/alerts"],
     }]
     async fn webhook_event_class_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<
-            PaginationParams<EmptyScanParams, params::EventClassPage>,
+            PaginationParams<EmptyScanParams, params::AlertClassPage>,
         >,
-        filter: Query<params::EventClassFilter>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError>;
+        filter: Query<params::AlertClassFilter>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertClass>>, HttpError>;
 
     /// List webhook receivers
     #[endpoint {
@@ -3730,7 +3730,7 @@ pub trait NexusExternalApi {
     }]
     async fn webhook_delivery_resend(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookEventSelector>,
+        path_params: Path<params::AlertSelector>,
         receiver: Query<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError>;
 }

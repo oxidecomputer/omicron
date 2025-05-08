@@ -5116,15 +5116,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicro
 );
 
 /*
- * WEBHOOKS
+ * Alerts
  */
 
 
 /*
- * Webhook receivers, receiver secrets, and receiver subscriptions.
+ * Alert webhook receivers, receiver secrets, and receiver subscriptions.
  */
 
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_receiver (
+CREATE TABLE IF NOT EXISTS omicron.public.alert_receiver (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -5143,13 +5143,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_receiver (
     endpoint STRING(512) NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_webhook_rx_by_id
-ON omicron.public.webhook_receiver (id)
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_alert_rx_by_id
+ON omicron.public.alert_receiver (id)
 WHERE
     time_deleted IS NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_webhook_rx_by_name
-ON omicron.public.webhook_receiver (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_alert_rx_by_name
+ON omicron.public.alert_receiver (
     name
 ) WHERE
     time_deleted IS NULL;
@@ -5175,11 +5175,11 @@ ON omicron.public.webhook_secret (
 ) WHERE
     time_deleted IS NULL;
 
--- Webhook event classes.
+-- Alert classes.
 --
--- When creating new event classes, be sure to add them here!
-CREATE TYPE IF NOT EXISTS omicron.public.webhook_event_class AS ENUM (
-    -- Liveness probes, which are technically not real events, but, you know...
+-- When creating new alert classes, be sure to add them here!
+CREATE TYPE IF NOT EXISTS omicron.public.alert_class AS ENUM (
+    -- Liveness probes, which are technically not real alerts, but, you know...
     'probe',
     -- Test classes used to test globbing.
     --
@@ -5189,21 +5189,21 @@ CREATE TYPE IF NOT EXISTS omicron.public.webhook_event_class AS ENUM (
     'test.foo.baz',
     'test.quux.bar',
     'test.quux.bar.baz'
-    -- Add new event classes here!
+    -- Add new alert classes here!
 );
 
--- The set of event class filters (either event class names or event class glob
--- patterns) associated with a webhook receiver.
+-- The set of alert class filters (either alert class names or alert class glob
+-- patterns) associated with a alert receiver.
 --
--- This is used when creating entries in the webhook_rx_subscription table to
--- indicate that a webhook receiver is interested in a given event class.
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_event_glob (
-    -- UUID of the webhook receiver (foreign key into
-    -- `omicron.public.webhook_rx`)
+-- This is used when creating entries in the alert_subscription table to
+-- indicate that a alert receiver is interested in a given event class.
+CREATE TABLE IF NOT EXISTS omicron.public.alert_glob (
+    -- UUID of the alert receiver (foreign key into
+    -- `omicron.public.alert_receiver`)
     rx_id UUID NOT NULL,
     -- An event class glob to which this receiver is subscribed.
     glob STRING(512) NOT NULL,
-    -- Regex used when evaluating this filter against concrete event classes.
+    -- Regex used when evaluating this filter against concrete alert classes.
     regex STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     -- The database schema version at which this glob was last expanded.
@@ -5218,21 +5218,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_event_glob (
     PRIMARY KEY (rx_id, glob)
 );
 
--- Look up all event class globs for a webhook receiver.
-CREATE INDEX IF NOT EXISTS lookup_webhook_event_globs_for_rx
-ON omicron.public.webhook_rx_event_glob (
+-- Look up all event class globs for an alert receiver.
+CREATE INDEX IF NOT EXISTS lookup_alert_globs_for_rx
+ON omicron.public.alert_rx_glbs (
     rx_id
 );
 
-CREATE INDEX IF NOT EXISTS lookup_webhook_event_globs_by_schema_version
-ON omicron.public.webhook_rx_event_glob (schema_version);
+CREATE INDEX IF NOT EXISTS lookup_alert_globs_by_schema_version
+ON omicron.public.alert_glob (schema_version);
 
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_subscription (
+CREATE TABLE IF NOT EXISTS omicron.public.alert_subscription (
     -- UUID of the webhook receiver (foreign key into
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
-    -- An event class to which the receiver is subscribed.
-    event_class omicron.public.webhook_event_class NOT NULL,
+    -- An alert class to which the receiver is subscribed.
+    event_class omicron.public.alert_class NOT NULL,
     -- If this subscription is a concrete instantiation of a glob pattern, the
     -- value of the glob that created it (and, a foreign key into
     -- `webhook_rx_event_glob`). If the receiver is subscribed to this exact
@@ -5248,10 +5248,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_subscription (
     PRIMARY KEY (rx_id, event_class)
 );
 
--- Look up all webhook receivers subscribed to an event class. This is used by
+-- Look up all receivers subscribed to an alert class. This is used by
 -- the dispatcher to determine who is interested in a particular event.
-CREATE INDEX IF NOT EXISTS lookup_webhook_rxs_for_event_class
-ON omicron.public.webhook_rx_subscription (
+CREATE INDEX IF NOT EXISTS lookup_alert_rxs_for_class
+ON omicron.public.alert_subscription (
     event_class
 );
 
@@ -5260,22 +5260,22 @@ ON omicron.public.webhook_rx_subscription (
 -- This is used when generating a view of all user-provided original
 -- subscriptions provided for a receiver. That list is generated by looking up
 -- all exact event class subscriptions for the receiver ID in this table,
--- combined with the list of all globs in the `webhook_rx_event_glob` table.
-CREATE INDEX IF NOT EXISTS lookup_exact_subscriptions_for_webhook_rx
-on omicron.public.webhook_rx_subscription (
+-- combined with the list of all globs in the `alert_glob` table.
+CREATE INDEX IF NOT EXISTS lookup_exact_subscriptions_for_alert_rx
+on omicron.public.alert_subscription (
     rx_id
 ) WHERE glob IS NULL;
 
 /*
- * Webhook event message queue.
+ * Alert message queue.
  */
 
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_event (
+CREATE TABLE IF NOT EXISTS omicron.public.alert (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     -- The class of event that this is.
-    event_class omicron.public.webhook_event_class NOT NULL,
+    event_class omicron.public.alert_class NOT NULL,
     -- Actual event data. The structure of this depends on the event class.
     event JSONB NOT NULL,
 
@@ -5293,8 +5293,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_event (
     )
 );
 
--- Singleton probe event
-INSERT INTO omicron.public.webhook_event (
+-- Singleton probe alert
+INSERT INTO omicron.public.alert (
     id,
     time_created,
     time_modified,
@@ -5318,29 +5318,28 @@ INSERT INTO omicron.public.webhook_event (
 -- Look up webhook events in need of dispatching.
 --
 -- This is used by the message dispatcher when looking for events to dispatch.
-CREATE INDEX IF NOT EXISTS lookup_undispatched_webhook_events
-ON omicron.public.webhook_event (
+CREATE INDEX IF NOT EXISTS lookup_undispatched_alerts
+ON omicron.public.alert (
     id, time_created
 ) WHERE time_dispatched IS NULL;
 
 
 /*
- * Webhook message dispatching and delivery attempts.
+ * Alert message dispatching and delivery attempts.
  */
 
--- Describes why a webhook delivery was triggered
-CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_trigger AS ENUM (
+-- Describes why an alert delivery was triggered
+CREATE TYPE IF NOT EXISTS omicron.public.alert_delivery_trigger AS ENUM (
     --  This delivery was triggered by the event being dispatched.
     'event',
-    -- This delivery was triggered by an explicit call to the webhook event
-    -- resend API.
+    -- This delivery was triggered by an explicit call to the alert resend API.
     'resend',
     --- This delivery is a liveness probe.
     'probe'
 );
 
--- Describes the state of a webhook delivery
-CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_state AS ENUM (
+-- Describes the state of an alert delivery
+CREATE TYPE IF NOT EXISTS omicron.public.alert_delivery_state AS ENUM (
     --  This delivery has not yet completed.
     'pending',
     -- This delivery has failed.
@@ -5349,6 +5348,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_state AS ENUM (
     'delivered'
 );
 
+-- Delivery dispatch table for webhook receivers.
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- UUID of this delivery.
     id UUID PRIMARY KEY,
@@ -5358,7 +5358,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
 
-    triggered_by omicron.public.webhook_delivery_trigger NOT NULL,
+    triggered_by omicron.public.alert_delivery_trigger NOT NULL,
 
     --- Delivery attempt count. Starts at 0.
     attempts INT2 NOT NULL,
@@ -5368,7 +5368,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- successfully, or is considered permanently failed.
     time_completed TIMESTAMPTZ,
 
-    state omicron.public.webhook_delivery_state NOT NULL,
+    state omicron.public.alert_delivery_state NOT NULL,
 
     -- Deliverator coordination bits
     deliverator_id UUID,

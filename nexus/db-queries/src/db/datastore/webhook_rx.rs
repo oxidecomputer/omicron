@@ -12,19 +12,19 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::SQL_BATCH_SIZE;
+use crate::db::model::AlertClass;
+use crate::db::model::AlertGlob;
+use crate::db::model::AlertReceiver;
+use crate::db::model::AlertReceiverIdentity;
+use crate::db::model::AlertRxGlob;
+use crate::db::model::AlertRxSubscription;
+use crate::db::model::AlertSubscriptionKind;
 use crate::db::model::Generation;
 use crate::db::model::Name;
 use crate::db::model::SCHEMA_VERSION;
 use crate::db::model::SemverVersion;
-use crate::db::model::WebhookEventClass;
-use crate::db::model::WebhookGlob;
-use crate::db::model::WebhookReceiver;
 use crate::db::model::WebhookReceiverConfig;
-use crate::db::model::WebhookReceiverIdentity;
-use crate::db::model::WebhookRxEventGlob;
-use crate::db::model::WebhookRxSubscription;
 use crate::db::model::WebhookSecret;
-use crate::db::model::WebhookSubscriptionKind;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
@@ -37,16 +37,16 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_schema::schema::alert::dsl as alert_dsl;
+use nexus_db_schema::schema::alert_glob::dsl as glob_dsl;
+use nexus_db_schema::schema::alert_receiver::dsl as rx_dsl;
+use nexus_db_schema::schema::alert_subscription::dsl as subscription_dsl;
 use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as delivery_attempt_dsl;
-use nexus_db_schema::schema::webhook_event::dsl as event_dsl;
-use nexus_db_schema::schema::webhook_receiver::dsl as rx_dsl;
-use nexus_db_schema::schema::webhook_rx_event_glob::dsl as glob_dsl;
-use nexus_db_schema::schema::webhook_rx_subscription::dsl as subscription_dsl;
 use nexus_db_schema::schema::webhook_secret::dsl as secret_dsl;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
-use nexus_types::internal_api::background::WebhookGlobStatus;
+use nexus_types::internal_api::background::AlertGlobStatus;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -55,8 +55,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::WebhookReceiverUuid;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -80,7 +80,7 @@ impl DataStore {
 
         let subscriptions = subscriptions
             .into_iter()
-            .map(WebhookSubscriptionKind::try_from)
+            .map(AlertSubscriptionKind::try_from)
             .collect::<Result<Vec<_>, _>>()?;
         let err = OptionalError::new();
         let (rx, secrets) = self
@@ -90,12 +90,9 @@ impl DataStore {
                 // transaction fails because of a UUID collision.
                 //
                 // this probably won't happen, but, ya know...
-                let id = WebhookReceiverUuid::new_v4();
-                let receiver = WebhookReceiver {
-                    identity: WebhookReceiverIdentity::new(
-                        id,
-                        identity.clone(),
-                    ),
+                let id = AlertReceiverUuid::new_v4();
+                let receiver = AlertReceiver {
+                    identity: AlertReceiverIdentity::new(id, identity.clone()),
                     endpoint: endpoint.to_string(),
                     secret_gen: Generation::new(),
                     subscription_gen: Generation::new(),
@@ -105,9 +102,9 @@ impl DataStore {
                 let err = err.clone();
                 let name = identity.name.clone();
                 async move {
-                    let rx = diesel::insert_into(rx_dsl::webhook_receiver)
+                    let rx = diesel::insert_into(rx_dsl::alert_receiver)
                         .values(receiver)
-                        .returning(WebhookReceiver::as_returning())
+                        .returning(AlertReceiver::as_returning())
                         .get_result_async(&conn)
                         .await
                         .map_err(|e| {
@@ -115,7 +112,7 @@ impl DataStore {
                                 public_error_from_diesel(
                                     e,
                                     ErrorHandler::Conflict(
-                                        ResourceType::WebhookReceiver,
+                                        ResourceType::AlertReceiver,
                                         name.as_str(),
                                     ),
                                 )
@@ -165,7 +162,7 @@ impl DataStore {
                 public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
-                        ResourceType::WebhookReceiver,
+                        ResourceType::AlertReceiver,
                         identity.name.as_str(),
                     ),
                 )
@@ -176,8 +173,8 @@ impl DataStore {
     pub async fn webhook_rx_config_fetch(
         &self,
         opctx: &OpContext,
-        authz_rx: &authz::WebhookReceiver,
-    ) -> Result<(Vec<WebhookSubscriptionKind>, Vec<WebhookSecret>), Error> {
+        authz_rx: &authz::AlertReceiver,
+    ) -> Result<(Vec<AlertSubscriptionKind>, Vec<WebhookSecret>), Error> {
         opctx.authorize(authz::Action::ListChildren, authz_rx).await?;
         self.rx_config_fetch_on_conn(
             authz_rx.id(),
@@ -188,9 +185,9 @@ impl DataStore {
 
     async fn rx_config_fetch_on_conn(
         &self,
-        rx_id: WebhookReceiverUuid,
+        rx_id: AlertReceiverUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<(Vec<WebhookSubscriptionKind>, Vec<WebhookSecret>), Error> {
+    ) -> Result<(Vec<AlertSubscriptionKind>, Vec<WebhookSecret>), Error> {
         let subscriptions =
             self.rx_subscription_list_on_conn(rx_id, &conn).await?;
         let secrets = self.rx_secret_list_on_conn(rx_id, &conn).await?;
@@ -200,8 +197,8 @@ impl DataStore {
     pub async fn webhook_rx_delete(
         &self,
         opctx: &OpContext,
-        authz_rx: &authz::WebhookReceiver,
-        db_rx: &WebhookReceiver,
+        authz_rx: &authz::AlertReceiver,
+        db_rx: &AlertReceiver,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_rx).await?;
         let rx_id = authz_rx.id().into_untyped_uuid();
@@ -235,7 +232,7 @@ impl DataStore {
 
                     // Delete subscriptions and globs.
                     let exact_subscriptions_deleted = diesel::delete(
-                        subscription_dsl::webhook_rx_subscription,
+                        subscription_dsl::alert_subscription,
                     )
                     .filter(subscription_dsl::rx_id.eq(rx_id))
                     .execute_async(&conn)
@@ -250,7 +247,7 @@ impl DataStore {
                     })?;
 
                     let globs_deleted =
-                        diesel::delete(glob_dsl::webhook_rx_event_glob)
+                        diesel::delete(glob_dsl::alert_glob)
                             .filter(glob_dsl::rx_id.eq(rx_id))
                             .execute_async(&conn)
                             .await
@@ -297,7 +294,7 @@ impl DataStore {
                     })?;
                     // Finally, mark the webhook receiver record as deleted,
                     // provided that none of its children were modified in the interim.
-                    let deleted = diesel::update(rx_dsl::webhook_receiver)
+                    let deleted = diesel::update(rx_dsl::alert_receiver)
                         .filter(rx_dsl::id.eq(rx_id))
                         .filter(rx_dsl::time_deleted.is_null())
                         .filter(rx_dsl::subscription_gen.eq(db_rx.subscription_gen))
@@ -344,9 +341,9 @@ impl DataStore {
     pub async fn webhook_rx_update(
         &self,
         opctx: &OpContext,
-        authz_rx: &authz::WebhookReceiver,
+        authz_rx: &authz::AlertReceiver,
         params: params::WebhookReceiverUpdate,
-    ) -> UpdateResult<WebhookReceiver> {
+    ) -> UpdateResult<AlertReceiver> {
         opctx.authorize(authz::Action::Modify, authz_rx).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -357,7 +354,7 @@ impl DataStore {
             endpoint: params.endpoint.as_ref().map(ToString::to_string),
             time_modified: chrono::Utc::now(),
         };
-        let updated = diesel::update(rx_dsl::webhook_receiver)
+        let updated = diesel::update(rx_dsl::alert_receiver)
             .filter(rx_dsl::id.eq(rx_id))
             .filter(rx_dsl::time_deleted.is_null())
             .set(update)
@@ -388,20 +385,20 @@ impl DataStore {
         //
         // This is a bit unfortunate, and it would be nicer to do this with
         // JOINs, but it's a bit hairy as the subscriptions come from both the
-        // `webhook_rx_subscription` and `webhook_rx_glob` tables...
+        // `alert_subscription` and `webhook_rx_glob` tables...
 
         let receivers = match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(rx_dsl::webhook_receiver, rx_dsl::id, &pagparams)
+                paginated(rx_dsl::alert_receiver, rx_dsl::id, &pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
-                rx_dsl::webhook_receiver,
+                rx_dsl::alert_receiver,
                 rx_dsl::name,
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
         .filter(rx_dsl::time_deleted.is_null())
-        .select(WebhookReceiver::as_select())
+        .select(AlertReceiver::as_select())
         .load_async(&*conn)
         .await
         .map_err(|e| {
@@ -433,8 +430,8 @@ impl DataStore {
     pub async fn webhook_rx_is_subscribed_to_event(
         &self,
         opctx: &OpContext,
-        authz_rx: &authz::WebhookReceiver,
-        authz_event: &authz::WebhookEvent,
+        authz_rx: &authz::AlertReceiver,
+        authz_event: &authz::Alert,
     ) -> Result<bool, Error> {
         opctx.authorize(authz::Action::Read, authz_rx).await?;
 
@@ -475,11 +472,11 @@ impl DataStore {
             }
         }
 
-        let event_class = event_dsl::webhook_event
-            .filter(event_dsl::id.eq(authz_event.id().into_untyped_uuid()))
-            .select(event_dsl::event_class)
+        let event_class = alert_dsl::alert
+            .filter(alert_dsl::id.eq(authz_event.id().into_untyped_uuid()))
+            .select(alert_dsl::event_class)
             .single_value();
-        subscription_dsl::webhook_rx_subscription
+        subscription_dsl::alert_subscription
             .filter(subscription_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
             .filter(subscription_dsl::event_class.nullable().eq(event_class))
             .select(subscription_dsl::rx_id)
@@ -491,11 +488,11 @@ impl DataStore {
     }
 
     /// Don't forget to like and subscribe!
-    pub async fn webhook_rx_subscription_add(
+    pub async fn alert_subscription_add(
         &self,
         opctx: &OpContext,
-        authz_rx: &authz::WebhookReceiver,
-        subscription: WebhookSubscriptionKind,
+        authz_rx: &authz::AlertReceiver,
+        subscription: AlertSubscriptionKind,
     ) -> CreateResult<()> {
         opctx.authorize(authz::Action::Modify, authz_rx).await?;
         self.rx_add_subscription_on_conn(
@@ -515,11 +512,11 @@ impl DataStore {
         })
     }
 
-    pub async fn webhook_rx_subscription_remove(
+    pub async fn alert_subscription_remove(
         &self,
         opctx: &OpContext,
-        authz_rx: &authz::WebhookReceiver,
-        subscription: WebhookSubscriptionKind,
+        authz_rx: &authz::AlertReceiver,
+        subscription: AlertSubscriptionKind,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, authz_rx).await?;
         let rx_id = authz_rx.id().into_untyped_uuid();
@@ -543,7 +540,7 @@ impl DataStore {
         };
         const LOG_MSG: &str = "unsubscribed webhook receiver";
         match subscription {
-            WebhookSubscriptionKind::Glob(ref glob) => {
+            AlertSubscriptionKind::Glob(ref glob) => {
                 // Deleting a glob subscription is performed in a transaction in
                 // order to ensure that the glob is only deleted if its exact
                 // subscriptions could also be deleted.
@@ -553,13 +550,13 @@ impl DataStore {
                         let glob = glob.glob.clone();
                         async move {
                             let n_exact = diesel::delete(
-                                subscription_dsl::webhook_rx_subscription,
+                                subscription_dsl::alert_subscription,
                             )
                             .filter(subscription_dsl::rx_id.eq(rx_id))
                             .filter(subscription_dsl::glob.eq(glob.clone()))
                             .execute_async(&conn)
                             .await?;
-                            diesel::delete(glob_dsl::webhook_rx_event_glob)
+                            diesel::delete(glob_dsl::alert_glob)
                                 .filter(glob_dsl::rx_id.eq(rx_id))
                                 .filter(glob_dsl::glob.eq(glob))
                                 .execute_async(&conn)
@@ -577,8 +574,8 @@ impl DataStore {
                     "exact_subscriptions_deleted" => n_exact,
                 );
             }
-            WebhookSubscriptionKind::Exact(class) => {
-                diesel::delete(subscription_dsl::webhook_rx_subscription)
+            AlertSubscriptionKind::Exact(class) => {
+                diesel::delete(subscription_dsl::alert_subscription)
                     .filter(subscription_dsl::rx_id.eq(rx_id))
                     .filter(subscription_dsl::event_class.eq(class))
                     .execute_async(&*conn)
@@ -598,30 +595,30 @@ impl DataStore {
 
     async fn rx_subscription_list_on_conn(
         &self,
-        rx_id: WebhookReceiverUuid,
+        rx_id: AlertReceiverUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> ListResultVec<WebhookSubscriptionKind> {
+    ) -> ListResultVec<AlertSubscriptionKind> {
         // TODO(eliza): rather than performing two separate queries, this could
         // perhaps be expressed using a SQL `union`, with an added "label"
         // column to distinguish between globs and exact subscriptions, but this
         // is a bit more complex, and would require raw SQL...
 
         // First, get all the exact subscriptions that aren't from globs.
-        let exact = subscription_dsl::webhook_rx_subscription
+        let exact = subscription_dsl::alert_subscription
             .filter(subscription_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
             .filter(subscription_dsl::glob.is_null())
             .select(subscription_dsl::event_class)
-            .load_async::<WebhookEventClass>(conn)
+            .load_async::<AlertClass>(conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(e, ErrorHandler::Server)
                     .internal_context("failed to list exact subscriptions")
             })?;
         // Then, get the globs
-        let globs = glob_dsl::webhook_rx_event_glob
+        let globs = glob_dsl::alert_glob
             .filter(glob_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
-            .select(WebhookGlob::as_select())
-            .load_async::<WebhookGlob>(conn)
+            .select(AlertGlob::as_select())
+            .load_async::<AlertGlob>(conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(e, ErrorHandler::Server)
@@ -629,8 +626,8 @@ impl DataStore {
             })?;
         let subscriptions = exact
             .into_iter()
-            .map(WebhookSubscriptionKind::Exact)
-            .chain(globs.into_iter().map(WebhookSubscriptionKind::Glob))
+            .map(AlertSubscriptionKind::Exact)
+            .chain(globs.into_iter().map(AlertSubscriptionKind::Glob))
             .collect::<Vec<_>>();
         Ok(subscriptions)
     }
@@ -638,17 +635,17 @@ impl DataStore {
     async fn rx_add_subscription_on_conn(
         &self,
         opctx: &OpContext,
-        rx_id: WebhookReceiverUuid,
-        subscription: WebhookSubscriptionKind,
+        rx_id: AlertReceiverUuid,
+        subscription: AlertSubscriptionKind,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<(), TransactionError<Error>> {
         match subscription {
-            WebhookSubscriptionKind::Glob(glob) => {
-                let glob = WebhookRxEventGlob::new(rx_id, glob);
-                let result: Option<WebhookRxEventGlob> =
-                    WebhookReceiver::insert_resource(
+            AlertSubscriptionKind::Glob(glob) => {
+                let glob = AlertRxGlob::new(rx_id, glob);
+                let result: Option<AlertRxGlob> =
+                    AlertReceiver::insert_resource(
                         rx_id.into_untyped_uuid(),
-                        diesel::insert_into(glob_dsl::webhook_rx_event_glob)
+                        diesel::insert_into(glob_dsl::alert_glob)
                             .values(glob)
                             // If there's already a subscription to this glob,
                             // that's fine...
@@ -659,23 +656,23 @@ impl DataStore {
                     .map_err(async_insert_error_to_txn(rx_id))?;
                 slog::debug!(
                     &opctx.log,
-                    "added glob subscription to webhook receiver";
+                    "added glob subscription to alert receiver";
                     "rx_id" => ?rx_id,
                     "subscription" => ?result,
                 );
             }
-            WebhookSubscriptionKind::Exact(event_class) => {
-                let subscription = WebhookRxSubscription {
+            AlertSubscriptionKind::Exact(event_class) => {
+                let subscription = AlertRxSubscription {
                     rx_id: rx_id.into(),
                     event_class,
                     glob: None,
                     time_created: chrono::Utc::now(),
                 };
-                let result: Option<WebhookRxSubscription> =
-                    WebhookReceiver::insert_resource(
+                let result: Option<AlertRxSubscription> =
+                    AlertReceiver::insert_resource(
                         rx_id.into_untyped_uuid(),
                         diesel::insert_into(
-                            subscription_dsl::webhook_rx_subscription,
+                            subscription_dsl::alert_subscription,
                         )
                         .values(subscription)
                         // If there's already a subscription to this event
@@ -687,7 +684,7 @@ impl DataStore {
                     .map_err(async_insert_error_to_txn(rx_id))?;
                 slog::debug!(
                     &opctx.log,
-                    "added exact subscription to webhook receiver";
+                    "added exact subscription to alert receiver";
                     "rx_id" => ?rx_id,
                     "subscription" => ?result,
                 );
@@ -698,13 +695,13 @@ impl DataStore {
 
     async fn add_exact_subscription_batch_on_conn(
         &self,
-        rx_id: WebhookReceiverUuid,
-        subscriptions: Vec<WebhookRxSubscription>,
+        rx_id: AlertReceiverUuid,
+        subscriptions: Vec<AlertRxSubscription>,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<Vec<WebhookRxSubscription>, TransactionError<Error>> {
-        <WebhookReceiver as DatastoreCollection<WebhookRxSubscription>>::insert_resource(
+    ) -> Result<Vec<AlertRxSubscription>, TransactionError<Error>> {
+        <AlertReceiver as DatastoreCollection<AlertRxSubscription>>::insert_resource(
             rx_id.into_untyped_uuid(),
-        diesel::insert_into(subscription_dsl::webhook_rx_subscription)
+        diesel::insert_into(subscription_dsl::alert_subscription)
             .values(subscriptions)
             .on_conflict_do_nothing()
         ).insert_and_get_results_async(conn)
@@ -715,7 +712,7 @@ impl DataStore {
     async fn glob_generate_exact_subs(
         &self,
         opctx: &OpContext,
-        glob: &WebhookRxEventGlob,
+        glob: &AlertRxGlob,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<usize, TransactionError<Error>> {
         let regex = match regex::Regex::new(&glob.glob.regex) {
@@ -735,7 +732,7 @@ impl DataStore {
                 ));
             }
         };
-        let subscriptions = WebhookEventClass::ALL_CLASSES
+        let subscriptions = AlertClass::ALL_CLASSES
             .iter()
             .filter_map(|class| {
                 if regex.is_match(class.as_str()) {
@@ -747,7 +744,7 @@ impl DataStore {
                         "regex" => ?regex,
                         "event_class" => %class,
                     );
-                    Some(WebhookRxSubscription::for_glob(&glob, *class))
+                    Some(AlertRxSubscription::for_glob(&glob, *class))
                 } else {
                     slog::trace!(
                         &opctx.log,
@@ -785,29 +782,29 @@ impl DataStore {
     pub async fn webhook_rx_list_subscribed_to_event(
         &self,
         opctx: &OpContext,
-        event_class: WebhookEventClass,
-    ) -> Result<Vec<(WebhookReceiver, WebhookRxSubscription)>, Error> {
+        event_class: AlertClass,
+    ) -> Result<Vec<(AlertReceiver, AlertRxSubscription)>, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
         Self::rx_list_subscribed_query(event_class)
-            .load_async::<(WebhookReceiver, WebhookRxSubscription)>(&*conn)
+            .load_async::<(AlertReceiver, AlertRxSubscription)>(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     fn rx_list_subscribed_query(
-        event_class: WebhookEventClass,
-    ) -> impl RunnableQuery<(WebhookReceiver, WebhookRxSubscription)> {
-        subscription_dsl::webhook_rx_subscription
+        event_class: AlertClass,
+    ) -> impl RunnableQuery<(AlertReceiver, AlertRxSubscription)> {
+        subscription_dsl::alert_subscription
             .filter(subscription_dsl::event_class.eq(event_class))
             .order_by(subscription_dsl::rx_id.asc())
             .inner_join(
-                rx_dsl::webhook_receiver
+                rx_dsl::alert_receiver
                     .on(subscription_dsl::rx_id.eq(rx_dsl::id)),
             )
             .filter(rx_dsl::time_deleted.is_null())
             .select((
-                WebhookReceiver::as_select(),
-                WebhookRxSubscription::as_select(),
+                AlertReceiver::as_select(),
+                AlertRxSubscription::as_select(),
             ))
     }
 
@@ -829,17 +826,17 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (Uuid, String)>,
-    ) -> ListResultVec<WebhookRxEventGlob> {
+    ) -> ListResultVec<AlertRxGlob> {
         let conn = self.pool_connection_authorized(opctx).await?;
         self.rx_list_reprocessable_globs_on_conn(None, pagparams, &conn).await
     }
 
     async fn rx_list_reprocessable_globs_on_conn(
         &self,
-        rx_id: Option<WebhookReceiverUuid>,
+        rx_id: Option<AlertReceiverUuid>,
         pagparams: &DataPageParams<'_, (Uuid, String)>,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> ListResultVec<WebhookRxEventGlob> {
+    ) -> ListResultVec<AlertRxGlob> {
         let (current_version, target_version) =
             self.database_schema_version().await.map_err(|e| {
                 e.internal_context("couldn't load db schema version")
@@ -854,7 +851,7 @@ impl DataStore {
         if let Some(target) = target_version {
             return Err(Error::InternalError {
                 internal_message: format!(
-                    "webhook glob reprocessing must wait until the migration \
+                    "alert glob reprocessing must wait until the migration \
                     from {current_version} to {target} has completed",
                 ),
             });
@@ -877,7 +874,7 @@ impl DataStore {
         if current_version != SCHEMA_VERSION {
             return Err(Error::InternalError {
                 internal_message: format!(
-                    "cannot reprocess webhook globs, as our schema version \
+                    "cannot reprocess alert globs, as our schema version \
                     ({SCHEMA_VERSION}) doess not match the current version \
                     ({current_version})",
                 ),
@@ -885,7 +882,7 @@ impl DataStore {
         }
 
         let query = paginated_multicolumn(
-            glob_dsl::webhook_rx_event_glob,
+            glob_dsl::alert_glob,
             (glob_dsl::rx_id, glob_dsl::glob),
             pagparams,
         )
@@ -896,7 +893,7 @@ impl DataStore {
         .filter(glob_dsl::schema_version.is_null().or(
             glob_dsl::schema_version.ne(SemverVersion::from(SCHEMA_VERSION)),
         ))
-        .select(WebhookRxEventGlob::as_select());
+        .select(AlertRxGlob::as_select());
         // If we were asked for globs belonging to a specific receiver, add a
         // WHERE clause to filter on the receiver's UUID. We just use a match
         // rather than boxing the query since this is the only dynamically
@@ -927,8 +924,8 @@ impl DataStore {
     pub async fn webhook_glob_reprocess(
         &self,
         opctx: &OpContext,
-        glob: &WebhookRxEventGlob,
-    ) -> Result<WebhookGlobStatus, Error> {
+        glob: &AlertRxGlob,
+    ) -> Result<AlertGlobStatus, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
         self.glob_reprocess_on_conn(opctx, glob, &conn).await
     }
@@ -936,9 +933,9 @@ impl DataStore {
     async fn glob_reprocess_on_conn(
         &self,
         opctx: &OpContext,
-        glob: &WebhookRxEventGlob,
+        glob: &AlertRxGlob,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<WebhookGlobStatus, Error> {
+    ) -> Result<AlertGlobStatus, Error> {
         slog::trace!(
             opctx.log,
             "reprocessing outdated webhook glob";
@@ -954,13 +951,15 @@ impl DataStore {
                 let glob = glob.clone();
                 let err = err.clone();
                 async move {
-                    let deleted = diesel::delete(
-                        subscription_dsl::webhook_rx_subscription,
-                    )
-                    .filter(subscription_dsl::glob.eq(glob.glob.glob.clone()))
-                    .filter(subscription_dsl::rx_id.eq(glob.rx_id))
-                    .execute_async(&conn)
-                    .await?;
+                    let deleted =
+                        diesel::delete(subscription_dsl::alert_subscription)
+                            .filter(
+                                subscription_dsl::glob
+                                    .eq(glob.glob.glob.clone()),
+                            )
+                            .filter(subscription_dsl::rx_id.eq(glob.rx_id))
+                            .execute_async(&conn)
+                            .await?;
                     let created = self
                         .glob_generate_exact_subs(opctx, &glob, &conn)
                         .await
@@ -970,17 +969,15 @@ impl DataStore {
                             }
                             TransactionError::Database(e) => e,
                         })?;
-                    let update =
-                        diesel::update(glob_dsl::webhook_rx_event_glob)
-                            .filter(
-                                glob_dsl::rx_id
-                                    .eq(glob.rx_id.into_untyped_uuid()),
-                            )
-                            .filter(glob_dsl::glob.eq(glob.glob.glob.clone()))
-                            .set(
-                                glob_dsl::schema_version
-                                    .eq(SemverVersion::from(SCHEMA_VERSION)),
-                            );
+                    let update = diesel::update(glob_dsl::alert_glob)
+                        .filter(
+                            glob_dsl::rx_id.eq(glob.rx_id.into_untyped_uuid()),
+                        )
+                        .filter(glob_dsl::glob.eq(glob.glob.glob.clone()))
+                        .set(
+                            glob_dsl::schema_version
+                                .eq(SemverVersion::from(SCHEMA_VERSION)),
+                        );
                     let did_update = match glob.schema_version {
                         Some(ref version) => {
                             update
@@ -1004,7 +1001,7 @@ impl DataStore {
                         // it has been deleted.
                         Err(diesel::result::Error::NotFound) | Ok(0) => {
                             return Err(err.bail(Ok(
-                                WebhookGlobStatus::AlreadyReprocessed,
+                                AlertGlobStatus::AlreadyReprocessed,
                             )));
                         }
                         Err(e) => return Err(e),
@@ -1013,7 +1010,7 @@ impl DataStore {
                         }
                     }
 
-                    Ok(WebhookGlobStatus::Reprocessed {
+                    Ok(AlertGlobStatus::Reprocessed {
                         created,
                         deleted,
                         prev_version: glob
@@ -1033,7 +1030,7 @@ impl DataStore {
             })?;
 
         match status {
-            WebhookGlobStatus::Reprocessed {
+            AlertGlobStatus::Reprocessed {
                 created,
                 deleted,
                 ref prev_version,
@@ -1049,7 +1046,7 @@ impl DataStore {
                     "subscriptions_deleted" => ?deleted,
                 );
             }
-            WebhookGlobStatus::AlreadyReprocessed => {
+            AlertGlobStatus::AlreadyReprocessed => {
                 slog::trace!(
                     opctx.log,
                     "outdated webhook glob was either already reprocessed or deleted";
@@ -1071,7 +1068,7 @@ impl DataStore {
     pub async fn webhook_rx_secret_list(
         &self,
         opctx: &OpContext,
-        authz_rx: &authz::WebhookReceiver,
+        authz_rx: &authz::AlertReceiver,
     ) -> ListResultVec<WebhookSecret> {
         opctx.authorize(authz::Action::ListChildren, authz_rx).await?;
         let conn = self.pool_connection_authorized(&opctx).await?;
@@ -1080,7 +1077,7 @@ impl DataStore {
 
     async fn rx_secret_list_on_conn(
         &self,
-        rx_id: WebhookReceiverUuid,
+        rx_id: AlertReceiverUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> ListResultVec<WebhookSecret> {
         secret_dsl::webhook_secret
@@ -1098,7 +1095,7 @@ impl DataStore {
     pub async fn webhook_rx_secret_create(
         &self,
         opctx: &OpContext,
-        authz_rx: &authz::WebhookReceiver,
+        authz_rx: &authz::AlertReceiver,
         secret: WebhookSecret,
     ) -> CreateResult<WebhookSecret> {
         opctx.authorize(authz::Action::CreateChild, authz_rx).await?;
@@ -1118,7 +1115,7 @@ impl DataStore {
     pub async fn webhook_rx_secret_delete(
         &self,
         opctx: &OpContext,
-        authz_rx: &authz::WebhookReceiver,
+        authz_rx: &authz::AlertReceiver,
         authz_secret: &authz::WebhookSecret,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_secret).await?;
@@ -1141,8 +1138,8 @@ impl DataStore {
         secret: WebhookSecret,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<WebhookSecret, TransactionError<Error>> {
-        let rx_id = secret.webhook_receiver_id;
-        let secret: WebhookSecret = WebhookReceiver::insert_resource(
+        let rx_id = secret.alert_receiver_id;
+        let secret: WebhookSecret = AlertReceiver::insert_resource(
             rx_id.into_untyped_uuid(),
             diesel::insert_into(secret_dsl::webhook_secret).values(secret),
         )
@@ -1154,12 +1151,12 @@ impl DataStore {
 }
 
 fn async_insert_error_to_txn(
-    rx_id: WebhookReceiverUuid,
+    rx_id: AlertReceiverUuid,
 ) -> impl FnOnce(AsyncInsertError) -> TransactionError<Error> {
     move |e| match e {
         AsyncInsertError::CollectionNotFound => {
             TransactionError::CustomError(Error::not_found_by_id(
-                ResourceType::WebhookReceiver,
+                ResourceType::AlertReceiver,
                 &rx_id.into_untyped_uuid(),
             ))
         }
@@ -1176,7 +1173,7 @@ mod test {
     use nexus_db_lookup::LookupPath;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::WebhookEventUuid;
+    use omicron_uuid_kinds::AlertUuid;
 
     async fn create_receiver(
         datastore: &DataStore,
@@ -1208,9 +1205,9 @@ mod test {
     async fn create_event(
         datastore: &DataStore,
         opctx: &OpContext,
-        event_class: WebhookEventClass,
-    ) -> (authz::WebhookEvent, crate::db::model::WebhookEvent) {
-        let id = WebhookEventUuid::new_v4();
+        event_class: AlertClass,
+    ) -> (authz::Alert, crate::db::model::Alert) {
+        let id = AlertUuid::new_v4();
         datastore
             .webhook_event_create(opctx, id, event_class, serde_json::json!({}))
             .await
@@ -1326,7 +1323,7 @@ mod test {
             datastore: &DataStore,
             opctx: &OpContext,
             all_rxs: &Vec<WebhookReceiverConfig>,
-            event_class: WebhookEventClass,
+            event_class: AlertClass,
             matches: &[&WebhookReceiverConfig],
         ) {
             let subscribed = datastore
@@ -1372,7 +1369,7 @@ mod test {
             datastore,
             opctx,
             &all_rxs,
-            WebhookEventClass::TestFoo,
+            AlertClass::TestFoo,
             &[&test_star, &test_starstar],
         )
         .await;
@@ -1380,7 +1377,7 @@ mod test {
             datastore,
             opctx,
             &all_rxs,
-            WebhookEventClass::TestFooBar,
+            AlertClass::TestFooBar,
             &[&test_starstar, &test_foo_star],
         )
         .await;
@@ -1388,7 +1385,7 @@ mod test {
             datastore,
             opctx,
             &all_rxs,
-            WebhookEventClass::TestFooBaz,
+            AlertClass::TestFooBaz,
             &[
                 &test_starstar,
                 &test_foo_star,
@@ -1401,7 +1398,7 @@ mod test {
             datastore,
             opctx,
             &all_rxs,
-            WebhookEventClass::TestQuuxBar,
+            AlertClass::TestQuuxBar,
             &[&test_starstar, &test_quux_star, &test_quux_starstar],
         )
         .await;
@@ -1409,7 +1406,7 @@ mod test {
             datastore,
             opctx,
             &all_rxs,
-            WebhookEventClass::TestQuuxBarBaz,
+            AlertClass::TestQuuxBarBaz,
             &[&test_starstar, &test_quux_starstar, &test_starstar_baz],
         )
         .await;
@@ -1426,8 +1423,7 @@ mod test {
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let query =
-            DataStore::rx_list_subscribed_query(WebhookEventClass::TestFooBar);
+        let query = DataStore::rx_list_subscribed_query(AlertClass::TestFooBar);
         let explanation = query
             .explain_async(&conn)
             .await
@@ -1453,18 +1449,17 @@ mod test {
         .await;
 
         let (authz_rx, _) = LookupPath::new(opctx, datastore)
-            .webhook_receiver_id(rx.rx.id())
+            .alert_receiver_id(rx.rx.id())
             .fetch()
             .await
             .expect("cant get ye receiver");
 
         let (authz_foo, _) =
-            create_event(datastore, opctx, WebhookEventClass::TestFoo).await;
+            create_event(datastore, opctx, AlertClass::TestFoo).await;
         let (authz_foo_bar, _) =
-            create_event(datastore, opctx, WebhookEventClass::TestFooBar).await;
+            create_event(datastore, opctx, AlertClass::TestFooBar).await;
         let (authz_quux_bar, _) =
-            create_event(datastore, opctx, WebhookEventClass::TestQuuxBar)
-                .await;
+            create_event(datastore, opctx, AlertClass::TestQuuxBar).await;
 
         let is_subscribed_foo = datastore
             .webhook_rx_is_subscribed_to_event(opctx, &authz_rx, &authz_foo)

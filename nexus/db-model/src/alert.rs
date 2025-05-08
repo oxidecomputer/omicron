@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::WebhookEventClass;
+use crate::AlertClass;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use nexus_db_schema::schema::webhook_event;
+use nexus_db_schema::schema::alert;
 use serde::{Deserialize, Serialize};
 
 /// A webhook event.
@@ -20,11 +20,11 @@ use serde::{Deserialize, Serialize};
     PartialEq,
     Asset,
 )]
-#[diesel(table_name = webhook_event)]
-#[asset(uuid_kind = WebhookEventKind)]
-pub struct WebhookEvent {
+#[diesel(table_name = alert)]
+#[asset(uuid_kind = AlertKind)]
+pub struct Alert {
     #[diesel(embed)]
-    pub identity: WebhookEventIdentity,
+    pub identity: AlertIdentity,
 
     /// The time at which this event was dispatched by creating entries in the
     /// `webhook_delivery` table.
@@ -33,7 +33,7 @@ pub struct WebhookEvent {
     pub time_dispatched: Option<DateTime<Utc>>,
 
     /// The class of this event.
-    pub event_class: WebhookEventClass,
+    pub event_class: AlertClass,
 
     /// The event's data payload.
     pub event: serde_json::Value,
@@ -41,8 +41,8 @@ pub struct WebhookEvent {
     pub num_dispatched: i64,
 }
 
-impl WebhookEvent {
+impl Alert {
     /// UUID of the singleton event entry for webhook liveness probes.
-    pub const PROBE_EVENT_ID: uuid::Uuid =
+    pub const PROBE_ALERT_ID: uuid::Uuid =
         uuid::Uuid::from_u128(0x001de000_7768_4000_8000_000000000001);
 }

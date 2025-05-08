@@ -163,7 +163,7 @@ tuf_artifact_replication.period_secs = 3600
 tuf_artifact_replication.min_sled_replication = 3
 # In general, the webhook dispatcher will be activated when events are queued,
 # so we don't need to periodically activate it *that* frequently.
-webhook_dispatcher.period_secs = 60
+alert_dispatcher.period_secs = 60
 webhook_deliverator.period_secs = 60
 # In order to test webhook delivery retry behavior without waiting for a long
 # time, turn these backoff periods down from multiple minutes to just a couple

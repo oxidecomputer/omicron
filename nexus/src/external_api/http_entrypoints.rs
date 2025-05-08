@@ -7801,10 +7801,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn webhook_event_class_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<
-            PaginationParams<EmptyScanParams, params::EventClassPage>,
+            PaginationParams<EmptyScanParams, params::AlertClassPage>,
         >,
-        filter: Query<params::EventClassFilter>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError> {
+        filter: Query<params::AlertClassFilter>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertClass>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -7828,7 +7828,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ResultsPage::new(
                 event_classes,
                 &EmptyScanParams {},
-                |class: &views::EventClass, _| class.name.clone(),
+                |class: &views::AlertClass, _| class.name.clone(),
             )?))
         };
         apictx
@@ -8174,7 +8174,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_delivery_resend(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookEventSelector>,
+        path_params: Path<params::AlertSelector>,
         receiver: Query<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError> {
         let apictx = rqctx.context();

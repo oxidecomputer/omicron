@@ -11,6 +11,11 @@ extern crate newtype_derive;
 
 mod address_lot;
 mod affinity;
+mod alert;
+mod alert_class;
+mod alert_delivery_state;
+mod alert_delivery_trigger;
+mod alert_subscription;
 mod allow_list;
 mod bfd;
 mod bgp;
@@ -71,10 +76,6 @@ mod v2p_mapping;
 mod vmm_state;
 mod webhook_delivery;
 mod webhook_delivery_attempt_result;
-mod webhook_delivery_state;
-mod webhook_delivery_trigger;
-mod webhook_event;
-mod webhook_event_class;
 mod webhook_rx;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
@@ -141,6 +142,11 @@ pub use self::macaddr::*;
 pub use self::unsigned::*;
 pub use address_lot::*;
 pub use affinity::*;
+pub use alert::*;
+pub use alert_class::*;
+pub use alert_delivery_state::*;
+pub use alert_delivery_trigger::*;
+pub use alert_subscription::*;
 pub use allow_list::*;
 pub use bfd::*;
 pub use bgp::*;
@@ -245,10 +251,6 @@ pub use vpc_router::*;
 pub use vpc_subnet::*;
 pub use webhook_delivery::*;
 pub use webhook_delivery_attempt_result::*;
-pub use webhook_delivery_state::*;
-pub use webhook_delivery_trigger::*;
-pub use webhook_event::*;
-pub use webhook_event_class::*;
 pub use webhook_rx::*;
 pub use zpool::*;
 

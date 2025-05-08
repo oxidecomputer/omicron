@@ -32,9 +32,9 @@
 //!
 //! Two background tasks implement the reliable persistent workflow of
 //! determining what events should be sent to what receiver, and performing the
-//! actual HTTP requests to send the event to the receiver:
+//! actual HTTP requests to send the alert to the receiver:
 //!
-//! + The `webhook_dispatcher` task is responsible for *dispatching* events to
+//! + The `alert_dispatcher` task is responsible for *dispatching* alerts to
 //!   receivers.  For each event that has not yet been dispatched, the task
 //!   queries the database for webhook receivers that have subscribed to that
 //!   event, and creates a *delivery record* in the `webhook_delivery` table,
@@ -76,7 +76,7 @@
 //! that glob subscription.  Because event classes are represented as a SQL
 //! `enum` type,  we know that any change to the event classes should change the
 //! database schema version as well.  This way, we can detect whether a glob's
-//! list of subscriptions are up to date.  The `webhook_dispatcher` background
+//! list of subscriptions are up to date.  The `alert_dispatcher` background
 //! task will query the database for any globs which were last reprocessed at
 //! earlier database schema versions and reprocess those globs prior to
 //! attempting to dispatch events to receivers.
@@ -142,15 +142,15 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::model::Alert;
+use nexus_db_queries::db::model::AlertClass;
+use nexus_db_queries::db::model::AlertDeliveryState;
+use nexus_db_queries::db::model::AlertDeliveryTrigger;
+use nexus_db_queries::db::model::AlertReceiver;
 use nexus_db_queries::db::model::SqlU8;
 use nexus_db_queries::db::model::WebhookDelivery;
 use nexus_db_queries::db::model::WebhookDeliveryAttempt;
 use nexus_db_queries::db::model::WebhookDeliveryAttemptResult;
-use nexus_db_queries::db::model::WebhookDeliveryState;
-use nexus_db_queries::db::model::WebhookDeliveryTrigger;
-use nexus_db_queries::db::model::WebhookEvent;
-use nexus_db_queries::db::model::WebhookEventClass;
-use nexus_db_queries::db::model::WebhookReceiver;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::model::WebhookSecret;
 use nexus_types::external_api::params;
@@ -167,12 +167,12 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::AlertReceiverUuid;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::WebhookDeliveryAttemptUuid;
 use omicron_uuid_kinds::WebhookDeliveryUuid;
-use omicron_uuid_kinds::WebhookEventUuid;
-use omicron_uuid_kinds::WebhookReceiverUuid;
 use omicron_uuid_kinds::WebhookSecretUuid;
 use sha2::Sha256;
 use std::sync::LazyLock;
@@ -193,10 +193,10 @@ impl Nexus {
     pub async fn webhook_event_publish(
         &self,
         opctx: &OpContext,
-        id: WebhookEventUuid,
-        event_class: WebhookEventClass,
+        id: AlertUuid,
+        event_class: AlertClass,
         event: serde_json::Value,
-    ) -> Result<WebhookEvent, Error> {
+    ) -> Result<Alert, Error> {
         let event = self
             .datastore()
             .webhook_event_create(opctx, id, event_class, event)
@@ -211,7 +211,7 @@ impl Nexus {
 
         // Once the event has been inserted, activate the dispatcher task to
         // ensure its propagated to receivers.
-        self.background_tasks.task_webhook_dispatcher.activate();
+        self.background_tasks.task_alert_dispatcher.activate();
 
         Ok(event)
     }
@@ -224,18 +224,18 @@ impl Nexus {
         &'a self,
         opctx: &'a OpContext,
         webhook_selector: params::WebhookReceiverSelector,
-    ) -> LookupResult<lookup::WebhookReceiver<'a>> {
+    ) -> LookupResult<lookup::AlertReceiver<'a>> {
         match webhook_selector.receiver {
             NameOrId::Id(id) => {
                 let webhook = LookupPath::new(opctx, &self.db_datastore)
-                    .webhook_receiver_id(
-                        WebhookReceiverUuid::from_untyped_uuid(id),
-                    );
+                    .alert_receiver_id(AlertReceiverUuid::from_untyped_uuid(
+                        id,
+                    ));
                 Ok(webhook)
             }
             NameOrId::Name(name) => {
                 let webhook = LookupPath::new(opctx, &self.db_datastore)
-                    .webhook_receiver_name_owned(name.into());
+                    .alert_receiver_name_owned(name.into());
                 Ok(webhook)
             }
         }
@@ -256,10 +256,10 @@ impl Nexus {
     pub fn webhook_event_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        params::WebhookEventSelector { event_id }: params::WebhookEventSelector,
-    ) -> LookupResult<lookup::WebhookEvent<'a>> {
+        params::AlertSelector { event_id }: params::AlertSelector,
+    ) -> LookupResult<lookup::Alert<'a>> {
         let event = LookupPath::new(opctx, &self.db_datastore)
-            .webhook_event_id(WebhookEventUuid::from_untyped_uuid(event_id));
+            .webhook_event_id(AlertUuid::from_untyped_uuid(event_id));
         Ok(event)
     }
 
@@ -269,30 +269,27 @@ impl Nexus {
     pub async fn webhook_event_class_list(
         &self,
         opctx: &OpContext,
-        filter: params::EventClassFilter,
-        pagparams: DataPageParams<'_, params::EventClassPage>,
-    ) -> ListResultVec<views::EventClass> {
+        filter: params::AlertClassFilter,
+        pagparams: DataPageParams<'_, params::AlertClassPage>,
+    ) -> ListResultVec<views::AlertClass> {
         opctx
-            .authorize(
-                authz::Action::ListChildren,
-                &authz::WEBHOOK_EVENT_CLASS_LIST,
-            )
+            .authorize(authz::Action::ListChildren, &authz::ALERT_CLASS_LIST)
             .await?;
         Self::actually_list_event_classes(filter, pagparams)
     }
 
     // This is factored out to avoid having to make a whole Nexus to test it.
     fn actually_list_event_classes(
-        params::EventClassFilter { filter }: params::EventClassFilter,
-        pagparams: DataPageParams<'_, params::EventClassPage>,
-    ) -> ListResultVec<views::EventClass> {
-        use nexus_db_model::WebhookSubscriptionKind;
+        params::AlertClassFilter { filter }: params::AlertClassFilter,
+        pagparams: DataPageParams<'_, params::AlertClassPage>,
+    ) -> ListResultVec<views::AlertClass> {
+        use nexus_db_model::AlertSubscriptionKind;
 
         let regex = if let Some(filter) = filter {
-            let sub = WebhookSubscriptionKind::try_from(filter)?;
+            let sub = AlertSubscriptionKind::try_from(filter)?;
             let regex_string = match sub {
-                WebhookSubscriptionKind::Exact(class) => class.as_str(),
-                WebhookSubscriptionKind::Glob(ref glob) => glob.regex.as_str(),
+                AlertSubscriptionKind::Exact(class) => class.as_str(),
+                AlertSubscriptionKind::Glob(ref glob) => glob.regex.as_str(),
             };
             let re = regex::Regex::new(regex_string).map_err(|e| {
                 // This oughtn't happen, provided the code for producing the
@@ -310,15 +307,14 @@ impl Nexus {
         };
 
         // If we're resuming a previous scan, figure out where to start.
-        let start = if let Some(params::EventClassPage { last_seen }) =
+        let start = if let Some(params::AlertClassPage { last_seen }) =
             pagparams.marker
         {
-            let start = WebhookEventClass::ALL_CLASSES
-                .iter()
-                .enumerate()
-                .find_map(|(idx, class)| {
+            let start = AlertClass::ALL_CLASSES.iter().enumerate().find_map(
+                |(idx, class)| {
                     if class.as_str() == last_seen { Some(idx) } else { None }
-                });
+                },
+            );
             match start {
                 Some(start) => start + 1,
                 None => return Ok(Vec::new()),
@@ -328,11 +324,11 @@ impl Nexus {
         };
 
         // This shouldn't ever happen, but...don't panic I guess.
-        if start > WebhookEventClass::ALL_CLASSES.len() {
+        if start > AlertClass::ALL_CLASSES.len() {
             return Ok(Vec::new());
         }
 
-        let result = WebhookEventClass::ALL_CLASSES[start..]
+        let result = AlertClass::ALL_CLASSES[start..]
             .iter()
             .filter_map(|&class| {
                 // Skip test classes, as they should not be used in the public
@@ -369,7 +365,7 @@ impl Nexus {
     pub async fn webhook_receiver_config_fetch(
         &self,
         opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'_>,
+        rx: lookup::AlertReceiver<'_>,
     ) -> LookupResult<WebhookReceiverConfig> {
         let (authz_rx, rx) = rx.fetch().await?;
         let (subscriptions, secrets) =
@@ -388,7 +384,7 @@ impl Nexus {
     pub async fn webhook_receiver_update(
         &self,
         opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'_>,
+        rx: lookup::AlertReceiver<'_>,
         params: params::WebhookReceiverUpdate,
     ) -> UpdateResult<()> {
         let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
@@ -402,7 +398,7 @@ impl Nexus {
     pub async fn webhook_receiver_delete(
         &self,
         opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'_>,
+        rx: lookup::AlertReceiver<'_>,
     ) -> DeleteResult {
         let (authz_rx, db_rx) = rx.fetch_for(authz::Action::Delete).await?;
         self.datastore().webhook_rx_delete(&opctx, &authz_rx, &db_rx).await
@@ -415,17 +411,16 @@ impl Nexus {
     pub async fn webhook_receiver_subscription_add(
         &self,
         opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'_>,
+        rx: lookup::AlertReceiver<'_>,
         params::WebhookSubscriptionCreate { subscription}: params::WebhookSubscriptionCreate,
     ) -> CreateResult<views::WebhookSubscriptionCreated> {
         let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
-        let db_subscription =
-            nexus_db_model::WebhookSubscriptionKind::try_from(
-                subscription.clone(),
-            )?;
+        let db_subscription = nexus_db_model::AlertSubscriptionKind::try_from(
+            subscription.clone(),
+        )?;
         let _ = self
             .datastore()
-            .webhook_rx_subscription_add(opctx, &authz_rx, db_subscription)
+            .alert_subscription_add(opctx, &authz_rx, db_subscription)
             .await?;
         Ok(views::WebhookSubscriptionCreated { subscription })
     }
@@ -433,15 +428,15 @@ impl Nexus {
     pub async fn webhook_receiver_subscription_remove(
         &self,
         opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'_>,
+        rx: lookup::AlertReceiver<'_>,
         subscription: shared::WebhookSubscription,
     ) -> DeleteResult {
         let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
         let db_subscription =
-            nexus_db_model::WebhookSubscriptionKind::try_from(subscription)?;
+            nexus_db_model::AlertSubscriptionKind::try_from(subscription)?;
         let _ = self
             .datastore()
-            .webhook_rx_subscription_remove(opctx, &authz_rx, db_subscription)
+            .alert_subscription_remove(opctx, &authz_rx, db_subscription)
             .await?;
         Ok(())
     }
@@ -453,7 +448,7 @@ impl Nexus {
     pub async fn webhook_receiver_secrets_list(
         &self,
         opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'_>,
+        rx: lookup::AlertReceiver<'_>,
     ) -> ListResultVec<WebhookSecret> {
         let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
         self.datastore().webhook_rx_secret_list(opctx, &authz_rx).await
@@ -462,7 +457,7 @@ impl Nexus {
     pub async fn webhook_receiver_secret_add(
         &self,
         opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'_>,
+        rx: lookup::AlertReceiver<'_>,
         secret: String,
     ) -> Result<views::WebhookSecretId, Error> {
         let (authz_rx,) = rx.lookup_for(authz::Action::CreateChild).await?;
@@ -507,7 +502,7 @@ impl Nexus {
     pub async fn webhook_receiver_probe(
         &self,
         opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'_>,
+        rx: lookup::AlertReceiver<'_>,
         params: params::WebhookProbe,
     ) -> Result<views::WebhookProbeResult, Error> {
         let (authz_rx, rx) = rx.fetch_for(authz::Action::ListChildren).await?;
@@ -523,7 +518,7 @@ impl Nexus {
         )?;
         let mut delivery = WebhookDelivery::new_probe(&rx_id, &self.id);
 
-        const CLASS: WebhookEventClass = WebhookEventClass::Probe;
+        const CLASS: AlertClass = AlertClass::Probe;
         static DATA: LazyLock<serde_json::Value> =
             LazyLock::new(|| serde_json::json!({}));
 
@@ -550,9 +545,9 @@ impl Nexus {
         // Update the delivery state based on the result of the probe attempt.
         // Otherwise, it will still appear "pending", which is obviously wrong.
         delivery.state = if attempt.result.is_failed() {
-            WebhookDeliveryState::Failed
+            AlertDeliveryState::Failed
         } else {
-            WebhookDeliveryState::Delivered
+            AlertDeliveryState::Delivered
         };
 
         let resends_started = if params.resend
@@ -587,7 +582,7 @@ impl Nexus {
                     WebhookDelivery::new(
                         &event.id(),
                         &rx_id,
-                        WebhookDeliveryTrigger::Resend,
+                        AlertDeliveryTrigger::Resend,
                     )
                 })
                 .collect::<Vec<_>>();
@@ -643,8 +638,8 @@ impl Nexus {
     pub async fn webhook_receiver_event_resend(
         &self,
         opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'_>,
-        event: lookup::WebhookEvent<'_>,
+        rx: lookup::AlertReceiver<'_>,
+        event: lookup::Alert<'_>,
     ) -> CreateResult<WebhookDeliveryUuid> {
         let (authz_rx,) = rx.lookup_for(authz::Action::CreateChild).await?;
         let (authz_event, event) = event.fetch().await?;
@@ -664,7 +659,7 @@ impl Nexus {
         let delivery = WebhookDelivery::new(
             &event.id(),
             &authz_rx.id(),
-            WebhookDeliveryTrigger::Resend,
+            AlertDeliveryTrigger::Resend,
         );
         let delivery_id = delivery.id.into();
 
@@ -699,7 +694,7 @@ impl Nexus {
     pub async fn webhook_receiver_delivery_list(
         &self,
         opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'_>,
+        rx: lookup::AlertReceiver<'_>,
         filter: params::WebhookDeliveryStateFilter,
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<views::WebhookDelivery> {
@@ -709,13 +704,13 @@ impl Nexus {
         } else {
             let mut states = Vec::with_capacity(3);
             if filter.include_failed() {
-                states.push(WebhookDeliveryState::Failed);
+                states.push(AlertDeliveryState::Failed);
             }
             if filter.include_pending() {
-                states.push(WebhookDeliveryState::Pending);
+                states.push(AlertDeliveryState::Pending);
             }
             if filter.include_delivered() {
-                states.push(WebhookDeliveryState::Delivered);
+                states.push(AlertDeliveryState::Delivered);
             }
             states
         };
@@ -725,10 +720,7 @@ impl Nexus {
                 opctx,
                 &authz_rx.id(),
                 // No probes; they could have their own list endpoint later...
-                &[
-                    WebhookDeliveryTrigger::Event,
-                    WebhookDeliveryTrigger::Resend,
-                ],
+                &[AlertDeliveryTrigger::Event, AlertDeliveryTrigger::Resend],
                 only_states,
                 pagparams,
             )
@@ -773,7 +765,7 @@ pub(super) fn delivery_client(
 /// API in the liveness probe endpoint.
 pub(crate) struct ReceiverClient<'a> {
     client: &'a reqwest::Client,
-    rx: &'a WebhookReceiver,
+    rx: &'a AlertReceiver,
     secrets: Vec<(WebhookSecretUuid, Hmac<Sha256>)>,
     hdr_rx_id: http::HeaderValue,
     nexus_id: OmicronZoneUuid,
@@ -783,7 +775,7 @@ impl<'a> ReceiverClient<'a> {
     pub(crate) fn new(
         client: &'a reqwest::Client,
         secrets: impl IntoIterator<Item = WebhookSecret>,
-        rx: &'a WebhookReceiver,
+        rx: &'a AlertReceiver,
         nexus_id: OmicronZoneUuid,
     ) -> Result<Self, Error> {
         let secrets = secrets
@@ -808,7 +800,7 @@ impl<'a> ReceiverClient<'a> {
         &mut self,
         opctx: &OpContext,
         delivery: &WebhookDelivery,
-        event_class: WebhookEventClass,
+        event_class: AlertClass,
         data: &serde_json::Value,
     ) -> Result<WebhookDeliveryAttempt, anyhow::Error> {
         const HDR_DELIVERY_ID: HeaderName =
@@ -824,8 +816,8 @@ impl<'a> ReceiverClient<'a> {
 
         #[derive(serde::Serialize, Debug)]
         struct Payload<'a> {
-            event_class: WebhookEventClass,
-            event_id: WebhookEventUuid,
+            event_class: AlertClass,
+            event_id: AlertUuid,
             data: &'a serde_json::Value,
             delivery: DeliveryMetadata<'a>,
         }
@@ -833,9 +825,9 @@ impl<'a> ReceiverClient<'a> {
         #[derive(serde::Serialize, Debug)]
         struct DeliveryMetadata<'a> {
             id: WebhookDeliveryUuid,
-            webhook_id: WebhookReceiverUuid,
+            webhook_id: AlertReceiverUuid,
             sent_at: &'a str,
-            trigger: views::WebhookDeliveryTrigger,
+            trigger: views::AlertDeliveryTrigger,
         }
 
         // okay, actually do the thing...
@@ -1049,11 +1041,11 @@ mod tests {
             last_seen: Option<&str>,
             limit: u32,
         ) -> Vec<String> {
-            let filter = params::EventClassFilter {
+            let filter = params::AlertClassFilter {
                 filter: dbg!(filter).map(|f| f.parse().unwrap()),
             };
             let marker = dbg!(last_seen).map(|last_seen| {
-                params::EventClassPage { last_seen: last_seen.to_string() }
+                params::AlertClassPage { last_seen: last_seen.to_string() }
             });
             let result = Nexus::actually_list_event_classes(
                 filter,

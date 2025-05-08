@@ -1087,8 +1087,8 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "tuf_artifact_replication" => {
             print_task_tuf_artifact_replication(details);
         }
-        "webhook_dispatcher" => {
-            print_task_webhook_dispatcher(details);
+        "alert_dispatcher" => {
+            print_task_alert_dispatcher(details);
         }
         "webhook_deliverator" => {
             print_task_webhook_deliverator(details);
@@ -2390,19 +2390,18 @@ fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
     }
 }
 
-fn print_task_webhook_dispatcher(details: &serde_json::Value) {
+fn print_task_alert_dispatcher(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::AlertDispatcherStatus;
+    use nexus_types::internal_api::background::AlertGlobStatus;
     use nexus_types::internal_api::background::WebhookDispatched;
-    use nexus_types::internal_api::background::WebhookDispatcherStatus;
-    use nexus_types::internal_api::background::WebhookGlobStatus;
 
-    let WebhookDispatcherStatus {
+    let AlertDispatcherStatus {
         globs_reprocessed,
         glob_version,
         errors,
         dispatched,
         no_receivers,
-    } = match serde_json::from_value::<WebhookDispatcherStatus>(details.clone())
-    {
+    } = match serde_json::from_value::<AlertDispatcherStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
@@ -2487,11 +2486,11 @@ fn print_task_webhook_dispatcher(details: &serde_json::Value) {
             println!("      receiver {rx_id:?}:");
             for (glob, status) in globs {
                 match status {
-                    Ok(WebhookGlobStatus::AlreadyReprocessed) => {
+                    Ok(AlertGlobStatus::AlreadyReprocessed) => {
                         println!("      > {glob:?}: already reprocessed");
                         already_reprocessed += 1;
                     }
-                    Ok(WebhookGlobStatus::Reprocessed {
+                    Ok(AlertGlobStatus::Reprocessed {
                         created,
                         deleted,
                         prev_version,

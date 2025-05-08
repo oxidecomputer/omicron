@@ -2381,20 +2381,35 @@ pub struct DeviceAccessTokenRequest {
     pub client_id: Uuid,
 }
 
-// Webhooks
+// Alerts
 
-/// Query params for listing webhook event classes.
+/// Query params for listing alert classes.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EventClassFilter {
-    /// An optional glob pattern for filtering event class names.
+pub struct AlertClassFilter {
+    /// An optional glob pattern for filtering alert class names.
     ///
-    /// If provided, only event classes which match this glob pattern will be
+    /// If provided, only alert classes which match this glob pattern will be
     /// included in the response.
     pub filter: Option<shared::WebhookSubscription>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct AlertSelector {
+    /// UUID of the event
+    pub event_id: Uuid,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EventClassPage {
+pub struct WebhookSubscriptionSelector {
+    /// The webhook receiver that the subscription is attached to.
+    #[serde(flatten)]
+    pub receiver: WebhookReceiverSelector,
+    /// The event class subscription itself.
+    pub subscription: shared::WebhookSubscription,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertClassPage {
     /// The last webhook event class returned by a previous page.
     pub last_seen: String,
 }
@@ -2450,21 +2465,6 @@ pub struct WebhookSecretCreate {
 pub struct WebhookSecretSelector {
     /// ID of the secret.
     pub secret_id: Uuid,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct WebhookEventSelector {
-    /// UUID of the event
-    pub event_id: Uuid,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookSubscriptionSelector {
-    /// The webhook receiver that the subscription is attached to.
-    #[serde(flatten)]
-    pub receiver: WebhookReceiverSelector,
-    /// The event class subscription itself.
-    pub subscription: shared::WebhookSubscription,
 }
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]

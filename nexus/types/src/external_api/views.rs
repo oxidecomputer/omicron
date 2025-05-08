@@ -17,7 +17,7 @@ use omicron_common::api::external::{
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
     ObjectIdentity, RoleName, SimpleIdentityOrName,
 };
-use omicron_uuid_kinds::{WebhookEventUuid, WebhookReceiverUuid};
+use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
@@ -1059,7 +1059,7 @@ pub struct OxqlQueryResult {
 
 /// A webhook event class.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EventClass {
+pub struct AlertClass {
     /// The name of the event class.
     pub name: String,
 
@@ -1109,19 +1109,19 @@ pub struct WebhookDelivery {
     pub id: Uuid,
 
     /// The UUID of the webhook receiver that this event was delivered to.
-    pub webhook_id: WebhookReceiverUuid,
+    pub webhook_id: AlertReceiverUuid,
 
     /// The event class.
     pub event_class: String,
 
     /// The UUID of the event.
-    pub event_id: WebhookEventUuid,
+    pub event_id: AlertUuid,
 
     /// The state of this delivery.
-    pub state: WebhookDeliveryState,
+    pub state: AlertDeliveryState,
 
     /// Why this delivery was performed.
-    pub trigger: WebhookDeliveryTrigger,
+    pub trigger: AlertDeliveryTrigger,
 
     /// Individual attempts to deliver this webhook event, and their outcomes.
     pub attempts: Vec<WebhookDeliveryAttempt>,
@@ -1144,7 +1144,7 @@ pub struct WebhookDelivery {
     strum::VariantArray,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum WebhookDeliveryState {
+pub enum AlertDeliveryState {
     /// The webhook event has not yet been delivered successfully.
     ///
     /// Either no delivery attempts have yet been performed, or the delivery has
@@ -1157,7 +1157,7 @@ pub enum WebhookDeliveryState {
     Failed,
 }
 
-impl WebhookDeliveryState {
+impl AlertDeliveryState {
     pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
 
     pub fn as_str(&self) -> &'static str {
@@ -1169,24 +1169,24 @@ impl WebhookDeliveryState {
     }
 }
 
-impl fmt::Display for WebhookDeliveryState {
+impl fmt::Display for AlertDeliveryState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl std::str::FromStr for WebhookDeliveryState {
+impl std::str::FromStr for AlertDeliveryState {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Error> {
         static EXPECTED_ONE_OF: LazyLock<String> =
-            LazyLock::new(expected_one_of::<WebhookDeliveryState>);
+            LazyLock::new(expected_one_of::<AlertDeliveryState>);
 
         for &v in Self::ALL {
             if s.trim().eq_ignore_ascii_case(v.as_str()) {
                 return Ok(v);
             }
         }
-        Err(Error::invalid_value("WebhookDeliveryState", &*EXPECTED_ONE_OF))
+        Err(Error::invalid_value("AlertDeliveryState", &*EXPECTED_ONE_OF))
     }
 }
 
@@ -1203,7 +1203,7 @@ impl std::str::FromStr for WebhookDeliveryState {
     strum::VariantArray,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum WebhookDeliveryTrigger {
+pub enum AlertDeliveryTrigger {
     /// Delivery was triggered by the event occurring for the first time.
     Event,
     /// Delivery was triggered by a request to resend the event.
@@ -1212,7 +1212,7 @@ pub enum WebhookDeliveryTrigger {
     Probe,
 }
 
-impl WebhookDeliveryTrigger {
+impl AlertDeliveryTrigger {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Event => "event",
@@ -1222,24 +1222,24 @@ impl WebhookDeliveryTrigger {
     }
 }
 
-impl fmt::Display for WebhookDeliveryTrigger {
+impl fmt::Display for AlertDeliveryTrigger {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl std::str::FromStr for WebhookDeliveryTrigger {
+impl std::str::FromStr for AlertDeliveryTrigger {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Error> {
         static EXPECTED_ONE_OF: LazyLock<String> =
-            LazyLock::new(expected_one_of::<WebhookDeliveryTrigger>);
+            LazyLock::new(expected_one_of::<AlertDeliveryTrigger>);
 
         for &v in <Self as strum::VariantArray>::VARIANTS {
             if s.trim().eq_ignore_ascii_case(v.as_str()) {
                 return Ok(v);
             }
         }
-        Err(Error::invalid_value("WebhookDeliveryTrigger", &*EXPECTED_ONE_OF))
+        Err(Error::invalid_value("AlertDeliveryTrigger", &*EXPECTED_ONE_OF))
     }
 }
 

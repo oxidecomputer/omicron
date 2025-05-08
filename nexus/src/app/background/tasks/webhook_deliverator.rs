@@ -6,7 +6,7 @@
 //! active webhook deliveries.
 //!
 //! This task reads [`WebhookDelivery`] records from the database (created by the
-//! [`webhook_dispatcher`] task) and sends HTTP requests to the receivers for
+//! [`alert_dispatcher`] task) and sends HTTP requests to the receivers for
 //! those records.  The deliverator is responsible for recording the status of
 //! each of these attempts, and for retrying failed attempts as needed.  For
 //! an overview of all the components of the webhook subsystem, their roles, and
@@ -27,7 +27,7 @@
 //! eventually time out, and other Nexii will attempt that delivery.
 //!
 //! [`WebhookDelivery`]: nexus_db_model::WebhookDelivery
-//! [`webhook_dispatcher`]: super::webhook_dispatcher
+//! [`alert_dispatcher`]: super::alert_dispatcher
 //! [`app::webhook`]: crate::app::webhook
 
 use crate::app::background::BackgroundTask;

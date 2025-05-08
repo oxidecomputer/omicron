@@ -24194,7 +24194,7 @@
         "type": "string",
         "format": "uuid"
       },
-      "TypedUuidForWebhookEventKind": {
+      "TypedUuidForAlertKind": {
         "type": "string",
         "format": "uuid"
       },
@@ -25669,7 +25669,7 @@
             "description": "The UUID of the event.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForWebhookEventKind"
+                "$ref": "#/components/schemas/TypedUuidForAlertKind"
               }
             ]
           },
@@ -25695,7 +25695,7 @@
             "description": "Why this delivery was performed.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/WebhookDeliveryTrigger"
+                "$ref": "#/components/schemas/AlertDeliveryState"
               }
             ]
           },
@@ -25870,7 +25870,7 @@
           }
         ]
       },
-      "WebhookDeliveryTrigger": {
+      "AlertDeliveryState": {
         "description": "The reason a webhook event was delivered",
         "oneOf": [
           {
