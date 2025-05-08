@@ -11061,6 +11061,7 @@ dependencies = [
 name = "serde-helpers"
 version = "0.1.0"
 dependencies = [
+ "omicron-workspace-hack",
  "schemars",
  "serde",
 ]
