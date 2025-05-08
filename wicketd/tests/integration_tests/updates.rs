@@ -13,6 +13,7 @@ use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
+use omicron_common::update::MupdateOverrideInfo;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
 use update_engine::NestedError;
@@ -359,7 +360,8 @@ async fn test_installinator_fetch() {
     });
 
     let update_id_str = update_id.to_string();
-    let dest_path = temp_dir.path().join("installinator-out");
+    let a_path = temp_dir.path().join("installinator-out-a");
+    let b_path = temp_dir.path().join("installinator-out-b");
     let args = installinator::InstallinatorApp::try_parse_from([
         "installinator",
         "install",
@@ -371,7 +373,8 @@ async fn test_installinator_fetch() {
         host_phase_2_hash.as_str(),
         "--control-plane",
         control_plane_hash.as_str(),
-        dest_path.as_str(),
+        a_path.as_str(),
+        b_path.as_str(),
         "--data-link0",
         "cxgbe0",
         "--data-link1",
@@ -398,9 +401,51 @@ async fn test_installinator_fetch() {
     for file_name in
         [HOST_PHASE_2_FILE_NAME, "zones/zone1.tar.gz", "zones/zone2.tar.gz"]
     {
-        let path = dest_path.join(file_name);
-        assert!(path.is_file(), "{path} was written out");
+        let a_path = a_path.join(file_name);
+        assert!(a_path.is_file(), "{a_path} was written out");
+
+        let b_path = b_path.join(file_name);
+        assert!(b_path.is_file(), "{b_path} was written out");
     }
+
+    // Ensure that the MUPdate override files were written correctly.
+    //
+    // In the mode where we specify a destination directory to write to,
+    // the install dataset translates to "<dest-path>/zones".
+    let b_override_path =
+        a_path.join("zones").join(MupdateOverrideInfo::FILE_NAME);
+    assert!(b_override_path.is_file(), "{b_override_path} was written out");
+
+    // Ensure that the MUPdate override file can be parsed.
+    let a_override_bytes = std::fs::read(b_override_path)
+        .expect("mupdate override file successfully read");
+    let a_override_info =
+        serde_json::from_slice::<MupdateOverrideInfo>(&a_override_bytes)
+            .expect("mupdate override file successfully deserialized");
+
+    assert_eq!(
+        a_override_info.hash_ids,
+        btreeset! {
+            host_phase_2_id, control_plane_id,
+        }
+    );
+
+    // Ensure that the B path also had the same file written out.
+    let b_override_path =
+        b_path.join("zones").join(MupdateOverrideInfo::FILE_NAME);
+    assert!(b_override_path.is_file(), "{b_override_path} was written out");
+
+    // Ensure that the MUPdate override file can be parsed.
+    let b_override_bytes = std::fs::read(b_override_path)
+        .expect("mupdate override file successfully read");
+    let b_override_info =
+        serde_json::from_slice::<MupdateOverrideInfo>(&b_override_bytes)
+            .expect("mupdate override file successfully deserialized");
+
+    assert_eq!(
+        a_override_info, b_override_info,
+        "mupdate override info matches across A and B drives",
+    );
 
     recv_handle.await.expect("recv_handle succeeded");
 
