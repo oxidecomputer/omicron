@@ -9,7 +9,8 @@ use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use sled_storage::dataset::INSTALL_DATASET;
 use sled_storage::dataset::M2_ARTIFACT_DATASET;
 use sled_storage::resources::AllDisks;
-use std::sync::OnceLock;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 /// Places to look for an Omicron zone image.
 pub struct ZoneImageFileSource {
@@ -27,25 +28,61 @@ pub struct ZoneImageFileSource {
 
 /// Resolves [`OmicronZoneImageSource`] instances into file names and search
 /// paths.
+///
+/// This is cheaply cloneable.
+#[derive(Clone)]
 pub struct ZoneImageSourceResolver {
-    image_directory_override: OnceLock<Utf8PathBuf>,
+    // Inner state, guarded by a mutex.
+    inner: Arc<Mutex<ResolverInner>>,
 }
 
 impl ZoneImageSourceResolver {
     pub fn new() -> Self {
-        ZoneImageSourceResolver { image_directory_override: OnceLock::new() }
+        ZoneImageSourceResolver {
+            inner: Arc::new(Mutex::new(ResolverInner::new())),
+        }
     }
 
     /// Overrides the image directory with another one.
     ///
     /// Intended for testing.
     pub fn override_image_directory(&self, path: Utf8PathBuf) {
-        self.image_directory_override.set(path).unwrap();
+        self.inner.lock().unwrap().override_image_directory(path);
     }
 
     /// Returns a [`ZoneImageFileSource`] consisting of the file name, plus a
     /// list of potential paths to search, for a zone image.
     pub fn file_source_for(
+        &self,
+        image_source: &OmicronZoneImageSource,
+        all_disks: &AllDisks,
+    ) -> ZoneImageFileSource {
+        let inner = self.inner.lock().unwrap();
+        inner.file_source_for(image_source, all_disks)
+    }
+}
+
+#[derive(Debug)]
+struct ResolverInner {
+    image_directory_override: Option<Utf8PathBuf>,
+}
+
+impl ResolverInner {
+    fn new() -> Self {
+        Self { image_directory_override: None }
+    }
+
+    fn override_image_directory(
+        &mut self,
+        image_directory_override: Utf8PathBuf,
+    ) {
+        if let Some(dir) = &self.image_directory_override {
+            panic!("image_directory_override already set to {dir}");
+        }
+        self.image_directory_override = Some(image_directory_override);
+    }
+
+    fn file_source_for(
         &self,
         image_source: &OmicronZoneImageSource,
         all_disks: &AllDisks,
@@ -64,7 +101,7 @@ impl ZoneImageSourceResolver {
                 let mut zone_image_paths =
                     vec![Utf8PathBuf::from("/opt/oxide")];
                 // Inject an image path if requested by a test.
-                if let Some(path) = self.image_directory_override.get() {
+                if let Some(path) = &self.image_directory_override {
                     zone_image_paths.push(path.clone());
                 };
 
