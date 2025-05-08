@@ -422,7 +422,7 @@ either = "1.14.0"
 ereport-api = { path = "ereport/api" }
 ereport-client = { path = "clients/ereport-client" }
 ereport-types = { path = "ereport/types" }
-expectorate = "1.1.0"
+expectorate = "1.2.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
 flate2 = "1.1.1"
