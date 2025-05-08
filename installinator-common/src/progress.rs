@@ -251,6 +251,8 @@ pub enum WriteError {
         #[source]
         error: Box<NestedEngineError<ControlPlaneZonesSpec>>,
     },
+    #[error("error creating directory: {error}")]
+    CreateDirError { error: std::io::Error },
 }
 
 impl From<NestedEngineError<ControlPlaneZonesSpec>> for WriteError {
@@ -293,6 +295,12 @@ pub enum ControlPlaneZonesStepId {
 
     /// Writing a zone.
     Zone { name: String },
+
+    /// Creating Measurement directory
+    CreateMeasurementDir,
+
+    /// Writing a measurement corpus
+    MeasurementCorpus { name: String },
 
     /// Syncing writes to disk.
     Fsync,

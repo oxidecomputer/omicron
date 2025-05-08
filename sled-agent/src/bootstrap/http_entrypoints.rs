@@ -123,6 +123,7 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
             .start_reset(
                 &ctx.base_log,
                 ctx.sprockets.clone(),
+                ctx.storage_manager.clone(),
                 ctx.global_zone_bootstrap_ip,
             )
             .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;

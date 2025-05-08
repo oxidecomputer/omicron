@@ -685,7 +685,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "6d31fa63217c6a51061dc4afa1ebe175a0021981" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", branch = "measurement_wip" }
+#sprockets-tls = { path = "/home/labbott/sprockets/tls" }
 sqlformat = "0.2.6"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
@@ -722,10 +723,10 @@ toml_edit = "0.22.24"
 tough = { version = "0.20.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 trybuild = "1.0.103"
-tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "measurement_corpus" }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "measurement_corpus", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "measurement_corpus" }
+tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "measurement_corpus" }
 tui-tree-widget = "0.23.0"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
