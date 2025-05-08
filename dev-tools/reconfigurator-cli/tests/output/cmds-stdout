@@ -1,4 +1,9 @@
-using provided RNG seed: test_basic
+using provided RNG seed: reconfigurator-cli-test
+> # This is a legacy test; new tests shouldn't need to set a seed
+
+> set seed test_basic
+new RNG seed: test_basic
+
 > sled-list
 ID NZPOOLS SUBNET 
 
