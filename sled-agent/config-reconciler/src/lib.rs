@@ -63,6 +63,10 @@ mod sled_agent_facilities;
 pub mod dump_setup;
 
 pub use dataset_serialization_task::DatasetTaskError;
+pub use dataset_serialization_task::NestedDatasetDestroyError;
+pub use dataset_serialization_task::NestedDatasetEnsureError;
+pub use dataset_serialization_task::NestedDatasetListError;
+pub use dataset_serialization_task::NestedDatasetMountError;
 pub use handle::AvailableDatasetsReceiver;
 pub use handle::ConfigReconcilerHandle;
 pub use handle::ConfigReconcilerSpawnToken;

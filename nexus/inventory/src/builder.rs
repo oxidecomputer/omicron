@@ -717,6 +717,7 @@ mod test {
             git_commit: String::from("git_commit_1"),
             name: String::from("name_1"),
             version: String::from("version_1"),
+            sign: Some(String::from("sign_1")),
         };
         for bb in &common_caboose_baseboards {
             let _ = collection.sps.get(*bb).unwrap();
@@ -1105,7 +1106,7 @@ mod test {
             git_commit: String::from("git_commit1"),
             name: String::from("name1"),
             version: String::from("version1"),
-            sign: None,
+            sign: Some(String::from("sign1")),
             epoch: None,
         };
         assert!(
@@ -1125,7 +1126,7 @@ mod test {
             "reporting caboose for unknown baseboard: \
             BaseboardId { part_number: \"p1\", serial_number: \"bogus\" } \
             (Caboose { board: \"board1\", git_commit: \"git_commit1\", \
-            name: \"name1\", version: \"version1\" })"
+            name: \"name1\", version: \"version1\", sign: Some(\"sign1\") })"
         );
         assert!(
             !builder
@@ -1177,7 +1178,7 @@ mod test {
                     git_commit: String::from("git_commit2"),
                     name: String::from("name2"),
                     version: String::from("version2"),
-                    sign: None,
+                    sign: Some(String::from("sign2")),
                     epoch: None,
                 },
             )

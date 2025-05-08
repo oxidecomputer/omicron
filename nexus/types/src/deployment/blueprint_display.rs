@@ -455,25 +455,25 @@ impl KvPair {
     }
 }
 
-// A top-to-bottom list of KV pairs with a heading
+// A top-to-bottom list of KV pairs, with or without a heading
 #[derive(Debug)]
-pub struct KvListWithHeading {
-    heading: &'static str,
+pub struct KvList {
+    heading: Option<&'static str>,
     kv: Vec<KvPair>,
 }
 
-impl KvListWithHeading {
+impl KvList {
     pub fn new_unchanged<S1: Into<String>, S2: Into<String>>(
-        heading: &'static str,
+        heading: Option<&'static str>,
         kv: Vec<(S1, S2)>,
-    ) -> KvListWithHeading {
+    ) -> KvList {
         let kv =
             kv.into_iter().map(|(k, v)| KvPair::new_unchanged(k, v)).collect();
-        KvListWithHeading { heading, kv }
+        KvList { heading, kv }
     }
 
-    pub fn new(heading: &'static str, kv: Vec<KvPair>) -> KvListWithHeading {
-        KvListWithHeading { heading, kv }
+    pub fn new(heading: Option<&'static str>, kv: Vec<KvPair>) -> KvList {
+        KvList { heading, kv }
     }
 
     /// Compute the max width of the keys for alignment purposes
@@ -482,10 +482,12 @@ impl KvListWithHeading {
     }
 }
 
-impl fmt::Display for KvListWithHeading {
+impl fmt::Display for KvList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Write the heading
-        writeln!(f, " {}:", self.heading)?;
+        if let Some(heading) = self.heading {
+            writeln!(f, " {}:", heading)?;
+        }
 
         // Write the rows
         let key_width = self.max_key_width() + 1;
