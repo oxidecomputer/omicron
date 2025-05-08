@@ -224,7 +224,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         },
         ncpus: InstanceCpuCount(4),
         memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "the-host".parse().unwrap(),
+        hostname: Some("the-host".parse().unwrap()),
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
@@ -332,7 +332,7 @@ async fn test_instances_create_reboot_halt(
                 },
                 ncpus: instance.ncpus,
                 memory: instance.memory,
-                hostname: instance.hostname.parse().unwrap(),
+                hostname: Some(instance.hostname.parse().unwrap()),
                 user_data: vec![],
                 ssh_public_keys: None,
                 network_interfaces:
@@ -2016,7 +2016,7 @@ async fn test_instances_create_stopped_start(
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "the-host".parse().unwrap(),
+            hostname: Some("the-host".parse().unwrap()),
             user_data: vec![],
             ssh_public_keys: None,
             network_interfaces:
@@ -2189,7 +2189,7 @@ async fn test_instance_using_image_from_other_project_fails(
                 },
                 ncpus: InstanceCpuCount(4),
                 memory: ByteCount::from_gibibytes_u32(1),
-                hostname: "stolen".parse().unwrap(),
+                hostname: Some("stolen".parse().unwrap()),
                 user_data: vec![],
                 ssh_public_keys: None,
                 network_interfaces:
@@ -2267,7 +2267,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "inst".parse().unwrap(),
+        hostname: Some("inst".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: interface_params.clone(),
@@ -2298,7 +2298,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "inst2".parse().unwrap(),
+        hostname: Some("inst2".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: interface_params,
@@ -2390,7 +2390,7 @@ async fn test_instance_with_single_explicit_ip_address(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nic-test".parse().unwrap(),
+        hostname: Some("nic-test".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: interface_params,
@@ -2509,7 +2509,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nic-test".parse().unwrap(),
+        hostname: Some("nic-test".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: interface_params,
@@ -2627,7 +2627,7 @@ async fn test_instance_create_delete_network_interface(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nic-test".parse().unwrap(),
+        hostname: Some("nic-test".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
@@ -2837,6 +2837,46 @@ async fn test_instance_create_delete_network_interface(
 }
 
 #[nexus_test]
+async fn test_instance_create_hostname_fallback(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "test-hostname-fallback";
+
+    create_project_and_pool(&client).await;
+
+    // Create an instance with no network interfaces
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("instance to test updatin nics"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: None,
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+    };
+    let instance: Instance = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // hostname should fall back to name when not provided
+    assert_eq!(instance.hostname, instance_params.identity.name.to_string());
+}
+
+#[nexus_test]
 async fn test_instance_update_network_interfaces(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -2874,7 +2914,7 @@ async fn test_instance_update_network_interfaces(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nic-test".parse().unwrap(),
+        hostname: Some("nic-test".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
@@ -3505,7 +3545,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nic-test".parse().unwrap(),
+        hostname: Some("nic-test".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: interface_params,
@@ -3576,7 +3616,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nfs".parse().unwrap(),
+        hostname: Some("nfs".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -3637,7 +3677,7 @@ async fn test_instance_create_attach_disks(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(3),
-        hostname: "nfs".parse().unwrap(),
+        hostname: Some("nfs".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -3750,7 +3790,7 @@ async fn test_instance_create_attach_disks_undo(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nfs".parse().unwrap(),
+        hostname: Some("nfs".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -3838,7 +3878,7 @@ async fn test_attach_eight_disks_to_instance(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nfs".parse().unwrap(),
+        hostname: Some("nfs".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -3926,7 +3966,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nfs".parse().unwrap(),
+        hostname: Some("nfs".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -4028,7 +4068,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nfs".parse().unwrap(),
+        hostname: Some("nfs".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -4119,7 +4159,7 @@ async fn test_disks_detached_when_instance_destroyed(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nfs".parse().unwrap(),
+        hostname: Some("nfs".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -4217,7 +4257,7 @@ async fn test_disks_detached_when_instance_destroyed(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nfsv2".parse().unwrap(),
+        hostname: Some("nfsv2".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -4303,7 +4343,7 @@ async fn test_duplicate_disk_attach_requests_ok(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nfs".parse().unwrap(),
+        hostname: Some("nfs".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -4350,7 +4390,7 @@ async fn test_duplicate_disk_attach_requests_ok(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nfs2".parse().unwrap(),
+        hostname: Some("nfs2".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -4411,7 +4451,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nfs".parse().unwrap(),
+        hostname: Some("nfs".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -4540,7 +4580,7 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "inst".parse().unwrap(),
+        hostname: Some("inst".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -4917,7 +4957,7 @@ async fn test_auto_restart_policy_can_be_changed(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: instance_name.parse().unwrap(),
+        hostname: Some(instance_name.parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -5006,7 +5046,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nfs".parse().unwrap(),
+        hostname: Some("nfs".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -5084,7 +5124,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "nfs".parse().unwrap(),
+        hostname: Some("nfs".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -5174,7 +5214,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE / 2),
-        hostname: "inst".parse().unwrap(),
+        hostname: Some("inst".parse().unwrap()),
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
@@ -5227,7 +5267,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from(1024 * 1024 * 1024 + 300),
-        hostname: "inst".parse().unwrap(),
+        hostname: Some("inst".parse().unwrap()),
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
@@ -5280,7 +5320,7 @@ async fn test_instances_memory_greater_than_max_size(
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE + (1 << 30))
             .unwrap(),
-        hostname: "inst".parse().unwrap(),
+        hostname: Some("inst".parse().unwrap()),
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
@@ -5612,7 +5652,7 @@ async fn test_instance_create_with_ssh_keys(
         // By default should transfer all profile keys
         ssh_public_keys: None,
         start: false,
-        hostname: instance_name.parse().unwrap(),
+        hostname: Some(instance_name.parse().unwrap()),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
@@ -5661,7 +5701,7 @@ async fn test_instance_create_with_ssh_keys(
         // Should only transfer the first key
         ssh_public_keys: Some(vec![user_keys[0].identity.name.clone().into()]),
         start: false,
-        hostname: instance_name.parse().unwrap(),
+        hostname: Some(instance_name.parse().unwrap()),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
@@ -5709,7 +5749,7 @@ async fn test_instance_create_with_ssh_keys(
         // Should transfer no keys
         ssh_public_keys: Some(vec![]),
         start: false,
-        hostname: instance_name.parse().unwrap(),
+        hostname: Some(instance_name.parse().unwrap()),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
@@ -5830,7 +5870,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             },
             ncpus,
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: config.0.parse().unwrap(),
+            hostname: Some(config.0.parse().unwrap()),
             user_data: vec![],
             ssh_public_keys: None,
             network_interfaces:
@@ -5890,7 +5930,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         },
         ncpus: too_many_cpus,
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "test".parse().unwrap(),
+        hostname: Some("test".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -5945,7 +5985,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
             },
             ncpus: InstanceCpuCount::try_from(i64::from(1)).unwrap(),
             memory: ByteCount::try_from(config.1).unwrap(),
-            hostname: config.0.parse().unwrap(),
+            hostname: Some(config.0.parse().unwrap()),
             user_data: vec![],
             ssh_public_keys: None,
             network_interfaces:
@@ -6244,7 +6284,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         },
         ncpus: InstanceCpuCount(4),
         memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "the-host".parse().unwrap(),
+        hostname: Some("the-host".parse().unwrap()),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
@@ -6314,7 +6354,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         },
         ncpus: InstanceCpuCount(4),
         memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "the-host".parse().unwrap(),
+        hostname: Some("the-host".parse().unwrap()),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
@@ -6378,7 +6418,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         },
         ncpus: InstanceCpuCount(4),
         memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "the-host".parse().unwrap(),
+        hostname: Some("the-host".parse().unwrap()),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
@@ -6516,7 +6556,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
         },
         ncpus: InstanceCpuCount(4),
         memory: ByteCount::from_gibibytes_u32(1),
-        hostname: "the-host".parse().unwrap(),
+        hostname: Some("the-host".parse().unwrap()),
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
@@ -6650,7 +6690,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: "inst".parse().unwrap(),
+        hostname: Some("inst".parse().unwrap()),
         user_data: vec![],
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
