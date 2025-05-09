@@ -659,6 +659,33 @@
         }
       }
     },
+    "/support/health-check": {
+      "get": {
+        "operationId": "support_health_check",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SledDiagnosticsQueryOutput",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/support/ipadm-info": {
       "get": {
         "operationId": "support_ipadm_info",

@@ -146,3 +146,25 @@ pub async fn zpool_info()
 -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
     execute_command_with_timeout(zpool_status(), DEFAULT_TIMEOUT).await
 }
+
+pub async fn health_check()
+-> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    [
+        uptime(),
+        kstat_low_page(),
+        svcs_enabled_but_not_running(),
+        count_disks(),
+        zfs_list_unmounted(),
+        count_crucibles(),
+        identify_datasets_close_to_quota(),
+        identify_datasets_with_less_than_300_gib_avail(),
+        dimm_check(),
+    ]
+        .into_iter()
+        .map(|c| async move {
+            execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
+        })
+        .collect::<FuturesUnordered<_>>()
+        .collect::<Vec<Result<_, _>>>()
+        .await
+}

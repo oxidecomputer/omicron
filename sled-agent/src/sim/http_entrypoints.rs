@@ -745,6 +745,13 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
+    async fn support_health_check(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        method_unimplemented()
+    }
+
     async fn support_logs(
         _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {

@@ -662,6 +662,12 @@ impl BundleCollection<'_> {
                         sled_client.support_zpool_info(),
                     )
                     .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "health-check",
+                        sled_client.support_health_check(),
+                    )
+                    .boxed(),
                 ])
                 // Currently we execute up to 10 commands concurrently which
                 // might be doing their own concurrent work, for example
