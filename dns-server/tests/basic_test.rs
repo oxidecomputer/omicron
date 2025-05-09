@@ -46,6 +46,7 @@ pub async fn a_crud() -> Result<(), anyhow::Error> {
 
     // add an a record
     let name = "devron".to_string();
+    let fqdn = name.clone() + "." + TEST_ZONE + ".";
     let addr = Ipv4Addr::new(10, 1, 2, 3);
     let a = DnsRecord::A(addr);
     let input_records = HashMap::from([(name.clone(), vec![a])]);
@@ -56,9 +57,23 @@ pub async fn a_crud() -> Result<(), anyhow::Error> {
     assert_eq!(input_records, records);
 
     // resolve the name
-    let response = resolver.lookup_ip(name + "." + TEST_ZONE + ".").await?;
+    let response = resolver.lookup_ip(fqdn.clone()).await?;
     let address = response.iter().next().expect("no addresses returned!");
     assert_eq!(address, addr);
+
+    // as with other cases, `hickory-resolver` does not let us see if the answer
+    // is authoritative, so we'll have to query again with a lower level
+    // interface to validate that.
+    let raw_response = raw_dns_client_query(
+        test_ctx.dns_server.local_address(),
+        Name::from_ascii(&fqdn).expect("name is valid"),
+        RecordType::A,
+    )
+    .await
+    .expect("can issue DNS query");
+
+    assert!(raw_response.authoritative());
+    assert_eq!(raw_response.answers().len(), 1);
 
     test_ctx.cleanup().await;
     Ok(())
@@ -76,6 +91,7 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
 
     // add an aaaa record
     let name = "devron".to_string();
+    let fqdn = name.clone() + "." + TEST_ZONE + ".";
     let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
     let aaaa = DnsRecord::Aaaa(addr);
     let input_records = HashMap::from([(name.clone(), vec![aaaa])]);
@@ -86,9 +102,23 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     assert_eq!(input_records, records);
 
     // resolve the name
-    let response = resolver.lookup_ip(name + "." + TEST_ZONE + ".").await?;
+    let response = resolver.lookup_ip(fqdn.clone()).await?;
     let address = response.iter().next().expect("no addresses returned!");
     assert_eq!(address, addr);
+
+    // as with other cases, `hickory-resolver` does not let us see if the answer
+    // is authoritative, so we'll have to query again with a lower level
+    // interface to validate that.
+    let raw_response = raw_dns_client_query(
+        test_ctx.dns_server.local_address(),
+        Name::from_ascii(&fqdn).expect("name is valid"),
+        RecordType::AAAA,
+    )
+    .await
+    .expect("can issue DNS query");
+
+    assert!(raw_response.authoritative());
+    assert_eq!(raw_response.answers().len(), 1);
 
     test_ctx.cleanup().await;
     Ok(())
@@ -125,7 +155,7 @@ pub async fn answers_match_question() -> Result<(), anyhow::Error> {
     //
     // `raw_dns_client_query` avoids using a hickory Resolver, so we can assert
     // on the exact answer from our server.
-    let response = raw_dns_client_query(
+    let raw_response = raw_dns_client_query(
         test_ctx.dns_server.local_address(),
         name,
         RecordType::A,
@@ -139,9 +169,12 @@ pub async fn answers_match_question() -> Result<(), anyhow::Error> {
     //   have
     // * no additionals: the server could return AAAA records as additionals to
     //   an A query, but does not currently.
-    assert_eq!(response.header().response_code(), ResponseCode::NoError);
-    assert_eq!(response.answers(), &[]);
-    assert_eq!(response.additionals(), &[]);
+    // * authoritative: the nameserver we've queried is the source of truth for
+    //   this name (and zone!)
+    assert_eq!(raw_response.header().response_code(), ResponseCode::NoError);
+    assert_eq!(raw_response.answers(), &[]);
+    assert_eq!(raw_response.additionals(), &[]);
+    assert!(raw_response.authoritative());
 
     test_ctx.cleanup().await;
     Ok(())
@@ -220,6 +253,7 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     assert_eq!(response.additionals().len(), 2);
     assert_eq!(response.additionals()[0].record_type(), RecordType::AAAA);
     assert_eq!(response.additionals()[1].record_type(), RecordType::AAAA);
+    assert!(response.authoritative());
 
     test_ctx.cleanup().await;
     Ok(())
@@ -260,7 +294,11 @@ pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-async fn lookup_ip_expect_nxdomain(resolver: &TokioAsyncResolver, name: &str) {
+async fn lookup_ip_expect_nxdomain(
+    server_addr: std::net::SocketAddr,
+    resolver: &TokioAsyncResolver,
+    name: &str,
+) {
     match resolver.lookup_ip(name).await {
         Ok(unexpected) => {
             panic!("Expected NXDOMAIN, got record {:?}", unexpected);
@@ -286,6 +324,42 @@ async fn lookup_ip_expect_nxdomain(resolver: &TokioAsyncResolver, name: &str) {
             }
         },
     };
+
+    // We should be authoritative for NXDOMAIN errors, but `lookup_ip` doesn't
+    // let us find out if the actual DNS message was authoritative.  So instead,
+    // query again via `hickory-client` to get the exact Message from our DNS
+    // server.  `lookup_ip` queries both A and AAAA and merges the answers,
+    // so we'll query both here too.
+
+    let name = Name::from_ascii(name).expect("can parse domain name");
+
+    let raw_response =
+        raw_dns_client_query(server_addr, name.clone(), RecordType::A)
+            .await
+            .expect("can issue DNS query");
+
+    assert!(raw_response.authoritative());
+    assert_eq!(raw_response.response_code(), ResponseCode::NXDomain);
+    assert!(raw_response.answers().is_empty());
+    assert!(raw_response.additionals().is_empty());
+    // Optionally, the DNS server is permitted to return SOA records with
+    // negative answers as a guide for how long to cache the result. We don't do
+    // that right now, so test that there are no name servers in the answer, but
+    // this should change if the DNS server is changed.
+    assert!(raw_response.name_servers().is_empty());
+
+    let raw_response =
+        raw_dns_client_query(server_addr, name, RecordType::AAAA)
+            .await
+            .expect("can issue DNS query");
+
+    assert!(raw_response.authoritative());
+    assert_eq!(raw_response.response_code(), ResponseCode::NXDomain);
+    assert!(raw_response.answers().is_empty());
+    assert!(raw_response.additionals().is_empty());
+    // Same as above, this assert may have to change if we return SOA records as
+    // negative caching hints.
+    assert!(raw_response.name_servers().is_empty());
 }
 
 // Verify that the part of a name that's under the zone name can contain the
@@ -319,7 +393,12 @@ pub async fn name_contains_zone() -> Result<(), anyhow::Error> {
     assert_eq!(address, addr);
 
     // A lookup shouldn't work without the zone's name appended twice.
-    lookup_ip_expect_nxdomain(resolver, "epsilon3.oxide.test").await;
+    lookup_ip_expect_nxdomain(
+        test_ctx.dns_server.local_address(),
+        resolver,
+        "epsilon3.oxide.test",
+    )
+    .await;
 
     test_ctx.cleanup().await;
     Ok(())
@@ -343,7 +422,12 @@ pub async fn empty_record() -> Result<(), anyhow::Error> {
     assert!(records.is_empty());
 
     // resolve the name
-    lookup_ip_expect_nxdomain(&resolver, &(name + "." + TEST_ZONE + ".")).await;
+    lookup_ip_expect_nxdomain(
+        test_ctx.dns_server.local_address(),
+        &resolver,
+        &(name + "." + TEST_ZONE + "."),
+    )
+    .await;
 
     test_ctx.cleanup().await;
     Ok(())
@@ -372,8 +456,12 @@ pub async fn nxdomain() -> Result<(), anyhow::Error> {
 
     // asking for a nonexistent record within the domain of the internal DNS
     // server should result in an NXDOMAIN
-    lookup_ip_expect_nxdomain(&resolver, &format!("unicorn.{}.", TEST_ZONE))
-        .await;
+    lookup_ip_expect_nxdomain(
+        test_ctx.dns_server.local_address(),
+        &resolver,
+        &format!("unicorn.{}.", TEST_ZONE),
+    )
+    .await;
 
     test_ctx.cleanup().await;
     Ok(())
@@ -384,10 +472,12 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
     let test_ctx = init_client_server("servfail").await?;
     let resolver = &test_ctx.resolver;
 
+    let name = "unicorn.oxide.internal";
+
     // In this case, we haven't defined any zones yet, so any request should be
     // outside the server's authoritative zones.  That should result in a
     // SERVFAIL.
-    match resolver.lookup_ip("unicorn.oxide.internal").await {
+    match resolver.lookup_ip(name).await {
         Ok(unexpected) => {
             panic!("Expected SERVFAIL, got record {:?}", unexpected);
         }
@@ -412,6 +502,24 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
             }
         },
     };
+
+    let raw_response = raw_dns_client_query(
+        test_ctx.dns_server.local_address(),
+        Name::from_ascii(name).expect("can parse domain name"),
+        RecordType::A,
+    )
+    .await
+    .expect("can issue DNS query");
+
+    // The answer is not authoritative. The authoritative bit for SERVFAIL isn't
+    // defined to mean anything, so this shouldn't matter either way. Even so,
+    // if this is a SERVFAIL in response to being queried about a zone we're not
+    // authoritative for, we cannot set the bit in responses.
+    assert!(!raw_response.authoritative());
+    assert_eq!(raw_response.response_code(), ResponseCode::ServFail);
+    assert!(raw_response.answers().is_empty());
+    assert!(raw_response.additionals().is_empty());
+    assert!(raw_response.name_servers().is_empty());
 
     test_ctx.cleanup().await;
     Ok(())
