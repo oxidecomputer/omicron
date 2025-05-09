@@ -157,6 +157,10 @@ struct Args {
     #[clap(long)]
     extra_manifest: Option<Utf8PathBuf>,
 
+    /// Extra helios-dev origin to be passed along to helios-build
+    #[clap(long)]
+    extra_origin: Option<String>,
+
     /// Create and use an `omicron-ci-incorporation` package during the image
     /// build. The incorporation can then be reused during branching to pin
     /// packages in the image to the same version.
@@ -620,6 +624,12 @@ async fn main() -> Result<()> {
             )
             .env_remove("CARGO")
             .env_remove("RUSTUP_TOOLCHAIN");
+
+        if let Some(extra_origin) = &args.extra_origin {
+            image_cmd = image_cmd
+                .arg("-p")
+                .arg(format!("{}={extra_origin}", helios::PUBLISHER));
+        }
 
         if let Some(helios) = &pins.helios {
             image_cmd = image_cmd.arg("-F").arg(format!(
