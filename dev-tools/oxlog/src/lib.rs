@@ -8,7 +8,9 @@
 
 use anyhow::Context;
 use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
+use glob::Pattern;
 use jiff::Timestamp;
+use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::io;
 use uuid::Uuid;
@@ -186,8 +188,8 @@ impl SvcLogs {
     /// scattered across several different directories -- and we care more
     /// about filename than which directory they are in.
     pub fn sort_by_file_name(&mut self) {
-        self.archived.sort_unstable_by(LogFile::file_name_cmp);
-        self.extra.sort_unstable_by(LogFile::file_name_cmp);
+        self.archived.par_sort_unstable_by(LogFile::file_name_cmp);
+        self.extra.par_sort_unstable_by(LogFile::file_name_cmp);
     }
 }
 
@@ -347,8 +349,20 @@ impl Zones {
         }
 
         sort_logs(&mut output);
-
         output
+    }
+
+    /// Return log files for all zones whose names match `zone_pattern`
+    pub fn matching_zone_logs(
+        &self,
+        zone_pattern: &Pattern,
+        filter: Filter,
+    ) -> Vec<BTreeMap<ServiceName, SvcLogs>> {
+        self.zones
+            .par_iter()
+            .filter(|(zone, _)| zone_pattern.matches(zone))
+            .map(|(zone, _)| self.zone_logs(zone, filter))
+            .collect()
     }
 }
 
