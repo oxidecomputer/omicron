@@ -12,6 +12,8 @@ use futures::stream::StreamExt;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ObjectStream;
 use omicron_common::api::external::Vni;
+use omicron_common::snake_case_result;
+use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_uuid_kinds::DemoSagaUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -418,7 +420,7 @@ pub struct CompletedAttempt {
     pub time_done: DateTime<Utc>,
     pub elapsed: Duration,
     pub request: PendingMgsUpdate,
-    #[serde(serialize_with = "serialize_snake_case_result")]
+    #[serde(serialize_with = "snake_case_result::serialize")]
     #[schemars(
         schema_with = "SnakeCaseResult::<UpdateCompletedHow, String>::json_schema"
     )]
@@ -466,28 +468,4 @@ pub enum UpdateAttemptStatus {
 pub struct WaitingStatus {
     pub next_attempt_time: DateTime<Utc>,
     pub nattempts_done: u32,
-}
-
-#[derive(JsonSchema, Serialize)]
-#[serde(rename = "Result{T}Or{E}")]
-#[serde(rename_all = "snake_case")]
-enum SnakeCaseResult<T, E> {
-    Ok(T),
-    Err(E),
-}
-
-fn serialize_snake_case_result<S, T, E>(
-    value: &Result<T, E>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-    T: Serialize,
-    E: Serialize,
-{
-    match value {
-        Ok(val) => SnakeCaseResult::Ok(val),
-        Err(err) => SnakeCaseResult::Err(err),
-    }
-    .serialize(serializer)
 }
