@@ -51,13 +51,9 @@ async fn test_sp_updater_updates_sled() {
     let mgstestctx =
         mgs_setup::test_setup("test_sp_updater_updates_sled", SpPort::One)
             .await;
-    let log = &mgstestctx.logctx.log;
 
     // Configure an MGS client.
-    let mgs_client = gateway_client::Client::new(
-        &mgstestctx.client.url("/").to_string(),
-        log.new(slog::o!("component" => "MgsClient")),
-    );
+    let mgs_client = mgstestctx.client();
     let mut mgs_clients = MgsClients::from_clients([mgs_client.clone()]);
 
     // Configure and instantiate an `SpUpdater`.
@@ -167,13 +163,9 @@ async fn test_sp_updater_updates_switch() {
     let mgstestctx =
         mgs_setup::test_setup("test_sp_updater_updates_switch", SpPort::One)
             .await;
-    let log = &mgstestctx.logctx.log;
 
     // Configure an MGS client.
-    let mgs_client = gateway_client::Client::new(
-        &mgstestctx.client.url("/").to_string(),
-        log.new(slog::o!("component" => "MgsClient")),
-    );
+    let mgs_client = mgstestctx.client();
     let mut mgs_clients = MgsClients::from_clients([mgs_client.clone()]);
 
     // Configure and instantiate an `SpUpdater`.
@@ -593,11 +585,7 @@ async fn test_sp_updater_delivers_progress() {
     };
 
     // Configure an MGS client.
-    let mut mgs_clients =
-        MgsClients::from_clients([gateway_client::Client::new(
-            &mgstestctx.client.url("/").to_string(),
-            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )]);
+    let mut mgs_clients = MgsClients::from_clients([mgstestctx.client()]);
 
     let sp_type = SpType::Sled;
     let sp_slot = 0;

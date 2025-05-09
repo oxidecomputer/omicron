@@ -239,6 +239,14 @@ impl RawDisk {
             RawDisk::Synthetic(synthetic) => &synthetic.firmware,
         }
     }
+
+    #[cfg(feature = "testing")]
+    pub fn firmware_mut(&mut self) -> &mut DiskFirmware {
+        match self {
+            RawDisk::Real(unparsed) => unparsed.firmware_mut(),
+            RawDisk::Synthetic(synthetic) => &mut synthetic.firmware,
+        }
+    }
 }
 
 /// A physical [`PooledDisk`] or a [`SyntheticDisk`] that contains or is backed
