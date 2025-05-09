@@ -26,6 +26,7 @@ impl DataStore {
         opctx: &OpContext,
         id: WebhookEventUuid,
         event_class: WebhookEventClass,
+        payload_schema_version: u32,
         event: serde_json::Value,
     ) -> CreateResult<WebhookEvent> {
         let conn = self.pool_connection_authorized(&opctx).await?;
@@ -34,6 +35,7 @@ impl DataStore {
                 identity: WebhookEventIdentity::new(id),
                 time_dispatched: None,
                 event_class,
+                payload_schema_version: payload_schema_version.into(),
                 event,
                 num_dispatched: 0,
             })

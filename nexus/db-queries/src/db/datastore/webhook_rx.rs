@@ -1212,7 +1212,13 @@ mod test {
     ) -> (authz::WebhookEvent, crate::db::model::WebhookEvent) {
         let id = WebhookEventUuid::new_v4();
         datastore
-            .webhook_event_create(opctx, id, event_class, serde_json::json!({}))
+            .webhook_event_create(
+                opctx,
+                id,
+                event_class,
+                1,
+                serde_json::json!({}),
+            )
             .await
             .expect("cant create ye event");
         LookupPath::new(opctx, datastore)

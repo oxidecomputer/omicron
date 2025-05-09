@@ -7,7 +7,6 @@
 use dropshot::test_util::ClientTestContext;
 use hmac::{Hmac, Mac};
 use httpmock::prelude::*;
-use nexus_db_model::WebhookEventClass;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -25,6 +24,8 @@ use omicron_uuid_kinds::WebhookReceiverUuid;
 use sha2::Sha256;
 use std::time::Duration;
 use uuid::Uuid;
+
+use nexus_webhooks::events::test as test_events;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -536,8 +537,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
         .webhook_event_publish(
             &opctx,
             id,
-            WebhookEventClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
+            test_events::Foo { hello_world: true },
         )
         .await
         .expect("event should be published successfully");
@@ -658,8 +658,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
         .webhook_event_publish(
             &opctx,
             id,
-            WebhookEventClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
+            test_events::Foo { hello_world: true },
         )
         .await
         .expect("event should be published successfully");
@@ -819,8 +818,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
         .webhook_event_publish(
             &opctx,
             bar_event_id,
-            WebhookEventClass::TestFooBar,
-            serde_json::json!({"lol": "webhooked on phonics"}),
+            test_events::FooBar { hello: "emeryville" },
         )
         .await
         .expect("event should be published successfully");
@@ -830,8 +828,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
         .webhook_event_publish(
             &opctx,
             baz_event_id,
-            WebhookEventClass::TestFooBaz,
-            serde_json::json!({"lol": "webhook, line, and sinker"}),
+            test_events::FooBaz { hello: "san francisco" },
         )
         .await
         .expect("event should be published successfully");
@@ -901,8 +898,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
         .webhook_event_publish(
             &opctx,
             id,
-            WebhookEventClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
+            test_events::Foo { hello_world: true },
         )
         .await
         .expect("event should be published successfully");
@@ -1295,8 +1291,7 @@ async fn test_probe_resends_failed_deliveries(
             .webhook_event_publish(
                 &opctx,
                 event1_id,
-                WebhookEventClass::TestFoo,
-                serde_json::json!({"hello": "world"}),
+                test_events::Foo { hello_world: true }
             )
             .await
             .expect("event1 should be published successfully")
@@ -1306,8 +1301,7 @@ async fn test_probe_resends_failed_deliveries(
             .webhook_event_publish(
                 &opctx,
                 event2_id,
-                WebhookEventClass::TestFoo,
-                serde_json::json!({"hello": "emeryville"}),
+                test_events::Foo { hello_world: false }
             )
             .await
             .expect("event2 should be published successfully")
@@ -1451,8 +1445,7 @@ async fn test_api_resends_failed_deliveries(
         .webhook_event_publish(
             &opctx,
             event1_id,
-            WebhookEventClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
+            test_events::Foo { hello_world: true },
         )
         .await
         .expect("event should be published successfully");
@@ -1463,8 +1456,7 @@ async fn test_api_resends_failed_deliveries(
         .webhook_event_publish(
             &opctx,
             event2_id,
-            WebhookEventClass::TestQuuxBar,
-            serde_json::json!({"hello_world": true}),
+            test_events::QuuxBar { a: true, b: 42 },
         )
         .await
         .expect("event should be published successfully");
@@ -1567,7 +1559,7 @@ async fn subscription_add_test(
                     "event_class": "test.foo.bar",
                     "event_id": id2,
                     "data": {
-                        "hello_world": true,
+                        "hello": "emeryville",
                     }
                 })
                 .to_string();
@@ -1591,8 +1583,7 @@ async fn subscription_add_test(
         .webhook_event_publish(
             &opctx,
             id1,
-            WebhookEventClass::TestFooBar,
-            serde_json::json!({"hello_world": false}),
+            test_events::FooBar { hello: "san francisco" },
         )
         .await
         .expect("event should be published successfully");
@@ -1624,8 +1615,7 @@ async fn subscription_add_test(
         .webhook_event_publish(
             &opctx,
             id2,
-            WebhookEventClass::TestFooBar,
-            serde_json::json!({"hello_world": true}),
+            test_events::FooBar { hello: "emeryville" },
         )
         .await
         .expect("event should be published successfully");
@@ -1699,7 +1689,7 @@ async fn subscription_remove_test(
                     "event_class": "test.foo.bar",
                     "event_id": id1,
                     "data": {
-                        "hello_world": true,
+                        "hello": "emeryville",
                     }
                 })
                 .to_string();
@@ -1723,8 +1713,7 @@ async fn subscription_remove_test(
         .webhook_event_publish(
             &opctx,
             id1,
-            WebhookEventClass::TestFooBar,
-            serde_json::json!({"hello_world": true}),
+            test_events::FooBar { hello: "emeryville" },
         )
         .await
         .expect("event should be published successfully");
@@ -1755,8 +1744,7 @@ async fn subscription_remove_test(
         .webhook_event_publish(
             &opctx,
             id2,
-            WebhookEventClass::TestFooBar,
-            serde_json::json!({"hello_world": false}),
+            test_events::FooBar { hello: "san francisco" },
         )
         .await
         .expect("event should be published successfully");
@@ -1780,7 +1768,7 @@ async fn subscription_remove_test(
                     "event_class": "test.foo",
                     "event_id": id3,
                     "data": {
-                        "whatever": 1
+                        "hello_world": true,
                     }
                 })
                 .to_string();
@@ -1802,8 +1790,7 @@ async fn subscription_remove_test(
         .webhook_event_publish(
             &opctx,
             id3,
-            WebhookEventClass::TestFoo,
-            serde_json::json!({"whatever": 1}),
+            test_events::Foo { hello_world: true },
         )
         .await
         .expect("event should be published successfully");

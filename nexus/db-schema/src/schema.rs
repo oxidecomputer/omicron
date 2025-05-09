@@ -2267,6 +2267,7 @@ table! {
         event -> Jsonb,
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
+        payload_schema_version -> Int8,
     }
 }
 

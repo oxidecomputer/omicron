@@ -99,7 +99,7 @@ mod volume;
 mod vpc;
 mod vpc_router;
 mod vpc_subnet;
-mod webhook;
+pub mod webhook;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
@@ -253,6 +253,9 @@ pub struct Nexus {
 
     /// reports status of pending MGS-managed updates
     mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
+
+    /// Collection of JSON schemas for webhook event classes and versions.
+    webhook_schemas: webhook::EventSchemaRegistry,
 }
 
 impl Nexus {
@@ -480,6 +483,7 @@ impl Nexus {
             )),
             tuf_artifact_replication_tx,
             mgs_update_status_rx,
+            webhook_schemas: webhook::event_schemas(),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

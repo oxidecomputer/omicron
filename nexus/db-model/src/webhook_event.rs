@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::SqlU32;
 use crate::WebhookEventClass;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
@@ -39,6 +40,9 @@ pub struct WebhookEvent {
     pub event: serde_json::Value,
 
     pub num_dispatched: i64,
+
+    /// The version of the JSON schema for `event`.
+    pub payload_schema_version: SqlU32,
 }
 
 impl WebhookEvent {

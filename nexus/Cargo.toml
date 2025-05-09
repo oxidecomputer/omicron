@@ -64,6 +64,7 @@ nexus-mgs-updates.workspace = true
 nexus-networking.workspace = true
 nexus-saga-recovery.workspace = true
 nexus-test-interface.workspace = true
+nexus-webhooks.workspace = true
 num-integer.workspace = true
 openssl.workspace = true
 oximeter-client.workspace = true
@@ -151,6 +152,7 @@ nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-client.workspace = true
 nexus-test-utils-macros.workspace = true
 nexus-test-utils.workspace = true
+nexus-webhooks = { workspace = true, features = ["test-events"] }
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true

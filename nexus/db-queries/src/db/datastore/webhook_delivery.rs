@@ -52,15 +52,6 @@ pub struct DeliveryConfig {
     pub lease_timeout: TimeDelta,
 }
 
-/// A record from the [`WebhookDelivery`] table along with the event class and
-/// data of the corresponding [`WebhookEvent`] record.
-#[derive(Debug, Clone)]
-pub struct DeliveryAndEvent {
-    pub delivery: WebhookDelivery,
-    pub event_class: WebhookEventClass,
-    pub event: serde_json::Value,
-}
-
 impl DataStore {
     pub async fn webhook_delivery_create_batch(
         &self,
@@ -203,8 +194,7 @@ impl DataStore {
         opctx: &OpContext,
         rx_id: &WebhookReceiverUuid,
         cfg: &DeliveryConfig,
-    ) -> Result<impl ExactSizeIterator<Item = DeliveryAndEvent> + 'static, Error>
-    {
+    ) -> Result<Vec<(WebhookDelivery, WebhookEvent)>, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
         let now =
             diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
@@ -249,17 +239,11 @@ impl DataStore {
             .inner_join(
                 event_dsl::webhook_event.on(event_dsl::id.eq(dsl::event_id)),
             )
-            .select((
-                WebhookDelivery::as_select(),
-                event_dsl::event_class,
-                event_dsl::event,
-            ))
+            .select((WebhookDelivery::as_select(), WebhookEvent::as_select()))
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(rows.into_iter().map(|(delivery, event_class, event)| {
-            DeliveryAndEvent { delivery, event_class, event }
-        }))
+        Ok(rows)
     }
 
     pub async fn webhook_delivery_start_attempt(
@@ -503,6 +487,7 @@ mod test {
                 &opctx,
                 event_id,
                 WebhookEventClass::TestFoo,
+                1,
                 serde_json::json!({
                     "answer": 42,
                 }),

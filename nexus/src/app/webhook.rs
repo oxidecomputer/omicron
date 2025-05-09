@@ -180,9 +180,37 @@ use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
 
+pub use nexus_webhooks::{Event, EventSchemaRegistry};
+
+impl nexus_webhooks::PublishEvent for Nexus {
+    async fn publish_event<E: Event>(
+        &self,
+        opctx: &OpContext,
+        id: WebhookEventUuid,
+        event: E,
+    ) -> Result<WebhookEvent, Error> {
+        self.webhook_event_publish(opctx, id, event).await
+    }
+}
+
+pub(crate) fn event_schemas() -> EventSchemaRegistry {
+    let mut registry = EventSchemaRegistry::new();
+
+    #[cfg(debug_assertions)]
+    nexus_webhooks::events::test::register_all(&mut registry);
+
+    // WHEN ADDING NEW WEBHOOK EVENT CLASSES OR NEW SCHEMA VERSIONS, REMEMBER TO
+    // REGISTER THEM HERE!
+
+    registry
+}
+
 impl Nexus {
-    /// Publish a new webhook event, with the provided `id`, `event_class`, and
-    /// JSON data payload.
+    /// Publish a new webhook event.
+    ///
+    /// The event payload is represented by a type that implements the [`Event`]
+    /// trait defined in this module. Publishing the event converts it to a JSON
+    /// object that's stored in the database.
     ///
     /// If this method returns `Ok`, the event has been durably recorded in
     /// CockroachDB.  Once the new event record is inserted into the database,
@@ -190,22 +218,63 @@ impl Nexus {
     /// event to receivers.  However, if (for whatever reason) this Nexus fails
     /// to do that, the event remains durably in the database to be dispatched
     /// and delivered by someone else.
-    pub async fn webhook_event_publish(
+    pub async fn webhook_event_publish<E: Event>(
         &self,
         opctx: &OpContext,
         id: WebhookEventUuid,
-        event_class: WebhookEventClass,
-        event: serde_json::Value,
+        event: E,
     ) -> Result<WebhookEvent, Error> {
+        #[cfg(debug_assertions)]
+        {
+            // In test builds, assert that this is a schema that we know about.
+            let versions = match self
+                .webhook_schemas
+                .schema_versions_for(E::CLASS)
+            {
+                Some(versions) => versions,
+                None => panic!(
+                    "You have attempted to publish a webhook event type whose \
+                     event class was not added to the webhook event schema \
+                     registry in `nexus::app::webhook::event_schemas()`! This \
+                     means that the event type's schema will not be returned \
+                     by the /v1/webhooks/event-classes endpoint. This is \
+                     probably a mistake. Since I am a test build, I will now \
+                     panic!\n    event class: {}",
+                    E::CLASS,
+                ),
+            };
+
+            if !versions.contains_key(&E::VERSION) {
+                panic!(
+                    "You have attempted to publish a webhook event type whose \
+                     schema version is not present in the webhook event schema \
+                     registry in `nexus::app::webhook::event_schemas()`! This \
+                     is probably a mistake. Since I am a test build, I will \
+                     now panic!\n    event class: {}\n schema version: {}",
+                    E::CLASS,
+                    E::VERSION,
+                );
+            }
+        }
+
+        let json =
+            serde_json::to_value(event).map_err(|e| Error::InternalError {
+                internal_message: format!(
+                    "failed to convert {} (class: {}) to JSON: {e}",
+                    std::any::type_name::<E>(),
+                    E::CLASS
+                ),
+            })?;
         let event = self
             .datastore()
-            .webhook_event_create(opctx, id, event_class, event)
+            .webhook_event_create(opctx, id, E::CLASS, E::VERSION, json)
             .await?;
         slog::debug!(
             &opctx.log,
             "enqueued webhook event";
             "event_id" => ?id,
-            "event_class" => %event.event_class,
+            "event_class" => %E::CLASS,
+            "event_version" => E::VERSION,
             "time_created" => ?event.identity.time_created,
         );
 
@@ -528,7 +597,7 @@ impl Nexus {
             LazyLock::new(|| serde_json::json!({}));
 
         let attempt = match client
-            .send_delivery_request(opctx, &delivery, CLASS, &DATA)
+            .send_delivery_request(opctx, &delivery, CLASS, 1, &DATA)
             .await
         {
             Ok(attempt) => attempt,
@@ -809,6 +878,7 @@ impl<'a> ReceiverClient<'a> {
         opctx: &OpContext,
         delivery: &WebhookDelivery,
         event_class: WebhookEventClass,
+        event_version: u32,
         data: &serde_json::Value,
     ) -> Result<WebhookDeliveryAttempt, anyhow::Error> {
         const HDR_DELIVERY_ID: HeaderName =
@@ -819,6 +889,8 @@ impl<'a> ReceiverClient<'a> {
             HeaderName::from_static("x-oxide-event-id");
         const HDR_EVENT_CLASS: HeaderName =
             HeaderName::from_static("x-oxide-event-class");
+        const HDR_EVENT_VERSION: HeaderName =
+            HeaderName::from_static("x-oxide-event-version");
         const HDR_SIG: HeaderName =
             HeaderName::from_static("x-oxide-signature");
 
@@ -826,6 +898,7 @@ impl<'a> ReceiverClient<'a> {
         struct Payload<'a> {
             event_class: WebhookEventClass,
             event_id: WebhookEventUuid,
+            event_version: u32,
             data: &'a serde_json::Value,
             delivery: DeliveryMetadata<'a>,
         }
@@ -843,6 +916,7 @@ impl<'a> ReceiverClient<'a> {
         let sent_at = time_attempted.to_rfc3339();
         let payload = Payload {
             event_class,
+            event_version,
             event_id: delivery.event_id.into(),
             data,
             delivery: DeliveryMetadata {
@@ -892,6 +966,7 @@ impl<'a> ReceiverClient<'a> {
             .header(HDR_DELIVERY_ID, delivery.id.to_string())
             .header(HDR_EVENT_ID, delivery.event_id.to_string())
             .header(HDR_EVENT_CLASS, event_class.to_string())
+            .header(HDR_EVENT_VERSION, event_version.to_string())
             .header(http::header::CONTENT_TYPE, "application/json");
 
         // For each secret assigned to this webhook, calculate the HMAC and add a signature header.
