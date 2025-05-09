@@ -38,6 +38,10 @@ pub(crate) async fn fetch_hubris_artifacts(
 
     fs::create_dir_all(&output_dir).await?;
 
+    if !std::fs::exists(&output_dir.join("measurement_corpus"))? {
+        fs::create_dir_all(&output_dir.join("measurement_corpus")).await?;
+    }
+
     // This could be parallelized with FuturesUnordered but in practice this
     // takes less time than OS builds.
 
@@ -106,6 +110,19 @@ pub(crate) async fn fetch_hubris_artifacts(
                     }
                 }
             }
+            if let Some(corpus) = hash_manifest.corpus {
+                let hash = match corpus.source {
+                    Source::File(file) => file.hash,
+                    _ => anyhow::bail!("Unexpected file type"),
+                };
+                let data =
+                    fetch_hash(&logger, base_url, &client, &hash).await?;
+                fs::write(
+                    output_dir.join("measurement_corpus").join(hash),
+                    data,
+                )
+                .await?;
+            }
         }
     }
 
@@ -160,6 +177,8 @@ async fn fetch_hash(
 struct Manifest {
     #[serde(rename = "artifact")]
     artifacts: HashMap<KnownArtifactKind, Vec<Artifact>>,
+    #[serde(rename = "measurement_corpus")]
+    corpus: Option<Artifact>,
 }
 
 #[derive(Deserialize)]
