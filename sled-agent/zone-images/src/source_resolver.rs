@@ -4,11 +4,15 @@
 
 //! Zone image lookup.
 
+use crate::AllMupdateOverrides;
+use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use illumos_utils::zpool::ZpoolName;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use sled_storage::dataset::INSTALL_DATASET;
 use sled_storage::dataset::M2_ARTIFACT_DATASET;
 use sled_storage::resources::AllDisks;
+use slog::o;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -26,6 +30,16 @@ pub struct ZoneImageFileSource {
     pub search_paths: Vec<Utf8PathBuf>,
 }
 
+/// A description of zpools to examine for zone images.
+pub struct ZoneImageZpools<'a> {
+    /// The root directory, typically `/`.
+    pub root: &'a Utf8Path,
+
+    /// The full set of M.2 zpools that are currently known. Must be non-empty,
+    /// but it can include the boot zpool.
+    pub all_m2_zpools: Vec<ZpoolName>,
+}
+
 /// Resolves [`OmicronZoneImageSource`] instances into file names and search
 /// paths.
 ///
@@ -37,9 +51,16 @@ pub struct ZoneImageSourceResolver {
 }
 
 impl ZoneImageSourceResolver {
-    pub fn new() -> Self {
-        ZoneImageSourceResolver {
-            inner: Arc::new(Mutex::new(ResolverInner::new())),
+    /// Creates a new `ZoneImageSourceResolver`.
+    pub fn new(
+        log: &slog::Logger,
+        zpools: &ZoneImageZpools<'_>,
+        boot_zpool: &ZpoolName,
+    ) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(ResolverInner::new(
+                log, zpools, boot_zpool,
+            ))),
         }
     }
 
@@ -64,12 +85,29 @@ impl ZoneImageSourceResolver {
 
 #[derive(Debug)]
 struct ResolverInner {
+    #[expect(unused)]
+    log: slog::Logger,
     image_directory_override: Option<Utf8PathBuf>,
+    // Store all collected information for mupdate overrides -- we're going to
+    // need to report this via inventory.
+    //
+    // This isn't actually used yet.
+    #[expect(unused)]
+    mupdate_overrides: AllMupdateOverrides,
 }
 
 impl ResolverInner {
-    fn new() -> Self {
-        Self { image_directory_override: None }
+    fn new(
+        log: &slog::Logger,
+        zpools: &ZoneImageZpools<'_>,
+        boot_zpool: &ZpoolName,
+    ) -> Self {
+        let log = log.new(o!("component" => "ZoneImageSourceResolver"));
+
+        let mupdate_overrides =
+            AllMupdateOverrides::read_all(&log, zpools, boot_zpool);
+
+        Self { log, image_directory_override: None, mupdate_overrides }
     }
 
     fn override_image_directory(
@@ -77,7 +115,14 @@ impl ResolverInner {
         image_directory_override: Utf8PathBuf,
     ) {
         if let Some(dir) = &self.image_directory_override {
-            panic!("image_directory_override already set to {dir}");
+            // Allow idempotent sets to the same directory -- some tests do
+            // this.
+            if image_directory_override != *dir {
+                panic!(
+                    "image_directory_override already set to `{dir}`, \
+                     attempting to set it to `{image_directory_override}`"
+                );
+            }
         }
         self.image_directory_override = Some(image_directory_override);
     }
