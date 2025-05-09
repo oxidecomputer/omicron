@@ -10,7 +10,8 @@ pub use gateway_client::types::{
     SpState, SpType,
 };
 use omicron_common::api::external::SwitchLocation;
-use omicron_common::snake_case_result::{self, SnakeCaseResult};
+use omicron_common::snake_case_result;
+use omicron_common::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};

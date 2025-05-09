@@ -26,27 +26,38 @@ where
     }
 
     fn json_schema(
-        _: &mut schemars::r#gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some(Self::schema_name()),
-                ..Default::default()
-            })),
+        let mut ok_schema = schemars::schema::SchemaObject {
             instance_type: Some(schemars::schema::InstanceType::Object.into()),
-            extensions: [(
-                String::from("x-rust-type"),
-                serde_json::json!({
-                    "crate": env!("CARGO_PKG_NAME"),
-                    "version": env!("CARGO_PKG_VERSION"),
-                    "path": "::std::result::Result",
-                }),
-            )]
-            .into_iter()
-            .collect(),
             ..Default::default()
-        }
-        .into()
+        };
+        let obj = ok_schema.object();
+        obj.required.insert("ok".to_owned());
+        obj.properties.insert("ok".to_owned(), generator.subschema_for::<T>());
+        let mut err_schema = schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::Object.into()),
+            ..Default::default()
+        };
+        let obj = err_schema.object();
+        obj.required.insert("err".to_owned());
+        obj.properties.insert("err".to_owned(), generator.subschema_for::<E>());
+        let mut schema = schemars::schema::SchemaObject::default();
+        schema.subschemas().one_of =
+            Some(vec![ok_schema.into(), err_schema.into()]);
+        schema.extensions.insert(
+            String::from("x-rust-type"),
+            serde_json::json!({
+                "crate": "std",
+                "version": "*",
+                "path": "::std::result::Result",
+                "parameters": [
+                    generator.subschema_for::<T>(),
+                    generator.subschema_for::<E>(),
+                ],
+            }),
+        );
+        schema.into()
     }
 }
 

@@ -6782,6 +6782,19 @@
         "properties": {
           "datapath": {
             "description": "Status of the transceiver's machinery for carrying data, the \"datapath\".",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/Datapath"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
             "oneOf": [
               {
                 "type": "object",
@@ -6792,8 +6805,7 @@
                 },
                 "required": [
                   "ok"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -6804,13 +6816,25 @@
                 },
                 "required": [
                   "err"
-                ],
-                "additionalProperties": false
+                ]
               }
             ]
           },
           "monitors": {
             "description": "Environmental monitoring data, such as temperature or optical power.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/Monitors"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
             "oneOf": [
               {
                 "type": "object",
@@ -6821,8 +6845,7 @@
                 },
                 "required": [
                   "ok"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -6833,8 +6856,7 @@
                 },
                 "required": [
                   "err"
-                ],
-                "additionalProperties": false
+                ]
               }
             ]
           },
@@ -6844,6 +6866,19 @@
           },
           "power": {
             "description": "Information about the power state of the transceiver.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/PowerMode"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
             "oneOf": [
               {
                 "type": "object",
@@ -6854,8 +6889,7 @@
                 },
                 "required": [
                   "ok"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -6866,13 +6900,25 @@
                 },
                 "required": [
                   "err"
-                ],
-                "additionalProperties": false
+                ]
               }
             ]
           },
           "status": {
             "description": "The general status of the transceiver, such as presence and faults.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ExtendedStatus"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
             "oneOf": [
               {
                 "type": "object",
@@ -6883,8 +6929,7 @@
                 },
                 "required": [
                   "ok"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -6895,13 +6940,25 @@
                 },
                 "required": [
                   "err"
-                ],
-                "additionalProperties": false
+                ]
               }
             ]
           },
           "vendor": {
             "description": "Details about the vendor, part number, and serial number.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/VendorInfo"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
             "oneOf": [
               {
                 "type": "object",
@@ -6912,8 +6969,7 @@
                 },
                 "required": [
                   "ok"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -6924,8 +6980,7 @@
                 },
                 "required": [
                   "err"
-                ],
-                "additionalProperties": false
+                ]
               }
             ]
           }
