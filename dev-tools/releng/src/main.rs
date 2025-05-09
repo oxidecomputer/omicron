@@ -321,6 +321,9 @@ async fn main() -> Result<()> {
                 Command::new(&args.git_bin)
                     .arg("-C")
                     .arg(&args.helios_dir)
+                    // HEAD in a remote repository refers to the default
+                    // branch, even if the default branch is renamed.
+                    // `--no-write-fetch-head` avoids modifying FETCH_HEAD.
                     .args(["fetch", "--no-write-fetch-head", "origin", "HEAD"])
                     .ensure_success(&logger)
                     .await?;
