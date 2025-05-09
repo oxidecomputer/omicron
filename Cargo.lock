@@ -7675,6 +7675,7 @@ dependencies = [
  "reqwest",
  "semver 1.0.26",
  "serde",
+ "serde_json",
  "sha2",
  "shell-words",
  "slog",
