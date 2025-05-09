@@ -166,9 +166,9 @@ impl super::Nexus {
         opctx: &OpContext,
         token: String,
     ) -> Result<Actor, Reason> {
-        let (.., db_access_token) = LookupPath::new(opctx, &self.db_datastore)
-            .device_access_token(&token)
-            .fetch()
+        let db_access_token = self
+            .db_datastore
+            .device_token_lookup_by_token(opctx, token)
             .await
             .map_err(|e| match e {
                 Error::ObjectNotFound { .. } => Reason::UnknownActor {

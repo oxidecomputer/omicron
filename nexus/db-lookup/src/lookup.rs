@@ -220,18 +220,8 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type DeviceAccessToken, identified by its `token`
-    pub fn device_access_token<'b, 'c>(
-        self,
-        token: &'b str,
-    ) -> DeviceAccessToken<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        DeviceAccessToken::PrimaryKey(
-            Root { lookup_root: self },
-            token.to_string(),
-        )
+    pub fn device_access_token_id(self, id: Uuid) -> DeviceAccessToken<'a> {
+        DeviceAccessToken::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type RoleBuiltin, identified by its `name`
@@ -772,7 +762,7 @@ lookup_resource! {
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
-        { column_name = "token", rust_type = String },
+        { column_name = "id", rust_type = Uuid },
     ]
 }
 
