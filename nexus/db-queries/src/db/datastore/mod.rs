@@ -575,6 +575,7 @@ mod test {
         let silo_user_id = Uuid::new_v4();
 
         let session = ConsoleSession {
+            id: Uuid::new_v4(),
             token: token.clone(),
             time_created: Utc::now() - Duration::minutes(5),
             time_last_used: Utc::now() - Duration::minutes(5),
