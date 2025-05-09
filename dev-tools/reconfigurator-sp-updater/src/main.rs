@@ -315,15 +315,32 @@ fn cmd_config(
             PendingMgsUpdateDetails::Sp {
                 expected_active_version,
                 expected_inactive_version,
-            }
-            | PendingMgsUpdateDetails::Rot {
-                expected_active_version,
-                expected_inactive_version,
             } => {
                 writeln!(
                     &mut s,
                     "        preconditions: active slot {:?}, inactive slot {:?}",
                     expected_active_version, expected_inactive_version,
+                )?;
+            }
+            PendingMgsUpdateDetails::Rot {
+                expected_slot_a_version,
+                expected_slot_b_version,
+                active_slot,
+                persistent_boot_preference,
+                pending_persistent_boot_preference,
+                transient_boot_preference,
+            } => {
+                writeln!(
+                    &mut s,
+                    "        preconditions: expected_slot_a_version {:?}
+                                            expected_slot_b_version {:?}
+                                            active_slot {:?}
+                                            persistent_boot_preference {:?}
+                                            pending_persistent_boot_preference {:?}
+                                            transient_boot_preference {:?}",
+                    expected_slot_a_version, expected_slot_b_version, active_slot,
+                    persistent_boot_preference, pending_persistent_boot_preference,
+                    transient_boot_preference,
                 )?;
             }
         }

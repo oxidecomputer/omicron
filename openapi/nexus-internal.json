@@ -5382,33 +5382,69 @@
             "description": "the RoT is being updated",
             "type": "object",
             "properties": {
+              "active_slot": {
+                "description": "the slot of the currently running image",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
               "component": {
                 "type": "string",
                 "enum": [
                   "rot"
                 ]
               },
-              "expected_active_version": {
-                "description": "expected contents of the active slot",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ArtifactVersion"
-                  }
-                ]
-              },
-              "expected_inactive_version": {
-                "description": "expected contents of the inactive slot",
+              "expected_slot_a_version": {
+                "description": "expected contents of \"A\" slot",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/ExpectedVersion"
                   }
                 ]
+              },
+              "expected_slot_b_version": {
+                "description": "expected contents of \"B\" slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExpectedVersion"
+                  }
+                ]
+              },
+              "pending_persistent_boot_preference": {
+                "nullable": true,
+                "description": "the persistent boot preference written into the CFPA scratch page that will become the persistent boot preference in the authoritative CFPA page upon reboot, unless CFPA update of the authoritative page fails for some reason.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "persistent_boot_preference": {
+                "description": "the persistent boot preference written into the current authoritative CFPA page (ping or pong)",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "description": "override persistent preference selection for a single boot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
               }
             },
             "required": [
+              "active_slot",
               "component",
-              "expected_active_version",
-              "expected_inactive_version"
+              "expected_slot_a_version",
+              "expected_slot_b_version",
+              "persistent_boot_preference"
             ]
           }
         ]
@@ -6044,6 +6080,39 @@
           "repairs",
           "session_id",
           "time"
+        ]
+      },
+      "RotSlot": {
+        "description": "RotSlot\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"slot\" ], \"properties\": { \"slot\": { \"type\": \"string\", \"enum\": [ \"a\" ] } } }, { \"type\": \"object\", \"required\": [ \"slot\" ], \"properties\": { \"slot\": { \"type\": \"string\", \"enum\": [ \"b\" ] } } } ] } ``` </details>",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "a"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "b"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
         ]
       },
       "RouteConfig": {

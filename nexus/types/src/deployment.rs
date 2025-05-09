@@ -67,6 +67,7 @@ use crate::inventory::BaseboardId;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
 pub use clickhouse::ClickhouseClusterConfig;
+use gateway_client::types::RotSlot;
 use gateway_client::types::SpType;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
@@ -1250,10 +1251,31 @@ pub enum PendingMgsUpdateDetails {
         // implicit: component = ROT
         // TODO-K: Is this accurate for the RoT as well?
         // implicit: firmware slot id = 0 (always 0 for ROT)
-        /// expected contents of the active slot
-        expected_active_version: ArtifactVersion,
-        /// expected contents of the inactive slot
-        expected_inactive_version: ExpectedVersion,
+        /// expected contents of "A" slot
+        expected_slot_a_version: ExpectedVersion,
+        /// expected contents of "B" slot
+        expected_slot_b_version: ExpectedVersion,
+        /// the slot of the currently running image
+        active_slot: RotSlot,
+        // under normal operation, this should always match the active slot.
+        // if this field changed without the active slot changing, that might
+        // reflect a bad update.
+        //
+        /// the persistent boot preference written into the current authoritative
+        /// CFPA page (ping or pong)
+        persistent_boot_preference: RotSlot,
+        // if this value changed, but not any of this other information, that could
+        // reflect an attempt to switch to the other slot.
+        //
+        /// the persistent boot preference written into the CFPA scratch page that
+        /// will become the persistent boot preference in the authoritative CFPA
+        /// page upon reboot, unless CFPA update of the authoritative page fails
+        /// for some reason.
+        pending_persistent_boot_preference: Option<RotSlot>,
+        // this field is not in use yet.
+        //
+        /// override persistent preference selection for a single boot
+        transient_boot_preference: Option<RotSlot>,
     },
 }
 
@@ -1279,17 +1301,37 @@ impl slog::KV for PendingMgsUpdateDetails {
                 )
             }
             PendingMgsUpdateDetails::Rot {
-                expected_active_version,
-                expected_inactive_version,
+                expected_slot_a_version,
+                expected_slot_b_version,
+                active_slot,
+                persistent_boot_preference,
+                pending_persistent_boot_preference,
+                transient_boot_preference,
             } => {
                 serializer.emit_str(Key::from("component"), "rot")?;
                 serializer.emit_str(
-                    Key::from("expected_active_version"),
-                    &expected_active_version.to_string(),
+                    Key::from("expected_slot_a_version"),
+                    &format!("{:?}", expected_slot_a_version),
                 )?;
                 serializer.emit_str(
-                    Key::from("expected_inactive_version"),
-                    &format!("{:?}", expected_inactive_version),
+                    Key::from("expected_slot_b_version"),
+                    &format!("{:?}", expected_slot_b_version),
+                )?;
+                serializer.emit_str(
+                    Key::from("active_slot"),
+                    &active_slot.to_string(),
+                )?;
+                serializer.emit_str(
+                    Key::from("persistent_boot_preference"),
+                    &persistent_boot_preference.to_string(),
+                )?;
+                serializer.emit_str(
+                    Key::from("pending_persistent_boot_preference"),
+                    &format!("{:?}", pending_persistent_boot_preference),
+                )?;
+                serializer.emit_str(
+                    Key::from("transient_boot_preference"),
+                    &format!("{:?}", transient_boot_preference),
                 )
             }
         }
