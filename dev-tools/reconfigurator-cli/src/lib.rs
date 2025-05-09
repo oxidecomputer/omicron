@@ -412,7 +412,9 @@ impl FromStr for BlueprintIdOpt {
         match s {
             "latest" => Ok(BlueprintIdOpt::Latest),
             // These values match the ones supported in omdb.
-            "current-target" | "current" | "target" => Ok(BlueprintIdOpt::Target),
+            "current-target" | "current" | "target" => {
+                Ok(BlueprintIdOpt::Target)
+            }
             _ => Ok(BlueprintIdOpt::Id(s.parse()?)),
         }
     }
