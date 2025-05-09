@@ -13,6 +13,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_schema::schema::device_access_token;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
@@ -21,6 +22,23 @@ use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
 impl DataStore {
+    pub async fn device_token_lookup_by_token(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> LookupResult<DeviceAccessToken> {
+        // TODO: some special system authz because the presence of the token _is_ the authz
+        device_access_token::table
+            .filter(device_access_token::token.eq(token))
+            .select(DeviceAccessToken::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|_e| Error::ObjectNotFound {
+                type_name: ResourceType::DeviceAccessToken,
+                lookup_type: LookupType::ByOther("access token".to_string()),
+            })
+    }
+
     /// Start a device authorization grant flow by recording the request
     /// and initial response parameters.
     pub async fn device_auth_request_create(
