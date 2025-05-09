@@ -482,12 +482,12 @@ mod test {
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::VolumeUuid;
+    use omicron_uuid_kinds::{CollectionUuid, TypedUuid};
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -575,7 +575,7 @@ mod test {
         let silo_user_id = Uuid::new_v4();
 
         let session = ConsoleSession {
-            id: Uuid::new_v4(),
+            id: TypedUuid::new_v4().into(),
             token: token.clone(),
             time_created: Utc::now() - Duration::minutes(5),
             time_last_used: Utc::now() - Duration::minutes(5),

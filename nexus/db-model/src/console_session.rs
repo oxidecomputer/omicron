@@ -4,14 +4,18 @@
 
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::console_session;
+use omicron_uuid_kinds::ConsoleSessionKind;
+use omicron_uuid_kinds::TypedUuid;
 use uuid::Uuid;
+
+use crate::typed_uuid::DbTypedUuid;
 
 // TODO: `struct SessionToken(String)` for session token
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = console_session)]
 pub struct ConsoleSession {
-    pub id: Uuid,
+    pub id: DbTypedUuid<ConsoleSessionKind>,
     pub token: String,
     pub time_created: DateTime<Utc>,
     pub time_last_used: DateTime<Utc>,
@@ -22,7 +26,7 @@ impl ConsoleSession {
     pub fn new(token: String, silo_user_id: Uuid) -> Self {
         let now = Utc::now();
         Self {
-            id: Uuid::new_v4(),
+            id: TypedUuid::new_v4().into(),
             token,
             silo_user_id,
             time_last_used: now,
