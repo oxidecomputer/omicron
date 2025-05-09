@@ -25,11 +25,16 @@ pub const ARCHIVE_PATH: &str = "incorporation.p5p";
 
 pub const PUBLISHER: &str = "helios-dev";
 
+pub(crate) enum Action {
+    Generate { version: String },
+    Passthru { version: String },
+}
+
 pub(crate) async fn push_incorporation_jobs(
     jobs: &mut Jobs,
     logger: &Logger,
     output_dir: &Utf8Path,
-    version: String,
+    action: Action,
 ) -> Result<()> {
     let manifest_path = output_dir.join(MANIFEST_PATH);
     let repo_path = output_dir.join(REPO_PATH);
@@ -38,14 +43,34 @@ pub(crate) async fn push_incorporation_jobs(
     fs::remove_dir_all(&repo_path).await.or_else(ignore_not_found)?;
     fs::remove_file(&archive_path).await.or_else(ignore_not_found)?;
 
-    jobs.push(
-        "incorp-manifest",
-        write_incorporation_manifest(
-            logger.clone(),
-            manifest_path.clone(),
-            version,
-        ),
-    );
+    match action {
+        Action::Generate { version } => {
+            jobs.push(
+                "incorp-manifest",
+                generate_incorporation_manifest(
+                    logger.clone(),
+                    manifest_path.clone(),
+                    version,
+                ),
+            );
+        }
+        Action::Passthru { version } => {
+            jobs.push(
+                "incorp-manifest",
+                passthru_incorporation_manifest(
+                    logger.clone(),
+                    manifest_path.clone(),
+                    version,
+                ),
+            );
+        }
+    }
+
+    jobs.push_command(
+        "incorp-fmt",
+        Command::new("pkgfmt").args(["-u", "-f", "v2", manifest_path.as_str()]),
+    )
+    .after("incorp-manifest");
 
     jobs.push_command(
         "incorp-create",
@@ -69,7 +94,7 @@ pub(crate) async fn push_incorporation_jobs(
             .args(&path_args)
             .arg(manifest_path),
     )
-    .after("incorp-manifest")
+    .after("incorp-fmt")
     .after("incorp-publisher");
 
     jobs.push_command(
@@ -84,7 +109,7 @@ pub(crate) async fn push_incorporation_jobs(
     Ok(())
 }
 
-async fn write_incorporation_manifest(
+async fn generate_incorporation_manifest(
     logger: Logger,
     path: Utf8PathBuf,
     version: String,
@@ -127,6 +152,20 @@ set name=variant.opensolaris.zone value=global value=nonglobal
     }
 
     manifest.shutdown().await?;
+    Ok(())
+}
+
+async fn passthru_incorporation_manifest(
+    logger: Logger,
+    path: Utf8PathBuf,
+    version: String,
+) -> Result<()> {
+    let stdout = Command::new("pkgrepo")
+        .args(["contents", "-m", "-s", HELIOS_REPO])
+        .arg(format!("pkg://{PUBLISHER}/{INCORP_NAME}@{version},5.11"))
+        .ensure_stdout(&logger)
+        .await?;
+    fs::write(&path, stdout).await?;
     Ok(())
 }
 

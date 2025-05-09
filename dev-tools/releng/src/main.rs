@@ -521,12 +521,17 @@ async fn main() -> Result<()> {
     }
 
     let incorp_version = format!("{}.0.0.0", version.major);
-    if args.mkincorp && pins.helios.is_none() {
+    if args.mkincorp {
+        let action = if let Some(helios) = &pins.helios {
+            helios::Action::Passthru { version: helios.incorporation.clone() }
+        } else {
+            helios::Action::Generate { version: incorp_version.clone() }
+        };
         helios::push_incorporation_jobs(
             &mut jobs,
             &logger,
             &args.output_dir,
-            incorp_version.clone(),
+            action,
         )
         .await?;
     } else {
