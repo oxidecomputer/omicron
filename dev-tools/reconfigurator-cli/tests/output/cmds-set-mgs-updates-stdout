@@ -2770,7 +2770,7 @@ Commands:
   help              Print this message or the help of the given subcommand(s)
 
 Arguments:
-  <BLUEPRINT_ID>  id of the blueprint to edit
+  <BLUEPRINT_ID>  id of the blueprint to edit, "latest", or "target"
 
 Options:
       --creator <CREATOR>  "creator" field for the new blueprint

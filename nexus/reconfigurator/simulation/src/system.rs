@@ -135,14 +135,50 @@ impl SimSystem {
         self.collections.values().map(|c| &**c)
     }
 
+    pub fn resolve_blueprint_id(
+        &self,
+        original: BlueprintId,
+    ) -> Result<ResolvedBlueprintId, KeyError> {
+        let resolved = match original {
+            BlueprintId::Target => {
+                self.target_blueprint
+                    .ok_or_else(|| KeyError::blueprint(original))?
+                    .target_id
+            }
+            BlueprintId::Latest => {
+                // self.blueprints is an IndexMap, so the last element is the
+                // latest.
+                let (id, _) = self
+                    .blueprints
+                    .last()
+                    .ok_or_else(|| KeyError::blueprint(original))?;
+                *id
+            }
+            BlueprintId::Id(id) => id,
+        };
+        Ok(ResolvedBlueprintId { original, resolved })
+    }
+
     pub fn get_blueprint(
         &self,
-        id: BlueprintUuid,
+        id: &ResolvedBlueprintId,
     ) -> Result<&Blueprint, KeyError> {
-        match self.blueprints.get(&id) {
+        match self.blueprints.get(&id.resolved()) {
             Some(b) => Ok(&**b),
-            None => Err(KeyError::blueprint(id)),
+            None => Err(KeyError::resolved_blueprint(id.clone())),
         }
+    }
+
+    /// Combines `self.resolve_blueprint_id` and `self.get_blueprint`.
+    ///
+    /// This can be convenient when the intermediate [`ResolvedBlueprintId`] is
+    /// not needed.
+    pub fn resolve_and_get_blueprint(
+        &self,
+        original: BlueprintId,
+    ) -> Result<&Blueprint, KeyError> {
+        let id = self.resolve_blueprint_id(original)?;
+        self.get_blueprint(&id)
     }
 
     pub fn target_blueprint(&self) -> Option<BlueprintTarget> {
@@ -239,9 +275,17 @@ impl SimSystemBuilder {
     }
 
     #[inline]
+    pub fn resolve_blueprint_id(
+        &self,
+        original: BlueprintId,
+    ) -> Result<ResolvedBlueprintId, KeyError> {
+        self.inner.system.resolve_blueprint_id(original)
+    }
+
+    #[inline]
     pub fn get_blueprint(
         &self,
-        id: BlueprintUuid,
+        id: &ResolvedBlueprintId,
     ) -> Result<&Blueprint, KeyError> {
         self.inner.system.get_blueprint(id)
     }
@@ -391,6 +435,55 @@ impl SimSystemBuilder {
 
     pub(crate) fn into_parts(self) -> (SimSystem, Vec<SimSystemLogEntry>) {
         (self.inner.system, self.log)
+    }
+}
+
+/// An identifier for a blueprint.
+#[derive(Clone, Copy, Debug)]
+pub enum BlueprintId {
+    /// The target blueprint.
+    Target,
+
+    /// The latest blueprint added to the system.
+    Latest,
+
+    /// The specified blueprint.
+    Id(BlueprintUuid),
+}
+
+/// An identifier for a blueprint after it has been resolved.
+#[derive(Clone, Debug)]
+pub struct ResolvedBlueprintId {
+    /// The original blueprint ID.
+    original: BlueprintId,
+
+    /// The resolved blueprint ID.
+    resolved: BlueprintUuid,
+}
+
+impl ResolvedBlueprintId {
+    /// Return the original blueprint ID.
+    pub fn original(&self) -> BlueprintId {
+        self.original
+    }
+
+    /// Return the resolved blueprint ID.
+    pub fn resolved(&self) -> BlueprintUuid {
+        self.resolved
+    }
+}
+
+impl fmt::Display for ResolvedBlueprintId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.original {
+            BlueprintId::Target => {
+                write!(f, "target blueprint ({})", self.resolved)
+            }
+            BlueprintId::Latest => {
+                write!(f, "latest blueprint ({})", self.resolved)
+            }
+            BlueprintId::Id(id) => write!(f, "blueprint {id}"),
+        }
     }
 }
 
@@ -694,7 +787,7 @@ impl SimSystemBuilderInner {
                 Ok(())
             }
             indexmap::map::Entry::Occupied(_) => {
-                Err(DuplicateError::blueprint(blueprint_id))
+                Err(DuplicateError::blueprint(BlueprintId::Id(blueprint_id)))
             }
         }
     }
