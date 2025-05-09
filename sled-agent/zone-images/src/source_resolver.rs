@@ -107,9 +107,6 @@ impl ResolverInner {
         let mupdate_overrides =
             AllMupdateOverrides::read_all(&log, zpools, boot_zpool);
 
-        // Log the results.
-        mupdate_overrides.log_results(&log);
-
         Self { log, image_directory_override: None, mupdate_overrides }
     }
 

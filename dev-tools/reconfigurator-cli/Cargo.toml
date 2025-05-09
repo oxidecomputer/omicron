@@ -48,6 +48,7 @@ omicron-workspace-hack.workspace = true
 # its database code here. Instead, put those tests inside
 # nexus/reconfigurator/cli-integration-tests.
 camino-tempfile.workspace = true
+datatest-stable.workspace = true
 expectorate.workspace = true
 omicron-test-utils.workspace = true
 serde.workspace = true
@@ -59,3 +60,7 @@ tokio.workspace = true
 [[bin]]
 name = "reconfigurator-cli"
 doc = false
+
+[[test]]
+name = "test-scripts"
+harness = false
