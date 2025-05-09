@@ -29,7 +29,7 @@ pub(crate) async fn push_incorporation_jobs(
     jobs: &mut Jobs,
     logger: &Logger,
     output_dir: &Utf8Path,
-    version: u64,
+    version: String,
 ) -> Result<()> {
     let manifest_path = output_dir.join(MANIFEST_PATH);
     let repo_path = output_dir.join(REPO_PATH);
@@ -87,7 +87,7 @@ pub(crate) async fn push_incorporation_jobs(
 async fn write_incorporation_manifest(
     logger: Logger,
     path: Utf8PathBuf,
-    version: u64,
+    version: String,
 ) -> Result<()> {
     #[derive(Deserialize, PartialEq, Eq, PartialOrd, Ord)]
     struct Package {

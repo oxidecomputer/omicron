@@ -517,13 +517,13 @@ async fn main() -> Result<()> {
         }};
     }
 
-    let incorp_version = version.major;
+    let incorp_version = format!("{}.0.0.0", version.major);
     if args.mkincorp && pins.helios.is_none() {
         helios::push_incorporation_jobs(
             &mut jobs,
             &logger,
             &args.output_dir,
-            incorp_version,
+            incorp_version.clone(),
         )
         .await?;
     } else {
