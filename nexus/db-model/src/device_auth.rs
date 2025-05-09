@@ -117,6 +117,7 @@ impl DeviceAuthRequest {
 #[derive(Clone, Debug, Insertable, Queryable, Selectable)]
 #[diesel(table_name = device_access_token)]
 pub struct DeviceAccessToken {
+    pub id: Uuid,
     pub token: String,
     pub client_id: Uuid,
     pub device_code: String,
@@ -136,6 +137,7 @@ impl DeviceAccessToken {
         let now = Utc::now();
         assert!(time_requested <= now);
         Self {
+            id: Uuid::new_v4(),
             token: generate_token(),
             client_id,
             device_code,
@@ -146,6 +148,7 @@ impl DeviceAccessToken {
         }
     }
 
+    // TODO: uhhhh
     pub fn id(&self) -> String {
         self.token.clone()
     }

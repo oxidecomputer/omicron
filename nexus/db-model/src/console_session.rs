@@ -11,6 +11,7 @@ use uuid::Uuid;
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = console_session)]
 pub struct ConsoleSession {
+    pub id: Uuid,
     pub token: String,
     pub time_created: DateTime<Utc>,
     pub time_last_used: DateTime<Utc>,
@@ -20,7 +21,13 @@ pub struct ConsoleSession {
 impl ConsoleSession {
     pub fn new(token: String, silo_user_id: Uuid) -> Self {
         let now = Utc::now();
-        Self { token, silo_user_id, time_last_used: now, time_created: now }
+        Self {
+            id: Uuid::new_v4(),
+            token,
+            silo_user_id,
+            time_last_used: now,
+            time_created: now,
+        }
     }
 
     pub fn id(&self) -> String {

@@ -929,6 +929,7 @@ table! {
 
 table! {
     console_session (token) {
+        id -> Uuid,
         token -> Text,
         time_created -> Timestamptz,
         time_last_used -> Timestamptz,
@@ -1355,6 +1356,7 @@ table! {
 
 table! {
     device_access_token (token) {
+        id -> Uuid,
         token -> Text,
         client_id -> Uuid,
         device_code -> Text,
