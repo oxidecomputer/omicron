@@ -82,6 +82,15 @@ impl SpComponentUpdate {
                 firmware_slot: 0,
                 update_id,
             },
+            PendingMgsUpdateDetails::Rot { .. } => SpComponentUpdate {
+                log: log.clone(),
+                component: SpComponent::ROT,
+                target_sp_type: request.sp_type,
+                target_sp_slot: request.slot_id,
+                // TODO-K: Is this correct for the RoT as well?
+                firmware_slot: 0,
+                update_id,
+            },
         }
     }
 }

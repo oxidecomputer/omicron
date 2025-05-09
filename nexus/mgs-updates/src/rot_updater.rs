@@ -9,10 +9,15 @@ use super::SpComponentUpdateError;
 use super::UpdateProgress;
 use super::common_sp_update::SpComponentUpdater;
 use super::common_sp_update::deliver_update;
+use crate::SpComponentUpdateHelper;
+use crate::common_sp_update::PrecheckError;
+use crate::common_sp_update::PrecheckStatus;
+use futures::future::BoxFuture;
 use gateway_client::SpComponent;
 use gateway_client::types::RotSlot;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
+use nexus_types::deployment::PendingMgsUpdate;
 use slog::Logger;
 use slog::info;
 use tokio::sync::watch;
@@ -190,5 +195,31 @@ impl SpComponentUpdater for RotUpdater {
 
     fn logger(&self) -> &Logger {
         &self.log
+    }
+}
+
+pub struct ReconfiguratorRotUpdater;
+impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
+    /// Checks if the component is already updated or ready for update
+    fn precheck<'a>(
+        &'a self,
+        _log: &'a slog::Logger,
+        _mgs_clients: &'a mut MgsClients,
+        _update: &'a PendingMgsUpdate,
+    ) -> BoxFuture<'a, Result<PrecheckStatus, PrecheckError>> {
+        // TODO-K: fill in the precheck
+        todo!()
+    }
+
+    /// Attempts once to perform any post-update actions (e.g., reset the
+    /// device)
+    fn post_update<'a>(
+        &'a self,
+        _log: &'a slog::Logger,
+        _mgs_clients: &'a mut MgsClients,
+        _update: &'a PendingMgsUpdate,
+    ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
+        // TODO-K: fill in the post_update
+        todo!()
     }
 }
