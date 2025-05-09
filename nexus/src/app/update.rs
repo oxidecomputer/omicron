@@ -88,7 +88,7 @@ impl super::Nexus {
 
         let tuf_repo_description = self
             .db_datastore
-            .update_tuf_repo_get(opctx, system_version.into())
+            .update_tuf_repo_get_by_version(opctx, system_version.into())
             .await
             .map_err(HttpError::from)?;
 
