@@ -33,7 +33,7 @@ use crate::bootstrap::early_networking::{
 use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
-use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
+use crate::params::{DendriteAsic, OmicronZoneTypeExt};
 use crate::profile::*;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;

@@ -7,11 +7,9 @@
 use chrono::DateTime;
 use chrono::Utc;
 use illumos_utils::dladm::EtherstubVnic;
-use illumos_utils::running_zone::RunCommandError;
 use illumos_utils::zpool::PathInPool;
 use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use sled_agent_types::time_sync::TimeSync;
 use slog::Logger;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,9 +21,12 @@ use crate::ledger::CurrentSledConfig;
 use crate::sled_agent_facilities::SledAgentFacilities;
 
 mod external_disks;
+mod zones;
 
 pub use self::external_disks::CurrentlyManagedZpools;
 pub use self::external_disks::CurrentlyManagedZpoolsReceiver;
+pub use self::zones::TimeSyncError;
+pub use self::zones::TimeSyncStatus;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn<T: SledAgentFacilities>(
@@ -111,28 +112,6 @@ pub enum ReconcilerTaskStatus {
         completed_at_time: DateTime<Utc>,
         ran_for: Duration,
     },
-}
-
-#[derive(Debug, Clone)]
-pub enum TimeSyncStatus {
-    NotYetChecked,
-    ConfiguredToSkip,
-    FailedToGetSyncStatus(Arc<TimeSyncError>),
-    TimeSync(TimeSync),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum TimeSyncError {
-    #[error("no running NTP zone")]
-    NoRunningNtpZone,
-    #[error("multiple running NTP zones - this should never happen!")]
-    MultipleRunningNtpZones,
-    #[error("failed to execute chronyc within NTP zone")]
-    ExecuteChronyc(#[source] RunCommandError),
-    #[error(
-        "failed to parse chronyc tracking output: {reason} (stdout: {stdout:?})"
-    )]
-    FailedToParse { reason: &'static str, stdout: String },
 }
 
 #[derive(Debug)]

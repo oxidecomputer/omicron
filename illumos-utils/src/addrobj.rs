@@ -26,7 +26,7 @@ pub const DHCP_ADDROBJ_NAME: &str = "omicron";
 /// ^    ^
 /// |    | AddrObject name
 /// | Interface name
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AddrObject {
     interface: String,
     name: String,
