@@ -2411,7 +2411,7 @@ pub(crate) mod test {
             .find_map(|(_, sled_config)| {
                 for zone_config in &sled_config.zones {
                     if zone_config.zone_type.is_ntp() {
-                        return Some(zone_config.filesystem_pool.clone());
+                        return Some(zone_config.filesystem_pool);
                     }
                 }
                 None

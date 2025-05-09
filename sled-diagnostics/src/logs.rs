@@ -842,7 +842,7 @@ mod illumos_tests {
         async fn configure_dataset(&self, kind: DatasetKind) -> Utf8PathBuf {
             let zpool_name = ZpoolName::new_external(self.zpool_id);
             let dataset_id = DatasetUuid::new_v4();
-            let name = DatasetName::new(zpool_name.clone(), kind);
+            let name = DatasetName::new(zpool_name, kind);
             let mountpoint = name.mountpoint(
                 &self.storage_test_harness.handle().mount_config().root,
             );

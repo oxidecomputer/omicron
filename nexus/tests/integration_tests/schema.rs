@@ -13,6 +13,7 @@ use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
 use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
+use nexus_test_utils::sql::AnySqlType;
 use nexus_test_utils::sql::ColumnValue;
 use nexus_test_utils::sql::Row;
 use nexus_test_utils::sql::SqlEnum;
@@ -892,6 +893,7 @@ const INSTANCE4: Uuid = Uuid::from_u128(0x44441257_5c3d_4647_83b0_8f3515da7be1);
 
 // "67060115" -> "Prop"olis
 const PROPOLIS: Uuid = Uuid::from_u128(0x11116706_5c3d_4647_83b0_8f3515da7be1);
+const PROPOLIS2: Uuid = Uuid::from_u128(0x22226706_5c3d_4647_83b0_8f3515da7be1);
 
 // "7154"-> "Disk"
 const DISK1: Uuid = Uuid::from_u128(0x11117154_5c3d_4647_83b0_8f3515da7be1);
@@ -1097,7 +1099,6 @@ fn before_70_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             ))
             .await
             .expect("failed to create instances");
-
         ctx.client
             .batch_execute(&format!(
                 "
@@ -2093,6 +2094,99 @@ fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn before_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // We'll mostly reuse the instances from previous migration tests, but
+        // give instance 4 a VMM in the `Stopped` state.
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO vmm (
+                    id,
+                    time_created,
+                    time_deleted,
+                    instance_id,
+                    time_state_updated,
+                    state_generation,
+                    sled_id,
+                    propolis_ip,
+                    propolis_port,
+                    state
+                ) VALUES (
+                    '{PROPOLIS2}',
+                    now(),
+                    NULL,
+                    '{INSTANCE4}',
+                    now(),
+                    1,
+                    '{SLED2}',
+                    'fd00:1122:3344:104::1',
+                    12400,
+                    'stopped'
+                );"
+            ))
+            .await
+            .expect("inserted VMM record");
+        ctx.client
+            .batch_execute(&format!(
+                "UPDATE instance
+                SET
+                    state = 'vmm',
+                    active_propolis_id = '{PROPOLIS2}'
+                WHERE id = '{INSTANCE4}';"
+            ))
+            .await
+            .expect("updated instance4 record");
+    })
+}
+
+fn after_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        let rows = ctx
+            .client
+            .query("SELECT id, intended_state FROM instance ORDER BY id", &[])
+            .await
+            .expect("failed to load instance auto-restart policies");
+        let records = process_rows(&rows);
+        let instances = records.into_iter().map(|row| {
+            slog::info!(&ctx.log, "instance record: {row:?}");
+            let [id_value, state_value] = &row.values[..] else {
+                panic!("row did not have two columns! {row:?}");
+            };
+            let Some(&AnySqlType::Uuid(id)) = id_value.expect("id") else {
+                panic!("id column must be non-null UUID, but found: {id_value:?}")
+            };
+            let AnySqlType::Enum(intended_state) = state_value
+                .expect("intended_state")
+                .expect("intended state must not be null")
+            else {
+                panic!("intended_state column must be an enum, but found: {state_value:?}");
+            };
+            (id, intended_state.clone())
+        }).collect::<std::collections::HashMap<_, _>>();
+
+        assert_eq!(
+            instances.get(&INSTANCE1),
+            Some(&SqlEnum::from(("instance_intended_state", "stopped"))),
+            "instance 1 ({INSTANCE1}): state='no_vmm'"
+        );
+        assert_eq!(
+            instances.get(&INSTANCE2),
+            Some(&SqlEnum::from(("instance_intended_state", "running"))),
+            "instance 2 ({INSTANCE2}): state='vmm', active_vmm='running'"
+        );
+        assert_eq!(
+            instances.get(&INSTANCE3),
+            Some(&SqlEnum::from(("instance_intended_state", "running"))),
+            "instance 3 ({INSTANCE3}): state='failed'"
+        );
+        assert_eq!(
+            instances.get(&INSTANCE4),
+            Some(&SqlEnum::from(("instance_intended_state", "stopped"))),
+            "instance 4 ({INSTANCE4}): state='vmm',active_vmm='stopped'"
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -2152,6 +2246,10 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(139, 0, 0),
         DataMigrationFns::new().after(after_139_0_0),
+    );
+    map.insert(
+        Version::new(140, 0, 0),
+        DataMigrationFns::new().before(before_140_0_0).after(after_140_0_0),
     );
 
     map
