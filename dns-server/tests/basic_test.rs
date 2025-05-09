@@ -24,7 +24,7 @@ use hickory_resolver::{
     },
 };
 use internal_dns_types::{
-    config::{DnsConfigParams, DnsConfigZone, DnsRecord, Soa, Srv},
+    config::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv},
     names::ZONE_APEX_NAME,
 };
 use omicron_test_utils::dev::test_setup_log;
@@ -380,56 +380,6 @@ pub async fn soa() -> Result<(), anyhow::Error> {
     let ns1 = DnsRecord::Ns(ns1_name.clone());
     let service_addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
     let service_aaaa = DnsRecord::Aaaa(service_addr);
-
-    // Add a zone with only an SOA record and a NS it refers to. The server
-    // should reject this: while the records are coherent on their own, the DNS
-    // server will refuse to accept an externally-provided SOA record. It forms
-    // the SOA record as part of updating records when updated, and accepting
-    // external SOA records invites potential conflict with no clear resolution.
-    // What happens if we're provided two SOA records? What if they conflict?
-    // Should the DNS server still create another SOA record, and what if it's
-    // different than the provided one?
-
-    let mut records = HashMap::new();
-
-    let soa = DnsRecord::Soa(Soa {
-        mname: ns1_name.clone(),
-        rname: "admin".to_string(),
-        serial: 5,
-        refresh: 1,
-        retry: 2,
-        expire: 3,
-        minimum: 4,
-    });
-
-    records.insert("ns1".to_string(), vec![ns1_aaaa.clone()]);
-    records.insert(ZONE_APEX_NAME.to_string(), vec![ns1.clone(), soa.clone()]);
-
-    let err = dns_records_create(client, TEST_ZONE, records).await.unwrap_err();
-    let err_text = err.root_cause().to_string();
-    assert!(
-        err_text
-            .contains(dns_service_client::ERROR_CODE_UPDATE_DEFINES_SOA_RECORD)
-    );
-
-    let lookup_err = resolver
-        .soa_lookup(TEST_ZONE)
-        .await
-        .expect_err("test zone should not exist");
-    // I think we really should answer with ResponseCode::Refused. We are not
-    // authoritative for the .internal TLD, so we don't know that some *other*
-    // server would have records for `oxide.internal`. It is not a failure of
-    // our server to not know what that domain is, we should just refuse to
-    // answer.
-    //
-    // One may imagine we should return at least NXDomain without the
-    // authoritative bit set. RFC 1035 says that "Name Error - Meaningful only
-    // from an authoritative name server, ...". Does that mean that recursive
-    // resolvers and clients would faithfully ignore our error in that case? Is
-    // there a risk that something would miss the non-authoritative nature of
-    // such an NXDomain and incorrectly cache the non-existence of some other
-    // domain? Hopefully not! Answering `Refused` would side-step this question.
-    expect_no_records_error_code(&lookup_err, ResponseCode::ServFail);
 
     // If an update defines a zone with records, but defines no nameservers,
     // that should be acceptable. We won't be able to define an SOA record,

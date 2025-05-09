@@ -98,7 +98,6 @@ use hickory_proto::rr::LowerName;
 use hickory_resolver::Name;
 use internal_dns_types::{
     config::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord},
-    names::ZONE_APEX_NAME,
 };
 use omicron_common::api::external::Generation;
 use serde::{Deserialize, Serialize};
@@ -310,6 +309,28 @@ impl Store {
         })
     }
 
+    pub(crate) fn soa_for(&self, answer: &Answer) -> Result<hickory_proto::rr::Record, QueryError> {
+        let preferred_ns = Name::from_ascii(format!("ns1.{}", answer.zone.as_str())).expect("TODO: valid");
+        // TODO: make sure there's an NS record with this name at the apex..
+
+        let mut record = hickory_proto::rr::Record::new();
+        // TODO: need to make sure `ns1.{}` exists. Which really means this probably needs to be
+        // constructed 
+        let soa_name = Name::from_ascii(format!("{}.{}", answer.name.as_str(), answer.zone.as_str())).expect("TODO: valid");
+        record.set_name(soa_name)
+            .set_rr_type(hickory_proto::rr::RecordType::SOA)
+            .set_data(Some(hickory_proto::rr::RData::SOA(hickory_proto::rr::rdata::SOA::new(
+                Name::from_ascii(format!("admin.{}", answer.zone.as_str())).expect("TODO: valid"),
+                preferred_ns,
+                answer.generation,
+                3600,
+                600,
+                1800,
+                600,
+            ))));
+        Ok(record)
+    }
+
     async fn begin_update<'a, 'b>(
         &'a self,
         req_id: &'b str,
@@ -357,22 +378,6 @@ impl Store {
             "req_id" => req_id.to_owned(),
             "new_generation" => u64::from(config.generation),
         ));
-
-        // We disallow updates that provide SOA records because the only SOA
-        // records we should have are ones we define when we're told we're
-        // authoritative for zones. SOA records are in the API types here
-        // because they are included when reporting this server's records (such
-        // as via `dns_config_get()`).
-        for zone in config.zones.iter() {
-            if let Some(apex_records) = zone.records.get(ZONE_APEX_NAME) {
-                if apex_records
-                    .iter()
-                    .any(|record| matches!(record, DnsRecord::Soa(_)))
-                {
-                    return Err(UpdateError::UpdateDefinesSoaRecord);
-                }
-            }
-        }
 
         // Lock out concurrent updates.  We must not return until we've released
         // the "updating" lock.
@@ -440,12 +445,6 @@ impl Store {
                 .with_context(|| format!("creating tree {:?}", &tree_name))?;
 
             for (name, records) in &zone_config.records {
-                if name == ZONE_APEX_NAME {
-                    // If any records are present on the zone itself, we'll
-                    // handle those separately.
-                    continue;
-                }
-
                 if records.is_empty() {
                     // There's no distinction between in DNS between a name that
                     // doesn't exist at all and one with no records associated
@@ -467,63 +466,6 @@ impl Store {
                         zone_name, name
                     )
                 })?;
-            }
-
-            // We've gone through all non-apex names for this zone.  Now process
-            // records for the zone apex.  We should have NS records here, and
-            // we'll want to add an SOA record here as well.
-            let records: Option<Vec<DnsRecord>> =
-                zone_config.records.get(ZONE_APEX_NAME).map(|x| x.clone());
-            if let Some(mut apex_records) = records {
-                // Sort for a stable ordering of NS records.  We'll pick the first
-                // NS record we see for the SOA record we'll create later.  It
-                // really doesn't matter *which* NS record comes first, just that
-                // all DNS servers see the same NS record first.
-                apex_records.sort();
-
-                let mut representative_ns = None;
-                for record in &apex_records {
-                    if let DnsRecord::Ns(nsdname) = record {
-                        representative_ns = Some(nsdname.clone());
-                        break;
-                    }
-                }
-
-                if let Some(nsdname) = representative_ns {
-                    // The SOA serial number field is a 32-bit field, but we
-                    // want to use the 63-bit generation number here.  The only
-                    // issue with wrapping is, of course, that the serial number
-                    // will decrease to 0 when the generation gets high enough.
-                    // This will likely result in other systems consuming the
-                    // rack's SOA records needing to reset their expected serial
-                    // numbers, perhaps by dropping caches or other manual
-                    // intervention.
-                    //
-                    // Assuming one generation bump every minute, this overflow
-                    // would affect operations after 8,171 years.
-                    let soa_serial = config.generation.as_u64() as u32;
-                    apex_records.push(DnsRecord::Soa(
-                        internal_dns_types::config::Soa::new(
-                            nsdname, soa_serial,
-                        ),
-                    ));
-                }
-
-                let records_json = serde_json::to_vec(&apex_records)
-                    .with_context(|| {
-                        format!(
-                            "serializing records for zone {:?} apex",
-                            zone_name,
-                        )
-                    })?;
-                tree.insert(ZONE_APEX_NAME, records_json).with_context(
-                    || {
-                        format!(
-                            "inserting records for zone {:?} apex",
-                            zone_name,
-                        )
-                    },
-                )?;
             }
 
             // Flush this tree.  We do this here to make sure the tree is fully
@@ -680,26 +622,29 @@ impl Store {
         self.prune_trees(trees_to_prune, "too old");
     }
 
-    /// Returns a non-empty list of DNS records associated with the name in the
-    /// given DNS request.
+    /// Returns an [`Answer`] describing the records associated with the name in
+    /// the given DNS request, as well as the zone containing the name and the
+    /// name prefix in that zone that the query is for.
     ///
-    /// If the returned set would have been empty, returns `QueryError::NoName`.
+    /// If the name does not match any zone, returns `QueryError::NoZone`.
     pub(crate) fn query(
         &self,
         mr: &hickory_server::authority::MessageRequest,
-    ) -> Result<Vec<DnsRecord>, QueryError> {
+    ) -> Result<Answer, QueryError> {
         let name = mr.query().name();
         let orig_name = mr.query().original().name();
         self.query_raw(name, orig_name)
     }
 
-    /// Returns a non-empty list of DNS records associated with the given name.
+    /// Returns an [`Answer`] describing the records associated with the given
+    /// name, as well as the zone containing the name and the name prefix in
+    /// that zone that the query is for.
     ///
-    /// If the returned set would have been empty, returns `QueryError::NoName`.
+    /// If the name does not match any zone, returns `QueryError::NoZone`.
     pub(crate) fn query_name(
         &self,
         name: &Name,
-    ) -> Result<Vec<DnsRecord>, QueryError> {
+    ) -> Result<Answer, QueryError> {
         self.query_raw(&LowerName::new(name), name)
     }
 
@@ -707,7 +652,7 @@ impl Store {
         &self,
         name: &LowerName,
         orig_name: &Name,
-    ) -> Result<Vec<DnsRecord>, QueryError> {
+    ) -> Result<Answer, QueryError> {
         let config = self.read_config().map_err(QueryError::QueryFail)?;
 
         let zone_name = config
@@ -742,35 +687,45 @@ impl Store {
             name_only.set_fqdn(false);
             let key = name_only.to_string().to_lowercase();
             assert!(!key.ends_with('.'));
-
-            if key.is_empty() { ZONE_APEX_NAME.to_string() } else { key }
+            key
         };
 
         debug!(&self.log, "query key"; "key" => &key);
 
+        let mut answer = Answer {
+            zone: zone_name.clone(),
+            name: key.clone(),
+            // TODO: make generation a u32
+            generation: config.generation.as_u64() as u32,
+            records: None,
+        };
+
         let bits = tree
             .get(key.as_bytes())
             .with_context(|| format!("query tree {:?}", tree_name))
-            .map_err(QueryError::QueryFail)?
-            .ok_or_else(|| QueryError::NoName(name_str.clone()))?;
+            .map_err(QueryError::QueryFail)?;
 
-        let records: Vec<DnsRecord> = serde_json::from_slice(&bits)
-            .with_context(|| format!("deserialize record for key {:?}", key))
-            .map_err(QueryError::ParseFail)?;
+        if let Some(bits) = bits {
+            let records: Vec<DnsRecord> = serde_json::from_slice(&bits)
+                .with_context(|| format!("deserialize record for key {:?}", key))
+                .map_err(QueryError::ParseFail)?;
 
-        if records.is_empty() {
-            // This shouldn't be possible because we don't insert names with no
-            // records.
-            warn!(
-                &self.log,
-                "found name with no records";
-                "key" => &key
-            );
+            if records.is_empty() {
+                // This shouldn't be possible because we don't insert names with no
+                // records.
+                warn!(
+                    &self.log,
+                    "found name with no records";
+                    "key" => &key
+                );
 
-            return Err(QueryError::NoName(name_str));
+                return Err(QueryError::NoRecords(name_str));
+            }
+
+            answer.records = Some(records);
         }
 
-        Ok(records)
+        Ok(answer)
     }
 }
 
@@ -780,13 +735,23 @@ pub(crate) enum QueryError {
     NoZone(String),
 
     #[error("no records found for name: {0:?}")]
-    NoName(String),
+    NoRecords(String),
 
     #[error("failed to query database")]
     QueryFail(#[source] anyhow::Error),
 
     #[error("failed to parse database result")]
     ParseFail(#[source] anyhow::Error),
+}
+
+/// The records to answer a query, along with the name and zone that matched the
+/// query.
+#[derive(Debug)]
+pub(crate) struct Answer {
+    zone: String,
+    pub name: String,
+    pub generation: u32,
+    pub records: Option<Vec<DnsRecord>>,
 }
 
 /// Describes an ongoing update, if any
@@ -877,7 +842,7 @@ impl Drop for UpdateGuard<'_, '_> {
 
 #[cfg(test)]
 mod test {
-    use super::{Config, Store, UpdateError};
+    use super::{Answer, Config, Store, UpdateError};
     use crate::storage::QueryError;
     use anyhow::Context;
     use camino::Utf8PathBuf;
@@ -963,13 +928,13 @@ mod test {
 
         match (expect, result) {
             (Expect::NoZone, Err(QueryError::NoZone(n))) if n == name => (),
-            (Expect::NoName, Err(QueryError::NoName(n))) if n == name => (),
-            (Expect::Only(r), Ok(records))
+            (Expect::NoName, Ok(Answer { name: n, records: None, .. })) if n == name => (),
+            (Expect::Only(r), Ok(Answer { records: Some(records), .. }))
                 if records.len() == 1 && records[0] == *r =>
             {
                 ()
             }
-            (Expect::Record(r), Ok(records)) if records.contains(r) => (),
+            (Expect::Record(r), Ok(Answer { records: Some(records), .. })) if records.contains(r) => (),
             _ => panic!("did not get what we expected from DNS query"),
         }
     }
@@ -1419,6 +1384,10 @@ mod test {
             Expect::Record(&DnsRecord::Ns("ns1.zone1.internal".to_string())),
         );
 
+        /*
+         * TODO: the SOa is not returned from querying the store, because it's not in the store.
+         * We'll use hickory-client to query the server directly instead.
+         *
         let zone_soa = DnsRecord::Soa(internal_dns_types::config::Soa::new(
             "ns1.zone1.internal".to_string(),
             update.generation.as_u64() as u32,
@@ -1430,6 +1399,7 @@ mod test {
 
         // The use of `@` as a name for labels
         expect(&tc.store, "zone1.internal", Expect::Record(&zone_soa));
+        */
 
         // We can update DNS to a configuration without NS records and the
         // server will survive the encounter.  We won't have an SOA record
@@ -1484,16 +1454,7 @@ mod test {
             .await
             .expect("can apply update");
 
-        let zone_soa = DnsRecord::Soa(internal_dns_types::config::Soa::new(
-            "ns1.zone1.internal".to_string(),
-            update3.generation.as_u64() as u32,
-        ));
-
-        // The SOA record is created when the server is told it is serving
-        // records for a zone.
-        expect(&tc.store, "zone1.internal", Expect::Record(&zone_soa));
-
-        // And both NS records *are* present at the zone apex.
+        // Both NS records *are* present at the zone apex.
         expect(&tc.store, "zone1.internal", Expect::Record(&ns1_ns));
 
         expect(&tc.store, "zone1.internal", Expect::Record(&ns2_ns));

@@ -133,8 +133,6 @@ pub enum DnsRecord {
     Srv(Srv),
     #[serde(rename = "NS")]
     Ns(String),
-    #[serde(rename = "SOA")]
-    Soa(Soa),
 }
 
 impl DnsRecord {
@@ -143,7 +141,7 @@ impl DnsRecord {
             DnsRecord::A(ip) => Some(v1::config::DnsRecord::A(ip)),
             DnsRecord::Aaaa(ip) => Some(v1::config::DnsRecord::Aaaa(ip)),
             DnsRecord::Srv(srv) => Some(v1::config::DnsRecord::Srv(srv.into())),
-            DnsRecord::Ns(_) | DnsRecord::Soa(_) => {
+            DnsRecord::Ns(_) => {
                 // V1 DNS records do not have variants for NS or SOA records, so
                 // we're lossy here.
                 None
@@ -202,48 +200,6 @@ impl From<v1::config::Srv> for Srv {
             weight: other.weight,
             port: other.port,
             target: other.target,
-        }
-    }
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-)]
-pub struct Soa {
-    pub mname: String,
-    pub rname: String,
-    pub serial: u32,
-    pub refresh: i32,
-    pub retry: i32,
-    pub expire: i32,
-    pub minimum: u32,
-}
-
-const HOUR_IN_SECONDS: i32 = 60 * 60;
-
-impl Soa {
-    /// Create a struct describing the internal fields of an SOA record. This uses defaults
-    /// presumed to be reasonable for fields that are not provided as arguments.
-    pub fn new(mname: String, serial: u32) -> Self {
-        Self {
-            mname,
-            rname: "admin".to_string(),
-            serial,
-            // We pick a relatively short REFRESH period because we don't
-            // support sending NOTIFY messages. We don't support zone transfers
-            // though, so this is a moot point for the time being.
-            refresh: HOUR_IN_SECONDS,
-            retry: HOUR_IN_SECONDS / 10,
-            expire: 24 * HOUR_IN_SECONDS,
-            minimum: 60,
         }
     }
 }

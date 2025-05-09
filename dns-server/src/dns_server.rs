@@ -26,7 +26,6 @@ use hickory_server::authority::MessageRequest;
 use hickory_server::authority::MessageResponse;
 use hickory_server::authority::MessageResponseBuilder;
 use internal_dns_types::config::DnsRecord;
-use internal_dns_types::config::Soa;
 use internal_dns_types::config::Srv;
 use pretty_hex::*;
 use serde::Deserialize;
@@ -209,7 +208,7 @@ enum RequestError {
 impl From<QueryError> for RequestError {
     fn from(source: QueryError) -> Self {
         match &source {
-            QueryError::NoName(_) => RequestError::NxDomain(source),
+            QueryError::NoRecords(_) => RequestError::NxDomain(source),
             // Bail with servfail when this query is for a zone that we don't
             // own (and other server-side failures) so that resolvers will look
             // to other DNS servers for this query.
@@ -222,14 +221,14 @@ impl From<QueryError> for RequestError {
 
 fn dns_record_to_record(
     name: &Name,
-    record: DnsRecord,
+    record: &DnsRecord,
 ) -> Result<Record, RequestError> {
     match record {
         DnsRecord::A(addr) => {
             let mut a = Record::new();
             a.set_name(name.clone())
                 .set_rr_type(RecordType::A)
-                .set_data(Some(RData::A(addr.into())));
+                .set_data(Some(RData::A((*addr).into())));
             Ok(a)
         }
 
@@ -237,7 +236,7 @@ fn dns_record_to_record(
             let mut aaaa = Record::new();
             aaaa.set_name(name.clone())
                 .set_rr_type(RecordType::AAAA)
-                .set_data(Some(RData::AAAA(addr.into())));
+                .set_data(Some(RData::AAAA((*addr).into())));
             Ok(aaaa)
         }
 
@@ -252,7 +251,7 @@ fn dns_record_to_record(
             let mut srv = Record::new();
             srv.set_name(name.clone())
                 .set_rr_type(RecordType::SRV)
-                .set_data(Some(RData::SRV(SRV::new(prio, weight, port, tgt))));
+                .set_data(Some(RData::SRV(SRV::new(*prio, *weight, *port, tgt))));
             Ok(srv)
         }
 
@@ -271,40 +270,6 @@ fn dns_record_to_record(
                 .set_data(Some(RData::NS(NS(nsdname))));
             Ok(ns)
         }
-
-        DnsRecord::Soa(Soa {
-            mname,
-            rname,
-            serial,
-            refresh,
-            retry,
-            expire,
-            minimum,
-        }) => {
-            let mname = Name::from_str(&mname).map_err(|error| {
-                RequestError::ServFail(anyhow!(
-                    "serialization failed due to bad SOA mname {:?}: {:#}",
-                    &mname,
-                    error
-                ))
-            })?;
-            let rname = Name::from_str(&rname).map_err(|error| {
-                RequestError::ServFail(anyhow!(
-                    "serialization failed due to bad SOA rname {:?}: {:#}",
-                    &rname,
-                    error
-                ))
-            })?;
-            let mut record = Record::new();
-            use hickory_proto::rr::rdata::SOA;
-            record
-                .set_name(name.clone())
-                .set_rr_type(RecordType::SOA)
-                .set_data(Some(RData::SOA(SOA::new(
-                    mname, rname, serial, refresh, retry, expire, minimum,
-                ))));
-            Ok(record)
-        }
     }
 }
 
@@ -320,11 +285,13 @@ async fn handle_dns_message(
     let header = Header::response_from_request(mr.header());
     let query = mr.query();
     let name = query.original().name().clone();
-    let records = store.query(mr)?;
+    let answer = store.query(mr)?;
     let rb = MessageResponseBuilder::from_message_request(mr);
     let mut additional_records = vec![];
-    let response_records = records
-        .into_iter()
+    let mut response_records = answer.records
+        .as_ref()
+        .unwrap_or(&Vec::new())
+        .iter()
         .filter(|record| {
             let ty = query.query_type();
             if ty == RecordType::ANY {
@@ -336,7 +303,6 @@ async fn handle_dns_message(
                 (RecordType::AAAA, DnsRecord::Aaaa(_)) => true,
                 (RecordType::SRV, DnsRecord::Srv(_)) => true,
                 (RecordType::NS, DnsRecord::Ns(_)) => true,
-                (RecordType::SOA, DnsRecord::Soa(_)) => true,
                 _ => false,
             }
         })
@@ -361,10 +327,10 @@ async fn handle_dns_message(
             };
 
             if let Some(target) = additionals_target {
-                let target_records = store.query_name(target).map(|records| {
-                    records
+                let target_records = store.query_name(target).map(|answer| {
+                    answer.records.unwrap_or(Vec::new())
                         .into_iter()
-                        .map(|record| dns_record_to_record(target, record))
+                        .map(|record| dns_record_to_record(target, &record))
                         .collect::<Result<Vec<_>, _>>()
                 });
                 match target_records {
@@ -378,7 +344,7 @@ async fn handle_dns_message(
                     Err(error) => {
                         slog::warn!(
                             &log,
-                            "SRV target lookup failed";
+                            "additional records lookup failed";
                             "original_mr" => #?mr,
                             "target" => ?target,
                             "error" => ?error,
@@ -387,7 +353,7 @@ async fn handle_dns_message(
                     Ok(Err(error)) => {
                         slog::warn!(
                             &log,
-                            "SRV target unexpected response";
+                            "additional records unexpected response";
                             "original_mr" => #?mr,
                             "target" => ?target,
                             "error" => ?error,
@@ -398,6 +364,18 @@ async fn handle_dns_message(
             Ok(record)
         })
         .collect::<Result<Vec<_>, RequestError>>()?;
+
+    if answer.name.is_empty() && query.query_type() == RecordType::SOA {
+        // The query was for an SOA record at the apex. There isn't an SOA record in the database,
+        // but we can build one from the answer.
+        response_records.push(store.soa_for(&answer)?);
+    }
+
+    if response_records.is_empty() {
+        return Err(RequestError::NxDomain(QueryError::NoRecords(answer.name.to_owned())));
+    }
+
+
     debug!(
         &log,
         "dns response";

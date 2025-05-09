@@ -156,37 +156,6 @@ async fn main() -> Result<()> {
                             DnsRecord::Ns(name) => {
                                 println!("        NS: {:?}", name);
                             }
-                            DnsRecord::Soa(soa) => {
-                                println!("        SOA");
-                                println!(
-                                    "              mname    {}",
-                                    soa.mname
-                                );
-                                println!(
-                                    "              rname    {}",
-                                    soa.rname
-                                );
-                                println!(
-                                    "              serial   {}",
-                                    soa.serial
-                                );
-                                println!(
-                                    "              refresh  {}",
-                                    soa.refresh
-                                );
-                                println!(
-                                    "              retry    {}",
-                                    soa.retry
-                                );
-                                println!(
-                                    "              expire   {}",
-                                    soa.expire
-                                );
-                                println!(
-                                    "              minimum  {}",
-                                    soa.minimum
-                                );
-                            }
                         }
                     }
                 }
