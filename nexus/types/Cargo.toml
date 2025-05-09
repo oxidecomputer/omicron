@@ -34,7 +34,6 @@ parse-display.workspace = true
 regex.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1", "url"] }
 serde.workspace = true
-serde-helpers.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
 slog.workspace = true

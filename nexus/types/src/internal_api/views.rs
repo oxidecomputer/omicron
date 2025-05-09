@@ -12,12 +12,12 @@ use futures::stream::StreamExt;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ObjectStream;
 use omicron_common::api::external::Vni;
+use omicron_common::snake_case_result;
+use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_uuid_kinds::DemoSagaUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_helpers::SnakeCaseResult;
-use serde_helpers::serialize_snake_case_result;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::fmt::Display;
@@ -420,7 +420,7 @@ pub struct CompletedAttempt {
     pub time_done: DateTime<Utc>,
     pub elapsed: Duration,
     pub request: PendingMgsUpdate,
-    #[serde(serialize_with = "serialize_snake_case_result")]
+    #[serde(serialize_with = "snake_case_result::serialize")]
     #[schemars(
         schema_with = "SnakeCaseResult::<UpdateCompletedHow, String>::json_schema"
     )]

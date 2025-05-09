@@ -19,7 +19,6 @@ owo-colors.workspace = true
 oxnet.workspace = true
 schemars.workspace = true
 serde.workspace = true
-serde-helpers.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sled-hardware-types.workspace = true

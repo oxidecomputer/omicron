@@ -6630,7 +6630,6 @@ dependencies = [
  "schemars",
  "semver 1.0.26",
  "serde",
- "serde-helpers",
  "serde_json",
  "serde_with",
  "slog",
@@ -11058,15 +11057,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde-helpers"
-version = "0.1.0"
-dependencies = [
- "omicron-workspace-hack",
- "schemars",
- "serde",
-]
-
-[[package]]
 name = "serde-hex"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14080,7 +14070,6 @@ dependencies = [
  "oxnet",
  "schemars",
  "serde",
- "serde-helpers",
  "serde_json",
  "sha2",
  "sled-hardware-types",
