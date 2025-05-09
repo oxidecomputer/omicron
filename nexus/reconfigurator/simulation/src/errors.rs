@@ -58,10 +58,10 @@ impl ObjectId {
                 format!("collection ID {id}")
             }
             ObjectId::Blueprint(BlueprintId::Latest) => {
-                format!("no latest blueprint found")
+                "no latest blueprint found".to_string()
             }
             ObjectId::Blueprint(BlueprintId::Target) => {
-                format!("no target blueprint found")
+                "no target blueprint found".to_string()
             }
             ObjectId::Blueprint(BlueprintId::Id(id)) => {
                 format!("blueprint ID {id}")

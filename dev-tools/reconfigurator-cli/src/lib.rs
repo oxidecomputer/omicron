@@ -411,7 +411,8 @@ impl FromStr for BlueprintIdOpt {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "latest" => Ok(BlueprintIdOpt::Latest),
-            "target" => Ok(BlueprintIdOpt::Target),
+            // These values match the ones supported in omdb.
+            "current-target" | "current" | "target" => Ok(BlueprintIdOpt::Target),
             _ => Ok(BlueprintIdOpt::Id(s.parse()?)),
         }
     }
