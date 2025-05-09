@@ -488,6 +488,8 @@ struct BlueprintDiffArgs {
 
 #[derive(Debug, Subcommand)]
 enum SetArgs {
+    /// RNG seed for future commands
+    Seed { seed: String },
     /// target number of Nexus instances (for planning)
     NumNexus { num_nexus: u16 },
     /// system's external DNS zone name (suffix)
@@ -1286,6 +1288,12 @@ fn cmd_set(
 ) -> anyhow::Result<Option<String>> {
     let mut state = sim.current_state().to_mut();
     let rv = match args {
+        SetArgs::Seed { seed } => {
+            // In this case, reset the RNG state to the provided seed.
+            let rv = format!("new RNG seed: {seed}");
+            state.rng_mut().set_seed(seed);
+            rv
+        }
         SetArgs::NumNexus { num_nexus } => {
             let rv = format!(
                 "target number of Nexus zones: {:?} -> {}",

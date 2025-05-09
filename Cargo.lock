@@ -1112,7 +1112,7 @@ checksum = "2d886547e41f740c616ae73108f6eb70afe6d940c7bc697cb30f13daec073037"
 dependencies = [
  "camino",
  "cargo-platform",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1126,7 +1126,7 @@ checksum = "dd5eb614ed4c27c5d706420e4320fbe3216ab31fa1c33cd8246ac36dae4479ba"
 dependencies = [
  "camino",
  "cargo-platform",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -2222,6 +2222,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 
 [[package]]
+name = "datatest-stable"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19ebbb3c403031a3739980c2864e3b5ee4efca009dd83d2c0f80a31555243981"
+dependencies = [
+ "camino",
+ "fancy-regex",
+ "libtest-mimic",
+ "walkdir",
+]
+
+[[package]]
 name = "db-dev"
 version = "0.1.0"
 dependencies = [
@@ -2465,9 +2477,9 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.2.9"
+version = "2.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34d3950690ba3a6910126162b47e775e203006d4242a15de912bec6c0a695153"
+checksum = "ff3e1edb1f37b4953dd5176916347289ed43d7119cc2e6c7c3f7849ff44ea506"
 dependencies = [
  "bitflags 2.9.0",
  "byteorder",
@@ -2643,7 +2655,7 @@ dependencies = [
  "omicron-workspace-hack",
  "openapi-manager-types",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
 ]
 
@@ -2737,7 +2749,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "multer",
  "openapiv3",
  "paste",
@@ -2746,7 +2758,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "schemars",
  "scopeguard",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -2776,7 +2788,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_tokenstream",
  "syn 2.0.98",
@@ -3029,7 +3041,7 @@ dependencies = [
  "omicron-workspace-hack",
  "openapi-manager-types",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -3084,6 +3096,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5d9305ccc6942a704f4335694ecd3de2ea531b114ac2d51f5f843750787a92f"
 
 [[package]]
+name = "escape8259"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5692dd7b5a1978a5aeb0ce83b7655c58ca8efdcb79d21036ea249da95afec2c6"
+
+[[package]]
 name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3112,10 +3130,11 @@ dependencies = [
 
 [[package]]
 name = "expectorate"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de6f19b25bdfa2747ae775f37cd109c31f1272d4e4c83095be0727840aa1d75f"
+checksum = "2cfe29c067b3dd398703f5cb05420a21c21079edfbcfa96c3ff2d9bde55cc8b3"
 dependencies = [
+ "atomicwrites",
  "console",
  "newline-converter",
  "similar",
@@ -3126,6 +3145,17 @@ name = "fallible-iterator"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7"
+
+[[package]]
+name = "fancy-regex"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e24cb5a94bcae1e5408b0effca5cd7172ea3c5755049c5f3af4cd283a165298"
+dependencies = [
+ "bit-set 0.8.0",
+ "regex-automata",
+ "regex-syntax 0.8.5",
+]
 
 [[package]]
 name = "fastrand"
@@ -3758,9 +3788,9 @@ dependencies = [
 
 [[package]]
 name = "guppy"
-version = "0.17.17"
+version = "0.17.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "452b22f04f2a5cdae96b3a636a7c311da0cba665ca90f5033e042b8b590b6d7c"
+checksum = "b59852737bb6ccfe90e37408dfefd968b23bfd14daf30406d49ee46b4763e64a"
 dependencies = [
  "ahash",
  "camino",
@@ -3769,13 +3799,13 @@ dependencies = [
  "debug-ignore",
  "fixedbitset 0.5.7",
  "guppy-workspace-hack",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "itertools 0.14.0",
  "nested",
  "once_cell",
  "pathdiff",
  "petgraph 0.7.1",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "smallvec 1.14.0",
@@ -3801,7 +3831,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "http",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "slab",
  "tokio",
  "tokio-util",
@@ -4590,7 +4620,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=db01858ce12db22079b5776731adbff163a50d91#db01858ce12db22079b5776731adbff163a50d91"
+source = "git+https://github.com/oxidecomputer/opte?rev=9e79588b11a69ff3d40f9aa29af97e31a0045c4b#9e79588b11a69ff3d40f9aa29af97e31a0045c4b"
 dependencies = [
  "bitflags 2.9.0",
 ]
@@ -4668,9 +4698,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.7.1"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c9c992b02b5b4c94ea26e32fe5bccb7aa7d9f390ab5c1221ff895bc7ea8b652"
+checksum = "cea70ddb795996207ad57735b50c5982d8844f38ba9ee5f1aedcfb708a2aa11e"
 dependencies = [
  "equivalent",
  "hashbrown 0.15.1",
@@ -4916,7 +4946,7 @@ dependencies = [
  "progenitor 0.9.1",
  "qorb",
  "reqwest",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "sled",
@@ -5077,9 +5107,9 @@ checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 
 [[package]]
 name = "jiff"
-version = "0.2.10"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a064218214dc6a10fbae5ec5fa888d80c45d611aba169222fc272072bf7aef6"
+checksum = "f02000660d30638906021176af16b17498bd0d12813dbfe7b276d8bc7f3c0806"
 dependencies = [
  "jiff-static",
  "jiff-tzdb-platform",
@@ -5092,9 +5122,9 @@ dependencies = [
 
 [[package]]
 name = "jiff-static"
-version = "0.2.10"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "199b7932d97e325aff3a7030e141eafe7f2c6268e1d1b24859b753a627f45254"
+checksum = "f3c30758ddd7188629c6713fc45d1188af4f44c90582311d0c8d8c9907f60c48"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5163,7 +5193,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=db01858ce12db22079b5776731adbff163a50d91#db01858ce12db22079b5776731adbff163a50d91"
+source = "git+https://github.com/oxidecomputer/opte?rev=9e79588b11a69ff3d40f9aa29af97e31a0045c4b#9e79588b11a69ff3d40f9aa29af97e31a0045c4b"
 dependencies = [
  "quote",
  "syn 2.0.98",
@@ -5352,7 +5382,7 @@ dependencies = [
  "socket2",
  "thiserror 1.0.69",
  "tracing",
- "winnow 0.6.20",
+ "winnow 0.6.26",
 ]
 
 [[package]]
@@ -5412,6 +5442,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bae8635b70a7de1ebb752a5fa90aff0420ff0ff223b2d1958e2fea85019532f3"
 dependencies = [
  "tokio",
+]
+
+[[package]]
+name = "libtest-mimic"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5297962ef19edda4ce33aaa484386e0a5b3d7f2f4e037cbeee00503ef6b29d33"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap",
+ "escape8259",
 ]
 
 [[package]]
@@ -6031,7 +6073,7 @@ dependencies = [
  "ref-cast",
  "regex",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "sled-agent-client",
@@ -6110,7 +6152,7 @@ dependencies = [
  "regex",
  "rustls 0.22.4",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "serde_with",
@@ -6418,7 +6460,7 @@ dependencies = [
  "gateway-client",
  "id-map",
  "illumos-utils",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "internal-dns-resolver",
  "ipnet",
  "itertools 0.14.0",
@@ -6495,7 +6537,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
  "nexus-types",
@@ -6674,7 +6716,7 @@ dependencies = [
  "proptest",
  "regex",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "serde_with",
@@ -7105,7 +7147,7 @@ dependencies = [
  "regress",
  "reqwest",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -7405,7 +7447,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "samael",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -7505,6 +7547,7 @@ dependencies = [
  "steno",
  "strum",
  "subprocess",
+ "support-bundle-reader-lib",
  "supports-color",
  "tabled 0.15.0",
  "textwrap",
@@ -7536,7 +7579,7 @@ dependencies = [
  "rayon",
  "reqwest",
  "ring",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "shell-words",
  "sled-hardware",
@@ -7630,7 +7673,7 @@ dependencies = [
  "omicron-workspace-hack",
  "omicron-zone-package",
  "reqwest",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "sha2",
  "shell-words",
@@ -7917,7 +7960,7 @@ dependencies = [
  "hyper-rustls 0.27.3",
  "hyper-util",
  "idna",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "indicatif",
  "inout",
  "ipnetwork",
@@ -7962,7 +8005,7 @@ dependencies = [
  "rustls-webpki 0.102.8",
  "schemars",
  "scopeguard",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "sha1",
@@ -7993,6 +8036,7 @@ dependencies = [
  "usdt",
  "usdt-impl",
  "uuid",
+ "winnow 0.6.26",
  "x509-cert",
  "zerocopy 0.7.35",
  "zerocopy 0.8.10",
@@ -8003,9 +8047,9 @@ dependencies = [
 
 [[package]]
 name = "omicron-zone-package"
-version = "0.12.0"
+version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c74f14c5ac8ea6fe525e496c3d4b984e658857a1a34c758bc7a16a632ec9235"
+checksum = "90857c497284b6cbd15e9d9531081a9abab15d7e4bc9eb6b0e4f176b9c024f7e"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8019,7 +8063,7 @@ dependencies = [
  "futures-util",
  "hex",
  "reqwest",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_derive",
  "serde_json",
@@ -8057,7 +8101,7 @@ version = "0.4.0"
 source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#ef442ee4343e97b6d9c217d3e7533962fe7d7236"
 dependencies = [
  "heck 0.4.1",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "lazy_static",
  "openapiv3",
  "regex",
@@ -8095,7 +8139,7 @@ dependencies = [
  "owo-colors",
  "oximeter-api",
  "repo-depot-api",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde_json",
  "sha2",
  "similar",
@@ -8115,7 +8159,7 @@ dependencies = [
  "camino",
  "omicron-workspace-hack",
  "paste",
- "semver 1.0.25",
+ "semver 1.0.26",
 ]
 
 [[package]]
@@ -8124,7 +8168,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc02deea53ffe807708244e5914f6b099ad7015a207ee24317c22112e17d9c5c"
 dependencies = [
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "serde",
  "serde_json",
 ]
@@ -8176,7 +8220,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=db01858ce12db22079b5776731adbff163a50d91#db01858ce12db22079b5776731adbff163a50d91"
+source = "git+https://github.com/oxidecomputer/opte?rev=9e79588b11a69ff3d40f9aa29af97e31a0045c4b#9e79588b11a69ff3d40f9aa29af97e31a0045c4b"
 dependencies = [
  "bitflags 2.9.0",
  "cfg-if",
@@ -8195,7 +8239,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=db01858ce12db22079b5776731adbff163a50d91#db01858ce12db22079b5776731adbff163a50d91"
+source = "git+https://github.com/oxidecomputer/opte?rev=9e79588b11a69ff3d40f9aa29af97e31a0045c4b#9e79588b11a69ff3d40f9aa29af97e31a0045c4b"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -8208,7 +8252,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=db01858ce12db22079b5776731adbff163a50d91#db01858ce12db22079b5776731adbff163a50d91"
+source = "git+https://github.com/oxidecomputer/opte?rev=9e79588b11a69ff3d40f9aa29af97e31a0045c4b#9e79588b11a69ff3d40f9aa29af97e31a0045c4b"
 dependencies = [
  "libc",
  "libnet",
@@ -8277,7 +8321,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=db01858ce12db22079b5776731adbff163a50d91#db01858ce12db22079b5776731adbff163a50d91"
+source = "git+https://github.com/oxidecomputer/opte?rev=9e79588b11a69ff3d40f9aa29af97e31a0045c4b#9e79588b11a69ff3d40f9aa29af97e31a0045c4b"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -8385,7 +8429,7 @@ dependencies = [
  "rand 0.8.5",
  "reqwest",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "slog",
@@ -8428,7 +8472,7 @@ dependencies = [
  "gethostname",
  "highway",
  "iana-time-zone",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "itertools 0.14.0",
  "libc",
  "nom",
@@ -9075,7 +9119,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
 dependencies = [
  "fixedbitset 0.4.2",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "serde",
  "serde_derive",
 ]
@@ -9087,7 +9131,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
 dependencies = [
  "fixedbitset 0.5.7",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
 ]
 
 [[package]]
@@ -9615,7 +9659,7 @@ checksum = "d85934a440963a69f9f04f48507ff6e7aa2952a5b2d8f96cc37fa3dd5c270f66"
 dependencies = [
  "heck 0.5.0",
  "http",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "openapiv3",
  "proc-macro2",
  "quote",
@@ -9637,7 +9681,7 @@ checksum = "37adc80a94c9cae890e82deeeecc9d8f2a5cb153256caaf1bf0f03611e537214"
 dependencies = [
  "heck 0.5.0",
  "http",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "openapiv3",
  "proc-macro2",
  "quote",
@@ -9750,7 +9794,7 @@ dependencies = [
  "rand 0.8.5",
  "reqwest",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "slog",
@@ -10138,6 +10182,7 @@ dependencies = [
  "chrono",
  "clap",
  "colored",
+ "datatest-stable",
  "expectorate",
  "humantime",
  "indent_write",
@@ -10156,7 +10201,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pq-sys",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "slog",
@@ -10668,7 +10713,7 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
- "semver 1.0.25",
+ "semver 1.0.26",
 ]
 
 [[package]]
@@ -10946,7 +10991,7 @@ dependencies = [
  "chrono",
  "dyn-clone",
  "schemars_derive",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "url",
@@ -11075,9 +11120,9 @@ checksum = "d4f410fedcf71af0345d7607d246e7ad15faaadd49d240ee3b24e5dc21a820ac"
 
 [[package]]
 name = "semver"
-version = "1.0.25"
+version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f79dfe2d285b0488816f30e700a7438c5a73d816b5b7d3ac72fbc48b0d185e03"
+checksum = "56e6fa9c48d24d85fb3de5ad847117517440f6beceb7798af16b4a87d616b8d0"
 dependencies = [
  "serde",
 ]
@@ -11237,7 +11282,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "serde",
  "serde_derive",
  "serde_json",
@@ -11263,7 +11308,7 @@ version = "0.9.34+deprecated"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
 dependencies = [
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "itoa",
  "ryu",
  "serde",
@@ -11481,10 +11526,12 @@ name = "sled-agent-config-reconciler"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-trait",
  "camino",
  "camino-tempfile",
  "chrono",
+ "debug-ignore",
  "derive_more",
  "dropshot",
  "expectorate",
@@ -11512,6 +11559,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tufaceous-artifact",
+ "xshell",
  "zone 0.3.1",
 ]
 
@@ -11974,12 +12022,12 @@ dependencies = [
 
 [[package]]
 name = "sqlformat"
-version = "0.2.6"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bba3a93db0cc4f7bdece8bb09e77e2e785c20bfebf79eb8340ed80708048790"
+checksum = "a0d7b3e8a3b6f2ee93ac391a0f757c13790caa0147892e3545cd549dd5b54bc0"
 dependencies = [
- "nom",
  "unicode_categories",
+ "winnow 0.6.26",
 ]
 
 [[package]]
@@ -12219,6 +12267,25 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "support-bundle-reader-lib"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "camino",
+ "crossterm",
+ "futures",
+ "nexus-client",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "ratatui",
+ "reqwest",
+ "tokio",
+ "zip 2.6.1",
+]
 
 [[package]]
 name = "supports-color"
@@ -12903,7 +12970,7 @@ version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -12916,7 +12983,7 @@ version = "0.22.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17b4795ff5edd201c7cd6dca065ae59972ce77d1b80fa0a84d94950ece7d1474"
 dependencies = [
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -13185,7 +13252,7 @@ dependencies = [
  "clap",
  "console",
  "humantime",
- "semver 1.0.25",
+ "semver 1.0.26",
  "slog",
  "slog-async",
  "slog-envlogger",
@@ -13204,7 +13271,7 @@ dependencies = [
  "hex",
  "proptest",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_human_bytes",
  "strum",
@@ -13217,7 +13284,7 @@ name = "tufaceous-brand-metadata"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#04681f26ba09e144e5467dd6bd22c4887692a670"
 dependencies = [
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "tar",
@@ -13249,7 +13316,7 @@ dependencies = [
  "itertools 0.13.0",
  "parse-size",
  "rand 0.8.5",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -13378,7 +13445,7 @@ dependencies = [
  "quote",
  "regress",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "syn 2.0.98",
@@ -13398,7 +13465,7 @@ dependencies = [
  "quote",
  "regress",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "syn 2.0.98",
@@ -13415,7 +13482,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -13432,7 +13499,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -13585,7 +13652,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "rand 0.8.5",
- "semver 1.0.25",
+ "semver 1.0.26",
  "sha2",
  "slog",
  "tar",
@@ -13616,7 +13683,7 @@ dependencies = [
  "either",
  "futures",
  "indent_write",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "indicatif",
  "indoc 2.0.6",
  "libsw",
@@ -14044,7 +14111,7 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "indicatif",
  "itertools 0.14.0",
  "maplit",
@@ -14056,7 +14123,7 @@ dependencies = [
  "ratatui",
  "reqwest",
  "rpassword",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "shell-words",
@@ -14184,7 +14251,7 @@ dependencies = [
  "rand 0.8.5",
  "reqwest",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "sha2",
@@ -14224,7 +14291,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "sled-hardware-types",
  "slog",
@@ -14245,7 +14312,7 @@ dependencies = [
  "regress",
  "reqwest",
  "schemars",
- "semver 1.0.25",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "sled-agent-types",
@@ -14605,9 +14672,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.6.20"
+version = "0.6.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36c1fec1a2bb5866f07c25f68c26e565c4c200aebb96d7e55710c19d3e8ac49b"
+checksum = "1e90edd2ac1aa278a5c4599b1d89cf03074b610800f866d4026dc199d7929a28"
 dependencies = [
  "memchr",
 ]
@@ -14937,7 +15004,7 @@ dependencies = [
  "crc32fast",
  "crossbeam-utils",
  "flate2",
- "indexmap 2.7.1",
+ "indexmap 2.9.0",
  "memchr",
  "zopfli",
  "zstd",

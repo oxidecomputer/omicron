@@ -69,8 +69,8 @@ pub async fn shell(
             sqlformat::format(
                 &transformed,
                 &sqlformat::QueryParams::None,
-                sqlformat::FormatOptions {
-                    uppercase: true,
+                &sqlformat::FormatOptions {
+                    uppercase: Some(true),
                     ..Default::default()
                 }
             )
@@ -246,7 +246,10 @@ fn print_sql_query(query: &str) {
         sqlformat::format(
             &query,
             &sqlformat::QueryParams::None,
-            sqlformat::FormatOptions { uppercase: true, ..Default::default() }
+            &sqlformat::FormatOptions {
+                uppercase: Some(true),
+                ..Default::default()
+            }
         )
     );
     println!();

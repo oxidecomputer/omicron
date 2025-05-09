@@ -1,4 +1,6 @@
-using provided RNG seed: test_example
+using provided RNG seed: reconfigurator-cli-test
+> # This is a legacy test; new tests shouldn't need to set a seed
+
 > load-example --seed test-basic
 loaded example system with:
 - collection: 9e187896-7809-46d0-9210-d75be1b3c4d4
