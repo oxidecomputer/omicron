@@ -14,7 +14,7 @@ use strum::{EnumIter, IntoEnumIterator as _};
 pub enum OrderedComponent {
     HostOs,
     SpRot,
-    ControlPlaneZone,
+    NonNexusOmicronZone,
     NexusZone,
 }
 
@@ -53,7 +53,7 @@ impl From<ZoneKind> for OrderedComponent {
     fn from(zone_kind: ZoneKind) -> Self {
         match zone_kind {
             ZoneKind::Nexus => Self::NexusZone,
-            _ => Self::ControlPlaneZone,
+            _ => Self::NonNexusOmicronZone,
         }
     }
 }
@@ -76,19 +76,19 @@ mod test {
         );
         assert_eq!(
             OrderedComponent::SpRot.next(),
-            Some(OrderedComponent::ControlPlaneZone)
+            Some(OrderedComponent::NonNexusOmicronZone)
         );
         assert_eq!(
-            OrderedComponent::ControlPlaneZone.prev(),
+            OrderedComponent::NonNexusOmicronZone.prev(),
             Some(OrderedComponent::SpRot)
         );
         assert_eq!(
-            OrderedComponent::ControlPlaneZone.next(),
+            OrderedComponent::NonNexusOmicronZone.next(),
             Some(OrderedComponent::NexusZone)
         );
         assert_eq!(
             OrderedComponent::NexusZone.prev(),
-            Some(OrderedComponent::ControlPlaneZone)
+            Some(OrderedComponent::NonNexusOmicronZone)
         );
         assert_eq!(OrderedComponent::NexusZone.next(), None);
         assert!(OrderedComponent::HostOs < OrderedComponent::NexusZone);
@@ -98,7 +98,7 @@ mod test {
     fn ordered_component_from_zone_kind() {
         assert!(matches!(
             OrderedComponent::from(ZoneKind::CruciblePantry),
-            OrderedComponent::ControlPlaneZone
+            OrderedComponent::NonNexusOmicronZone
         ));
         assert!(matches!(
             OrderedComponent::from(ZoneKind::Nexus),

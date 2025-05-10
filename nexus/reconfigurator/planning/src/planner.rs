@@ -4876,7 +4876,7 @@ pub(crate) mod test {
         input_builder.policy_mut().tuf_repo = Some(tuf_repo);
         let input = input_builder.build();
 
-        let mut comp = OrderedComponent::ControlPlaneZone;
+        let mut comp = OrderedComponent::NonNexusOmicronZone;
         let mut parent = blueprint1;
         const MAX_PLANNING_ITERATIONS: usize = 100;
         for i in 2..=MAX_PLANNING_ITERATIONS {
@@ -4915,7 +4915,7 @@ pub(crate) mod test {
                 OrderedComponent::HostOs | OrderedComponent::SpRot => {
                     unreachable!("can only update zones")
                 }
-                OrderedComponent::ControlPlaneZone => {
+                OrderedComponent::NonNexusOmicronZone => {
                     assert!(
                         blueprint
                             .all_omicron_zones(

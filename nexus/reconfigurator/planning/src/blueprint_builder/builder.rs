@@ -1930,7 +1930,7 @@ impl<'a> BlueprintBuilder<'a> {
         let new_artifact = Self::zone_image_artifact(new_repo, zone_kind);
         let old_artifact = Self::zone_image_artifact(old_repo, zone_kind);
         if let Some(prev) = OrderedComponent::from(zone_kind).prev() {
-            if prev >= OrderedComponent::ControlPlaneZone
+            if prev >= OrderedComponent::NonNexusOmicronZone
                 && self.sled_ids_with_zones().any(|sled_id| {
                     self.current_sled_zones(
                         sled_id,
