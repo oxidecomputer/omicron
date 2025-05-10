@@ -951,13 +951,14 @@ impl<'a> Planner<'a> {
         let image_source = self.blueprint.zone_image_source(zone_kind);
         if zone.image_source == image_source {
             // This should only happen in the event of a planning error above.
-            warn!(
+            error!(
                 self.log, "zone is already up-to-date";
                 "sled_id" => %sled_id,
                 "zone_id" => %zone.id,
                 "kind" => ?zone.zone_type.kind(),
                 "image_source" => %image_source,
             );
+            return Err(Error::ZoneAlreadyUpToDate);
         } else {
             match zone_kind {
                 ZoneKind::Crucible

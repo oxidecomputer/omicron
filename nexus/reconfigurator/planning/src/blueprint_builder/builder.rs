@@ -125,6 +125,8 @@ pub enum Error {
     AllocateExternalNetworking(#[from] ExternalNetworkingError),
     #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
     PolicySpecifiesTooManyInternalDnsServers,
+    #[error("zone is already up-to-date and should not be updated")]
+    ZoneAlreadyUpToDate,
 }
 
 /// Describes the result of an idempotent "ensure" operation
