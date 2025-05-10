@@ -4549,13 +4549,13 @@ pub(crate) mod test {
 
         // We should start with no specified TUF repo and nothing to do.
         assert!(example.input.tuf_repo().is_none());
-        // assert_planning_makes_no_changes(
-        //     &logctx.log,
-        //     &blueprint1,
-        //     &example.input,
-        //     &example.collection,
-        //     TEST_NAME,
-        // );
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint1,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
 
         // All zones should be sourced from the install dataset by default.
         assert!(
