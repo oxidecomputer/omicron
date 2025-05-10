@@ -17,7 +17,9 @@ use diesel::result::Error as DieselError;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::{ArtifactHash, TufArtifact, TufRepo, TufRepoDescription};
+use nexus_db_model::{
+    ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, to_db_typed_uuid,
+};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Generation, ListResultVec,
     LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
@@ -118,9 +120,8 @@ impl DataStore {
         use nexus_db_schema::schema::tuf_repo::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let repo_id = repo_id.into_untyped_uuid();
         let repo = dsl::tuf_repo
-            .filter(dsl::id.eq(repo_id))
+            .filter(dsl::id.eq(to_db_typed_uuid(repo_id)))
             .select(TufRepo::as_select())
             .first_async::<TufRepo>(&*conn)
             .await
@@ -129,7 +130,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::TufRepo,
-                        LookupType::ById(repo_id),
+                        LookupType::ById(repo_id.into_untyped_uuid()),
                     ),
                 )
             })?;
