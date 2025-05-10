@@ -4924,7 +4924,7 @@ pub(crate) mod test {
                             .all(|(_, zone)| match zone.zone_type.kind() {
                                 ZoneKind::Nexus => {
                                     if zone.image_source == image_source {
-                                        comp = comp.next().unwrap();
+                                        comp = OrderedComponent::NexusZone;
                                         true
                                     } else {
                                         zone.image_source

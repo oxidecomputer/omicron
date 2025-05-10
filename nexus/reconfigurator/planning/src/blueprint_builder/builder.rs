@@ -1929,28 +1929,32 @@ impl<'a> BlueprintBuilder<'a> {
         let old_repo = self.input.old_repo();
         let new_artifact = Self::zone_image_artifact(new_repo, zone_kind);
         let old_artifact = Self::zone_image_artifact(old_repo, zone_kind);
-        if let Some(prev) = OrderedComponent::from(zone_kind).prev() {
-            if prev >= OrderedComponent::NonNexusOmicronZone
-                && self.sled_ids_with_zones().any(|sled_id| {
+        match OrderedComponent::from(zone_kind) {
+            // Nexus can only be updated if all non-Nexus zones have been updated.
+            OrderedComponent::NexusZone => {
+                if self.sled_ids_with_zones().any(|sled_id| {
                     self.current_sled_zones(
                         sled_id,
                         BlueprintZoneDisposition::is_in_service,
                     )
-                    .any(|z| {
-                        let kind = z.zone_type.kind();
-                        let old_artifact =
-                            Self::zone_image_artifact(old_repo, kind);
-                        OrderedComponent::from(kind) == prev
-                            && z.image_source == old_artifact
+                    .filter(|z| {
+                        OrderedComponent::from(z.zone_type.kind())
+                            == OrderedComponent::NonNexusOmicronZone
                     })
-                })
-            {
-                old_artifact
-            } else {
-                new_artifact
+                    .any(|z| z.image_source != new_artifact)
+                }) {
+                    // Some dependent zone is not up-to-date.
+                    old_artifact
+                } else {
+                    // All dependent zones are up-to-date.
+                    new_artifact
+                }
             }
-        } else {
-            new_artifact
+            // It's always safe to use the new artifact for non-Nexus zones.
+            OrderedComponent::NonNexusOmicronZone => new_artifact,
+            OrderedComponent::HostOs | OrderedComponent::SpRot => {
+                unreachable!("can't get an OS or SP/RoT image from a zone")
+            }
         }
     }
 }
