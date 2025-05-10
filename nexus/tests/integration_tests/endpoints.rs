@@ -18,6 +18,7 @@ use nexus_test_utils::PHYSICAL_DISK_UUID;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
@@ -1140,10 +1141,10 @@ pub static DEMO_TIMESERIES_QUERY: LazyLock<params::TimeseriesQuery> =
     });
 
 // Users
-pub static DEMO_USER_CREATE: LazyLock<params::UserCreate> =
-    LazyLock::new(|| params::UserCreate {
+pub static DEMO_USER_CREATE: LazyLock<test_params::UserCreate> =
+    LazyLock::new(|| test_params::UserCreate {
         external_id: UserId::from_str("dummy-user").unwrap(),
-        password: params::UserPassword::LoginDisallowed,
+        password: test_params::UserPassword::LoginDisallowed,
     });
 
 // Allowlist for user-facing services.
@@ -1689,8 +1690,10 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::ReadOnly,
                 allowed_methods: vec![AllowedMethod::Post(
-                    serde_json::to_value(params::UserPassword::LoginDisallowed)
-                        .unwrap(),
+                    serde_json::to_value(
+                        test_params::UserPassword::LoginDisallowed,
+                    )
+                    .unwrap(),
                 )],
             },
             /* Projects */

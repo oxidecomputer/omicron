@@ -14,6 +14,7 @@ use nexus_test_utils::TEST_SUITE_PASSWORD;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared::UninitializedSled;
@@ -75,9 +76,12 @@ async fn test_rack_initialization(cptestctx: &ControlPlaneTestContext) {
     // login.
     let login_url = format!("/v1/login/{}/local", cptestctx.silo_name);
     let username = cptestctx.user_name.clone();
-    let password: params::Password = TEST_SUITE_PASSWORD.parse().unwrap();
+    let password = TEST_SUITE_PASSWORD.to_string();
     let _ = RequestBuilder::new(&client, Method::POST, &login_url)
-        .body(Some(&params::UsernamePasswordCredentials { username, password }))
+        .body(Some(&test_params::UsernamePasswordCredentials {
+            username,
+            password,
+        }))
         .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()
         .await
