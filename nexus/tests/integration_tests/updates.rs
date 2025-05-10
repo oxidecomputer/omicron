@@ -114,7 +114,7 @@ async fn test_repo_upload() -> Result<()> {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
     assert_eq!(
-        datastore.update_tuf_generation_get(&opctx).await.unwrap(),
+        datastore.tuf_get_generation(&opctx).await.unwrap(),
         1u32.into()
     );
 
@@ -162,7 +162,7 @@ async fn test_repo_upload() -> Result<()> {
     }));
     // The generation number should now be 2.
     assert_eq!(
-        datastore.update_tuf_generation_get(&opctx).await.unwrap(),
+        datastore.tuf_get_generation(&opctx).await.unwrap(),
         2u32.into()
     );
 
@@ -215,7 +215,7 @@ async fn test_repo_upload() -> Result<()> {
 
     // We didn't insert a new repo, so the generation number should still be 2.
     assert_eq!(
-        datastore.update_tuf_generation_get(&opctx).await.unwrap(),
+        datastore.tuf_get_generation(&opctx).await.unwrap(),
         2u32.into()
     );
 
@@ -361,7 +361,7 @@ async fn test_repo_upload() -> Result<()> {
     }
     // No artifacts changed, so the generation number should still be 2...
     assert_eq!(
-        datastore.update_tuf_generation_get(&opctx).await.unwrap(),
+        datastore.tuf_get_generation(&opctx).await.unwrap(),
         2u32.into()
     );
     // ... and the task should have nothing to do and should immediately

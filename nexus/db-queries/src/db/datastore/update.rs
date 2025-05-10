@@ -76,7 +76,7 @@ impl DataStore {
     /// `TufRepoDescription` if one was already found. (This is not an upsert,
     /// because if we know about an existing repo but with different contents,
     /// we reject that.)
-    pub async fn update_tuf_repo_insert(
+    pub async fn tuf_repo_insert(
         &self,
         opctx: &OpContext,
         description: &external::TufRepoDescription,
@@ -108,7 +108,7 @@ impl DataStore {
     }
 
     /// Returns a TUF repo description.
-    pub async fn update_tuf_repo_get_by_id(
+    pub async fn tuf_repo_get_by_id(
         &self,
         opctx: &OpContext,
         repo_id: TypedUuid<TufRepoKind>,
@@ -141,7 +141,7 @@ impl DataStore {
     }
 
     /// Returns the TUF repo description corresponding to this system version.
-    pub async fn update_tuf_repo_get_by_version(
+    pub async fn tuf_repo_get_by_version(
         &self,
         opctx: &OpContext,
         system_version: SemverVersion,
@@ -174,7 +174,7 @@ impl DataStore {
     }
 
     /// Returns the list of all TUF repo artifacts known to the system.
-    pub async fn update_tuf_artifact_list(
+    pub async fn tuf_list_repos(
         &self,
         opctx: &OpContext,
         generation: Generation,
@@ -194,7 +194,7 @@ impl DataStore {
     }
 
     /// Returns the current TUF repo generation number.
-    pub async fn update_tuf_generation_get(
+    pub async fn tuf_get_generation(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<Generation> {

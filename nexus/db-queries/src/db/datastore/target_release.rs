@@ -210,7 +210,7 @@ mod test {
                 .parse()
                 .expect("SHA256('')");
         let repo = datastore
-            .update_tuf_repo_insert(
+            .tuf_repo_insert(
                 opctx,
                 &TufRepoDescription {
                     repo: TufRepoMeta {

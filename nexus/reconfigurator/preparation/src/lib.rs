@@ -156,7 +156,7 @@ impl PlanningInputFromDb<'_> {
             None => None,
             Some(repo_id) => Some(
                 datastore
-                    .update_tuf_repo_get_by_id(opctx, repo_id.into())
+                    .tuf_repo_get_by_id(opctx, repo_id.into())
                     .await
                     .internal_context("fetching target release repo")?
                     .into_external(),
@@ -175,7 +175,7 @@ impl PlanningInputFromDb<'_> {
             None => None,
             Some(repo_id) => Some(
                 datastore
-                    .update_tuf_repo_get_by_id(opctx, repo_id.into())
+                    .tuf_repo_get_by_id(opctx, repo_id.into())
                     .await
                     .internal_context("fetching target release repo")?
                     .into_external(),
