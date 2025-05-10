@@ -31,7 +31,7 @@ use swrite::{SWrite, swrite};
 use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
-/// The return value of [`DataStore::update_tuf_repo_insert`].
+/// The return value of [`DataStore::tuf_repo_insert`].
 ///
 /// This is similar to [`external::TufRepoInsertResponse`], but uses
 /// nexus-db-model's types instead of external types.
