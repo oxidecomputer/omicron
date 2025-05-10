@@ -10,6 +10,9 @@ use crate::SIM_GIMLET_BOARD;
 use crate::SIM_ROT_BOARD;
 use crate::SIM_ROT_STAGE0_BOARD;
 use crate::SIM_SIDECAR_BOARD;
+use crate::helpers::rot_slot_id_from_u16;
+use crate::helpers::rot_slot_id_to_u16;
+use gateway_messages::Fwid;
 use gateway_messages::RotSlotId;
 use gateway_messages::RotStateV3;
 use gateway_messages::SpComponent;
@@ -17,20 +20,41 @@ use gateway_messages::SpError;
 use gateway_messages::UpdateChunk;
 use gateway_messages::UpdateId;
 use gateway_messages::UpdateInProgressStatus;
+use hubtools::RawHubrisImage;
+use sha3::Digest;
+use sha3::Sha3_256;
 
 pub(crate) struct SimSpUpdate {
+    /// tracks the state of any ongoing simulated update
+    ///
+    /// Both the hardware and this simulator enforce that only one update to any
+    /// SP-managed component can be in flight at a time.
     state: UpdateState,
-    last_sp_update_data: Option<Box<[u8]>>,
-    last_rot_update_data: Option<Box<[u8]>>,
-    last_host_phase1_update_data: BTreeMap<u16, Box<[u8]>>,
-    active_host_slot: Option<u16>,
 
+    /// data from the last completed SP update (exposed for testing)
+    last_sp_update_data: Option<Box<[u8]>>,
+    /// data from the last completed RoT update (exposed for testing)
+    last_rot_update_data: Option<Box<[u8]>>,
+    /// data from the last completed phase1 update for each slot (exposed for
+    /// testing)
+    last_host_phase1_update_data: BTreeMap<u16, Box<[u8]>>,
+
+    /// records whether a change to the stage0 "active slot" has been requested
+    pending_stage0_update: bool,
+
+    /// current caboose for the SP active slot
     caboose_sp_active: CabooseValue,
+    /// current caboose for the SP inactive slot
     caboose_sp_inactive: CabooseValue,
+    /// current caboose for the RoT slot A
     caboose_rot_a: CabooseValue,
+    /// current caboose for the RoT slot B
     caboose_rot_b: CabooseValue,
+    /// current caboose for stage0
     caboose_stage0: CabooseValue,
+    /// current caboose for stage0next
     caboose_stage0next: CabooseValue,
+    /// current RoT boot and version information
     rot_state: RotStateV3,
 }
 
@@ -154,11 +178,7 @@ impl SimSpUpdate {
             last_rot_update_data: None,
             last_host_phase1_update_data: BTreeMap::new(),
 
-            // In the real SP, there is always _some_ active host slot. We could
-            // emulate that by always defaulting to slot 0, but instead we'll
-            // ensure any tests that expect to read or write a particular slot
-            // set that slot as active first.
-            active_host_slot: None,
+            pending_stage0_update: false,
 
             caboose_sp_active,
             caboose_sp_inactive,
@@ -171,39 +191,86 @@ impl SimSpUpdate {
         }
     }
 
-    // TODO-completeness Split into `sp_prepare` and `component_prepare` when we
-    // need to simulate aux flash-related (SP update only) things.
-    pub(crate) fn prepare(
+    pub(crate) fn sp_update_prepare(
+        &mut self,
+        id: UpdateId,
+        total_size: usize,
+    ) -> Result<(), SpError> {
+        // SP updates always target slot 0.
+        let slot = 0;
+        self.component_update_prepare(
+            SpComponent::SP_ITSELF,
+            id,
+            total_size,
+            slot,
+        )
+    }
+
+    pub(crate) fn component_update_prepare(
         &mut self,
         component: SpComponent,
         id: UpdateId,
         total_size: usize,
+        slot: u16,
     ) -> Result<(), SpError> {
         match &self.state {
             state @ UpdateState::Prepared { .. } => {
                 Err(SpError::UpdateInProgress(state.to_message()))
             }
+            state @ UpdateState::Completed {
+                component: update_component,
+                ..
+            } if component == SpComponent::SP_ITSELF
+                && component == *update_component =>
+            {
+                // The SP will not allow you to start another update of itself
+                // while one is completed.
+                Err(SpError::UpdateInProgress(state.to_message()))
+            }
             UpdateState::NotPrepared
             | UpdateState::Aborted(_)
             | UpdateState::Completed { .. } => {
-                let slot = if component == SpComponent::HOST_CPU_BOOT_FLASH {
-                    match self.active_host_slot {
-                        Some(slot) => slot,
-                        None => return Err(SpError::InvalidSlotForComponent),
-                    }
-                } else {
-                    // We don't manage SP or RoT slots, so just use 0
-                    0
-                };
-
                 self.state = UpdateState::Prepared {
                     component,
                     id,
                     slot,
                     data: Cursor::new(vec![0u8; total_size].into_boxed_slice()),
                 };
+
+                // When the SP or RoT begins preparing an update, we can start
+                // seeing various errors when we try to read the caboose for the
+                // slot we're updating.  Empirically, during the SP update we
+                // tend to see InvalidMissing.  During the stage0next update, we
+                // see InvalidFailedRead.  It'd be nice to get these exactly
+                // right, but it's most important that consumers handle both
+                // cases, which they will if they test updates to both of these
+                // components.
+                if let Some(caboose) = self.caboose_mut(component, slot) {
+                    *caboose = if component == SpComponent::STAGE0 {
+                        CabooseValue::InvalidFailedRead
+                    } else {
+                        CabooseValue::InvalidMissing
+                    }
+                }
+
                 Ok(())
             }
+        }
+    }
+
+    fn caboose_mut(
+        &mut self,
+        component: SpComponent,
+        slot: u16,
+    ) -> Option<&mut CabooseValue> {
+        match (component, slot) {
+            // SP always updates slot 0.
+            (SpComponent::SP_ITSELF, 0) => Some(&mut self.caboose_sp_inactive),
+            (SpComponent::ROT, 0) => Some(&mut self.caboose_rot_a),
+            (SpComponent::ROT, 1) => Some(&mut self.caboose_rot_b),
+            // RoT bootloader always updates slot 1.
+            (SpComponent::STAGE0, 1) => Some(&mut self.caboose_stage0next),
+            _ => None,
         }
     }
 
@@ -219,8 +286,9 @@ impl SimSpUpdate {
         match &mut self.state {
             UpdateState::Prepared { component, id, slot, data } => {
                 // Ensure that the update ID and target component are correct.
-                if chunk.id != *id || chunk.component != *component {
-                    return Err(SpError::InvalidUpdateId { sp_update_id: *id });
+                let id = *id;
+                if chunk.id != id || chunk.component != *component {
+                    return Err(SpError::InvalidUpdateId { sp_update_id: id });
                 };
                 if data.position() != u64::from(chunk.offset) {
                     return Err(SpError::UpdateInProgress(
@@ -245,11 +313,29 @@ impl SimSpUpdate {
                             .insert(*slot, data.clone());
                     }
 
-                    self.state = UpdateState::Completed {
-                        component: *component,
-                        id: *id,
-                        data,
-                    };
+                    let component = *component;
+                    let slot = *slot;
+                    if let Some(caboose_value) =
+                        self.caboose_mut(component, slot)
+                    {
+                        let caboose = RawHubrisImage::from_binary(
+                            data.clone().to_vec(),
+                            0,
+                            0,
+                        )
+                        .and_then(|image| image.read_caboose());
+                        match caboose {
+                            Ok(caboose) => {
+                                *caboose_value = CabooseValue::Caboose(caboose);
+                            }
+                            Err(_) => {
+                                *caboose_value = CabooseValue::InvalidMissing;
+                            }
+                        };
+                    }
+
+                    self.state =
+                        UpdateState::Completed { component, id, slot, data };
                 }
 
                 Ok(())
@@ -279,28 +365,75 @@ impl SimSpUpdate {
     }
 
     pub(crate) fn sp_reset(&mut self) {
-        match &self.state {
-            UpdateState::Completed { data, component, .. } => {
-                if *component == SpComponent::SP_ITSELF {
-                    self.last_sp_update_data = Some(data.clone());
-                }
+        // Clear any update, whatever state it was in.
+        let prev_state =
+            std::mem::replace(&mut self.state, UpdateState::NotPrepared);
+
+        // Check if an SP update completed since the last reset.
+        if let UpdateState::Completed { data, component, .. } = prev_state {
+            if component == SpComponent::SP_ITSELF {
+                // Save the data that we received so that we can expose it
+                // for tests.
+                self.last_sp_update_data = Some(data.clone());
+
+                // Swap the cabooses to simulate the real SP behavior of
+                // swapping which slot is active after an update.
+                std::mem::swap(
+                    &mut self.caboose_sp_active,
+                    &mut self.caboose_sp_inactive,
+                );
             }
-            UpdateState::NotPrepared
-            | UpdateState::Prepared { .. }
-            | UpdateState::Aborted(_) => (),
         }
     }
 
     pub(crate) fn rot_reset(&mut self) {
-        match &self.state {
-            UpdateState::Completed { data, component, .. } => {
-                if *component == SpComponent::ROT {
-                    self.last_rot_update_data = Some(data.clone());
-                }
+        // Clear any update, whatever state it was in.
+        let prev_state =
+            std::mem::replace(&mut self.state, UpdateState::NotPrepared);
+
+        // Apply changes from a successfully-completed update.
+        if let UpdateState::Completed { data, component, slot, .. } = prev_state
+        {
+            if component == SpComponent::ROT {
+                // Compute a new FWID for the affected slot.
+                // unwrap(): we've already validated this.
+                let slot = rot_slot_id_from_u16(slot).unwrap();
+                let fwidp = match slot {
+                    RotSlotId::A => &mut self.rot_state.slot_a_fwid,
+                    RotSlotId::B => &mut self.rot_state.slot_b_fwid,
+                };
+                *fwidp = fake_fwid_compute(&data);
+
+                // For an RoT update, save the data that we received so that
+                // we can expose it for tests.
+                self.last_rot_update_data = Some(data);
+            } else if component == SpComponent::STAGE0 {
+                // Similarly, for a bootloader update, compute a new FWID
+                // for stage0next.
+                let fwid = fake_fwid_compute(&data);
+                self.rot_state.stage0next_fwid = fwid;
             }
-            UpdateState::NotPrepared
-            | UpdateState::Prepared { .. }
-            | UpdateState::Aborted(_) => (),
+        }
+
+        // If there was a pending persistent boot preference set, apply that now
+        // (and unset it).
+        if let Some(new_boot_pref) =
+            self.rot_state.pending_persistent_boot_preference.take()
+        {
+            self.rot_state.persistent_boot_preference = new_boot_pref;
+            self.rot_state.active = new_boot_pref;
+        }
+
+        // We do not currently simulate changes to the transient boot
+        // preference.
+        self.rot_state.transient_boot_preference = None;
+
+        // If there was a pending stage0 update (i.e., a change to the stage0
+        // "active slot"), apply that now.  All this means is changing the
+        // stage0 FWID and caboose to match the stage0next FWID and caboose.
+        if self.pending_stage0_update {
+            self.rot_state.stage0_fwid = self.rot_state.stage0next_fwid;
+            self.caboose_stage0 = self.caboose_stage0next.clone();
         }
     }
 
@@ -317,10 +450,6 @@ impl SimSpUpdate {
         slot: u16,
     ) -> Option<Box<[u8]>> {
         self.last_host_phase1_update_data.get(&slot).cloned()
-    }
-
-    pub(crate) fn set_active_host_slot(&mut self, slot: u16) {
-        self.active_host_slot = Some(slot);
     }
 
     pub(crate) fn get_component_caboose_value(
@@ -347,6 +476,57 @@ impl SimSpUpdate {
 
     pub(crate) fn rot_state(&self) -> RotStateV3 {
         self.rot_state
+    }
+
+    pub(crate) fn component_set_active_slot(
+        &mut self,
+        component: SpComponent,
+        slot: u16,
+        persist: bool,
+    ) -> Result<(), SpError> {
+        match component {
+            SpComponent::ROT => {
+                if persist {
+                    self.rot_state.pending_persistent_boot_preference =
+                        Some(rot_slot_id_from_u16(slot)?);
+                } else {
+                    self.rot_state.transient_boot_preference =
+                        Some(rot_slot_id_from_u16(slot)?);
+                }
+                Ok(())
+            }
+            SpComponent::STAGE0 => {
+                if slot == 1 {
+                    self.pending_stage0_update = true;
+                    return Ok(());
+                } else {
+                    Err(SpError::RequestUnsupportedForComponent)
+                }
+            }
+            SpComponent::HOST_CPU_BOOT_FLASH => Ok(()),
+            _ => {
+                // The real SP returns `RequestUnsupportedForComponent` for
+                // anything other than the RoT and host boot flash, including
+                // SP_ITSELF.
+                Err(SpError::RequestUnsupportedForComponent)
+            }
+        }
+    }
+
+    pub(crate) fn component_get_active_slot(
+        &mut self,
+        component: SpComponent,
+    ) -> Result<u16, SpError> {
+        match component {
+            // The only active component for SP is slot 0.
+            SpComponent::SP_ITSELF => Ok(0),
+            SpComponent::ROT => Ok(rot_slot_id_to_u16(
+                self.rot_state.persistent_boot_preference,
+            )),
+            // The only active component is stage0
+            SpComponent::STAGE0 => Ok(0),
+            _ => Err(SpError::RequestUnsupportedForComponent),
+        }
     }
 }
 
@@ -380,18 +560,15 @@ impl BaseboardKind {
 }
 
 /// Represents a simulated caboose
+#[derive(Clone)]
 enum CabooseValue {
     /// emulate an actual caboose
     Caboose(hubtools::Caboose),
     /// emulate "the image does not include a caboose"
-    // This will be used shortly.
-    #[allow(dead_code)]
     InvalidMissing,
     /// emulate "the image caboose does not contain 'KEY'"
     InvalidMissingAllKeys,
     /// emulate "failed to read data from the caboose" (erased)
-    // This will be used shortly.
-    #[allow(dead_code)]
     InvalidFailedRead,
 }
 
@@ -446,6 +623,7 @@ enum UpdateState {
     Completed {
         component: SpComponent,
         id: UpdateId,
+        slot: u16,
         data: Box<[u8]>,
     },
 }
@@ -474,4 +652,14 @@ impl UpdateState {
             Self::Completed { id, .. } => UpdateStatus::Complete(*id),
         }
     }
+}
+
+/// Computes a fake FWID for the Hubris image contained in `data`
+fn fake_fwid_compute(data: &[u8]) -> Fwid {
+    // This is NOT the way real FWIDs are computed.  For our purposes, all we
+    // really care about is that the value changes when the image changes, and
+    // maybe that the value doesn't change when the image doesn't change.
+    let mut digest = Sha3_256::default();
+    digest.update(data);
+    Fwid::Sha3_256(digest.finalize().into())
 }

@@ -458,6 +458,7 @@ pub struct SwCaboose {
     pub git_commit: String,
     pub name: String,
     pub version: String,
+    pub sign: Option<String>,
 }
 
 impl From<Caboose> for SwCaboose {
@@ -468,6 +469,7 @@ impl From<Caboose> for SwCaboose {
             git_commit: c.git_commit,
             name: c.name,
             version: c.version,
+            sign: c.sign,
         }
     }
 }
@@ -479,6 +481,7 @@ impl From<SwCaboose> for Caboose {
             git_commit: row.git_commit,
             name: row.name,
             version: row.version,
+            sign: row.sign,
         }
     }
 }

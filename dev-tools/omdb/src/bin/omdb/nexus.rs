@@ -22,6 +22,7 @@ use clap::Args;
 use clap::ColorChoice;
 use clap::Subcommand;
 use clap::ValueEnum;
+use futures::StreamExt;
 use futures::TryStreamExt;
 use futures::future::try_join;
 use http::StatusCode;
@@ -70,6 +71,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -127,6 +129,9 @@ enum NexusCommands {
     Sagas(SagasArgs),
     /// interact with sleds
     Sleds(SledsArgs),
+    /// interact with support bundles
+    #[command(visible_alias = "sb")]
+    SupportBundles(SupportBundleArgs),
 }
 
 #[derive(Debug, Args)]
@@ -475,6 +480,80 @@ struct DiskExpungeArgs {
     physical_disk_id: PhysicalDiskUuid,
 }
 
+#[derive(Debug, Args)]
+struct SupportBundleArgs {
+    #[command(subcommand)]
+    command: SupportBundleCommands,
+}
+
+#[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
+enum SupportBundleCommands {
+    /// List all support bundles
+    List,
+    /// Create a new support bundle
+    Create,
+    /// Delete a support bundle
+    Delete(SupportBundleDeleteArgs),
+    /// Download an entire support bundle
+    Download(SupportBundleDownloadArgs),
+    /// Download the index of a support bundle
+    ///
+    /// This is a "list of files", from which individual files can be accessed
+    GetIndex(SupportBundleIndexArgs),
+    /// Download a single file within a support bundle
+    GetFile(SupportBundleFileArgs),
+    /// Creates a dashboard for viewing the contents of a support bundle
+    Inspect(SupportBundleInspectArgs),
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleDeleteArgs {
+    id: SupportBundleUuid,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleDownloadArgs {
+    id: SupportBundleUuid,
+
+    /// Optional output path where the file should be written,
+    /// instead of stdout.
+    #[arg(short, long)]
+    output: Option<Utf8PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleIndexArgs {
+    id: SupportBundleUuid,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleFileArgs {
+    id: SupportBundleUuid,
+    path: Utf8PathBuf,
+    /// Optional output path where the file should be written,
+    /// instead of stdout.
+    #[arg(short, long)]
+    output: Option<Utf8PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleInspectArgs {
+    /// A specific bundle to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "path".
+    #[arg(short, long)]
+    id: Option<SupportBundleUuid>,
+
+    /// A local bundle file to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "id".
+    #[arg(short, long)]
+    path: Option<Utf8PathBuf>,
+}
+
 impl NexusArgs {
     /// Run a `omdb nexus` subcommand.
     pub(crate) async fn run_cmd(
@@ -668,6 +747,33 @@ impl NexusArgs {
                 cmd_nexus_sled_expunge_disk(&client, args, omdb, log, token)
                     .await
             }
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::List,
+            }) => cmd_nexus_support_bundles_list(&client).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Create,
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_support_bundles_create(&client, token).await
+            }
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Delete(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_support_bundles_delete(&client, args, token).await
+            }
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Download(args),
+            }) => cmd_nexus_support_bundles_download(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::GetIndex(args),
+            }) => cmd_nexus_support_bundles_get_index(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::GetFile(args),
+            }) => cmd_nexus_support_bundles_get_file(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Inspect(args),
+            }) => cmd_nexus_support_bundles_inspect(&client, args).await,
         }
     }
 }
@@ -3681,4 +3787,168 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
         .context("expunging disk")?;
     eprintln!("expunged disk {}", args.physical_disk_id);
     Ok(())
+}
+
+/// Runs `omdb nexus support-bundles list`
+async fn cmd_nexus_support_bundles_list(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let support_bundle_stream = client.support_bundle_list_stream(None, None);
+
+    let support_bundles = support_bundle_stream
+        .try_collect::<Vec<_>>()
+        .await
+        .context("listing support bundles")?;
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct SupportBundleInfo {
+        id: Uuid,
+        time_created: DateTime<Utc>,
+        reason_for_creation: String,
+        reason_for_failure: String,
+        state: String,
+    }
+    let rows = support_bundles.into_iter().map(|sb| SupportBundleInfo {
+        id: *sb.id,
+        time_created: sb.time_created,
+        reason_for_creation: sb.reason_for_creation,
+        reason_for_failure: sb
+            .reason_for_failure
+            .unwrap_or_else(|| "-".to_string()),
+        state: format!("{:?}", sb.state),
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    println!("{}", table);
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles create`
+async fn cmd_nexus_support_bundles_create(
+    client: &nexus_client::Client,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let support_bundle_id = client
+        .support_bundle_create()
+        .await
+        .context("creating support bundle")?
+        .into_inner()
+        .id;
+    println!("created support bundle: {support_bundle_id}");
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles delete`
+async fn cmd_nexus_support_bundles_delete(
+    client: &nexus_client::Client,
+    args: &SupportBundleDeleteArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let _ = client
+        .support_bundle_delete(args.id.as_untyped_uuid())
+        .await
+        .with_context(|| format!("deleting support bundle {}", args.id))?;
+    println!("support bundle {} deleted", args.id);
+    Ok(())
+}
+
+async fn write_stream_to_sink(
+    mut stream: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>>
+    + std::marker::Unpin,
+    mut sink: impl std::io::Write,
+) -> Result<(), anyhow::Error> {
+    while let Some(data) = stream.next().await {
+        match data {
+            Err(err) => return Err(anyhow::anyhow!(err)),
+            Ok(data) => sink.write_all(&data)?,
+        }
+    }
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles download`
+async fn cmd_nexus_support_bundles_download(
+    client: &nexus_client::Client,
+    args: &SupportBundleDownloadArgs,
+) -> Result<(), anyhow::Error> {
+    let stream = client
+        .support_bundle_download(args.id.as_untyped_uuid())
+        .await
+        .with_context(|| format!("downloading support bundle {}", args.id))?
+        .into_inner_stream();
+
+    let sink: Box<dyn std::io::Write> = match &args.output {
+        Some(path) => Box::new(std::fs::File::create(path)?),
+        None => Box::new(std::io::stdout()),
+    };
+
+    write_stream_to_sink(stream, sink)
+        .await
+        .with_context(|| format!("streaming support bundle {}", args.id))?;
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles get-index`
+async fn cmd_nexus_support_bundles_get_index(
+    client: &nexus_client::Client,
+    args: &SupportBundleIndexArgs,
+) -> Result<(), anyhow::Error> {
+    let stream = client
+        .support_bundle_index(args.id.as_untyped_uuid())
+        .await
+        .with_context(|| {
+            format!("downloading support bundle index {}", args.id)
+        })?
+        .into_inner_stream();
+
+    write_stream_to_sink(stream, std::io::stdout()).await.with_context(
+        || format!("streaming support bundle index {}", args.id),
+    )?;
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles get-file`
+async fn cmd_nexus_support_bundles_get_file(
+    client: &nexus_client::Client,
+    args: &SupportBundleFileArgs,
+) -> Result<(), anyhow::Error> {
+    let stream = client
+        .support_bundle_download_file(
+            args.id.as_untyped_uuid(),
+            args.path.as_str(),
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "downloading support bundle file {}: {}",
+                args.id, args.path
+            )
+        })?
+        .into_inner_stream();
+
+    let sink: Box<dyn std::io::Write> = match &args.output {
+        Some(path) => Box::new(std::fs::File::create(path)?),
+        None => Box::new(std::io::stdout()),
+    };
+
+    write_stream_to_sink(stream, sink).await.with_context(|| {
+        format!("streaming support bundle file {}: {}", args.id, args.path)
+    })?;
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles inspect`
+async fn cmd_nexus_support_bundles_inspect(
+    client: &nexus_client::Client,
+    args: &SupportBundleInspectArgs,
+) -> Result<(), anyhow::Error> {
+    support_bundle_reader_lib::run_dashboard(
+        client,
+        args.id,
+        args.path.as_ref(),
+    )
+    .await
 }

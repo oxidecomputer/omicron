@@ -1,0 +1,23 @@
+[package]
+name = "support-bundle-reader-lib"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+camino.workspace = true
+crossterm.workspace = true
+futures.workspace = true
+nexus-client.workspace = true
+omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true
+ratatui.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+zip.workspace = true

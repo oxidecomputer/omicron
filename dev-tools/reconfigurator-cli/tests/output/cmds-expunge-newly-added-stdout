@@ -1,5 +1,7 @@
-using provided RNG seed: test_expunge_newly_added_external_dns
-> load-example
+using provided RNG seed: reconfigurator-cli-test
+> # This is a legacy test; new tests shouldn't need to set a seed
+
+> load-example --seed test_expunge_newly_added_external_dns
 loaded example system with:
 - collection: 8bc58dd6-dd6e-44e2-9671-e35a2a941c98
 - blueprint: 3f00b694-1b16-4aaa-8f78-e6b3a527b434

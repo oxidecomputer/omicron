@@ -239,6 +239,14 @@ impl RawDisk {
             RawDisk::Synthetic(synthetic) => &synthetic.firmware,
         }
     }
+
+    #[cfg(feature = "testing")]
+    pub fn firmware_mut(&mut self) -> &mut DiskFirmware {
+        match self {
+            RawDisk::Real(unparsed) => unparsed.firmware_mut(),
+            RawDisk::Synthetic(synthetic) => &mut synthetic.firmware,
+        }
+    }
 }
 
 /// A physical [`PooledDisk`] or a [`SyntheticDisk`] that contains or is backed
@@ -375,7 +383,7 @@ impl Disk {
         }
     }
 
-    pub(crate) fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
+    pub fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
         match self {
             Disk::Real(pooled_disk) => {
                 pooled_disk.firmware = raw_disk.firmware().clone();

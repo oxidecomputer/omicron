@@ -1128,6 +1128,7 @@ pub(crate) mod test {
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
+    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -1324,16 +1325,18 @@ pub(crate) mod test {
         // example.collection -- this should be addressed via API improvements.
         example
             .system
-            .sled_set_omicron_zones(
-                new_sled_id,
-                blueprint4
+            .sled_set_omicron_zones(new_sled_id, {
+                let sled_cfg = blueprint4
                     .sleds
                     .get(&new_sled_id)
                     .expect("blueprint should contain zones for new sled")
                     .clone()
-                    .into_in_service_sled_config()
-                    .zones_config,
-            )
+                    .into_in_service_sled_config();
+                OmicronZonesConfig {
+                    generation: sled_cfg.generation,
+                    zones: sled_cfg.zones.into_iter().collect(),
+                }
+            })
             .unwrap();
         let collection =
             example.system.to_collection_builder().unwrap().build();
@@ -2552,7 +2555,7 @@ pub(crate) mod test {
             .find_map(|(_, sled_config)| {
                 for zone_config in &sled_config.zones {
                     if zone_config.zone_type.is_ntp() {
-                        return Some(zone_config.filesystem_pool.clone());
+                        return Some(zone_config.filesystem_pool);
                     }
                 }
                 None
@@ -4520,12 +4523,14 @@ pub(crate) mod test {
         blueprint: &Blueprint,
     ) {
         for (&sled_id, config) in blueprint.sleds.iter() {
+            let sled_config = config.clone().into_in_service_sled_config();
+            let zones_config = OmicronZonesConfig {
+                generation: sled_config.generation,
+                zones: sled_config.zones.into_iter().collect(),
+            };
             example
                 .system
-                .sled_set_omicron_zones(
-                    sled_id,
-                    config.clone().into_in_service_sled_config().zones_config,
-                )
+                .sled_set_omicron_zones(sled_id, zones_config)
                 .expect("can't set omicron zones for sled");
         }
         example.collection =

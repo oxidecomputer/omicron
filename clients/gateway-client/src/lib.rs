@@ -66,6 +66,7 @@ progenitor::generate_api!(
         RotImageError = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
         RotSlot = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
+        SpComponentCaboose = { derives = [PartialEq, Eq] },
         SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },
         SpIgnition = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpIgnitionSystemType = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },
