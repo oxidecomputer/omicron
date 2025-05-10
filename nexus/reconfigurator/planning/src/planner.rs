@@ -962,8 +962,10 @@ impl<'a> Planner<'a> {
         } else {
             match zone_kind {
                 ZoneKind::Crucible
-                | ZoneKind::CockroachDb
-                | ZoneKind::Clickhouse => {
+                | ZoneKind::Clickhouse
+                | ZoneKind::ClickhouseKeeper
+                | ZoneKind::ClickhouseServer
+                | ZoneKind::CockroachDb => {
                     info!(
                         self.log, "updating zone image source in-place";
                         "sled_id" => %sled_id,
@@ -977,7 +979,13 @@ impl<'a> Planner<'a> {
                         image_source,
                     )?;
                 }
-                _ => {
+                ZoneKind::BoundaryNtp
+                | ZoneKind::CruciblePantry
+                | ZoneKind::ExternalDns
+                | ZoneKind::InternalDns
+                | ZoneKind::InternalNtp
+                | ZoneKind::Nexus
+                | ZoneKind::Oximeter => {
                     info!(
                         self.log, "expunging out-of-date zone";
                         "sled_id" => %sled_id,
