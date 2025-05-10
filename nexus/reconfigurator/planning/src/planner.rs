@@ -37,7 +37,6 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
 use slog::{Logger, info, warn};
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 
@@ -888,22 +887,22 @@ impl<'a> Planner<'a> {
             .collect::<Vec<_>>();
 
         // Wait for all current zones to appear in the inventory.
-        // It would be nice if we could check their image source,
-        // but the inventory doesn't report that correctly: see
+        // TODO-correctness: We should check their image source,
+        // but the inventory doesn't report that yet; see
         // <https://github.com/oxidecomputer/omicron/issues/8084>.
         let inventory_zones = self
             .inventory
             .all_omicron_zones()
-            .map(|z| (z.id, z))
-            .collect::<BTreeMap<_, _>>();
-        for sled_id in sleds.iter().cloned() {
+            .map(|z| z.id)
+            .collect::<BTreeSet<_>>();
+        for &sled_id in &sleds {
             if !self
                 .blueprint
                 .current_sled_zones(
                     sled_id,
                     BlueprintZoneDisposition::is_in_service,
                 )
-                .all(|zone| inventory_zones.contains_key(&zone.id))
+                .all(|zone| inventory_zones.contains(&zone.id))
             {
                 info!(
                     self.log, "zones not yet up-to-date";
@@ -917,19 +916,18 @@ impl<'a> Planner<'a> {
         let mut out_of_date_zones = sleds
             .into_iter()
             .flat_map(|sled_id| {
-                self.blueprint
+                let blueprint = &self.blueprint;
+                blueprint
                     .current_sled_zones(
                         sled_id,
                         BlueprintZoneDisposition::is_in_service,
                     )
-                    .filter_map(|zone| {
+                    .filter_map(move |zone| {
                         (zone.image_source
-                            != self
-                                .blueprint
+                            != blueprint
                                 .zone_image_source(zone.zone_type.kind()))
                         .then(|| (sled_id, zone.clone()))
                     })
-                    .collect::<Vec<_>>()
             })
             .collect::<Vec<(SledUuid, BlueprintZoneConfig)>>();
 
