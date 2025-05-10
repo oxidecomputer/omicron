@@ -4532,6 +4532,20 @@ pub(crate) mod test {
             example.system.to_collection_builder().unwrap().build();
     }
 
+    macro_rules! fake_zone_artifact {
+        ($kind: ident, $version: expr) => {
+            TufArtifactMeta {
+                id: ArtifactId {
+                    name: ZoneKind::$kind.artifact_name().to_string(),
+                    version: $version,
+                    kind: ArtifactKind::from_known(KnownArtifactKind::Zone),
+                },
+                hash: ArtifactHash([0; 32]),
+                size: 0,
+            }
+        };
+    }
+
     #[test]
     fn test_update_crucible_pantry() {
         static TEST_NAME: &str = "update_crucible_pantry";
@@ -4616,24 +4630,8 @@ pub(crate) mod test {
             hash: fake_hash,
         };
         let artifacts = vec![
-            TufArtifactMeta {
-                id: ArtifactId {
-                    name: String::from("crucible-pantry-zone"),
-                    version: version.clone(),
-                    kind: ArtifactKind::from_known(KnownArtifactKind::Zone),
-                },
-                hash: fake_hash,
-                size: 0,
-            },
-            TufArtifactMeta {
-                id: ArtifactId {
-                    name: String::from("nexus"),
-                    version: version.clone(),
-                    kind: ArtifactKind::from_known(KnownArtifactKind::Zone),
-                },
-                hash: fake_hash,
-                size: 0,
-            },
+            fake_zone_artifact!(CruciblePantry, version.clone()),
+            fake_zone_artifact!(Nexus, version.clone()),
         ];
         input_builder.policy_mut().tuf_repo = Some(TufRepoDescription {
             repo: TufRepoMeta {
@@ -4845,19 +4843,6 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        macro_rules! zone_artifact {
-            ($name:expr) => {
-                TufArtifactMeta {
-                    id: ArtifactId {
-                        name: String::from($name),
-                        version: version.clone(),
-                        kind: ArtifactKind::from_known(KnownArtifactKind::Zone),
-                    },
-                    hash: fake_hash,
-                    size: 0,
-                }
-            };
-        }
         let tuf_repo = TufRepoDescription {
             repo: TufRepoMeta {
                 hash: fake_hash,
@@ -4867,17 +4852,18 @@ pub(crate) mod test {
                 file_name: String::from(""),
             },
             artifacts: vec![
-                zone_artifact!("ntp"),
-                zone_artifact!("clickhouse"),
-                zone_artifact!("clickhouse_keeper"),
-                zone_artifact!("cockroachdb"),
-                zone_artifact!("crucible-zone"),
-                zone_artifact!("crucible-pantry-zone"),
-                zone_artifact!("external-dns"),
-                zone_artifact!("internal-dns"),
-                zone_artifact!("ntp"),
-                zone_artifact!("nexus"),
-                zone_artifact!("oximeter"),
+                fake_zone_artifact!(BoundaryNtp, version.clone()),
+                fake_zone_artifact!(Clickhouse, version.clone()),
+                fake_zone_artifact!(ClickhouseKeeper, version.clone()),
+                fake_zone_artifact!(ClickhouseServer, version.clone()),
+                fake_zone_artifact!(CockroachDb, version.clone()),
+                fake_zone_artifact!(Crucible, version.clone()),
+                fake_zone_artifact!(CruciblePantry, version.clone()),
+                fake_zone_artifact!(ExternalDns, version.clone()),
+                fake_zone_artifact!(InternalDns, version.clone()),
+                fake_zone_artifact!(InternalNtp, version.clone()),
+                fake_zone_artifact!(Nexus, version.clone()),
+                fake_zone_artifact!(Oximeter, version.clone()),
             ],
         };
         input_builder.policy_mut().tuf_repo = Some(tuf_repo);
