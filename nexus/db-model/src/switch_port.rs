@@ -407,21 +407,6 @@ impl SwitchPortLinkConfig {
     }
 }
 
-impl Into<external::SwitchPortLinkConfig> for SwitchPortLinkConfig {
-    fn into(self) -> external::SwitchPortLinkConfig {
-        external::SwitchPortLinkConfig {
-            port_settings_id: self.port_settings_id,
-            lldp_link_config_id: self.lldp_link_config_id,
-            tx_eq_config_id: self.tx_eq_config_id,
-            link_name: self.link_name.clone(),
-            mtu: self.mtu.into(),
-            fec: self.fec.map(|fec| fec.into()),
-            speed: self.speed.into(),
-            autoneg: self.autoneg,
-        }
-    }
-}
-
 #[derive(
     Queryable,
     Insertable,
@@ -625,7 +610,7 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
             port_settings_id: self.port_settings_id,
             interface_name: self.interface_name.clone(),
             dst: self.dst.into(),
-            gw: self.gw.into(),
+            gw: self.gw.ip(),
             vlan_id: self.vid.map(Into::into),
             rib_priority: self.rib_priority.map(Into::into),
         }

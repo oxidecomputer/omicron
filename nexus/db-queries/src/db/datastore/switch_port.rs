@@ -12,11 +12,11 @@ use crate::db::datastore::address_lot::{
     ReserveBlockError, ReserveBlockTxnError,
 };
 use crate::db::model::{
-    LldpLinkConfig, Name, SwitchInterfaceConfig, SwitchPort,
-    SwitchPortAddressConfig, SwitchPortBgpPeerConfig, SwitchPortConfig,
-    SwitchPortLinkConfig, SwitchPortRouteConfig, SwitchPortSettings,
-    SwitchPortSettingsGroup, SwitchPortSettingsGroups,
-    SwitchVlanInterfaceConfig, TxEqConfig,
+    LldpLinkConfig, Name, SwitchInterfaceConfig, SwitchLinkFec,
+    SwitchLinkSpeed, SwitchPort, SwitchPortAddressConfig,
+    SwitchPortBgpPeerConfig, SwitchPortConfig, SwitchPortLinkConfig,
+    SwitchPortRouteConfig, SwitchPortSettings, SwitchPortSettingsGroup,
+    SwitchPortSettingsGroups, SwitchVlanInterfaceConfig, TxEqConfig,
 };
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
@@ -30,15 +30,17 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::{
-    BgpConfig, SqlU8, SqlU16, SqlU32, SwitchPortBgpPeerConfigAllowExport,
-    SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
+    AddressLot, BgpConfig, SqlU8, SqlU16, SqlU32,
+    SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,
+    SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::params;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error,
     ImportExportPolicy, ListResultVec, LookupResult, NameOrId, ResourceType,
-    UpdateResult,
+    SwitchPortAddressView, UpdateResult,
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
@@ -99,14 +101,14 @@ pub struct SwitchPortSettingsCombinedResult {
     pub settings: SwitchPortSettings,
     pub groups: Vec<SwitchPortSettingsGroups>,
     pub port: SwitchPortConfig,
-    pub links: Vec<SwitchPortLinkConfig>,
+    pub links: Vec<LinkConfigCombinedResult>,
     pub link_lldp: Vec<LldpLinkConfig>,
-    pub tx_eq: Vec<Option<TxEqConfig>>,
+    pub tx_eq: Vec<TxEqConfig>,
     pub interfaces: Vec<SwitchInterfaceConfig>,
     pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
     pub routes: Vec<SwitchPortRouteConfig>,
     pub bgp_peers: Vec<BgpPeerConfig>,
-    pub addresses: Vec<SwitchPortAddressConfig>,
+    pub addresses: Vec<SwitchPortAddressView>,
 }
 
 impl SwitchPortSettingsCombinedResult {
@@ -136,12 +138,6 @@ impl Into<external::SwitchPortSettingsView>
             port: self.port.into(),
             groups: self.groups.into_iter().map(Into::into).collect(),
             links: self.links.into_iter().map(Into::into).collect(),
-            link_lldp: self.link_lldp.into_iter().map(Into::into).collect(),
-            tx_eq: self
-                .tx_eq
-                .into_iter()
-                .map(|t| if let Some(t) = t { Some(t.into()) } else { None })
-                .collect(),
             interfaces: self.interfaces.into_iter().map(Into::into).collect(),
             vlan_interfaces: self
                 .vlan_interfaces
@@ -150,7 +146,7 @@ impl Into<external::SwitchPortSettingsView>
                 .collect(),
             routes: self.routes.into_iter().map(Into::into).collect(),
             bgp_peers: self.bgp_peers.into_iter().map(Into::into).collect(),
-            addresses: self.addresses.into_iter().map(Into::into).collect(),
+            addresses: self.addresses,
         }
     }
 }
@@ -159,6 +155,33 @@ impl Into<external::SwitchPortSettingsView>
 pub struct SwitchPortSettingsGroupCreateResult {
     pub group: SwitchPortSettingsGroup,
     pub settings: SwitchPortSettingsCombinedResult,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct LinkConfigCombinedResult {
+    pub port_settings_id: Uuid,
+    pub link_name: String,
+    pub mtu: SqlU16,
+    pub fec: Option<SwitchLinkFec>,
+    pub speed: SwitchLinkSpeed,
+    pub autoneg: bool,
+    pub lldp_link_config: Option<LldpLinkConfig>,
+    pub tx_eq_config: Option<TxEqConfig>,
+}
+
+impl From<LinkConfigCombinedResult> for external::SwitchPortLinkConfig {
+    fn from(value: LinkConfigCombinedResult) -> Self {
+        Self {
+            port_settings_id: value.port_settings_id,
+            link_name: value.link_name,
+            mtu: *value.mtu,
+            fec: value.fec.map(Into::into),
+            speed: value.speed.into(),
+            autoneg: value.autoneg,
+            lldp_link_config: value.lldp_link_config.map(Into::into),
+            tx_eq_config: value.tx_eq_config.map(Into::into),
+        }
+    }
 }
 
 impl DataStore {
@@ -468,16 +491,47 @@ impl DataStore {
                     self as link_config, dsl as link_config_dsl,
                 };
 
-                result.links = link_config_dsl::switch_port_settings_link_config
+                let link_configs = link_config_dsl::switch_port_settings_link_config
                     .filter(link_config::port_settings_id.eq(id))
                     .select(SwitchPortLinkConfig::as_select())
                     .load_async::<SwitchPortLinkConfig>(&conn)
                     .await?;
 
+                result.links = link_configs
+                    .into_iter()
+                    .map(|config| {
+                        let lldp_link_config = match config.lldp_link_config_id {
+                            Some(id) => result.link_lldp.iter().find(|c| c.id == id),
+                            None => None,
+                        }
+                        .cloned();
+
+                        let tx_eq_config = match config.tx_eq_config_id {
+                            Some(id) => result.tx_eq.iter().find(|c| c.id == id),
+                            None => None,
+                        }
+                        .cloned();
+
+                        LinkConfigCombinedResult {
+                            port_settings_id: config.port_settings_id,
+                            link_name: config.link_name,
+                            mtu: config.mtu,
+                            fec: config.fec,
+                            speed: config.speed,
+                            autoneg: config.autoneg,
+                            lldp_link_config,
+                            tx_eq_config,
+                        }
+                    })
+                    .collect();
+
                 let lldp_link_ids: Vec<Uuid> = result
                     .links
                     .iter()
-                    .filter_map(|link| link.lldp_link_config_id)
+                    .filter_map(|link| match &link.lldp_link_config {
+                        Some(config) => Some(config.id),
+                        None => None,
+                    })
                     .collect();
 
                 use nexus_db_schema::schema::lldp_link_config;
@@ -491,11 +545,15 @@ impl DataStore {
                 let tx_eq_ids_and_nulls :Vec<Option<Uuid>>= result
                     .links
                     .iter()
-                    .map(|link| link.tx_eq_config_id)
+                    .map(|link| match &link.tx_eq_config {
+                        Some(config) => Some(config.id),
+                        None => None,
+                    })
                     .collect();
+
                 let tx_eq_ids: Vec<Uuid> = tx_eq_ids_and_nulls
                     .iter()
-		    .cloned()
+                    .cloned()
                     .flatten()
                     .collect();
 
@@ -506,12 +564,15 @@ impl DataStore {
                     .limit(1)
                     .load_async::<TxEqConfig>(&conn)
                     .await?;
-		    result.tx_eq = tx_eq_ids_and_nulls.iter().map(|x|
-			    if let Some(id) = x {
-				    configs.iter().find(|c| c.id == *id).cloned()
-			    } else {
-				    None
-			    }).collect();
+                    result.tx_eq = tx_eq_ids_and_nulls
+                        .iter()
+                        .filter_map(|x|
+                                    if let Some(id) = x {
+                                        configs.iter().find(|c| c.id == *id).cloned()}
+                                    else {
+                                        None
+                                    })
+                        .collect();
 
                 // get the interface configs
                 use nexus_db_schema::schema::switch_port_settings_interface_config::{
@@ -640,12 +701,13 @@ impl DataStore {
                     self as address_config, dsl as address_config_dsl,
                 };
 
-                result.addresses =
-                    address_config_dsl::switch_port_settings_address_config
+                let addresses = address_config_dsl::switch_port_settings_address_config
                         .filter(address_config::port_settings_id.eq(id))
                         .select(SwitchPortAddressConfig::as_select())
                         .load_async::<SwitchPortAddressConfig>(&conn)
                         .await?;
+
+                result.addresses = switch_port_address_view(&conn, addresses).await?;
 
                 Ok(result)
             }
@@ -1211,7 +1273,7 @@ async fn do_switch_port_settings_create(
     let mut link_config = Vec::with_capacity(params.links.len());
     let mut tx_eq_config = Vec::with_capacity(params.links.len());
 
-    for (link_name, c) in &params.links {
+    for c in &params.links {
         let lldp_link_config = LldpLinkConfig::new(
             c.lldp.enabled,
             c.lldp.link_name.clone(),
@@ -1229,19 +1291,16 @@ async fn do_switch_port_settings_create(
                 let config =
                     TxEqConfig::new(t.pre1, t.pre2, t.main, t.post2, t.post1);
                 let tx_eq_config_id = config.id;
-                tx_eq_config.push(Some(config));
+                tx_eq_config.push(config);
                 Some(tx_eq_config_id)
             }
-            _ => {
-                tx_eq_config.push(None);
-                None
-            }
+            _ => None,
         };
 
         link_config.push(SwitchPortLinkConfig::new(
             psid,
             lldp_config_id,
-            link_name.clone(),
+            c.link_name.to_string(),
             c.mtu,
             c.fec.map(|fec| fec.into()),
             c.speed.into(),
@@ -1256,29 +1315,54 @@ async fn do_switch_port_settings_create(
             .get_results_async(conn)
             .await?;
 
-    // We want to insert the Some(config) values into the table, but preserve the
-    // full vector of None/Some values.
-    let v: Vec<TxEqConfig> = tx_eq_config.iter().flatten().cloned().collect();
     let _ = diesel::insert_into(tx_eq_config_dsl::tx_eq_config)
-        .values(v)
+        .values(tx_eq_config.clone())
         .returning(TxEqConfig::as_returning())
         .get_results_async(conn)
         .await?;
     result.tx_eq = tx_eq_config;
 
-    result.links =
+    let link_configs =
         diesel::insert_into(link_config_dsl::switch_port_settings_link_config)
             .values(link_config)
             .returning(SwitchPortLinkConfig::as_returning())
             .get_results_async(conn)
             .await?;
 
+    result.links = link_configs
+        .into_iter()
+        .map(|config| {
+            let lldp_link_config = match config.lldp_link_config_id {
+                Some(id) => result.link_lldp.iter().find(|c| c.id == id),
+                None => None,
+            }
+            .cloned();
+
+            let tx_eq_config = match config.tx_eq_config_id {
+                Some(id) => result.tx_eq.iter().find(|c| c.id == id),
+                None => None,
+            }
+            .cloned();
+
+            LinkConfigCombinedResult {
+                port_settings_id: config.port_settings_id,
+                link_name: config.link_name,
+                mtu: config.mtu,
+                fec: config.fec,
+                speed: config.speed,
+                autoneg: config.autoneg,
+                lldp_link_config,
+                tx_eq_config,
+            }
+        })
+        .collect();
+
     let mut interface_config = Vec::with_capacity(params.interfaces.len());
     let mut vlan_interface_config = Vec::new();
-    for (interface_name, i) in &params.interfaces {
+    for i in &params.interfaces {
         let ifx_config = SwitchInterfaceConfig::new(
             psid,
-            interface_name.clone(),
+            i.link_name.to_string(),
             i.v6_enabled,
             i.kind.into(),
         );
@@ -1306,11 +1390,11 @@ async fn do_switch_port_settings_create(
 
     let mut route_config = Vec::with_capacity(params.routes.len());
 
-    for (interface_name, r) in &params.routes {
+    for r in &params.routes {
         for route in &r.routes {
             route_config.push(SwitchPortRouteConfig::new(
                 psid,
-                interface_name.clone(),
+                r.link_name.to_string(),
                 route.dst.into(),
                 route.gw.into(),
                 route.vid.map(Into::into),
@@ -1330,7 +1414,7 @@ async fn do_switch_port_settings_create(
         BTreeMap::new();
 
     let mut bgp_peer_config = Vec::new();
-    for (interface_name, peer_config) in &params.bgp_peers {
+    for peer_config in &params.bgp_peers {
         for p in &peer_config.peers {
             peer_by_addr.insert(p.addr, &p);
             use nexus_db_schema::schema::bgp_config;
@@ -1373,7 +1457,7 @@ async fn do_switch_port_settings_create(
                     .into_iter()
                     .map(|x| SwitchPortBgpPeerConfigAllowImport {
                         port_settings_id: id,
-                        interface_name: interface_name.clone(),
+                        interface_name: peer_config.link_name.to_string(),
                         addr: p.addr.into(),
                         prefix: x.into(),
                     })
@@ -1392,7 +1476,7 @@ async fn do_switch_port_settings_create(
                     .into_iter()
                     .map(|x| SwitchPortBgpPeerConfigAllowExport {
                         port_settings_id: id,
-                        interface_name: interface_name.clone(),
+                        interface_name: peer_config.link_name.to_string(),
                         addr: p.addr.into(),
                         prefix: x.into(),
                     })
@@ -1412,7 +1496,7 @@ async fn do_switch_port_settings_create(
                     .into_iter()
                     .map(|x| SwitchPortBgpPeerConfigCommunity {
                         port_settings_id: id,
-                        interface_name: interface_name.clone(),
+                        interface_name: peer_config.link_name.to_string(),
                         addr: p.addr.into(),
                         community: x.into(),
                     })
@@ -1427,7 +1511,7 @@ async fn do_switch_port_settings_create(
             bgp_peer_config.push(SwitchPortBgpPeerConfig::new(
                 psid,
                 bgp_config_id,
-                interface_name.clone(),
+                peer_config.link_name.to_string(),
                 p,
             ));
         }
@@ -1479,7 +1563,7 @@ async fn do_switch_port_settings_create(
 
     let mut address_config = Vec::new();
     use nexus_db_schema::schema::address_lot;
-    for (interface_name, a) in &params.addresses {
+    for a in &params.addresses {
         for address in &a.addresses {
             let address_lot_id = match &address.address_lot {
                 NameOrId::Id(id) => address_lot::table
@@ -1536,18 +1620,54 @@ async fn do_switch_port_settings_create(
                 block.id,
                 rsvd_block.id,
                 address.address.into(),
-                interface_name.clone(),
+                a.link_name.to_string(),
                 address.vlan_id,
             ));
         }
     }
-    result.addresses = diesel::insert_into(
+    let addresses = diesel::insert_into(
         address_config_dsl::switch_port_settings_address_config,
     )
     .values(address_config)
     .returning(SwitchPortAddressConfig::as_returning())
     .get_results_async(conn)
     .await?;
+
+    result.addresses = switch_port_address_view(conn, addresses).await?;
+
+    Ok(result)
+}
+
+async fn switch_port_address_view(
+    conn: &Connection<DTraceConnection<PgConnection>>,
+    addresses: Vec<SwitchPortAddressConfig>,
+) -> Result<Vec<SwitchPortAddressView>, diesel::result::Error> {
+    use nexus_db_schema::schema::{address_lot, address_lot_block};
+
+    let mut result = vec![];
+
+    for address in addresses {
+        let lot = address_lot::table
+            .inner_join(
+                address_lot_block::table
+                    .on(address_lot_block::address_lot_id.eq(address_lot::id)),
+            )
+            .filter(address_lot_block::id.eq(address.address_lot_block_id))
+            .select(AddressLot::as_select())
+            .limit(1)
+            .first_async::<AddressLot>(conn)
+            .await?;
+
+        result.push(SwitchPortAddressView {
+            port_settings_id: address.port_settings_id,
+            address_lot_id: lot.id(),
+            address_lot_name: lot.name().clone(),
+            address_lot_block_id: address.address_lot_block_id,
+            address: address.address.into(),
+            vlan_id: address.vlan_id.map(Into::into),
+            interface_name: address.interface_name,
+        })
+    }
 
     Ok(result)
 }
@@ -1752,7 +1872,7 @@ mod test {
         NameOrId,
     };
     use omicron_test_utils::dev;
-    use std::collections::HashMap;
+    use std::str::FromStr;
     use uuid::Uuid;
 
     #[tokio::test]
@@ -1806,37 +1926,36 @@ mod test {
                 geometry: SwitchPortGeometry::Qsfp28x1,
             },
             groups: Vec::new(),
-            links: HashMap::new(),
-            interfaces: HashMap::new(),
-            routes: HashMap::new(),
-            bgp_peers: HashMap::from([(
-                "phy0".into(),
-                BgpPeerConfig {
-                    peers: vec![BgpPeer {
-                        bgp_config: NameOrId::Name(
-                            "test-bgp-config".parse().unwrap(),
-                        ),
-                        interface_name: "qsfp0".into(),
-                        addr: "192.168.1.1".parse().unwrap(),
-                        hold_time: 0,
-                        idle_hold_time: 0,
-                        delay_open: 0,
-                        connect_retry: 0,
-                        keepalive: 0,
-                        remote_asn: None,
-                        min_ttl: None,
-                        md5_auth_key: None,
-                        multi_exit_discriminator: None,
-                        communities: Vec::new(),
-                        local_pref: None,
-                        enforce_first_as: false,
-                        allowed_export: ImportExportPolicy::NoFiltering,
-                        allowed_import: ImportExportPolicy::NoFiltering,
-                        vlan_id: None,
-                    }],
-                },
-            )]),
-            addresses: HashMap::new(),
+            links: vec![],
+            interfaces: vec![],
+            routes: vec![],
+            bgp_peers: vec![BgpPeerConfig {
+                link_name: Name::from_str("phy0")
+                    .expect("phy0 should be a valid link name"),
+                peers: vec![BgpPeer {
+                    bgp_config: NameOrId::Name(
+                        "test-bgp-config".parse().unwrap(),
+                    ),
+                    interface_name: "qsfp0".into(),
+                    addr: "192.168.1.1".parse().unwrap(),
+                    hold_time: 0,
+                    idle_hold_time: 0,
+                    delay_open: 0,
+                    connect_retry: 0,
+                    keepalive: 0,
+                    remote_asn: None,
+                    min_ttl: None,
+                    md5_auth_key: None,
+                    multi_exit_discriminator: None,
+                    communities: Vec::new(),
+                    local_pref: None,
+                    enforce_first_as: false,
+                    allowed_export: ImportExportPolicy::NoFiltering,
+                    allowed_import: ImportExportPolicy::NoFiltering,
+                    vlan_id: None,
+                }],
+            }],
+            addresses: vec![],
         };
 
         let settings_result = datastore
