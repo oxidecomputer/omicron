@@ -1152,6 +1152,13 @@ impl QueryFragment<Pg> for InsertQuery {
         out.push_identifier(dsl::parent_id::NAME)?;
         out.push_sql(", ");
 
+        out.push_bind_param::<sql_types::Array<sql_types::Inet>, Vec<IpNetwork>>(
+            &self.interface.transit_ips,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::transit_ips::NAME)?;
+        out.push_sql(", ");
+
         // Helper function to push a subquery selecting something from the CTE.
         fn select_from_cte(
             mut out: AstPass<Pg>,
@@ -1244,6 +1251,8 @@ impl QueryFragment<Pg> for InsertQueryValues {
         out.push_identifier(dsl::kind::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::parent_id::NAME)?;
+        out.push_sql(", ");
+        out.push_identifier(dsl::transit_ips::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::vpc_id::NAME)?;
         out.push_sql(", ");
@@ -2170,6 +2179,7 @@ mod tests {
                 name: "interface-a".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             Some(requested_ip),
         )
         .unwrap();
@@ -2199,6 +2209,7 @@ mod tests {
                 name: "interface-a".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             Some(requested_ip),
         )
         .unwrap();
@@ -2231,6 +2242,7 @@ mod tests {
                 name: "interface-b".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             None,
         )
         .unwrap();
@@ -2269,6 +2281,7 @@ mod tests {
                     name: format!("interface-{}", i).parse().unwrap(),
                     description: String::from("description"),
                 },
+                vec![],
                 None,
             )
             .unwrap();
@@ -2313,6 +2326,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             None,
         )
         .unwrap();
@@ -2332,6 +2346,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             Some(inserted_interface.ip.ip()),
         )
         .unwrap();
@@ -2580,6 +2595,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             None,
         )
         .unwrap();
@@ -2599,6 +2615,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             None,
         )
         .unwrap();
@@ -2630,6 +2647,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             None,
         )
         .unwrap();
@@ -2646,6 +2664,7 @@ mod tests {
                 name: "interface-d".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             None,
         )
         .unwrap();
@@ -2674,6 +2693,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             None,
         )
         .unwrap();
@@ -2716,6 +2736,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             None,
         )
         .unwrap();
@@ -2734,6 +2755,7 @@ mod tests {
                     name: "interface-a".parse().unwrap(),
                     description: String::from("description"),
                 },
+                vec![],
                 addr,
             )
             .unwrap();
@@ -2773,6 +2795,7 @@ mod tests {
                     name: "interface-c".parse().unwrap(),
                     description: String::from("description"),
                 },
+                vec![],
                 None,
             )
             .unwrap();
@@ -2802,6 +2825,7 @@ mod tests {
                 name: "interface-d".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             None,
         )
         .unwrap();
@@ -2835,6 +2859,7 @@ mod tests {
                     name: format!("if{}", i).parse().unwrap(),
                     description: String::from("description"),
                 },
+                vec![],
                 None,
             )
             .unwrap();
@@ -2903,6 +2928,7 @@ mod tests {
                     name: format!("interface-{}", slot).parse().unwrap(),
                     description: String::from("description"),
                 },
+                vec![],
                 None,
             )
             .unwrap();
@@ -2938,6 +2964,7 @@ mod tests {
                 name: "interface-8".parse().unwrap(),
                 description: String::from("description"),
             },
+            vec![],
             None,
         )
         .unwrap();
