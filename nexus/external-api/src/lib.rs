@@ -498,7 +498,7 @@ pub trait NexusExternalApi {
     async fn saml_identity_provider_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ProviderPath>,
-        query_params: Query<params::SiloSelector>,
+        query_params: Query<params::OptionalSiloSelector>,
     ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError>;
 
     // TODO: no DELETE for identity providers?
