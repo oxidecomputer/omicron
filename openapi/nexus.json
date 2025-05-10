@@ -7523,7 +7523,6 @@
             "in": "query",
             "name": "silo",
             "description": "Name or ID of the silo",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
