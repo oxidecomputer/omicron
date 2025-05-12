@@ -7,6 +7,7 @@
 //! There is no separate tokio task here; our parent reconciler task owns this
 //! set of disks and is able to mutate it in place during reconciliation.
 
+use futures::future;
 use id_map::IdMap;
 use id_map::IdMappable;
 use illumos_utils::zpool::ZpoolName;
@@ -273,6 +274,12 @@ impl ExternalDisks {
         log: &Logger,
         disk_adopter: &T,
     ) {
+        // Loop over all the disks in `config`, and collect for each either a
+        // future to ensure we're managing the disk (the common case) or an
+        // error (if we know we can't manage it based on just our inputs alone).
+        let mut try_ensure_managed_futures = Vec::new();
+        let mut failed_disk_states = Vec::new();
+
         for config in config.iter().cloned() {
             // We can only manage disks if the raw disk is present.
             let Some(raw_disk) = raw_disks.get(&config.identity) else {
@@ -282,7 +289,7 @@ impl ExternalDisks {
                     "disk_identity" => ?&config.identity
                 );
                 let err = DiskManagementError::NotFound;
-                self.disks.insert(ExternalDiskState::failed(config, err));
+                failed_disk_states.push(ExternalDiskState::failed(config, err));
                 continue;
             };
 
@@ -299,24 +306,30 @@ impl ExternalDisks {
                         DiskManagementError::InternalDiskControlPlaneRequest(
                             config.id,
                         );
-                    self.disks.insert(ExternalDiskState::failed(config, err));
+                    failed_disk_states
+                        .push(ExternalDiskState::failed(config, err));
                     continue;
                 }
             }
 
-            // Take ownership of our current disk state (if we have one), then
-            // immediately put back the new state.
-            let maybe_current = self.disks.remove(&config.id);
-            self.disks.insert(
-                self.try_ensure_disk_managed(
-                    maybe_current,
-                    config,
-                    raw_disk,
-                    disk_adopter,
-                    log,
-                )
-                .await,
-            );
+            try_ensure_managed_futures.push(self.try_ensure_disk_managed(
+                self.disks.get(&config.id),
+                config,
+                raw_disk,
+                disk_adopter,
+                log,
+            ));
+        }
+
+        // Run all the disk management futures concurrently...
+        let disk_states = future::join_all(try_ensure_managed_futures).await;
+
+        // Then record the new states for each disk in `config`.
+        for disk_state in disk_states {
+            self.disks.insert(disk_state);
+        }
+        for disk_state in failed_disk_states {
+            self.disks.insert(disk_state);
         }
 
         self.update_currently_managed_zpools();
@@ -324,13 +337,13 @@ impl ExternalDisks {
 
     async fn try_ensure_disk_managed<T: DiskAdopter>(
         &self,
-        current: Option<ExternalDiskState>,
+        current: Option<&ExternalDiskState>,
         config: OmicronPhysicalDiskConfig,
         raw_disk: &RawDisk,
         disk_adopter: &T,
         log: &Logger,
     ) -> ExternalDiskState {
-        match current.map(|d| d.state) {
+        match current.map(|d| &d.state) {
             // If we're already managing this disk, check whether there are any
             // new properties to update.
             Some(DiskState::Managed(disk)) => {
@@ -370,7 +383,7 @@ impl ExternalDisks {
 
     fn update_disk_properties(
         &self,
-        disk: Disk,
+        disk: &Disk,
         config: OmicronPhysicalDiskConfig,
         raw_disk: &RawDisk,
         log: &Logger,
@@ -396,7 +409,7 @@ impl ExternalDisks {
         // changes were actually made.
         let disk = match update_properties_from_raw_disk(disk, raw_disk, log) {
             MaybeUpdatedDisk::Updated(disk) => disk,
-            MaybeUpdatedDisk::Unchanged(disk) => disk,
+            MaybeUpdatedDisk::Unchanged => disk.clone(),
         };
 
         ExternalDiskState::managed(config, disk)

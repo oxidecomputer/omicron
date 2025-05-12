@@ -11,22 +11,23 @@ use slog::info;
 use slog::warn;
 
 pub(crate) enum MaybeUpdatedDisk {
+    Unchanged,
     Updated(Disk),
-    Unchanged(Disk),
 }
 
 pub(crate) fn update_properties_from_raw_disk(
-    mut disk: Disk,
+    disk: &Disk,
     raw_disk: &RawDisk,
     log: &Logger,
 ) -> MaybeUpdatedDisk {
     if *raw_disk == RawDisk::from(disk.clone()) {
-        return MaybeUpdatedDisk::Unchanged(disk);
+        return MaybeUpdatedDisk::Unchanged;
     }
 
     // The only property we expect to change is the firmware metadata. Update
     // that and check again; if they're still not equal, something weird is
     // going on. At least log a warning.
+    let mut disk = disk.clone();
     disk.update_firmware_metadata(raw_disk);
     if *raw_disk == RawDisk::from(disk.clone()) {
         info!(

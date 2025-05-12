@@ -731,7 +731,7 @@ impl InternalDisksTask {
                     .get(raw_disk.identity())
                     .expect("disk should still be present");
                 match update_properties_from_raw_disk(
-                    existing_disk.disk.clone(),
+                    &existing_disk.disk,
                     &raw_disk,
                     &self.log,
                 ) {
@@ -739,7 +739,7 @@ impl InternalDisksTask {
                         disks.insert(InternalDisk::from(new_disk));
                         changed = true;
                     }
-                    MaybeUpdatedDisk::Unchanged(_) => (),
+                    MaybeUpdatedDisk::Unchanged => (),
                 }
             }
 
