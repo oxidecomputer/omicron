@@ -1740,6 +1740,7 @@ pub struct SwitchPortSettingsCreate {
 
     pub port_config: SwitchPortConfigCreate,
 
+    #[serde(default)]
     pub groups: Vec<NameOrId>,
 
     /// Links indexed by phy name. On ports that are not broken out, this is
@@ -1748,12 +1749,15 @@ pub struct SwitchPortSettingsCreate {
     pub links: Vec<LinkConfigCreate>,
 
     /// Interfaces indexed by link name.
+    #[serde(default)]
     pub interfaces: Vec<SwitchInterfaceConfigCreate>,
 
     /// Routes indexed by interface name.
+    #[serde(default)]
     pub routes: Vec<RouteConfig>,
 
     /// BGP peers indexed by interface name.
+    #[serde(default)]
     pub bgp_peers: Vec<BgpPeerConfig>,
 
     /// Addresses indexed by interface name.

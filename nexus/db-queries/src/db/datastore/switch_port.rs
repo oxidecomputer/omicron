@@ -497,41 +497,9 @@ impl DataStore {
                     .load_async::<SwitchPortLinkConfig>(&conn)
                     .await?;
 
-                result.links = link_configs
-                    .into_iter()
-                    .map(|config| {
-                        let lldp_link_config = match config.lldp_link_config_id {
-                            Some(id) => result.link_lldp.iter().find(|c| c.id == id),
-                            None => None,
-                        }
-                        .cloned();
-
-                        let tx_eq_config = match config.tx_eq_config_id {
-                            Some(id) => result.tx_eq.iter().find(|c| c.id == id),
-                            None => None,
-                        }
-                        .cloned();
-
-                        LinkConfigCombinedResult {
-                            port_settings_id: config.port_settings_id,
-                            link_name: config.link_name,
-                            mtu: config.mtu,
-                            fec: config.fec,
-                            speed: config.speed,
-                            autoneg: config.autoneg,
-                            lldp_link_config,
-                            tx_eq_config,
-                        }
-                    })
-                    .collect();
-
-                let lldp_link_ids: Vec<Uuid> = result
-                    .links
+                let lldp_link_ids: Vec<Uuid> = link_configs
                     .iter()
-                    .filter_map(|link| match &link.lldp_link_config {
-                        Some(config) => Some(config.id),
-                        None => None,
-                    })
+                    .filter_map(|link| link.lldp_link_config_id)
                     .collect();
 
                 use nexus_db_schema::schema::lldp_link_config;
@@ -542,13 +510,9 @@ impl DataStore {
                     .load_async::<LldpLinkConfig>(&conn)
                     .await?;
 
-                let tx_eq_ids_and_nulls :Vec<Option<Uuid>>= result
-                    .links
+                let tx_eq_ids_and_nulls :Vec<Option<Uuid>>= link_configs
                     .iter()
-                    .map(|link| match &link.tx_eq_config {
-                        Some(config) => Some(config.id),
-                        None => None,
-                    })
+                    .map(|link| link.tx_eq_config_id )
                     .collect();
 
                 let tx_eq_ids: Vec<Uuid> = tx_eq_ids_and_nulls
@@ -573,6 +537,34 @@ impl DataStore {
                                         None
                                     })
                         .collect();
+
+                result.links = link_configs
+                    .into_iter()
+                    .map(|config| {
+                        let lldp_link_config = match config.lldp_link_config_id {
+                            Some(id) => result.link_lldp.iter().find(|c| c.id == id),
+                            None => None,
+                        }
+                        .cloned();
+
+                        let tx_eq_config = match config.tx_eq_config_id {
+                            Some(id) => configs.iter().find(|c| c.id == id),
+                            None => None,
+                        }
+                        .cloned();
+
+                        LinkConfigCombinedResult {
+                            port_settings_id: config.port_settings_id,
+                            link_name: config.link_name,
+                            mtu: config.mtu,
+                            fec: config.fec,
+                            speed: config.speed,
+                            autoneg: config.autoneg,
+                            lldp_link_config,
+                            tx_eq_config,
+                        }
+                    })
+                    .collect();
 
                 // get the interface configs
                 use nexus_db_schema::schema::switch_port_settings_interface_config::{

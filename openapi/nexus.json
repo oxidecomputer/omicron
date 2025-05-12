@@ -22964,6 +22964,7 @@
           },
           "bgp_peers": {
             "description": "BGP peers indexed by interface name.",
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BgpPeerConfig"
@@ -22973,6 +22974,7 @@
             "type": "string"
           },
           "groups": {
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NameOrId"
@@ -22980,6 +22982,7 @@
           },
           "interfaces": {
             "description": "Interfaces indexed by link name.",
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SwitchInterfaceConfigCreate"
@@ -23000,6 +23003,7 @@
           },
           "routes": {
             "description": "Routes indexed by interface name.",
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/RouteConfig"
@@ -23008,14 +23012,10 @@
         },
         "required": [
           "addresses",
-          "bgp_peers",
           "description",
-          "groups",
-          "interfaces",
           "links",
           "name",
-          "port_config",
-          "routes"
+          "port_config"
         ]
       },
       "SwitchPortSettingsGroups": {
