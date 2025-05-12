@@ -45,6 +45,8 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::sync::watch::error::RecvError;
 
+use crate::disks_common::MaybeUpdatedDisk;
+use crate::disks_common::update_properties_from_raw_disk;
 use crate::raw_disks::RawDiskWithId;
 
 /// A thin wrapper around a [`watch::Receiver`] that presents a similar API.
@@ -728,36 +730,16 @@ impl InternalDisksTask {
                 let existing_disk = disks
                     .get(raw_disk.identity())
                     .expect("disk should still be present");
-                let existing_raw_disk =
-                    RawDisk::from(existing_disk.disk.clone());
-
-                if *raw_disk != existing_raw_disk {
-                    // The only property we expect to change is the firmware
-                    // metadata. Update that and check again; if they're still
-                    // not equal, something weird is going on. At least log a
-                    // warning.
-                    let mut updated_disk = existing_disk.clone();
-                    updated_disk.disk.update_firmware_metadata(&raw_disk);
-
-                    if *raw_disk == RawDisk::from(updated_disk.disk.clone()) {
-                        info!(
-                            self.log, "Updated disk firmware metadata";
-                            "old" => ?updated_disk.firmware(),
-                            "new" => ?raw_disk.firmware(),
-                            "identity" => ?updated_disk.id(),
-                        );
-                    } else {
-                        warn!(
-                            self.log,
-                            "Updated disk firmware metadata, \
-                             but other disk properties are different!";
-                            "old" => ?existing_raw_disk,
-                            "new" => ?*raw_disk,
-                        );
+                match update_properties_from_raw_disk(
+                    &existing_disk.disk,
+                    &raw_disk,
+                    &self.log,
+                ) {
+                    MaybeUpdatedDisk::Updated(new_disk) => {
+                        disks.insert(InternalDisk::from(new_disk));
+                        changed = true;
                     }
-
-                    disks.insert(updated_disk);
-                    changed = true;
+                    MaybeUpdatedDisk::Unchanged => (),
                 }
             }
 
