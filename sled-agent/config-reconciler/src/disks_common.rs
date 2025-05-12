@@ -10,6 +10,11 @@ use slog::Logger;
 use slog::info;
 use slog::warn;
 
+#[derive(Debug)]
+// `Disk` is ~200 bytes, but the callers wants ownership of them, so it'd be
+// annoying to box them. Suppress the clippy lint about the variants having
+// large size differences.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum MaybeUpdatedDisk {
     Unchanged,
     Updated(Disk),
