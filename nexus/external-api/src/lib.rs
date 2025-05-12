@@ -3690,7 +3690,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::WebhookReceiverSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
-    ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError>;
+    ) -> Result<HttpResponseCreated<views::WebhookSecret>, HttpError>;
 
     /// Remove secret from webhook receiver
     #[endpoint {

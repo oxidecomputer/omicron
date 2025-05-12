@@ -8089,7 +8089,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::WebhookReceiverSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
-    ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError> {
+    ) -> Result<HttpResponseCreated<views::WebhookSecret>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

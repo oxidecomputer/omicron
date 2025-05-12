@@ -1498,7 +1498,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             datasets.insert(BlueprintDatasetConfig {
                 disposition: BlueprintDatasetDisposition::InService,
                 id: d.id,
-                pool: d.name.pool().clone(),
+                pool: *d.name.pool(),
                 kind: d.name.kind().clone(),
                 address,
                 compression: d.inner.compression,
