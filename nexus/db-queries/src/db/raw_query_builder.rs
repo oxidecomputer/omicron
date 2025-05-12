@@ -7,11 +7,11 @@
 //! These largely side-step Diesel's type system,
 //! and are recommended for more complex CTE
 
-use crate::db::pool::DbConnection;
 use diesel::RunQueryDsl;
 use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
 use diesel::sql_types;
+use nexus_db_lookup::DbConnection;
 use std::cell::Cell;
 use std::marker::PhantomData;
 

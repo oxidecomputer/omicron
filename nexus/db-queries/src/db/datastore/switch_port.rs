@@ -11,8 +11,6 @@ use crate::db::datastore::UpdatePrecondition;
 use crate::db::datastore::address_lot::{
     ReserveBlockError, ReserveBlockTxnError,
 };
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
 use crate::db::model::{
     LldpLinkConfig, Name, SwitchInterfaceConfig, SwitchLinkFec,
     SwitchLinkSpeed, SwitchPort, SwitchPortAddressConfig,
@@ -21,7 +19,6 @@ use crate::db::model::{
     SwitchPortSettingsGroups, SwitchVlanInterfaceConfig, TxEqConfig,
 };
 use crate::db::pagination::paginated;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
 use diesel::{
     CombineDsl, ExpressionMethods, JoinOnDsl, NullableExpressionMethods,
@@ -29,6 +26,9 @@ use diesel::{
 };
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::{
     AddressLot, BgpConfig, SqlU8, SqlU16, SqlU32,
     SwitchPortBgpPeerConfigAllowExport, SwitchPortBgpPeerConfigAllowImport,

@@ -28,6 +28,7 @@ use serde::{
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::{net::IpAddr, str::FromStr};
+use url::Url;
 use uuid::Uuid;
 
 macro_rules! path_param {
@@ -1115,8 +1116,8 @@ pub struct InstanceDiskAttach {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalIpCreate {
     /// An IP address providing both inbound and outbound access. The address is
-    /// automatically-assigned from the provided IP Pool, or the current silo's
-    /// default pool if not specified.
+    /// automatically assigned from the provided IP pool or the default IP pool
+    /// if not specified.
     Ephemeral { pool: Option<NameOrId> },
     /// An IP address providing both inbound and outbound access. The address is
     /// an existing floating IP object assigned to the current project.
@@ -1129,7 +1130,8 @@ pub enum ExternalIpCreate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub struct EphemeralIpCreate {
-    /// Name or ID of the IP pool used to allocate an address
+    /// Name or ID of the IP pool used to allocate an address. If unspecified,
+    /// the default IP pool will be used.
     pub pool: Option<NameOrId>,
 }
 
@@ -2432,4 +2434,166 @@ pub struct DeviceAccessTokenRequest {
     pub grant_type: String,
     pub device_code: String,
     pub client_id: Uuid,
+}
+
+// Webhooks
+
+/// Query params for listing webhook event classes.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EventClassFilter {
+    /// An optional glob pattern for filtering event class names.
+    ///
+    /// If provided, only event classes which match this glob pattern will be
+    /// included in the response.
+    pub filter: Option<shared::WebhookSubscription>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EventClassPage {
+    /// The last webhook event class returned by a previous page.
+    pub last_seen: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookReceiverSelector {
+    /// The name or ID of the webhook receiver.
+    pub receiver: NameOrId,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The URL that webhook notification requests should be sent to
+    pub endpoint: Url,
+
+    /// A non-empty list of secret keys used to sign webhook payloads.
+    pub secrets: Vec<String>,
+
+    /// A list of webhook event class subscriptions.
+    ///
+    /// If this list is empty or is not included in the request body, the
+    /// webhook will not be subscribed to any events.
+    #[serde(default)]
+    pub subscriptions: Vec<shared::WebhookSubscription>,
+}
+
+/// Parameters to update a webhook configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookReceiverUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+
+    /// The URL that webhook notification requests should be sent to
+    pub endpoint: Option<Url>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSubscriptionCreate {
+    /// The event class pattern to subscribe to.
+    pub subscription: shared::WebhookSubscription,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSecretCreate {
+    /// The value of the shared secret key.
+    pub secret: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSecretSelector {
+    /// ID of the secret.
+    pub secret_id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct WebhookEventSelector {
+    /// UUID of the event
+    pub event_id: Uuid,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSubscriptionSelector {
+    /// The webhook receiver that the subscription is attached to.
+    #[serde(flatten)]
+    pub receiver: WebhookReceiverSelector,
+    /// The event class subscription itself.
+    pub subscription: shared::WebhookSubscription,
+}
+
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookDeliveryStateFilter {
+    /// If true, include deliveries which are currently in progress.
+    ///
+    /// If any of the "pending", "failed", or "delivered" query parameters are
+    /// set to true, only deliveries matching those state(s) will be included in
+    /// the response. If NO state filter parameters are set, then all deliveries
+    /// are included.
+    ///
+    /// A delivery is considered "pending" if it has not yet been sent at all,
+    /// or if a delivery attempt has failed but the delivery has retries
+    /// remaining.
+    pub pending: Option<bool>,
+    /// If true, include deliveries which have failed permanently.
+    ///
+    /// If any of the "pending", "failed", or "delivered" query parameters are
+    /// set to true, only deliveries matching those state(s) will be included in
+    /// the response. If NO state filter parameters are set, then all deliveries
+    /// are included.
+    ///
+    /// A delivery fails permanently when the retry limit of three total
+    /// attempts is reached without a successful delivery.
+    pub failed: Option<bool>,
+    /// If true, include deliveries which have succeeded.
+    ///
+    /// If any of the "pending", "failed", or "delivered" query parameters are
+    /// set to true, only deliveries matching those state(s) will be included in
+    /// the response. If NO state filter parameters are set, then all deliveries
+    /// are included.
+    pub delivered: Option<bool>,
+}
+
+impl Default for WebhookDeliveryStateFilter {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
+impl WebhookDeliveryStateFilter {
+    pub const ALL: Self =
+        Self { pending: Some(true), failed: Some(true), delivered: Some(true) };
+
+    pub fn include_pending(&self) -> bool {
+        self.pending == Some(true) || self.is_all_none()
+    }
+
+    pub fn include_failed(&self) -> bool {
+        self.failed == Some(true) || self.is_all_none()
+    }
+
+    pub fn include_delivered(&self) -> bool {
+        self.delivered == Some(true) || self.is_all_none()
+    }
+
+    pub fn include_all(&self) -> bool {
+        self.is_all_none()
+            || (self.pending == Some(true)
+                && self.failed == Some(true)
+                && self.delivered == Some(true))
+    }
+
+    fn is_all_none(&self) -> bool {
+        self.pending.is_none()
+            && self.failed.is_none()
+            && self.delivered.is_none()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookProbe {
+    /// If true, resend all events that have not been delivered successfully if
+    /// the probe request succeeds.
+    #[serde(default)]
+    pub resend: bool,
 }

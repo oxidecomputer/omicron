@@ -254,6 +254,11 @@ impl UnparsedDisk {
     pub fn firmware(&self) -> &DiskFirmware {
         &self.firmware
     }
+
+    #[cfg(feature = "testing")]
+    pub fn firmware_mut(&mut self) -> &mut DiskFirmware {
+        &mut self.firmware
+    }
 }
 
 /// A physical disk that is partitioned to contain exactly one zpool

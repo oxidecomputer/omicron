@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+atomicwrites.workspace = true
 base64.workspace = true
 bootstore.workspace = true
 bootstrap-agent-api.workspace = true
@@ -23,6 +24,7 @@ cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-types.workspace = true
+cockroach-admin-client.workspace = true
 # Only used by the simulated sled agent.
 crucible-agent-client.workspace = true
 derive_more.workspace = true
@@ -81,7 +83,9 @@ sha2.workspace = true
 sha3.workspace = true
 sled-agent-api.workspace = true
 sled-agent-client.workspace = true
+sled-agent-config-reconciler.workspace = true
 sled-agent-types.workspace = true
+sled-agent-zone-images.workspace = true
 sled-diagnostics.workspace = true
 sled-hardware.workspace = true
 sled-hardware-types.workspace = true

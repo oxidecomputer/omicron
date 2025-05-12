@@ -7,7 +7,7 @@
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::DataStore;
-use crate::db::lookup::LookupPath;
+use nexus_db_lookup::LookupPath;
 
 use anyhow::Result;
 use chrono::Utc;

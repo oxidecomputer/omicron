@@ -100,7 +100,7 @@ impl AllDisks {
         for (id, disk) in self.inner.values.iter() {
             if let ManagedDisk::ImplicitlyManaged(disk) = disk {
                 if disk.is_boot_disk() {
-                    return Some((id.clone(), disk.zpool_name().clone()));
+                    return Some((id.clone(), *disk.zpool_name()));
                 }
             }
         }
@@ -147,7 +147,7 @@ impl AllDisks {
             .filter_map(|disk| match disk {
                 ManagedDisk::ExplicitlyManaged(disk)
                 | ManagedDisk::ImplicitlyManaged(disk) => {
-                    Some((disk.zpool_name().clone(), disk.variant()))
+                    Some((*disk.zpool_name(), disk.variant()))
                 }
                 ManagedDisk::Unmanaged(_) => None,
             })
@@ -165,7 +165,7 @@ impl AllDisks {
                 ManagedDisk::ExplicitlyManaged(disk)
                 | ManagedDisk::ImplicitlyManaged(disk) => {
                     if disk.variant() == variant {
-                        return Some(disk.zpool_name().clone());
+                        return Some(*disk.zpool_name());
                     }
                     None
                 }
@@ -180,6 +180,15 @@ impl AllDisks {
             .into_iter()
             .map(|p| p.join(BUNDLE_DIRECTORY).join(ZONE_BUNDLE_DIRECTORY))
             .collect()
+    }
+
+    /// Return the directories that can be used for temporary sled-diagnostics
+    /// file storage.
+    pub fn all_sled_diagnostics_directories(&self) -> Vec<Utf8PathBuf> {
+        // These directories are currently used for tempfile storage when
+        // zipping up zone logs before shuffling them off to a nexus collecting
+        // a support bundle.
+        self.all_m2_mountpoints(M2_DEBUG_DATASET).into_iter().collect()
     }
 
     /// Returns an iterator over all managed disks.

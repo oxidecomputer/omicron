@@ -22,6 +22,7 @@ use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
+use crate::helpers::display_option_blank;
 use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -55,6 +56,10 @@ use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use itertools::Itertools;
 use nexus_config::PostgresConfigWithUrl;
+use nexus_config::RegionAllocationStrategy;
+use nexus_db_errors::OptionalError;
+use nexus_db_lookup::DataStoreConnection;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -65,6 +70,7 @@ use nexus_db_model::ExternalIp;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Image;
 use nexus_db_model::Instance;
+use nexus_db_model::InstanceIntendedState;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvPhysicalDisk;
@@ -105,23 +111,23 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CrucibleTargets;
-use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+use nexus_db_queries::db::queries::region_allocation;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::params;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledPolicy;
@@ -132,6 +138,7 @@ use nexus_types::internal_api::params::Srv;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPageWhich;
+use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
@@ -162,8 +169,11 @@ use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 use uuid::Uuid;
+use webhook::WebhookArgs;
+use webhook::cmd_db_webhook;
 
 mod saga;
+mod webhook;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
@@ -377,6 +387,8 @@ enum DbCommands {
     Vmms(VmmListArgs),
     /// Print information about the oximeter collector.
     Oximeter(OximeterArgs),
+    /// Print information about webhooks
+    Webhook(WebhookArgs),
     /// Commands for querying and interacting with pools
     Zpool(ZpoolArgs),
 }
@@ -734,6 +746,9 @@ enum RegionCommands {
 
     /// Find deleted volume regions
     FindDeletedVolumeRegions,
+
+    /// Perform an dry-run allocation and return what was selected
+    DryRunRegionAllocation(DryRunRegionAllocationArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -750,6 +765,35 @@ struct RegionListArgs {
 #[derive(Debug, Args, Clone)]
 struct RegionUsedByArgs {
     region_id: Vec<Uuid>,
+}
+
+#[derive(Debug, Args, Clone)]
+struct DryRunRegionAllocationArgs {
+    /// Specify to consider associated region snapshots as existing region
+    /// allocations (i.e. do not allocate a new read-only region on the same
+    /// sled as a related region snapshot)
+    #[arg(long)]
+    snapshot_id: Option<Uuid>,
+
+    #[arg(long)]
+    block_size: u32,
+
+    /// The size of the virtual disk
+    #[arg(long)]
+    size: i64,
+
+    /// Should the allocated regions be restricted to distinct sleds?
+    #[arg(long)]
+    distinct_sleds: bool,
+
+    /// How many regions are required?
+    #[arg(long, short, default_value_t = 3)]
+    num_regions_required: usize,
+
+    /// the (optional) Volume to associate the new regions with (defaults to a
+    /// random ID)
+    #[arg(long, short)]
+    volume_id: Option<VolumeUuid>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1227,6 +1271,9 @@ impl DbArgs {
                     DbCommands::Region(RegionArgs {
                         command: RegionCommands::FindDeletedVolumeRegions,
                     }) => cmd_db_region_find_deleted(&datastore).await,
+                    DbCommands::Region(RegionArgs {
+                        command: RegionCommands::DryRunRegionAllocation(args),
+                    }) => cmd_db_dry_run_region_allocation(&opctx, &datastore, args).await,
                     DbCommands::RegionReplacement(RegionReplacementArgs {
                         command: RegionReplacementCommands::List(args),
                     }) => {
@@ -1419,6 +1466,8 @@ impl DbArgs {
                     DbCommands::Oximeter(OximeterArgs {
                         command: OximeterCommands::ListProducers
                     }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
+
+                    DbCommands::Webhook(args) => cmd_db_webhook(&opctx, &datastore, &fetch_opts, &args).await,
                     DbCommands::Zpool(ZpoolArgs {
                         command: ZpoolCommands::List(args)
                     }) => cmd_db_zpool_list(&opctx, &datastore, &args).await,
@@ -1636,11 +1685,21 @@ struct CrucibleDatasetRow {
     no_provision: bool,
 
     // zpool fields
-    control_plane_storage_buffer: i64,
-    pool_total_size: i64,
+    #[tabled(display_with = "option_impl_display")]
+    control_plane_storage_buffer: Option<i64>,
+    #[tabled(display_with = "option_impl_display")]
+    pool_total_size: Option<i64>,
 
     // computed fields
-    size_left: i128,
+    #[tabled(display_with = "option_impl_display")]
+    size_left: Option<i128>,
+}
+
+fn option_impl_display<T: std::fmt::Display>(t: &Option<T>) -> String {
+    match t {
+        Some(v) => format!("{v}"),
+        None => String::from("n/a"),
+    }
 }
 
 async fn get_crucible_dataset_rows(
@@ -1676,16 +1735,14 @@ async fn get_crucible_dataset_rows(
         Vec::with_capacity(crucible_datasets.len());
 
     for d in crucible_datasets {
-        let control_plane_storage_buffer: i64 = zpools
+        let control_plane_storage_buffer: Option<i64> = match zpools
             .get(&d.pool_id)
-            .ok_or_else(|| anyhow::anyhow!("zpool {} not found!", d.pool_id))?
-            .control_plane_storage_buffer()
-            .into();
+        {
+            Some(zpool) => Some(zpool.control_plane_storage_buffer().into()),
+            None => None,
+        };
 
-        let pool_total_size =
-            *zpool_total_size.get(&d.pool_id).ok_or_else(|| {
-                anyhow::anyhow!("zpool {} not part of inventory!", d.pool_id)
-            })?;
+        let pool_total_size = zpool_total_size.get(&d.pool_id);
 
         result.push(CrucibleDatasetRow {
             // dataset fields
@@ -1701,12 +1758,18 @@ async fn get_crucible_dataset_rows(
 
             // zpool fields
             control_plane_storage_buffer,
-            pool_total_size,
+            pool_total_size: pool_total_size.cloned(),
 
             // computed fields
-            size_left: i128::from(pool_total_size)
-                - i128::from(control_plane_storage_buffer)
-                - i128::from(d.size_used),
+            size_left: match (pool_total_size, control_plane_storage_buffer) {
+                (Some(total_size), Some(control_plane_storage_buffer)) => Some(
+                    i128::from(*total_size)
+                        - i128::from(control_plane_storage_buffer)
+                        - i128::from(d.size_used),
+                ),
+
+                _ => None,
+            },
         });
     }
 
@@ -1742,9 +1805,20 @@ async fn cmd_crucible_dataset_show_overprovisioned(
     let rows: Vec<_> = rows
         .into_iter()
         .filter(|row| {
-            (i128::from(row.size_used)
-                + i128::from(row.control_plane_storage_buffer))
-                >= i128::from(row.pool_total_size)
+            match (row.pool_total_size, row.control_plane_storage_buffer) {
+                (Some(pool_total_size), Some(control_plane_storage_buffer)) => {
+                    (i128::from(row.size_used)
+                        + i128::from(control_plane_storage_buffer))
+                        >= i128::from(pool_total_size)
+                }
+
+                _ => {
+                    // Without the total size or control plane storage buffer, we
+                    // can't determine if the dataset is overprovisioned or not.
+                    // Filter it out.
+                    false
+                }
+            }
         })
         .collect();
 
@@ -3647,6 +3721,164 @@ async fn cmd_db_region_find_deleted(
     Ok(())
 }
 
+#[derive(Debug)]
+enum DryRunRegionAllocationResult {
+    QueryError { e: region_allocation::AllocationQueryError },
+
+    Success { datasets_and_regions: Vec<(CrucibleDataset, Region)> },
+}
+
+async fn cmd_db_dry_run_region_allocation(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &DryRunRegionAllocationArgs,
+) -> Result<(), anyhow::Error> {
+    let volume_id = match args.volume_id {
+        Some(v) => v,
+        None => VolumeUuid::new_v4(),
+    };
+
+    let size: external::ByteCount = args.size.try_into()?;
+    let block_size: params::BlockSize = args.block_size.try_into()?;
+
+    let (blocks_per_extent, extent_count) = DataStore::get_crucible_allocation(
+        &block_size.try_into().unwrap(),
+        size,
+    );
+
+    let allocation_strategy = if args.distinct_sleds {
+        RegionAllocationStrategy::RandomWithDistinctSleds { seed: None }
+    } else {
+        RegionAllocationStrategy::Random { seed: None }
+    };
+
+    let err = OptionalError::<DryRunRegionAllocationResult>::new();
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    let result: Result<std::convert::Infallible, diesel::result::Error> =
+        datastore
+            .transaction_retry_wrapper("dry_run_region_allocation")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let allocation_strategy = allocation_strategy.clone();
+
+                async move {
+                    let query = region_allocation::allocation_query(
+                        volume_id,
+                        args.snapshot_id,
+                        region_allocation::RegionParameters {
+                            block_size: args.block_size.into(),
+                            blocks_per_extent,
+                            extent_count,
+                            read_only: args.snapshot_id.is_some(),
+                        },
+                        &allocation_strategy,
+                        args.num_regions_required,
+                    )
+                    .map_err(|e| {
+                        err.bail(DryRunRegionAllocationResult::QueryError { e })
+                    })?;
+
+                    let datasets_and_regions: Vec<(CrucibleDataset, Region)> =
+                        query.get_results_async(&conn).await?;
+
+                    Err(err.bail(DryRunRegionAllocationResult::Success {
+                        datasets_and_regions,
+                    }))
+                }
+            })
+            .await;
+
+    let datasets_and_regions = match result {
+        Ok(_) => {
+            panic!("should not have succeeded!");
+        }
+
+        Err(e) => {
+            if let Some(result) = err.take() {
+                match result {
+                    DryRunRegionAllocationResult::QueryError { e } => {
+                        let err: external::Error = e.into();
+                        Err(err)?
+                    }
+
+                    DryRunRegionAllocationResult::Success {
+                        datasets_and_regions,
+                    } => datasets_and_regions,
+                }
+            } else {
+                Err(e)?
+            }
+        }
+    };
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct Row {
+        pub region_id: Uuid,
+
+        pub dataset_id: Uuid,
+        pub size_used: i64,
+
+        pub pool_id: Uuid,
+
+        #[tabled(display_with = "option_impl_display")]
+        pub total_size: Option<i64>,
+
+        #[tabled(display_with = "option_impl_display")]
+        pub size_left: Option<i64>,
+    }
+
+    let mut rows = Vec::with_capacity(datasets_and_regions.len());
+
+    let Some(latest_collection) =
+        datastore.inventory_get_latest_collection(opctx).await?
+    else {
+        bail!(
+            "failing due to missing inventory - we rely on inventory to \
+            calculate zpool sizing info"
+        );
+    };
+
+    let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
+
+    for (_, sled_agent) in latest_collection.sled_agents {
+        for zpool in sled_agent.zpools {
+            zpool_total_size
+                .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
+        }
+    }
+
+    for (dataset, region) in datasets_and_regions {
+        let pool_id = dataset.pool_id.into_untyped_uuid();
+        let total_size = zpool_total_size.get(&pool_id);
+        rows.push(Row {
+            region_id: region.id(),
+
+            dataset_id: dataset.id().into_untyped_uuid(),
+            size_used: dataset.size_used,
+
+            pool_id,
+            total_size: total_size.copied(),
+
+            size_left: match total_size {
+                Some(total_size) => Some(total_size - dataset.size_used),
+                None => None,
+            },
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::psql())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .with(tabled::settings::Panel::header("Allocation results"))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
 /// List all region replacement requests
 async fn cmd_db_region_replacement_list(
     datastore: &DataStore,
@@ -4120,6 +4352,7 @@ async fn cmd_db_instance_info(
     const BOOT_DISK: &'static str = "boot disk";
     const AUTO_RESTART: &'static str = "auto-restart";
     const STATE: &'static str = "nexus state";
+    const INTENDED_STATE: &'static str = "intended state";
     const LAST_MODIFIED: &'static str = "last modified at";
     const LAST_UPDATED: &'static str = "last updated at";
     const LAST_AUTO_RESTART: &'static str = "  last reincarnated at";
@@ -4145,6 +4378,7 @@ async fn cmd_db_instance_info(
         AUTO_RESTART,
         STATE,
         API_STATE,
+        INTENDED_STATE,
         LAST_UPDATED,
         LAST_MODIFIED,
         LAST_AUTO_RESTART,
@@ -4204,6 +4438,7 @@ async fn cmd_db_instance_info(
         "{} {API_STATE:>WIDTH$}: {effective_state:?}",
         if effective_state == InstanceState::Failed { "/!\\" } else { "(i)" }
     );
+    println!("    {INTENDED_STATE:>WIDTH$}: {}", instance.intended_state);
     println!(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
         r#gen.0
@@ -4211,9 +4446,7 @@ async fn cmd_db_instance_info(
 
     // Reincarnation status
     let InstanceKarmicStatus { needs_reincarnation, can_reincarnate } =
-        instance
-            .auto_restart
-            .status(&instance.runtime_state, active_vmm.as_ref());
+        instance.auto_restart_status(active_vmm.as_ref());
     println!(
         "{} {NEEDS_REINCARNATION:>WIDTH$}: {needs_reincarnation}",
         if needs_reincarnation { "(i)" } else { "   " }
@@ -4559,6 +4792,7 @@ struct VmmStateRow {
 struct CustomerInstanceRow {
     id: String,
     state: String,
+    intent: InstanceIntendedState,
     propolis_id: MaybePropolisId,
     sled_id: MaybeSledId,
     host_serial: String,
@@ -4636,6 +4870,7 @@ async fn cmd_db_instances(
             id: i.instance().id().to_string(),
             name: i.instance().name().to_string(),
             state: i.effective_state().to_string(),
+            intent: i.instance().intended_state,
             propolis_id: (&i).into(),
             sled_id: (&i).into(),
             host_serial,
@@ -6532,6 +6767,8 @@ async fn cmd_db_inventory_cabooses(
         git_commit: String,
         name: String,
         version: String,
+        #[tabled(display_with = "option_impl_display")]
+        sign: Option<String>,
     }
 
     use nexus_db_schema::schema::sw_caboose::dsl;
@@ -6550,6 +6787,7 @@ async fn cmd_db_inventory_cabooses(
         name: caboose.name,
         version: caboose.version,
         git_commit: caboose.git_commit,
+        sign: caboose.sign,
     });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
@@ -6898,6 +7136,8 @@ async fn inv_collection_print_devices(
             name: &'a str,
             version: &'a str,
             git_commit: &'a str,
+            #[tabled(display_with = "option_impl_display")]
+            sign: &'a Option<String>,
         }
 
         println!("    cabooses:");
@@ -6911,6 +7151,7 @@ async fn inv_collection_print_devices(
                 name: &found_caboose.caboose.name,
                 version: &found_caboose.caboose.version,
                 git_commit: &found_caboose.caboose.git_commit,
+                sign: &found_caboose.caboose.sign,
             })
             .collect();
         let table = tabled::Table::new(caboose_rows)
@@ -7802,11 +8043,6 @@ async fn cmd_db_oximeter_list_producers(
     Ok(())
 }
 
-// Display an empty cell for an Option<T> if it's None.
-fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
-    opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
-}
-
 // Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using
 // `Z` rather than the UTC offset for UTC timestamps, to save a few characters
 // of line width in tabular output.
@@ -7858,7 +8094,8 @@ async fn cmd_db_zpool_list(
         time_deleted: String,
         sled_id: Uuid,
         physical_disk_id: Uuid,
-        total_size: i64,
+        #[tabled(display_with = "option_impl_display")]
+        total_size: Option<i64>,
         control_plane_storage_buffer: i64,
     }
 
@@ -7874,13 +8111,7 @@ async fn cmd_db_zpool_list(
                 },
                 sled_id: p.sled_id,
                 physical_disk_id: p.physical_disk_id.into_untyped_uuid(),
-                total_size: *zpool_total_size.get(&zpool_id).ok_or_else(
-                    || {
-                        anyhow::anyhow!(
-                            "zpool {zpool_id} not found in inventory!"
-                        )
-                    },
-                )?,
+                total_size: zpool_total_size.get(&zpool_id).cloned(),
                 control_plane_storage_buffer: p
                     .control_plane_storage_buffer()
                     .into(),

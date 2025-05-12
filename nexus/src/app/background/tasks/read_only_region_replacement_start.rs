@@ -165,6 +165,7 @@ mod test {
     use crate::app::RegionAllocationStrategy;
     use crate::external_api::params;
     use chrono::Utc;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::BlockSize;
     use nexus_db_model::Generation;
     use nexus_db_model::PhysicalDiskPolicy;
@@ -175,7 +176,6 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::db::datastore::RegionAllocationFor;
     use nexus_db_queries::db::datastore::RegionAllocationParameters;
-    use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external;
@@ -209,15 +209,14 @@ mod test {
             datastore.clone(),
         );
 
-        // Record which datasets map to which zpools for later
+        // Record which crucible datasets map to which zpools for later
 
         let mut dataset_to_zpool: BTreeMap<ZpoolUuid, DatasetUuid> =
             BTreeMap::default();
 
         for zpool in disk_test.zpools() {
-            for dataset in &zpool.datasets {
-                dataset_to_zpool.insert(zpool.id, dataset.id);
-            }
+            let dataset = zpool.crucible_dataset();
+            dataset_to_zpool.insert(zpool.id, dataset.id);
         }
 
         let mut task =
@@ -257,7 +256,7 @@ mod test {
 
         // Create the fake snapshot
 
-        let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_project) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .lookup_for(authz::Action::CreateChild)
             .await

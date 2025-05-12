@@ -526,3 +526,7 @@ mismatched zone type: after: InternalNtp(
     internal DNS version:   1 (unchanged)
 *   external DNS version:   1 -> 2
 
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+

@@ -14,6 +14,7 @@ use crate::external_api::params::UninitializedSledId;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use daft::Diffable;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
 pub use gateway_client::types::RotSlot;
@@ -34,6 +35,7 @@ use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::collections::BTreeMap;
@@ -205,7 +207,16 @@ impl Collection {
 /// the same part number and serial number but a new revision number, we'd want
 /// to treat that as the same baseboard as one with a different revision number.
 #[derive(
-    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+    Clone,
+    Debug,
+    Diffable,
+    Ord,
+    Eq,
+    PartialOrd,
+    PartialEq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
 pub struct BaseboardId {
     /// Oxide Part Number
@@ -226,6 +237,17 @@ impl From<UninitializedSledId> for BaseboardId {
     }
 }
 
+impl slog::KV for BaseboardId {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        serializer.emit_str("part_number".into(), &self.part_number)?;
+        serializer.emit_str("serial_number".into(), &self.serial_number)
+    }
+}
+
 /// Caboose contents found during a collection
 ///
 /// These are normalized in the database.  Each distinct `Caboose` is assigned a
@@ -238,6 +260,9 @@ pub struct Caboose {
     pub git_commit: String,
     pub name: String,
     pub version: String,
+    // The sign will generally be present for production RoT and RoT bootloader images.
+    // It's currently absent from SP images and could be absent from RoT images as well.
+    pub sign: Option<String>,
 }
 
 impl From<gateway_client::types::SpComponentCaboose> for Caboose {
@@ -247,6 +272,7 @@ impl From<gateway_client::types::SpComponentCaboose> for Caboose {
             git_commit: c.git_commit,
             name: c.name,
             version: c.version,
+            sign: c.sign,
         }
     }
 }

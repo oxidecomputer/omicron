@@ -5,9 +5,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::error::ErrorHandler;
-use crate::db::error::public_error_from_diesel;
-use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::pagination::{Paginator, paginated, paginated_multicolumn};
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use anyhow::Context;
@@ -21,12 +18,16 @@ use diesel::IntoSql;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
+use diesel::PgExpressionMethods;
 use diesel::QueryDsl;
 use diesel::Table;
 use diesel::expression::SelectableHelper;
 use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::HwPowerState;
 use nexus_db_model::HwRotSlot;
@@ -554,7 +555,7 @@ impl DataStore {
             // - `hw_baseboard` with an "id" primary key and lookup columns
             //   "part_number" and "serial_number"
             // - `sw_caboose` with an "id" primary key and lookup columns
-            //   "board", "git_commit", "name", and "version"
+            //   "board", "git_commit", "name", "version", and "sign"
             // - `inv_caboose` with foreign keys "hw_baseboard_id",
             //   "sw_caboose_id", and various other columns
             //
@@ -596,7 +597,8 @@ impl DataStore {
             //         AND sw_caboose.board = ...
             //         AND sw_caboose.git_commit = ...
             //         AND sw_caboose.name = ...
-            //         AND sw_caboose.version = ...;
+            //         AND sw_caboose.version = ...
+            //         AND sw_caboose.sign IS NOT DISTINCT FROM ...;
             //
             // Again, the whole point is to avoid back-and-forth between the
             // client and the database.  Those back-and-forth interactions can
@@ -642,6 +644,9 @@ impl DataStore {
                                     )
                                     .and(dsl_sw_caboose::version.eq(
                                         found_caboose.caboose.version.clone(),
+                                    ))
+                                    .and(dsl_sw_caboose::sign.is_not_distinct_from(
+                                        found_caboose.caboose.sign.clone(),
                                     )),
                             ),
                         )

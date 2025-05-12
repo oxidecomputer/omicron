@@ -40,6 +40,8 @@ use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
+use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
@@ -83,6 +85,8 @@ use thiserror::Error;
 
 use super::ClickhouseZonesThatShouldBeRunning;
 use super::clickhouse::ClickhouseAllocator;
+use nexus_types::inventory::BaseboardId;
+use std::sync::Arc;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
@@ -403,6 +407,7 @@ pub struct BlueprintBuilder<'a> {
     creator: String,
     operations: Vec<Operation>,
     comments: Vec<String>,
+    pending_mgs_updates: PendingMgsUpdates,
 
     // Random number generator for new UUIDs
     rng: PlannerRng,
@@ -454,6 +459,7 @@ impl<'a> BlueprintBuilder<'a> {
         Blueprint {
             id: rng.next_blueprint(),
             sleds,
+            pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -461,6 +467,8 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             clickhouse_cluster_config: None,
+            oximeter_read_version: Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("starting blueprint with {num_sleds} empty sleds"),
@@ -530,6 +538,7 @@ impl<'a> BlueprintBuilder<'a> {
             sled_editors,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
+            pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -685,9 +694,16 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
         });
+
+        let (oximeter_read_mode, oximeter_read_version) = {
+            let policy = self.input.oximeter_read_settings();
+            (policy.mode.clone(), policy.version)
+        };
+
         Blueprint {
             id: blueprint_id,
             sleds,
+            pending_mgs_updates: self.pending_mgs_updates,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.input.internal_dns_version(),
             external_dns_version: self.input.external_dns_version(),
@@ -699,6 +715,8 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
             clickhouse_cluster_config,
+            oximeter_read_version: oximeter_read_version.into(),
+            oximeter_read_mode,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self
@@ -1135,7 +1153,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zpool = self.sled_select_zpool(sled_id, ZoneKind::InternalDns)?;
         let zone_type =
             BlueprintZoneType::InternalDns(blueprint_zone_type::InternalDns {
-                dataset: OmicronZoneDataset { pool_name: zpool.clone() },
+                dataset: OmicronZoneDataset { pool_name: zpool },
                 dns_address: SocketAddrV6::new(address, DNS_PORT, 0, 0),
                 http_address: SocketAddrV6::new(address, DNS_HTTP_PORT, 0, 0),
                 gz_address: dns_subnet.gz_address(),
@@ -1188,7 +1206,7 @@ impl<'a> BlueprintBuilder<'a> {
             self.sled_select_zpool(sled_id, ZoneKind::ExternalDns)?;
         let zone_type =
             BlueprintZoneType::ExternalDns(blueprint_zone_type::ExternalDns {
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
                 http_address,
                 dns_address,
                 nic,
@@ -1290,7 +1308,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type =
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;
 
@@ -1464,7 +1482,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type =
             BlueprintZoneType::CockroachDb(blueprint_zone_type::CockroachDb {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;
 
@@ -1491,7 +1509,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type =
             BlueprintZoneType::Clickhouse(blueprint_zone_type::Clickhouse {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             });
 
         let zone = BlueprintZoneConfig {
@@ -1517,7 +1535,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type = BlueprintZoneType::ClickhouseServer(
             blueprint_zone_type::ClickhouseServer {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             },
         );
         let filesystem_pool = pool_name;
@@ -1545,7 +1563,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type = BlueprintZoneType::ClickhouseKeeper(
             blueprint_zone_type::ClickhouseKeeper {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             },
         );
         let filesystem_pool = pool_name;
@@ -1856,6 +1874,20 @@ impl<'a> BlueprintBuilder<'a> {
         addr: IpAddr,
     ) -> Result<(), Error> {
         Ok(self.resource_allocator()?.inject_untracked_external_dns_ip(addr)?)
+    }
+
+    pub fn pending_mgs_update_insert(
+        &mut self,
+        update: nexus_types::deployment::PendingMgsUpdate,
+    ) {
+        self.pending_mgs_updates.insert(update);
+    }
+
+    pub fn pending_mgs_update_delete(
+        &mut self,
+        baseboard_id: &Arc<BaseboardId>,
+    ) {
+        self.pending_mgs_updates.remove(baseboard_id);
     }
 }
 
@@ -2190,7 +2222,7 @@ pub mod test {
                     {
                         let ip = address.ip();
                         assert!(new_sled_resources.subnet.net().contains(*ip));
-                        Some(dataset.pool_name.clone())
+                        Some(dataset.pool_name)
                     } else {
                         None
                     }

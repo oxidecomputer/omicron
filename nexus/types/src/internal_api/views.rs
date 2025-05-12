@@ -2,7 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::deployment::PendingMgsUpdate;
+use crate::inventory::BaseboardId;
 use chrono::DateTime;
+use chrono::SecondsFormat;
 use chrono::Utc;
 use futures::future::ready;
 use futures::stream::StreamExt;
@@ -11,9 +14,14 @@ use omicron_common::api::external::ObjectStream;
 use omicron_common::api::external::Vni;
 use omicron_uuid_kinds::DemoSagaUuid;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeMap;
+use std::collections::VecDeque;
+use std::fmt::Display;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use steno::SagaResultErr;
@@ -320,4 +328,166 @@ pub struct Ipv4NatEntryView {
     pub mac: MacAddr,
     pub gen: i64,
     pub deleted: bool,
+}
+
+// Externally-visible status for MGS-managed updates
+
+/// Status of ongoing update attempts, recently completed attempts, and update
+/// requests that are waiting for retry.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct MgsUpdateDriverStatus {
+    pub recent: VecDeque<CompletedAttempt>,
+    pub in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdateStatus>,
+    pub waiting: BTreeMap<Arc<BaseboardId>, WaitingStatus>,
+}
+
+impl MgsUpdateDriverStatus {
+    pub fn detailed_display(&self) -> MgsUpdateDriverStatusDisplay<'_> {
+        MgsUpdateDriverStatusDisplay { status: self }
+    }
+}
+
+pub struct MgsUpdateDriverStatusDisplay<'a> {
+    status: &'a MgsUpdateDriverStatus,
+}
+
+impl Display for MgsUpdateDriverStatusDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let status = self.status;
+        writeln!(f, "recent completed attempts:")?;
+        for r in &status.recent {
+            // Ignore units smaller than a millisecond.
+            let elapsed = Duration::from_millis(
+                u64::try_from(r.elapsed.as_millis()).unwrap_or(u64::MAX),
+            );
+            writeln!(
+                f,
+                "    {} to {} (took {}): serial {}",
+                r.time_started.to_rfc3339_opts(SecondsFormat::Millis, true),
+                r.time_done.to_rfc3339_opts(SecondsFormat::Millis, true),
+                humantime::format_duration(elapsed),
+                r.request.baseboard_id.serial_number,
+            )?;
+            writeln!(f, "        attempt#: {}", r.nattempts_done)?;
+            writeln!(f, "        version:  {}", r.request.artifact_version)?;
+            writeln!(f, "        hash:     {}", r.request.artifact_hash,)?;
+            writeln!(f, "        result:   {:?}", r.result)?;
+        }
+
+        writeln!(f, "\ncurrently in progress:")?;
+        for (baseboard_id, status) in &status.in_progress {
+            // Ignore units smaller than a millisecond.
+            let elapsed = Duration::from_millis(
+                u64::try_from(
+                    (status.time_started - Utc::now()).num_milliseconds(),
+                )
+                .unwrap_or(0),
+            );
+            writeln!(
+                f,
+                "    {}: serial {}: {:?} (attempt {}, running {})",
+                status
+                    .time_started
+                    .to_rfc3339_opts(SecondsFormat::Millis, true),
+                baseboard_id.serial_number,
+                status.status,
+                status.nattempts_done + 1,
+                humantime::format_duration(elapsed),
+            )?;
+        }
+
+        writeln!(f, "\nwaiting for retry:")?;
+        for (baseboard_id, wait_info) in &status.waiting {
+            writeln!(
+                f,
+                "    serial {}: will try again at {} (attempt {})",
+                baseboard_id.serial_number,
+                wait_info.next_attempt_time,
+                wait_info.nattempts_done + 1,
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
+/// externally-exposed status for a completed attempt
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct CompletedAttempt {
+    pub time_started: DateTime<Utc>,
+    pub time_done: DateTime<Utc>,
+    pub elapsed: Duration,
+    pub request: PendingMgsUpdate,
+    #[serde(serialize_with = "serialize_snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<UpdateCompletedHow, String>::json_schema"
+    )]
+    pub result: Result<UpdateCompletedHow, String>,
+    pub nattempts_done: u32,
+}
+
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateCompletedHow {
+    FoundNoChangesNeeded,
+    CompletedUpdate,
+    WaitedForConcurrentUpdate,
+    TookOverConcurrentUpdate,
+}
+
+/// externally-exposed status for each in-progress update
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InProgressUpdateStatus {
+    pub time_started: DateTime<Utc>,
+    pub status: UpdateAttemptStatus,
+    pub nattempts_done: u32,
+}
+
+/// status of a single update attempt
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateAttemptStatus {
+    NotStarted,
+    FetchingArtifact,
+    Precheck,
+    Updating,
+    UpdateWaiting,
+    PostUpdate,
+    PostUpdateWait,
+    Done,
+}
+
+/// externally-exposed status for waiting updates
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WaitingStatus {
+    pub next_attempt_time: DateTime<Utc>,
+    pub nattempts_done: u32,
+}
+
+#[derive(JsonSchema, Serialize)]
+#[serde(rename = "Result{T}Or{E}")]
+#[serde(rename_all = "snake_case")]
+enum SnakeCaseResult<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+fn serialize_snake_case_result<S, T, E>(
+    value: &Result<T, E>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+    T: Serialize,
+    E: Serialize,
+{
+    match value {
+        Ok(val) => SnakeCaseResult::Ok(val),
+        Err(err) => SnakeCaseResult::Err(err),
+    }
+    .serialize(serializer)
 }

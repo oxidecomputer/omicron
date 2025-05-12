@@ -11,20 +11,17 @@ use crate::nexus::NexusClient;
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
-use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use omicron_common::api::external::ByteCount;
 
-use anyhow::anyhow;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::PropolisUuid;
 use sled_agent_types::instance::*;
-use sled_agent_types::zone_bundle::ZoneBundleMetadata;
 use sled_storage::manager::StorageHandle;
 use sled_storage::resources::AllDisks;
 use slog::Logger;
@@ -255,23 +252,6 @@ impl InstanceManager {
         rx.await?
     }
 
-    /// Create a zone bundle from a named instance zone, if it exists.
-    pub async fn create_zone_bundle(
-        &self,
-        name: &str,
-    ) -> Result<ZoneBundleMetadata, BundleError> {
-        let (tx, rx) = oneshot::channel();
-        self.inner
-            .tx
-            .send(InstanceManagerRequest::CreateZoneBundle {
-                name: name.to_string(),
-                tx,
-            })
-            .await
-            .map_err(|err| BundleError::FailedSend(anyhow!(err)))?;
-        rx.await.map_err(|err| BundleError::DroppedRequest(anyhow!(err)))?
-    }
-
     pub async fn add_external_ip(
         &self,
         propolis_id: PropolisUuid,
@@ -389,10 +369,6 @@ enum InstanceManagerRequest {
         snapshot_id: Uuid,
         tx: oneshot::Sender<Result<(), Error>>,
     },
-    CreateZoneBundle {
-        name: String,
-        tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
-    },
     AddExternalIp {
         propolis_id: PropolisUuid,
         ip: InstanceExternalIpBody,
@@ -502,9 +478,6 @@ impl InstanceManagerRunner {
                         Some(IssueDiskSnapshot { propolis_id, disk_id, snapshot_id, tx }) => {
                             self.issue_disk_snapshot_request(tx, propolis_id, disk_id, snapshot_id)
                         },
-                        Some(CreateZoneBundle { name, tx }) => {
-                            self.create_zone_bundle(tx, &name).map_err(Error::from)
-                        },
                         Some(AddExternalIp { propolis_id, ip, tx }) => {
                             self.add_external_ip(tx, propolis_id, &ip)
                         },
@@ -574,20 +547,22 @@ impl InstanceManagerRunner {
         sled_identifiers: SledIdentifiers,
     ) -> Result<SledVmmState, Error> {
         let InstanceEnsureBody {
+            vmm_spec,
+            local_config,
             instance_id,
             migration_id,
             propolis_addr,
-            hardware,
             vmm_runtime,
             metadata,
         } = instance;
         info!(
             &self.log,
             "ensuring instance is registered";
+            "propolis_spec" => ?vmm_spec,
             "instance_id" => %instance_id,
             "propolis_id" => %propolis_id,
             "migration_id" => ?migration_id,
-            "hardware" => ?hardware,
+            "local_config" => ?local_config,
             "vmm_runtime" => ?vmm_runtime,
             "propolis_addr" => ?propolis_addr,
             "metadata" => ?metadata,
@@ -639,7 +614,8 @@ impl InstanceManagerRunner {
                 };
 
                 let state = crate::instance::InstanceInitialState {
-                    hardware,
+                    vmm_spec,
+                    local_config,
                     vmm_runtime,
                     propolis_addr,
                     migration_id,
@@ -716,33 +692,6 @@ impl InstanceManagerRunner {
         instance
             .issue_snapshot_request(tx, disk_id, snapshot_id)
             .map_err(Error::from)
-    }
-
-    /// Create a zone bundle from a named instance zone, if it exists.
-    fn create_zone_bundle(
-        &self,
-        tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
-        name: &str,
-    ) -> Result<(), BundleError> {
-        // A well-formed Propolis zone name must consist of
-        // `PROPOLIS_ZONE_PREFIX` and the Propolis ID. If the prefix is not
-        // present or the Propolis ID portion of the supplied zone name isn't
-        // parseable as a UUID, there is no Propolis zone with the specified
-        // name to capture into a bundle, so return a `NoSuchZone` error.
-        let vmm_id: PropolisUuid = name
-            .strip_prefix(PROPOLIS_ZONE_PREFIX)
-            .and_then(|uuid_str| uuid_str.parse::<PropolisUuid>().ok())
-            .ok_or_else(|| BundleError::NoSuchZone {
-                name: name.to_string(),
-            })?;
-
-        let Some(instance) = self.jobs.get(&vmm_id) else {
-            return Err(BundleError::NoSuchZone { name: name.to_string() });
-        };
-        instance
-            .request_zone_bundle(tx)
-            .map_err(|e| BundleError::FailedSend(anyhow!(e)))?;
-        Ok(())
     }
 
     fn add_external_ip(

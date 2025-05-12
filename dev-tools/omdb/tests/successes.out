@@ -52,7 +52,7 @@ EXECUTING COMMAND: omdb ["db", "instances"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID STATE PROPOLIS_ID SLED_ID HOST_SERIAL NAME 
+ID STATE INTENT PROPOLIS_ID SLED_ID HOST_SERIAL NAME 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -397,6 +397,14 @@ task: "v2p_manager"
 
 task: "vpc_route_manager"
     propagates updated VPC routes to all OPTE ports
+
+
+task: "webhook_deliverator"
+    sends webhook delivery requests
+
+
+task: "webhook_dispatcher"
+    dispatches queued webhook events to receivers
 
 
 ---------------------------------------------
@@ -774,6 +782,26 @@ task: "vpc_route_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
+
+task: "webhook_deliverator"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    receivers:                            0
+    successful deliveries:                0
+    failed deliveries:                    0
+    internal delivery errors:             0
+    already delivered by another Nexus:   0
+    in progress by another Nexus:         0
+
+task: "webhook_dispatcher"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    events dispatched:                            0
+    events with no receivers subscribed:          0
 
 ---------------------------------------------
 stderr:
@@ -1274,6 +1302,26 @@ task: "vpc_route_manager"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
 
+task: "webhook_deliverator"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    receivers:                            0
+    successful deliveries:                0
+    failed deliveries:                    0
+    internal delivery errors:             0
+    already delivered by another Nexus:   0
+    in progress by another Nexus:         0
+
+task: "webhook_dispatcher"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    events dispatched:                            0
+    events with no receivers subscribed:          0
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -1416,6 +1464,10 @@ parent:    <none>
     state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED>
     cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED>
 
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   nexus-test-utils
     created at:::::::::::   <REDACTED_TIMESTAMP>
@@ -1423,6 +1475,7 @@ parent:    <none>
     internal DNS version:   1
     external DNS version:   2
 
+ PENDING MGS-MANAGED UPDATES: 0
 
 ---------------------------------------------
 stderr:
@@ -1512,6 +1565,10 @@ parent:    <none>
     state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED>
     cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED>
 
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
  METADATA:
     created by:::::::::::   nexus-test-utils
     created at:::::::::::   <REDACTED_TIMESTAMP>
@@ -1519,6 +1576,7 @@ parent:    <none>
     internal DNS version:   1
     external DNS version:   2
 
+ PENDING MGS-MANAGED UPDATES: 0
 
 ---------------------------------------------
 stderr:
@@ -1600,6 +1658,10 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
  METADATA:
     internal DNS version:   1 (unchanged)
     external DNS version:   2 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
 
 
 ---------------------------------------------

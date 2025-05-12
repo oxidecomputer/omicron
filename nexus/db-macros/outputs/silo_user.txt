@@ -39,7 +39,7 @@ impl<'a> SiloUser<'a> {
     ) -> LookupResult<(authz::SiloUser, nexus_db_model::SiloUser)> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
-        let datastore = &lookup.datastore;
+        let datastore = lookup.datastore;
         match &self {
             SiloUser::Error(_, error) => Err(error.clone()),
             SiloUser::PrimaryKey(_, v0) => {
@@ -97,7 +97,7 @@ impl<'a> SiloUser<'a> {
     async fn lookup(&self) -> LookupResult<(authz::SiloUser,)> {
         let lookup = self.lookup_root();
         let opctx = &lookup.opctx;
-        let datastore = &lookup.datastore;
+        let datastore = lookup.datastore;
         match &self {
             SiloUser::Error(_, error) => Err(error.clone()),
             SiloUser::PrimaryKey(_, v0) => {
@@ -137,7 +137,7 @@ impl<'a> SiloUser<'a> {
     /// outside this module.  See `fetch_for(authz::Action)`.
     async fn fetch_by_id_for(
         opctx: &OpContext,
-        datastore: &DataStore,
+        datastore: &dyn LookupDataStore,
         v0: &Uuid,
         action: authz::Action,
     ) -> LookupResult<(authz::SiloUser, nexus_db_model::SiloUser)> {
@@ -154,7 +154,7 @@ impl<'a> SiloUser<'a> {
     /// this module, you want `fetch()` or `lookup_for(authz::Action)`.
     async fn lookup_by_id_no_authz(
         opctx: &OpContext,
-        datastore: &DataStore,
+        datastore: &dyn LookupDataStore,
         v0: &Uuid,
     ) -> LookupResult<(authz::SiloUser, nexus_db_model::SiloUser)> {
         use ::nexus_db_schema::schema::silo_user::dsl;
