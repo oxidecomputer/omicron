@@ -35,7 +35,6 @@ use gateway_messages::MgsResponse;
 use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
 use gateway_messages::RotResponse;
-use gateway_messages::RotSlotId;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
 use gateway_messages::SpPort;
@@ -777,7 +776,6 @@ struct Handler {
 
     attached_mgs: AttachedMgsSerialConsole,
     incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
-    rot_active_slot: RotSlotId,
     power_state: PowerState,
     startup_options: StartupOptions,
     update_state: SimSpUpdate,
@@ -831,7 +829,6 @@ impl Handler {
             serial_number,
             attached_mgs,
             incoming_serial_console,
-            rot_active_slot: RotSlotId::A,
             power_state: PowerState::A2,
             startup_options: StartupOptions::empty(),
             update_state,
@@ -1125,8 +1122,7 @@ impl SpHandler for Handler {
             "received SP update prepare request";
             "update" => ?update,
         );
-        self.update_state.prepare(
-            SpComponent::SP_ITSELF,
+        self.update_state.sp_update_prepare(
             update.id,
             update.sp_image_size.try_into().unwrap(),
         )
@@ -1142,10 +1138,11 @@ impl SpHandler for Handler {
             "update" => ?update,
         );
 
-        self.update_state.prepare(
+        self.update_state.component_update_prepare(
             update.component,
             update.id,
             update.total_size.try_into().unwrap(),
+            update.slot,
         )
     }
 
@@ -1338,14 +1335,7 @@ impl SpHandler for Handler {
             &self.log, "asked for component active slot";
             "component" => ?component,
         );
-        match component {
-            SpComponent::ROT => Ok(rot_slot_id_to_u16(self.rot_active_slot)),
-            // The only active component is stage0
-            SpComponent::STAGE0 => Ok(0),
-            // The real SP returns `RequestUnsupportedForComponent` for anything
-            // other than the RoT, including SP_ITSELF.
-            _ => Err(SpError::RequestUnsupportedForComponent),
-        }
+        self.update_state.component_get_active_slot(component)
     }
 
     fn component_set_active_slot(
@@ -1360,28 +1350,7 @@ impl SpHandler for Handler {
             "slot" => slot,
             "persist" => persist,
         );
-        match component {
-            SpComponent::ROT => {
-                self.rot_active_slot = rot_slot_id_from_u16(slot)?;
-                Ok(())
-            }
-            SpComponent::STAGE0 => {
-                if slot == 1 {
-                    return Ok(());
-                } else {
-                    Err(SpError::RequestUnsupportedForComponent)
-                }
-            }
-            SpComponent::HOST_CPU_BOOT_FLASH => {
-                self.update_state.set_active_host_slot(slot);
-                Ok(())
-            }
-            _ => {
-                // The real SP returns `RequestUnsupportedForComponent` for anything
-                // other than the RoT and host boot flash, including SP_ITSELF.
-                Err(SpError::RequestUnsupportedForComponent)
-            }
-        }
+        self.update_state.component_set_active_slot(component, slot, persist)
     }
 
     fn component_action(

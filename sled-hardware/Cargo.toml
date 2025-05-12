@@ -39,3 +39,6 @@ libnvme.workspace = true
 [dev-dependencies]
 illumos-utils = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
+
+[features]
+testing = []

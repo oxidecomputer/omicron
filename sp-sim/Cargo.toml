@@ -20,6 +20,7 @@ hubtools.workspace = true
 omicron-common.workspace = true
 serde.workspace = true
 serde_cbor.workspace = true
+sha3.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
 thiserror.workspace = true

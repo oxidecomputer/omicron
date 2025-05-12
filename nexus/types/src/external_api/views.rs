@@ -17,6 +17,7 @@ use omicron_common::api::external::{
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
     ObjectIdentity, RoleName, SimpleIdentityOrName,
 };
+use omicron_uuid_kinds::{WebhookEventUuid, WebhookReceiverUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
@@ -25,7 +26,9 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::IpAddr;
+use std::sync::LazyLock;
 use strum::{EnumIter, IntoEnumIterator};
+use url::Url;
 use uuid::Uuid;
 
 use super::params::PhysicalDiskKind;
@@ -1052,6 +1055,300 @@ pub struct OxqlQueryResult {
     pub tables: Vec<oxql_types::Table>,
 }
 
+// WEBHOOKS
+
+/// A webhook event class.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EventClass {
+    /// The name of the event class.
+    pub name: String,
+
+    /// A description of what this event class represents.
+    pub description: String,
+}
+
+/// The configuration for a webhook.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
+pub struct WebhookReceiver {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The URL that webhook notification requests are sent to.
+    pub endpoint: Url,
+    // A list containing the IDs of the secret keys used to sign payloads sent
+    // to this receiver.
+    pub secrets: Vec<WebhookSecret>,
+    /// The list of event classes to which this receiver is subscribed.
+    pub subscriptions: Vec<shared::WebhookSubscription>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSubscriptionCreated {
+    /// The new subscription added to the receiver.
+    pub subscription: shared::WebhookSubscription,
+}
+
+/// A list of the IDs of secrets associated with a webhook.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSecrets {
+    pub secrets: Vec<WebhookSecret>,
+}
+
+/// A view of a shared secret key assigned to a webhook receiver.
+///
+/// Once a secret is created, the value of the secret is not available in the
+/// API, as it must remain secret. Instead, secrets are referenced by their
+/// unique IDs assigned when they are created.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct WebhookSecret {
+    /// The public unique ID of the secret.
+    pub id: Uuid,
+
+    /// The UTC timestamp at which this secret was created.
+    pub time_created: DateTime<Utc>,
+}
+
+/// A delivery of a webhook event.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookDelivery {
+    /// The UUID of this delivery attempt.
+    pub id: Uuid,
+
+    /// The UUID of the webhook receiver that this event was delivered to.
+    pub webhook_id: WebhookReceiverUuid,
+
+    /// The event class.
+    pub event_class: String,
+
+    /// The UUID of the event.
+    pub event_id: WebhookEventUuid,
+
+    /// The state of this delivery.
+    pub state: WebhookDeliveryState,
+
+    /// Why this delivery was performed.
+    pub trigger: WebhookDeliveryTrigger,
+
+    /// Individual attempts to deliver this webhook event, and their outcomes.
+    pub attempts: Vec<WebhookDeliveryAttempt>,
+
+    /// The time at which this delivery began (i.e. the event was dispatched to
+    /// the receiver).
+    pub time_started: DateTime<Utc>,
+}
+
+/// The state of a webhook delivery attempt.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    strum::VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum WebhookDeliveryState {
+    /// The webhook event has not yet been delivered successfully.
+    ///
+    /// Either no delivery attempts have yet been performed, or the delivery has
+    /// failed at least once but has retries remaining.
+    Pending,
+    /// The webhook event has been delivered successfully.
+    Delivered,
+    /// The webhook delivery attempt has failed permanently and will not be
+    /// retried again.
+    Failed,
+}
+
+impl WebhookDeliveryState {
+    pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Delivered => "delivered",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl fmt::Display for WebhookDeliveryState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for WebhookDeliveryState {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Error> {
+        static EXPECTED_ONE_OF: LazyLock<String> =
+            LazyLock::new(expected_one_of::<WebhookDeliveryState>);
+
+        for &v in Self::ALL {
+            if s.trim().eq_ignore_ascii_case(v.as_str()) {
+                return Ok(v);
+            }
+        }
+        Err(Error::invalid_value("WebhookDeliveryState", &*EXPECTED_ONE_OF))
+    }
+}
+
+/// The reason a webhook event was delivered
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    strum::VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum WebhookDeliveryTrigger {
+    /// Delivery was triggered by the event occurring for the first time.
+    Event,
+    /// Delivery was triggered by a request to resend the event.
+    Resend,
+    /// This delivery is a liveness probe.
+    Probe,
+}
+
+impl WebhookDeliveryTrigger {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Event => "event",
+            Self::Resend => "resend",
+            Self::Probe => "probe",
+        }
+    }
+}
+
+impl fmt::Display for WebhookDeliveryTrigger {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for WebhookDeliveryTrigger {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Error> {
+        static EXPECTED_ONE_OF: LazyLock<String> =
+            LazyLock::new(expected_one_of::<WebhookDeliveryTrigger>);
+
+        for &v in <Self as strum::VariantArray>::VARIANTS {
+            if s.trim().eq_ignore_ascii_case(v.as_str()) {
+                return Ok(v);
+            }
+        }
+        Err(Error::invalid_value("WebhookDeliveryTrigger", &*EXPECTED_ONE_OF))
+    }
+}
+
+/// An individual delivery attempt for a webhook event.
+///
+/// This represents a single HTTP request that was sent to the receiver, and its
+/// outcome.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookDeliveryAttempt {
+    /// The time at which the webhook delivery was attempted.
+    pub time_sent: DateTime<Utc>,
+
+    /// The attempt number.
+    pub attempt: usize,
+
+    /// The outcome of this delivery attempt: either the event was delivered
+    /// successfully, or the request failed for one of several reasons.
+    pub result: WebhookDeliveryAttemptResult,
+
+    pub response: Option<WebhookDeliveryResponse>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    strum::VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum WebhookDeliveryAttemptResult {
+    /// The webhook event has been delivered successfully.
+    Succeeded,
+    /// A webhook request was sent to the endpoint, and it
+    /// returned a HTTP error status code indicating an error.
+    FailedHttpError,
+    /// The webhook request could not be sent to the receiver endpoint.
+    FailedUnreachable,
+    /// A connection to the receiver endpoint was successfully established, but
+    /// no response was received within the delivery timeout.
+    FailedTimeout,
+}
+
+impl WebhookDeliveryAttemptResult {
+    pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
+    pub const ALL_FAILED: &[Self] =
+        &[Self::FailedHttpError, Self::FailedUnreachable, Self::FailedTimeout];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::FailedHttpError => "failed_http_error",
+            Self::FailedTimeout => "failed_timeout",
+            Self::FailedUnreachable => "failed_unreachable",
+        }
+    }
+
+    /// Returns `true` if this `WebhookDeliveryAttemptResult` represents a failure
+    pub fn is_failed(&self) -> bool {
+        *self != Self::Succeeded
+    }
+}
+
+impl fmt::Display for WebhookDeliveryAttemptResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// The response received from a webhook receiver endpoint.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookDeliveryResponse {
+    /// The HTTP status code returned from the webhook endpoint.
+    pub status: u16,
+    /// The response time of the webhook endpoint, in milliseconds.
+    pub duration_ms: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookDeliveryId {
+    pub delivery_id: Uuid,
+}
+
+/// Data describing the result of a webhook liveness probe attempt.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookProbeResult {
+    /// The outcome of the probe request.
+    pub probe: WebhookDelivery,
+    /// If the probe request succeeded, and resending failed deliveries on
+    /// success was requested, the number of new delivery attempts started.
+    /// Otherwise, if the probe did not succeed, or resending failed deliveries
+    /// was not requested, this is null.
+    ///
+    /// Note that this may be 0, if there were no events found which had not
+    /// been delivered successfully to this receiver.
+    pub resends_started: Option<usize>,
+}
+
 // UPDATE
 
 /// Source of a system software target release.
@@ -1076,4 +1373,47 @@ pub struct TargetRelease {
 
     /// The source of the target release.
     pub release_source: TargetReleaseSource,
+}
+
+fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
+    use std::fmt::Write;
+    let mut msg = "expected one of:".to_string();
+    let mut variants = T::VARIANTS.iter().peekable();
+    while let Some(variant) = variants.next() {
+        if variants.peek().is_some() {
+            write!(&mut msg, " '{variant}',").unwrap();
+        } else {
+            write!(&mut msg, " or '{variant}'").unwrap();
+        }
+    }
+    msg
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_expected_one_of() {
+        // Test this using an enum that we declare here, so that the test
+        // needn't be updated if the types which actually use this helper
+        // change.
+        #[derive(Debug, strum::VariantArray)]
+        enum Test {
+            Foo,
+            Bar,
+            Baz,
+        }
+
+        impl fmt::Display for Test {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                fmt::Debug::fmt(self, f)
+            }
+        }
+
+        assert_eq!(
+            expected_one_of::<Test>(),
+            "expected one of: 'Foo', 'Bar', or 'Baz'"
+        );
+    }
 }

@@ -241,7 +241,7 @@ pub struct DurableDataset<'a> {
 
 impl<'a> From<DurableDataset<'a>> for DatasetName {
     fn from(d: DurableDataset<'a>) -> Self {
-        DatasetName::new(d.dataset.pool_name.clone(), d.kind)
+        DatasetName::new(d.dataset.pool_name, d.kind)
     }
 }
 

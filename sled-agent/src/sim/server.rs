@@ -397,7 +397,7 @@ pub async fn run_standalone_server(
         id: OmicronZoneUuid::new_v4(),
         zone_type: BlueprintZoneType::InternalDns(
             blueprint_zone_type::InternalDns {
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
                 http_address: http_bound,
                 dns_address: match dns.dns_server.local_address() {
                     SocketAddr::V4(_) => panic!("did not expect v4 address"),
@@ -472,9 +472,7 @@ pub async fn run_standalone_server(
             id,
             zone_type: BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns {
-                    dataset: OmicronZoneDataset {
-                        pool_name: pool_name.clone(),
-                    },
+                    dataset: OmicronZoneDataset { pool_name },
                     http_address: external_dns_internal_addr,
                     dns_address: from_sockaddr_to_external_floating_addr(
                         SocketAddr::V6(external_dns_internal_addr),
