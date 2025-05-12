@@ -5,14 +5,15 @@
 use crate::config::Ereport;
 use crate::config::EreportConfig;
 use crate::config::EreportRestart;
-use gateway_messages::ereport::Ena;
-use gateway_messages::ereport::EreportRequest;
-use gateway_messages::ereport::EreportResponseHeader;
-use gateway_messages::ereport::ResponseHeaderV0;
-use gateway_messages::ereport::RestartId;
+use gateway_ereport_messages::Ena;
+use gateway_ereport_messages::Request;
+use gateway_ereport_messages::ResponseHeader;
+use gateway_ereport_messages::ResponseHeaderV0;
+use gateway_ereport_messages::RestartId;
 use std::collections::VecDeque;
 use std::io::Cursor;
 use tokio::sync::oneshot;
+use zerocopy::IntoBytes;
 
 pub(crate) struct EreportState {
     ereports: VecDeque<EreportListEntry>,
@@ -51,10 +52,14 @@ impl EreportState {
         let ereports: VecDeque<_> = ereports
             .into_iter()
             .enumerate()
-            .map(|(i, ereport)| ereport.to_entry(Ena(i as u64)))
+            .map(|(i, ereport)| {
+                // DON'T EMIT ENA 0
+                let ena = Ena::new(i as u64 + 1);
+                ereport.to_entry(ena)
+            })
             .collect();
-        let restart_id = RestartId(restart_id.as_u128());
-        let next_ena = Ena(ereports.len() as u64);
+        let restart_id = RestartId::new(restart_id.as_u128());
+        let next_ena = Ena::new(ereports.len() as u64);
         Self { ereports, next_ena, restart_id, meta: metadata, log }
     }
 
@@ -82,10 +87,10 @@ impl EreportState {
             "next_restart_id" => ?restart_id,
             "metadata" => ?metadata,
         );
-        self.restart_id = RestartId(restart_id.as_u128());
+        self.restart_id = RestartId::new(restart_id.as_u128());
         self.meta = metadata;
         self.ereports.clear();
-        self.next_ena = Ena(0);
+        self.next_ena = Ena::ZERO;
     }
 
     pub(crate) fn append_ereport(&mut self, ereport: Ereport) -> Ena {
@@ -103,12 +108,12 @@ impl EreportState {
 
     pub(crate) fn handle_request<'buf>(
         &mut self,
-        request: EreportRequest,
+        request: &Request,
         buf: &'buf mut [u8],
     ) -> &'buf [u8] {
         use serde::ser::Serializer;
 
-        let EreportRequest::V0(req) = request;
+        let Request::V0(req) = request;
         slog::info!(self.log, "ereport request: {req:?}");
 
         // If we "restarted", encode the current metadata map, and start at ENA
@@ -121,7 +126,7 @@ impl EreportState {
                 "req_restart_id" => ?req.restart_id,
                 "current_restart_id" => ?self.restart_id,
             );
-            (&self.meta, Ena(0))
+            (&self.meta, Ena::new(0))
         } else {
             // If we didn't "restart", we should honor the committed ENA (if the
             // request includes one), and we should start at the requested ENA.
@@ -162,15 +167,14 @@ impl EreportState {
             .unwrap_or(Ena(start_ena.0 + 1));
 
         // Serialize the header.
-        let mut pos = gateway_messages::serialize(
-            buf,
-            &EreportResponseHeader::V0(ResponseHeaderV0 {
-                request_id: req.request_id,
-                restart_id: self.restart_id,
-                start_ena,
-            }),
-        )
-        .expect("header must serialize");
+        ResponseHeader::V0(ResponseHeaderV0 {
+            request_id: req.request_id,
+            restart_id: self.restart_id,
+            start_ena,
+        })
+        .write_to_prefix(buf)
+        .expect("should successfully write header");
+        let mut pos = std::mem::size_of::<ResponseHeader>();
 
         // Serialize the metadata map.
         pos += {

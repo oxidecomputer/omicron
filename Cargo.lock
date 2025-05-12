@@ -11976,6 +11976,7 @@ dependencies = [
  "clap",
  "dropshot",
  "futures",
+ "gateway-ereport-messages",
  "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=57536869418e08667824c9a1b2cf115ed91b713f)",
  "gateway-types",
  "hex",
@@ -11992,6 +11993,7 @@ dependencies = [
  "tokio",
  "toml 0.8.20",
  "uuid",
+ "zerocopy 0.8.25",
 ]
 
 [[package]]

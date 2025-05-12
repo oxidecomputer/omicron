@@ -435,6 +435,8 @@ gateway-client = { path = "clients/gateway-client" }
 # is "fine", because SP/MGS communication maintains forwards and backwards
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
+#
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "57536869418e08667824c9a1b2cf115ed91b713f", default-features = false, features = ["debug-impls"] }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "57536869418e08667824c9a1b2cf115ed91b713f", default-features = false, features = ["std"] }
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "57536869418e08667824c9a1b2cf115ed91b713f" }
 gateway-test-utils = { path = "gateway-test-utils" }
@@ -738,6 +740,7 @@ wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
 xshell = "0.2.7"
+zerocopy = "0.8.25"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
 zip = { version = "2.6.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }

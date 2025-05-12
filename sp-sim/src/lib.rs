@@ -116,7 +116,7 @@ pub trait SimulatedSp {
     async fn ereport_append(
         &self,
         restart: config::Ereport,
-    ) -> gateway_messages::ereport::Ena;
+    ) -> gateway_ereport_messages::Ena;
 }
 
 // Helper function to pad a simulated serial number (stored as a `String`) to

@@ -22,6 +22,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use futures::Future;
 use futures::future;
+use gateway_ereport_messages::Request as EreportRequest;
 use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
@@ -40,7 +41,6 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
 use gateway_messages::SpStateV2;
-use gateway_messages::ereport::EreportRequest;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
@@ -198,7 +198,7 @@ impl SimulatedSp for Gimlet {
     async fn ereport_append(
         &self,
         ereport: crate::config::Ereport,
-    ) -> gateway_messages::ereport::Ena {
+    ) -> gateway_ereport_messages::Ena {
         let (tx, rx) = oneshot::channel();
         self.commands
             .send(Command::Ereport(ereport::Command::Append(ereport, tx)))
@@ -649,11 +649,16 @@ impl UdpTask {
             sock: Option<&mut UdpServer>,
         ) -> anyhow::Result<(EreportRequest, SocketAddrV6, &mut UdpServer)>
         {
+            use zerocopy::TryFromBytes;
             match sock {
                 Some(sock) => {
                     let (msg, addr) = sock.recv_from().await?;
-                    let (req, _) =
-                        gateway_messages::deserialize::<EreportRequest>(msg)?;
+                    let req = EreportRequest::try_read_from_bytes(msg)
+                        .map_err(|e| {
+                            anyhow::anyhow!(
+                                "couldn't zerocopy ereport header: {e:?}"
+                            )
+                        })?;
                     Ok((req, addr, sock))
                 }
                 None => futures::future::pending().await,
@@ -717,13 +722,13 @@ impl UdpTask {
 
                 recv = ereport_recv(ereport0) => {
                     let (req, addr, sock) = recv?;
-                    let rsp = self.ereport_state.handle_request(req, &mut out_buf);
+                    let rsp = self.ereport_state.handle_request(&req, &mut out_buf);
                     sock.send_to(rsp, addr).await?;
                 }
 
                 recv = ereport_recv(ereport1) => {
                     let (req, addr, sock) = recv?;
-                    let rsp = self.ereport_state.handle_request(req, &mut out_buf);
+                    let rsp = self.ereport_state.handle_request(&req, &mut out_buf);
                     sock.send_to(rsp, addr).await?;
                 }
 
