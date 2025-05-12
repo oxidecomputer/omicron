@@ -1014,8 +1014,8 @@ impl GatewayApi for GatewayImpl {
 
             let req_restart_id = restart_id.into_untyped_uuid();
             let start_ena = start_at
-                .map(|ereport_types::Ena(e)| ereport::Ena(e))
-                .unwrap_or(ereport::Ena(0));
+                .map(|ereport_types::Ena(e)| ereport::Ena::new(e))
+                .unwrap_or(ereport::Ena::new(0));
 
             // If the limit is greater than 255, just clamp to that for now.
             // TODO(eliza): eventually, we may want to request multiple tranches
@@ -1023,7 +1023,7 @@ impl GatewayApi for GatewayImpl {
             // limit requested by Nexus.
             let limit = NonZeroU8::try_from(limit).unwrap_or(NonZeroU8::MAX);
             let committed_ena =
-                committed.map(|ereport_types::Ena(e)| ereport::Ena(e));
+                committed.map(|ereport_types::Ena(e)| ereport::Ena::new(e));
 
             let ereport::EreportTranche { restart_id, ereports } = sp
                 .ereports(req_restart_id, start_ena, limit, committed_ena)
@@ -1042,7 +1042,7 @@ impl GatewayApi for GatewayImpl {
                 .into_iter()
                 .map(|ereport::Ereport { ena: ereport::Ena(ena), data }| {
                     ereport_types::Ereport {
-                        ena: ereport_types::Ena(ena),
+                        ena: ereport_types::Ena::new(ena),
                         data,
                     }
                 })

@@ -9,7 +9,6 @@ use clickhouse_admin_api::{
 };
 use cockroach_admin_api::cockroach_admin_api_mod;
 use dns_server_api::dns_server_api_mod;
-use ereport_api::ereport_api_mod;
 use gateway_api::gateway_api_mod;
 use installinator_api::installinator_api_mod;
 use nexus_external_api::nexus_external_api_mod;
