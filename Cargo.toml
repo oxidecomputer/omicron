@@ -49,7 +49,6 @@ members = [
     "dev-tools/releng",
     "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
-    "dev-tools/support-bundle-reader-lib",
     "dev-tools/xtask",
     "dns-server",
     "dns-server-api",
@@ -201,7 +200,6 @@ default-members = [
     "dev-tools/releng",
     "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
-    "dev-tools/support-bundle-reader-lib",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
@@ -699,7 +697,7 @@ strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
 subtle = "2.6.1"
 supports-color = "3.0.2"
-support-bundle-reader-lib = { path = "dev-tools/support-bundle-reader-lib" }
+support-bundle-viewer = "0.1.0"
 swrite = "0.1.0"
 sync-ptr = "0.1.1"
 libsw = { version = "3.4.0", features = ["tokio"] }
