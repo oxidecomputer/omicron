@@ -196,9 +196,7 @@ async fn wait_for_bundle_to_be_collected(
                 }
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 eprint!(".");
-                std::io::stderr()
-                    .flush()
-                    .with_context(|| "cannot flush stderr".to_string())?;
+                std::io::stderr().flush().context("cannot flush stderr")?;
             }
             other => bail!("Unexepcted state: {other}"),
         }
