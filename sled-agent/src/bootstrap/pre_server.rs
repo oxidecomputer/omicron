@@ -74,12 +74,13 @@ impl BootstrapAgentStartup {
         // Perform several blocking startup tasks first; we move `config` and
         // `log` into this task, and on success, it gives them back to us.
         let (config, log, startup_networking) =
-            tokio::task::spawn_blocking(move || {
-                enable_mg_ddm(&config, &log)?;
+            tokio::task::spawn_blocking(|| async move {
+                enable_mg_ddm(&config, &log).await?;
                 pumpkind::enable_pumpkind_service(&log)?;
                 ensure_zfs_key_directory_exists(&log)?;
 
-                let startup_networking = BootstrapNetworking::setup(&config)?;
+                let startup_networking =
+                    BootstrapNetworking::setup(&config).await?;
 
                 // Before we create the switch zone, we need to ensure that the
                 // necessary ZFS and Zone resources are ready. All other zones
@@ -89,7 +90,8 @@ impl BootstrapAgentStartup {
                 Ok::<_, StartError>((config, log, startup_networking))
             })
             .await
-            .unwrap()?;
+            .unwrap()
+            .await?;
 
         // Start the DDM reconciler, giving it our bootstrap subnet to
         // advertise to other sleds.
@@ -246,9 +248,13 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
     Ok(())
 }
 
-fn enable_mg_ddm(config: &Config, log: &Logger) -> Result<(), StartError> {
+async fn enable_mg_ddm(
+    config: &Config,
+    log: &Logger,
+) -> Result<(), StartError> {
     info!(log, "finding links {:?}", config.data_links);
     let mg_addr_objs = underlay::find_nics(&config.data_links)
+        .await
         .map_err(StartError::FindMaghemiteAddrObjs)?;
     if mg_addr_objs.is_empty() {
         return Err(StartError::NoUnderlayAddrObjs);
@@ -344,21 +350,23 @@ pub(crate) struct BootstrapNetworking {
 }
 
 impl BootstrapNetworking {
-    fn setup(config: &Config) -> Result<Self, StartError> {
-        let link_for_mac = config.get_link().map_err(StartError::ConfigLink)?;
+    async fn setup(config: &Config) -> Result<Self, StartError> {
+        let link_for_mac =
+            config.get_link().await.map_err(StartError::ConfigLink)?;
         let global_zone_bootstrap_ip = BootstrapInterface::GlobalZone
             .ip(&link_for_mac)
+            .await
             .map_err(StartError::BootstrapLinkMac)?;
 
-        let bootstrap_etherstub = Dladm::ensure_etherstub(
-            dladm::BOOTSTRAP_ETHERSTUB_NAME,
-        )
-        .map_err(|err| StartError::EnsureEtherstubError {
-            name: dladm::BOOTSTRAP_ETHERSTUB_NAME,
-            err,
-        })?;
+        let bootstrap_etherstub =
+            Dladm::ensure_etherstub(dladm::BOOTSTRAP_ETHERSTUB_NAME)
+                .await
+                .map_err(|err| StartError::EnsureEtherstubError {
+                    name: dladm::BOOTSTRAP_ETHERSTUB_NAME,
+                    err,
+                })?;
         let bootstrap_etherstub_vnic =
-            Dladm::ensure_etherstub_vnic(&bootstrap_etherstub)?;
+            Dladm::ensure_etherstub_vnic(&bootstrap_etherstub).await?;
 
         Zones::ensure_has_global_zone_v6_address(
             bootstrap_etherstub_vnic.clone(),
@@ -385,17 +393,18 @@ impl BootstrapNetworking {
 
         let switch_zone_bootstrap_ip = BootstrapInterface::SwitchZone
             .ip(&link_for_mac)
+            .await
             .map_err(StartError::BootstrapLinkMac)?;
 
-        let underlay_etherstub = Dladm::ensure_etherstub(
-            dladm::UNDERLAY_ETHERSTUB_NAME,
-        )
-        .map_err(|err| StartError::EnsureEtherstubError {
-            name: dladm::UNDERLAY_ETHERSTUB_NAME,
-            err,
-        })?;
+        let underlay_etherstub =
+            Dladm::ensure_etherstub(dladm::UNDERLAY_ETHERSTUB_NAME)
+                .await
+                .map_err(|err| StartError::EnsureEtherstubError {
+                    name: dladm::UNDERLAY_ETHERSTUB_NAME,
+                    err,
+                })?;
         let underlay_etherstub_vnic =
-            Dladm::ensure_etherstub_vnic(&underlay_etherstub)?;
+            Dladm::ensure_etherstub_vnic(&underlay_etherstub).await?;
 
         Ok(Self {
             bootstrap_etherstub,

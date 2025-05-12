@@ -36,6 +36,7 @@ pub(crate) async fn bootstrap_sled(
 ) -> Result<()> {
     // Find address objects to pass to maghemite.
     let links = underlay::find_chelsio_links(data_links)
+        .await
         .context("failed to find chelsio links")?;
     ensure!(
         !links.is_empty(),
@@ -59,17 +60,18 @@ pub(crate) async fn bootstrap_sled(
     // Set up an interface for our bootstrap network.
     let bootstrap_etherstub =
         Dladm::ensure_etherstub(dladm::BOOTSTRAP_ETHERSTUB_NAME)
+            .await
             .context("failed to ensure bootstrap etherstub existence")?;
 
     let bootstrap_etherstub_vnic =
         Dladm::ensure_etherstub_vnic(&bootstrap_etherstub)
+            .await
             .context("failed to ensure bootstrap etherstub vnic existence")?;
 
     // Use the mac address of the first link to derive our bootstrap address.
-    let ip =
-        BootstrapInterface::GlobalZone.ip(&links[0]).with_context(|| {
-            format!("failed to derive a bootstrap prefix from {:?}", links[0])
-        })?;
+    let ip = BootstrapInterface::GlobalZone.ip(&links[0]).await.with_context(
+        || format!("failed to derive a bootstrap prefix from {:?}", links[0]),
+    )?;
 
     Zones::ensure_has_global_zone_v6_address(
         bootstrap_etherstub_vnic,

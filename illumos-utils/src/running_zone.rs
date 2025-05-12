@@ -1186,7 +1186,7 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     // (used in unit tests)
-    fn fake_install(mut self) -> Result<InstalledZone, InstallZoneError> {
+    async fn fake_install(mut self) -> Result<InstalledZone, InstallZoneError> {
         let zones_api = self.zones_api.take().unwrap();
         let zone = self
             .zone_type
@@ -1196,6 +1196,7 @@ impl<'a> ZoneBuilder<'a> {
             .underlay_vnic_allocator
             .ok_or(InstallZoneError::IncompleteBuilder)?
             .new_control(None)
+            .await
             .map_err(move |err| InstallZoneError::CreateVnic { zone, err })?;
         let fake_cfg = self.fake_cfg.unwrap();
         let temp_dir = fake_cfg.temp_dir;
@@ -1233,7 +1234,7 @@ impl<'a> ZoneBuilder<'a> {
     /// parameter was not provided.
     pub async fn install(mut self) -> Result<InstalledZone, InstallZoneError> {
         if self.fake_cfg.is_some() {
-            return self.fake_install();
+            return self.fake_install().await;
         }
 
         let Self {
@@ -1258,12 +1259,12 @@ impl<'a> ZoneBuilder<'a> {
             return Err(InstallZoneError::IncompleteBuilder);
         };
 
-        let control_vnic =
-            underlay_vnic_allocator.new_control(None).map_err(|err| {
-                InstallZoneError::CreateVnic {
-                    zone: zone_type.to_string(),
-                    err,
-                }
+        let control_vnic = underlay_vnic_allocator
+            .new_control(None)
+            .await
+            .map_err(|err| InstallZoneError::CreateVnic {
+                zone: zone_type.to_string(),
+                err,
             })?;
 
         let full_zone_name =
