@@ -20,6 +20,7 @@ omicron-zone-package.workspace = true
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 shell-words.workspace = true
 slog.workspace = true

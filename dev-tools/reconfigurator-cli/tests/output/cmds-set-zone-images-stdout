@@ -1,7 +1,9 @@
-using provided RNG seed: test_set_zone_images
+using provided RNG seed: reconfigurator-cli-test
 > # Load example system
 
-> load-example --nsleds 1 --ndisks-per-sled 3
+> # This is a legacy test; new tests shouldn't need to set a seed
+
+> load-example --nsleds 1 --ndisks-per-sled 3 --seed test_set_zone_images
 loaded example system with:
 - collection: 0141c1ff-0f12-4bb6-b3c5-14fa3be0eaf3
 - blueprint: 971eeb12-1830-4fa0-a699-98ea0164505c
