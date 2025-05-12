@@ -261,7 +261,7 @@ impl ExternalDisks {
             raw_disks,
             config,
             log,
-            &mut RealDiskAdopter { key_requester },
+            &RealDiskAdopter { key_requester },
         )
         .await
     }
@@ -271,7 +271,7 @@ impl ExternalDisks {
         raw_disks: &IdMap<RawDiskWithId>,
         config: &IdMap<OmicronPhysicalDiskConfig>,
         log: &Logger,
-        disk_adopter: &mut T,
+        disk_adopter: &T,
     ) {
         for config in config.iter().cloned() {
             // We can only manage disks if the raw disk is present.
@@ -327,7 +327,7 @@ impl ExternalDisks {
         current: Option<ExternalDiskState>,
         config: OmicronPhysicalDiskConfig,
         raw_disk: &RawDisk,
-        disk_adopter: &mut T,
+        disk_adopter: &T,
         log: &Logger,
     ) -> ExternalDiskState {
         match current.map(|d| d.state) {
@@ -406,7 +406,7 @@ impl ExternalDisks {
         &self,
         config: OmicronPhysicalDiskConfig,
         raw_disk: RawDisk,
-        disk_adopter: &mut T,
+        disk_adopter: &T,
         log: &Logger,
     ) -> ExternalDiskState {
         match disk_adopter
@@ -470,7 +470,7 @@ enum DiskState {
 /// [`RealDiskAdopter`].
 trait DiskAdopter {
     fn adopt_disk(
-        &mut self,
+        &self,
         raw_disk: RawDisk,
         mount_config: &MountConfig,
         pool_id: ZpoolUuid,
@@ -484,7 +484,7 @@ struct RealDiskAdopter<'a> {
 
 impl DiskAdopter for RealDiskAdopter<'_> {
     async fn adopt_disk(
-        &mut self,
+        &self,
         raw_disk: RawDisk,
         mount_config: &MountConfig,
         pool_id: ZpoolUuid,
@@ -526,16 +526,17 @@ mod tests {
     use sled_hardware::PooledDisk;
     use sled_hardware::UnparsedDisk;
     use std::collections::BTreeMap;
+    use std::sync::Mutex;
     use test_strategy::proptest;
 
     #[derive(Debug, Default)]
     struct TestDiskAdopter {
-        requests: Vec<RawDisk>,
+        requests: Mutex<Vec<RawDisk>>,
     }
 
     impl DiskAdopter for TestDiskAdopter {
         async fn adopt_disk(
-            &mut self,
+            &self,
             raw_disk: RawDisk,
             _mount_config: &MountConfig,
             pool_id: ZpoolUuid,
@@ -556,7 +557,7 @@ mod tests {
                 zpool_name: ZpoolName::new_external(pool_id),
                 firmware: raw_disk.firmware().clone(),
             });
-            self.requests.push(raw_disk);
+            self.requests.lock().unwrap().push(raw_disk);
             Ok(disk)
         }
     }
@@ -661,28 +662,28 @@ mod tests {
 
         // This should partially succeed: we should adopt the U.2s and report
         // errors on the M.2s.
-        let mut disk_adopter = TestDiskAdopter::default();
+        let disk_adopter = TestDiskAdopter::default();
         external_disks
             .start_managing_if_needed_with_disk_adopter(
                 &raw_disks,
                 &config_disks,
                 &logctx.log,
-                &mut disk_adopter,
+                &disk_adopter,
             )
             .await;
 
         // We should only have attempted disk adoptions for external disks.
         let num_external =
             raw_disks.iter().filter(|d| d.variant() == DiskVariant::U2).count();
-        assert_eq!(disk_adopter.requests.len(), num_external);
-        assert!(
-            disk_adopter
-                .requests
-                .iter()
-                .all(|req| req.variant() == DiskVariant::U2),
-            "found non-U2 disk adoption request: {:?}",
-            disk_adopter.requests
-        );
+        {
+            let requests = disk_adopter.requests.lock().unwrap();
+            assert_eq!(requests.len(), num_external);
+            assert!(
+                requests.iter().all(|req| req.variant() == DiskVariant::U2),
+                "found non-U2 disk adoption request: {:?}",
+                disk_adopter.requests
+            );
+        }
 
         // Ensure each disk is in the state we expect: either adopted or
         // reported as an error.
@@ -759,13 +760,13 @@ mod tests {
         assert!(external_disks.disks.is_empty());
 
         // Attempt to adopt all the config disks.
-        let mut disk_adopter = TestDiskAdopter::default();
+        let disk_adopter = TestDiskAdopter::default();
         external_disks
             .start_managing_if_needed_with_disk_adopter(
                 &raw_disks,
                 &config_disks,
                 &logctx.log,
-                &mut disk_adopter,
+                &disk_adopter,
             )
             .await;
 
@@ -844,13 +845,13 @@ mod tests {
         assert!(external_disks.disks.is_empty());
 
         // Attempt to adopt all the config disks.
-        let mut disk_adopter = TestDiskAdopter::default();
+        let disk_adopter = TestDiskAdopter::default();
         external_disks
             .start_managing_if_needed_with_disk_adopter(
                 &raw_disks,
                 &config_disks,
                 &logctx.log,
-                &mut disk_adopter,
+                &disk_adopter,
             )
             .await;
 
@@ -890,7 +891,7 @@ mod tests {
                 &raw_disks,
                 &config_disks,
                 &logctx.log,
-                &mut disk_adopter,
+                &disk_adopter,
             )
             .await;
 
@@ -964,13 +965,13 @@ mod tests {
         assert!(external_disks.disks.is_empty());
 
         // Attempt to adopt all the config disks.
-        let mut disk_adopter = TestDiskAdopter::default();
+        let disk_adopter = TestDiskAdopter::default();
         external_disks
             .start_managing_if_needed_with_disk_adopter(
                 &raw_disks,
                 &config_disks,
                 &logctx.log,
-                &mut disk_adopter,
+                &disk_adopter,
             )
             .await;
 
