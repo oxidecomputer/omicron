@@ -28,8 +28,8 @@ where
 ///
 /// `pred` should return true for all entries that are less than the new entry,
 /// and false for all entries greater than the new entry. This function uses
-/// [`std::slice::partition_point`] internally; for more, see the documentation
-/// for that function. (Generally, `pred` should be of the form `|k, v| k <=
+/// [`slice::partition_point`] internally; for more, see the documentation for
+/// that function. (Generally, `pred` should be of the form `|k, v| k <=
 /// to_insert`).
 ///
 /// Returns an error if the key already exists in the map.
