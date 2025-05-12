@@ -25,7 +25,7 @@ use omicron_uuid_kinds::{BlueprintUuid, CollectionUuid, SledUuid};
 use crate::{
     LoadSerializedResultBuilder,
     errors::{DuplicateError, KeyError, NonEmptySystemError},
-    utils::join_comma_or_none,
+    utils::{insert_sorted_by, join_comma_or_none},
 };
 
 /// A versioned, simulated reconfigurator system.
@@ -69,12 +69,14 @@ pub struct SimSystem {
     /// describe the system.
     description: SystemDescription,
 
-    /// Inventory collections created by the user.
+    /// Inventory collections created by the user. Invariant: the `IndexMap`
+    /// is ordered by time started.
     ///
     /// Stored with `Arc` to allow cheap cloning.
     collections: IndexMap<CollectionUuid, Arc<Collection>>,
 
-    /// Blueprints created by the user.
+    /// Blueprints created by the user. Invariant: the `IndexMap` is ordered by
+    /// time created.
     ///
     /// Stored with `Arc` to allow cheap cloning.
     blueprints: IndexMap<BlueprintUuid, Arc<Blueprint>>,
@@ -608,9 +610,10 @@ impl SimSystemBuilderInner {
         external_dns: DnsConfigZone,
     ) {
         self.system.description = example.system;
-        self.system
-            .collections
-            .insert(example.collection.id, Arc::new(example.collection));
+
+        self.add_collection_inner(Arc::new(example.collection))
+            .expect("already checked that system is empty");
+
         self.system.internal_dns.insert(
             blueprint.internal_dns_version,
             Arc::new(DnsConfigParams {
@@ -629,16 +632,29 @@ impl SimSystemBuilderInner {
                 zones: vec![external_dns],
             }),
         );
-        self.system.blueprints.insert(
-            example.initial_blueprint.id,
-            Arc::new(example.initial_blueprint),
-        );
+
+        let initial_blueprint_id = example.initial_blueprint.id;
+        let target_blueprint_id = blueprint.id;
+
+        self.add_blueprint_inner(Arc::new(example.initial_blueprint))
+            .expect("already checked that system is empty");
+
         self.system.target_blueprint = Some(BlueprintTarget {
-            target_id: blueprint.id,
+            target_id: target_blueprint_id,
             enabled: true,
             time_made_target: blueprint.time_created,
         });
-        self.system.blueprints.insert(blueprint.id, Arc::new(blueprint));
+
+        // XXX: it's not normal, but hypothetically possible, that the initial
+        // and target blueprints have the same ID. This will panic if so. Maybe
+        // we should make it not panic.
+        self.add_blueprint_inner(Arc::new(blueprint)).unwrap_or_else(|_| {
+            panic!(
+                "possible conflict between initial blueprint \
+                 (ID {initial_blueprint_id}) and target blueprint \
+                 (ID {target_blueprint_id}"
+            )
+        });
     }
 
     // This method MUST be infallible. It should only be called after checking
@@ -765,14 +781,16 @@ impl SimSystemBuilderInner {
         collection: Arc<Collection>,
     ) -> Result<(), DuplicateError> {
         let collection_id = collection.id;
-        match self.system.collections.entry(collection_id) {
-            indexmap::map::Entry::Vacant(entry) => {
-                entry.insert(collection);
-                Ok(())
-            }
-            indexmap::map::Entry::Occupied(_) => {
-                Err(DuplicateError::collection(collection_id))
-            }
+        let time_started = collection.time_started;
+
+        match insert_sorted_by(
+            &mut self.system.collections,
+            collection_id,
+            collection,
+            |_, other| other.time_started <= time_started,
+        ) {
+            Ok(()) => Ok(()),
+            Err(_) => Err(DuplicateError::collection(collection_id)),
         }
     }
 
@@ -781,12 +799,16 @@ impl SimSystemBuilderInner {
         blueprint: Arc<Blueprint>,
     ) -> Result<(), DuplicateError> {
         let blueprint_id = blueprint.id;
-        match self.system.blueprints.entry(blueprint_id) {
-            indexmap::map::Entry::Vacant(entry) => {
-                entry.insert(blueprint);
-                Ok(())
-            }
-            indexmap::map::Entry::Occupied(_) => {
+        let time_created = blueprint.time_created;
+
+        match insert_sorted_by(
+            &mut self.system.blueprints,
+            blueprint_id,
+            blueprint,
+            |_, other| other.time_created <= time_created,
+        ) {
+            Ok(()) => Ok(()),
+            Err(_) => {
                 Err(DuplicateError::blueprint(BlueprintId::Id(blueprint_id)))
             }
         }

@@ -13,6 +13,7 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-bb8-diesel.workspace = true
+async-trait.workspace = true
 bytes.workspace = true
 camino.workspace = true
 chrono.workspace = true
@@ -59,7 +60,7 @@ slog.workspace = true
 slog-error-chain.workspace = true
 steno.workspace = true
 strum.workspace = true
-support-bundle-reader-lib.workspace = true
+support-bundle-viewer.workspace = true
 supports-color.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
