@@ -419,7 +419,8 @@ impl SledAgent {
         sled_diagnostics::LogsHandle::new(
             log.new(o!("component" => "sled-diagnostics-cleanup")),
         )
-        .cleanup_snapshots();
+        .cleanup_snapshots()
+        .await;
 
         let storage_manager = &long_running_task_handles.storage_manager;
         let boot_disk = storage_manager
@@ -447,7 +448,7 @@ impl SledAgent {
         }
 
         info!(log, "Mounting backing filesystems");
-        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1)?;
+        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1).await?;
 
         // TODO-correctness Bootstrap-agent already ensures the underlay
         // etherstub and etherstub VNIC exist on startup - could it pass them
@@ -468,6 +469,7 @@ impl SledAgent {
             *sled_address.ip(),
             "sled6",
         )
+        .await
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
@@ -1371,6 +1373,7 @@ impl SledAgent {
         for zpool in all_disks.all_u2_zpools() {
             let info =
                 match illumos_utils::zpool::Zpool::get_info(&zpool.to_string())
+                    .await
                 {
                     Ok(info) => info,
                     Err(err) => {

@@ -286,7 +286,7 @@ pub struct PooledDisk {
 
 impl PooledDisk {
     /// Create a new PooledDisk
-    pub fn new(
+    pub async fn new(
         log: &Logger,
         unparsed_disk: UnparsedDisk,
         zpool_id: Option<ZpoolUuid>,
@@ -310,9 +310,9 @@ impl PooledDisk {
         )?;
 
         let zpool_name =
-            ensure_zpool_exists(log, variant, &zpool_path, zpool_id)?;
-        ensure_zpool_imported(log, &zpool_name)?;
-        ensure_zpool_failmode_is_continue(log, &zpool_name)?;
+            ensure_zpool_exists(log, variant, &zpool_path, zpool_id).await?;
+        ensure_zpool_imported(log, &zpool_name).await?;
+        ensure_zpool_failmode_is_continue(log, &zpool_name).await?;
 
         Ok(Self {
             paths: unparsed_disk.paths,
@@ -329,23 +329,23 @@ impl PooledDisk {
 
 /// Checks if the zpool exists, but makes no modifications,
 /// and does not attempt to import the zpool.
-pub fn check_if_zpool_exists(
+pub async fn check_if_zpool_exists(
     zpool_path: &Utf8Path,
 ) -> Result<ZpoolName, PooledDiskError> {
-    let zpool_name = match Fstyp::get_zpool(&zpool_path) {
+    let zpool_name = match Fstyp::get_zpool(&zpool_path).await {
         Ok(zpool_name) => zpool_name,
         Err(_) => return Err(PooledDiskError::ZpoolDoesNotExist),
     };
     Ok(zpool_name)
 }
 
-pub fn ensure_zpool_exists(
+pub async fn ensure_zpool_exists(
     log: &Logger,
     variant: DiskVariant,
     zpool_path: &Utf8Path,
     zpool_id: Option<ZpoolUuid>,
 ) -> Result<ZpoolName, PooledDiskError> {
-    let zpool_name = match Fstyp::get_zpool(&zpool_path) {
+    let zpool_name = match Fstyp::get_zpool(&zpool_path).await {
         Ok(zpool_name) => {
             if let Some(expected) = zpool_id {
                 info!(log, "Checking that UUID in storage matches request"; "expected" => ?expected);
@@ -393,11 +393,11 @@ pub fn ensure_zpool_exists(
                 DiskVariant::M2 => ZpoolName::new_internal(id),
                 DiskVariant::U2 => ZpoolName::new_external(id),
             };
-            Zpool::real_api().create(&zpool_name, &zpool_path)?;
+            Zpool::real_api().create(&zpool_name, &zpool_path).await?;
             zpool_name
         }
     };
-    Zpool::import(&zpool_name).map_err(|e| {
+    Zpool::import(&zpool_name).await.map_err(|e| {
         warn!(log, "Failed to import zpool {zpool_name}: {e}");
         PooledDiskError::ZpoolImport(e)
     })?;
@@ -405,18 +405,18 @@ pub fn ensure_zpool_exists(
     Ok(zpool_name)
 }
 
-pub fn ensure_zpool_imported(
+pub async fn ensure_zpool_imported(
     log: &Logger,
     zpool_name: &ZpoolName,
 ) -> Result<(), PooledDiskError> {
-    Zpool::import(&zpool_name).map_err(|e| {
+    Zpool::import(&zpool_name).await.map_err(|e| {
         warn!(log, "Failed to import zpool {zpool_name}: {e}");
         PooledDiskError::ZpoolImport(e)
     })?;
     Ok(())
 }
 
-pub fn ensure_zpool_failmode_is_continue(
+pub async fn ensure_zpool_failmode_is_continue(
     log: &Logger,
     zpool_name: &ZpoolName,
 ) -> Result<(), PooledDiskError> {
@@ -427,7 +427,7 @@ pub fn ensure_zpool_failmode_is_continue(
     // actively harmful to try to wait for it to come back; we'll be waiting
     // forever and get stuck. We'd rather get the errors so we can deal with
     // them ourselves.
-    Zpool::set_failmode_continue(&zpool_name).map_err(|e| {
+    Zpool::set_failmode_continue(&zpool_name).await.map_err(|e| {
         warn!(
             log,
             "Failed to set failmode=continue on zpool {zpool_name}: {e}"

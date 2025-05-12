@@ -85,7 +85,7 @@ impl BootstrapAgentStartup {
                 // Before we create the switch zone, we need to ensure that the
                 // necessary ZFS and Zone resources are ready. All other zones
                 // are created on U.2 drives.
-                ensure_zfs_ramdisk_dataset()?;
+                ensure_zfs_ramdisk_dataset().await?;
 
                 Ok::<_, StartError>((config, log, startup_networking))
             })
@@ -279,7 +279,7 @@ fn ensure_zfs_key_directory_exists(log: &Logger) -> Result<(), StartError> {
     })
 }
 
-fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
+async fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
     Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
         name: zfs::ZONE_ZFS_RAMDISK_DATASET,
         mountpoint: zfs::Mountpoint(Utf8PathBuf::from(
@@ -292,6 +292,7 @@ fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
         id: None,
         additional_options: None,
     })
+    .await
     .map_err(StartError::EnsureZfsRamdiskDataset)
 }
 
@@ -372,7 +373,8 @@ impl BootstrapNetworking {
             bootstrap_etherstub_vnic.clone(),
             global_zone_bootstrap_ip,
             "bootstrap6",
-        )?;
+        )
+        .await?;
 
         let global_zone_bootstrap_link_local_address = Zones::get_address(
             None,
@@ -380,7 +382,8 @@ impl BootstrapNetworking {
             // malformed, but we just got it from `Dladm`, so we know it's
             // valid.
             &AddrObject::link_local(&bootstrap_etherstub_vnic.0).unwrap(),
-        )?;
+        )
+        .await?;
 
         // Convert the `IpNetwork` down to just the IP address.
         let global_zone_bootstrap_link_local_ip =

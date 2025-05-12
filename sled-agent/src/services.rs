@@ -2529,6 +2529,7 @@ impl ServiceManager {
                     *gz_address,
                     &addr_name,
                 )
+                .await
                 .map_err(|err| Error::GzAddress {
                     message: format!(
                         "Failed to create address {} for Internal DNS zone",
@@ -3941,7 +3942,7 @@ impl ServiceManager {
                 &internal_dns_addrobj_name(*gz_address_index),
             )
             .expect("internal DNS address object name is well-formed");
-            Zones::delete_address(None, &addrobj).map_err(|err| {
+            Zones::delete_address(None, &addrobj).await.map_err(|err| {
                 Error::ZoneCleanup {
                     zone_name: zone.zone_name(),
                     err: Box::new(err),
@@ -3979,6 +3980,7 @@ impl ServiceManager {
                     &["zoned", "canmount", "encryption"],
                     None,
                 )
+                .await
                 .map_err(|err| Error::GetZfsValue {
                     zone: zone.zone_name(),
                     source: err,

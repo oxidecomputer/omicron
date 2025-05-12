@@ -45,6 +45,7 @@ pub(crate) async fn bootstrap_sled(
 
     let mg_addr_objs =
         underlay::ensure_links_have_global_zone_link_local_v6_addresses(&links)
+            .await
             .context("failed to create address objects for maghemite")?;
 
     info!(log, "Starting mg-ddm service");
@@ -78,6 +79,7 @@ pub(crate) async fn bootstrap_sled(
         ip,
         "bootstrap6",
     )
+    .await
     .context("failed to create v6 address for bootstrap etherstub vnic")?;
 
     // Spawn a background task to notify our local ddmd of our bootstrap address

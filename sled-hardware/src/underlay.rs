@@ -58,7 +58,7 @@ pub async fn find_nics(
         }
     }
 
-    ensure_links_have_global_zone_link_local_v6_addresses(&underlay_nics)
+    ensure_links_have_global_zone_link_local_v6_addresses(&underlay_nics).await
 }
 
 /// Return the Chelsio links on the system.
@@ -86,14 +86,14 @@ pub async fn find_chelsio_links(
 
 /// Ensure each of the `PhysicalLink`s has a link local IPv6 address in the
 /// global zone.
-pub fn ensure_links_have_global_zone_link_local_v6_addresses(
+pub async fn ensure_links_have_global_zone_link_local_v6_addresses(
     links: &[PhysicalLink],
 ) -> Result<Vec<AddrObject>, Error> {
     let mut addr_objs = Vec::with_capacity(links.len());
 
     for link in links {
         let addrobj = AddrObject::link_local(&link.0)?;
-        Zones::ensure_has_link_local_v6_address(None, &addrobj)?;
+        Zones::ensure_has_link_local_v6_address(None, &addrobj).await?;
         addr_objs.push(addrobj);
     }
 

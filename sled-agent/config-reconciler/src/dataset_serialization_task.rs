@@ -930,41 +930,12 @@ impl ZfsImpl for RealZfs {
         &self,
         args: DatasetEnsureArgs<'_>,
     ) -> Result<(), DatasetEnsureError> {
-        // Unpack `args` so we can clone `name` so we can move it into the
-        // closure below so that we can safely use `spawn_blocking`. We could
-        // also consider changing `DatasetEnsureArgs` to hold a `String` instead
-        // of a `&str`...
-        let DatasetEnsureArgs {
-            name,
-            mountpoint,
-            can_mount,
-            zoned,
-            encryption_details,
-            size_details,
-            id,
-            additional_options,
-        } = args;
-        let name = name.to_owned();
-        let full_name = name.clone();
-
-        tokio::task::spawn_blocking(move || {
-            let args = DatasetEnsureArgs {
-                name: &name,
-                mountpoint,
-                can_mount,
-                zoned,
-                encryption_details,
-                size_details,
-                id,
-                additional_options,
-            };
-            Zfs::ensure_dataset(args)
-        })
-        .await
-        .expect("blocking closure did not panic")
-        .map_err(|err| DatasetEnsureError::EnsureFailed {
-            name: full_name,
-            err,
+        let full_name = args.name;
+        Zfs::ensure_dataset(args).await.map_err(|err| {
+            DatasetEnsureError::EnsureFailed {
+                name: full_name.to_string(),
+                err,
+            }
         })
     }
 
@@ -974,21 +945,16 @@ impl ZfsImpl for RealZfs {
         mountpoint: Mountpoint,
     ) -> Result<(), NestedDatasetMountError> {
         let name_cloned = name.clone();
-        tokio::task::spawn_blocking(move || {
-            Zfs::ensure_dataset_mounted_and_exists(&name_cloned, &mountpoint)
-        })
-        .await
-        .expect("blocking closure did not panic")
-        .map_err(|err| NestedDatasetMountError::MountFailed { name, err })
+        Zfs::ensure_dataset_mounted_and_exists(&name_cloned, &mountpoint)
+            .await
+            .map_err(|err| NestedDatasetMountError::MountFailed { name, err })
     }
 
     async fn destroy_dataset(
         &self,
         name: String,
     ) -> Result<(), DestroyDatasetError> {
-        tokio::task::spawn_blocking(move || Zfs::destroy_dataset(&name))
-            .await
-            .expect("blocking closure did not panic")
+        Zfs::destroy_dataset(&name).await
     }
 
     async fn get_dataset_properties(
@@ -997,11 +963,7 @@ impl ZfsImpl for RealZfs {
         which: WhichDatasets,
     ) -> anyhow::Result<Vec<DatasetProperties>> {
         let datasets = datasets.to_vec();
-        tokio::task::spawn_blocking(move || {
-            Zfs::get_dataset_properties(&datasets, which)
-        })
-        .await
-        .expect("blocking closure did not panic")
+        Zfs::get_dataset_properties(&datasets, which).await
     }
 }
 
