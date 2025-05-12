@@ -148,8 +148,8 @@ impl SimSystem {
                     .target_id
             }
             BlueprintId::Latest => {
-                // self.blueprints is an IndexMap, so the last element is the
-                // latest.
+                // The invariant of self.blueprints is that the last element is
+                // the latest.
                 let (id, _) = self
                     .blueprints
                     .last()
