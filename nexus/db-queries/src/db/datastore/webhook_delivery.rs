@@ -453,7 +453,6 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::explain::ExplainableAsync;
-    use crate::db::model::AlertDeliveryState;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;

@@ -1208,12 +1208,12 @@ pub static DEMO_WEBHOOK_SUBSCRIPTIONS_URL: LazyLock<String> =
         )
     });
 
-pub static DEMO_WEBHOOK_SUBSCRIPTION: LazyLock<shared::WebhookSubscription> =
+pub static DEMO_WEBHOOK_SUBSCRIPTION: LazyLock<shared::AlertSubscription> =
     LazyLock::new(|| "test.foo.**".parse().unwrap());
 
 pub static DEMO_WEBHOOK_SUBSCRIPTION_CREATE: LazyLock<
-    params::WebhookSubscriptionCreate,
-> = LazyLock::new(|| params::WebhookSubscriptionCreate {
+    params::AlertSubscriptionCreate,
+> = LazyLock::new(|| params::AlertSubscriptionCreate {
     subscription: DEMO_WEBHOOK_SUBSCRIPTION.clone(),
 });
 

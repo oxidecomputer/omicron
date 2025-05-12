@@ -95,7 +95,7 @@ impl AlertSubscriptionKind {
     }
 }
 
-impl TryFrom<AlertSubscriptionKind> for shared::WebhookSubscription {
+impl TryFrom<AlertSubscriptionKind> for shared::AlertSubscription {
     type Error = Error;
     fn try_from(kind: AlertSubscriptionKind) -> Result<Self, Self::Error> {
         match kind {
@@ -112,10 +112,10 @@ impl TryFrom<AlertSubscriptionKind> for shared::WebhookSubscription {
     }
 }
 
-impl TryFrom<shared::WebhookSubscription> for AlertSubscriptionKind {
+impl TryFrom<shared::AlertSubscription> for AlertSubscriptionKind {
     type Error = Error;
     fn try_from(
-        subscription: shared::WebhookSubscription,
+        subscription: shared::AlertSubscription,
     ) -> Result<Self, Self::Error> {
         Self::new(String::from(subscription))
     }

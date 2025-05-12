@@ -223,7 +223,7 @@ impl Nexus {
     pub fn webhook_receiver_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        webhook_selector: params::WebhookReceiverSelector,
+        webhook_selector: params::AlertReceiverSelector,
     ) -> LookupResult<lookup::AlertReceiver<'a>> {
         match webhook_selector.receiver {
             NameOrId::Id(id) => {
@@ -256,7 +256,7 @@ impl Nexus {
     pub fn webhook_event_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        params::AlertSelector { event_id }: params::AlertSelector,
+        params::AlertSelector { alert_id: event_id }: params::AlertSelector,
     ) -> LookupResult<lookup::Alert<'a>> {
         let event = LookupPath::new(opctx, &self.db_datastore)
             .webhook_event_id(AlertUuid::from_untyped_uuid(event_id));
@@ -412,8 +412,8 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
-        params::WebhookSubscriptionCreate { subscription}: params::WebhookSubscriptionCreate,
-    ) -> CreateResult<views::WebhookSubscriptionCreated> {
+        params::AlertSubscriptionCreate { subscription}: params::AlertSubscriptionCreate,
+    ) -> CreateResult<views::AlertSubscriptionCreated> {
         let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
         let db_subscription = nexus_db_model::AlertSubscriptionKind::try_from(
             subscription.clone(),
@@ -422,14 +422,14 @@ impl Nexus {
             .datastore()
             .alert_subscription_add(opctx, &authz_rx, db_subscription)
             .await?;
-        Ok(views::WebhookSubscriptionCreated { subscription })
+        Ok(views::AlertSubscriptionCreated { subscription })
     }
 
     pub async fn webhook_receiver_subscription_remove(
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
-        subscription: shared::WebhookSubscription,
+        subscription: shared::AlertSubscription,
     ) -> DeleteResult {
         let (authz_rx,) = rx.lookup_for(authz::Action::Modify).await?;
         let db_subscription =
@@ -695,7 +695,7 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
-        filter: params::WebhookDeliveryStateFilter,
+        filter: params::AlertDeliveryStateFilter,
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<views::WebhookDelivery> {
         let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;

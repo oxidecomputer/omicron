@@ -46,7 +46,7 @@ impl TryFrom<WebhookReceiverConfig> for views::WebhookReceiver {
             .collect();
         let subscriptions = subscriptions
             .into_iter()
-            .map(shared::WebhookSubscription::try_from)
+            .map(shared::AlertSubscription::try_from)
             .collect::<Result<Vec<_>, _>>()?;
         let endpoint =
             rx.endpoint.parse().map_err(|e| Error::InternalError {
@@ -59,9 +59,8 @@ impl TryFrom<WebhookReceiverConfig> for views::WebhookReceiver {
             })?;
         Ok(views::WebhookReceiver {
             identity: rx.identity(),
-            endpoint,
-            secrets,
             subscriptions,
+            config: views::WebhookReceiverConfig { secrets, endpoint },
         })
     }
 }

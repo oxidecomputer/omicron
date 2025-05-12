@@ -1055,19 +1055,47 @@ pub struct OxqlQueryResult {
     pub tables: Vec<oxql_types::Table>,
 }
 
-// WEBHOOKS
+// ALERTS
 
-/// A webhook event class.
+/// An alert class.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AlertClass {
-    /// The name of the event class.
+    /// The name of the alert class.
     pub name: String,
 
-    /// A description of what this event class represents.
+    /// A description of what this alert class represents.
     pub description: String,
 }
 
-/// The configuration for a webhook.
+/// The configuration for an alert receiver.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
+pub struct AlertReceiver {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The list of alert classes to which this receiver is subscribed.
+    pub subscriptions: Vec<shared::AlertSubscription>,
+
+    /// Configuration specific to the kind of alert receiver that this is.
+    pub kind: AlertReceiverKind,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertSubscriptionCreated {
+    /// The new subscription added to the receiver.
+    pub subscription: shared::AlertSubscription,
+}
+
+/// The possible alert delivery mechanisms for an alert receiver.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertReceiverKind {
+    Webhook(WebhookReceiverConfig),
+}
+
+/// The configuration for a webhook alert receiver.
 #[derive(
     ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
 )]
@@ -1075,22 +1103,62 @@ pub struct WebhookReceiver {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
+    /// The list of alert classes to which this receiver is subscribed.
+    pub subscriptions: Vec<shared::AlertSubscription>,
+
+    #[serde(flatten)]
+    pub config: WebhookReceiverConfig,
+}
+
+impl From<WebhookReceiver> for AlertReceiver {
+    fn from(
+        WebhookReceiver { identity, subscriptions, config }: WebhookReceiver,
+    ) -> Self {
+        Self {
+            identity,
+            subscriptions,
+            kind: AlertReceiverKind::Webhook(config),
+        }
+    }
+}
+
+impl PartialEq<WebhookReceiver> for AlertReceiver {
+    fn eq(&self, other: &WebhookReceiver) -> bool {
+        // Will become refutable if/when more variants are added...
+        #[allow(irrefutable_let_patterns)]
+        let AlertReceiverKind::Webhook(ref config) = self.kind else {
+            return false;
+        };
+        self.identity == other.identity
+            && self.subscriptions == other.subscriptions
+            && config == &other.config
+    }
+}
+
+impl PartialEq<AlertReceiver> for WebhookReceiver {
+    fn eq(&self, other: &AlertReceiver) -> bool {
+        // Will become refutable if/when more variants are added...
+        #[allow(irrefutable_let_patterns)]
+        let AlertReceiverKind::Webhook(ref config) = other.kind else {
+            return false;
+        };
+        self.identity == other.identity
+            && self.subscriptions == other.subscriptions
+            && &self.config == config
+    }
+}
+
+/// Webhook-specific alert receiver configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct WebhookReceiverConfig {
     /// The URL that webhook notification requests are sent to.
     pub endpoint: Url,
     // A list containing the IDs of the secret keys used to sign payloads sent
     // to this receiver.
     pub secrets: Vec<WebhookSecretId>,
-    /// The list of event classes to which this receiver is subscribed.
-    pub subscriptions: Vec<shared::WebhookSubscription>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookSubscriptionCreated {
-    /// The new subscription added to the receiver.
-    pub subscription: shared::WebhookSubscription,
-}
-
-/// A list of the IDs of secrets associated with a webhook.
+/// A list of the IDs of secrets associated with a webhook receiver.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookSecrets {
     pub secrets: Vec<WebhookSecretId>,
@@ -1322,7 +1390,7 @@ pub struct WebhookDeliveryResponse {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookDeliveryId {
+pub struct AlertDeliveryId {
     pub delivery_id: Uuid,
 }
 

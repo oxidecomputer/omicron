@@ -52,7 +52,7 @@ fn get_webhooks_url(name_or_id: impl Into<NameOrId>) -> String {
 async fn webhook_get(
     client: &ClientTestContext,
     webhook_url: &str,
-) -> views::WebhookReceiver {
+) -> views::AlertReceiver {
     webhook_get_as(client, webhook_url, AuthnMode::PrivilegedUser).await
 }
 
@@ -60,7 +60,7 @@ async fn webhook_get_as(
     client: &ClientTestContext,
     webhook_url: &str,
     authn_as: AuthnMode,
-) -> views::WebhookReceiver {
+) -> views::AlertReceiver {
     NexusRequest::object_get(client, &webhook_url)
         .authn_as(authn_as)
         .execute()
@@ -72,8 +72,8 @@ async fn webhook_get_as(
 
 async fn webhook_rx_list(
     client: &ClientTestContext,
-) -> Vec<views::WebhookReceiver> {
-    resource_helpers::objects_list_page_authz::<views::WebhookReceiver>(
+) -> Vec<views::AlertReceiver> {
+    resource_helpers::objects_list_page_authz::<views::AlertReceiver>(
         client,
         RECEIVERS_BASE_PATH,
     )
@@ -125,7 +125,7 @@ async fn webhook_delivery_resend(
     client: &ClientTestContext,
     webhook_name_or_id: impl Into<NameOrId>,
     event_id: AlertUuid,
-) -> views::WebhookDeliveryId {
+) -> views::AlertDeliveryId {
     let req = RequestBuilder::new(
         client,
         http::Method::POST,
@@ -206,14 +206,12 @@ async fn secret_add(
 async fn subscription_add(
     ctx: &ControlPlaneTestContext,
     webhook_id: AlertReceiverUuid,
-    subscription: &shared::WebhookSubscription,
-) -> views::WebhookSubscriptionCreated {
+    subscription: &shared::AlertSubscription,
+) -> views::AlertSubscriptionCreated {
     resource_helpers::object_create(
         &ctx.external_client,
         &format!("{RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions"),
-        &params::WebhookSubscriptionCreate {
-            subscription: subscription.clone(),
-        },
+        &params::AlertSubscriptionCreate { subscription: subscription.clone() },
     )
     .await
 }
@@ -221,7 +219,7 @@ async fn subscription_add(
 async fn subscription_remove(
     ctx: &ControlPlaneTestContext,
     webhook_id: AlertReceiverUuid,
-    subscription: &shared::WebhookSubscription,
+    subscription: &shared::AlertSubscription,
 ) {
     resource_helpers::object_delete(
         &ctx.external_client,
@@ -232,7 +230,7 @@ async fn subscription_remove(
 
 fn subscription_remove_url(
     webhook_id: AlertReceiverUuid,
-    subscription: &shared::WebhookSubscription,
+    subscription: &shared::AlertSubscription,
 ) -> String {
     format!("{RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions/{subscription}")
 }
@@ -262,7 +260,7 @@ async fn webhook_send_probe(
 fn is_valid_for_webhook(
     webhook: &views::WebhookReceiver,
 ) -> impl FnOnce(httpmock::When) -> httpmock::When {
-    let path = webhook.endpoint.path().to_string();
+    let path = webhook.config.endpoint.path().to_string();
     let id = webhook.identity.id.to_string();
     move |when| {
         when.path(path)
@@ -522,7 +520,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -587,7 +585,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
     dbg!(&webhook);
     let rx_id = AlertReceiverUuid::from_untyped_uuid(webhook.identity.id);
 
-    let secret1_id = webhook.secrets[0].id;
+    let secret1_id = webhook.config.secrets[0].id;
 
     let client = &cptestctx.external_client;
     let assert_secrets_get = |mut expected: Vec<Uuid>| async move {
@@ -687,7 +685,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     let baz_event_id = AlertUuid::new_v4();
 
     let assert_webhook_rx_list_matches =
-        |mut expected: Vec<views::WebhookReceiver>| async move {
+        |mut expected: Vec<views::AlertReceiver>| async move {
             let mut actual = webhook_rx_list(client).await;
             actual.sort_by_key(|rx| rx.identity.id);
             expected.sort_by_key(|rx| rx.identity.id);
@@ -714,7 +712,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     dbg!(&rx_bar);
-    assert_webhook_rx_list_matches(vec![rx_bar.clone()]).await;
+    assert_webhook_rx_list_matches(vec![rx_bar.clone().into()]).await;
     let mock_bar = {
         let webhook = rx_bar.clone();
         srv_bar
@@ -724,7 +722,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-id", bar_event_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         BAR_SECRET.as_bytes().to_vec(),
                     ));
                 then.status(200);
@@ -751,7 +749,11 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     dbg!(&rx_baz);
-    assert_webhook_rx_list_matches(vec![rx_bar.clone(), rx_baz.clone()]).await;
+    assert_webhook_rx_list_matches(vec![
+        rx_bar.clone().into(),
+        rx_baz.clone().into(),
+    ])
+    .await;
     let mock_baz = {
         let webhook = rx_baz.clone();
         srv_baz
@@ -761,7 +763,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-id", baz_event_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         BAZ_SECRET.as_bytes().to_vec(),
                     ));
                 then.status(200);
@@ -789,9 +791,9 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     .await;
     dbg!(&rx_star);
     assert_webhook_rx_list_matches(vec![
-        rx_bar.clone(),
-        rx_baz.clone(),
-        rx_star.clone(),
+        rx_bar.clone().into(),
+        rx_baz.clone().into(),
+        rx_star.clone().into(),
     ])
     .await;
     let mock_star = {
@@ -806,7 +808,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                     .header_exists("x-oxide-event-id")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         STAR_SECRET.as_bytes().to_vec(),
                     ));
                 then.status(200);
@@ -887,7 +889,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -968,7 +970,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1040,7 +1042,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1125,7 +1127,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-class", "probe")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1172,7 +1174,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-class", "probe")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1214,7 +1216,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-class", "probe")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1281,7 +1283,7 @@ async fn test_probe_resends_failed_deliveries(
                     )
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ));
                 then.status(500);
@@ -1350,7 +1352,7 @@ async fn test_probe_resends_failed_deliveries(
                     .header("x-oxide-event-class", "probe")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1373,7 +1375,7 @@ async fn test_probe_resends_failed_deliveries(
                     )
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ));
                 then.status(200);
@@ -1437,7 +1439,7 @@ async fn test_api_resends_failed_deliveries(
                     .header("x-oxide-event-id", event1_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1497,7 +1499,7 @@ async fn test_api_resends_failed_deliveries(
                     .header("x-oxide-event-id", event1_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1576,7 +1578,7 @@ async fn subscription_add_test(
                     .header("x-oxide-event-id", id2.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1607,7 +1609,7 @@ async fn subscription_add_test(
 
     let rx_id = AlertReceiverUuid::from_untyped_uuid(webhook.identity.id);
     let new_subscription =
-        new_subscription.parse::<shared::WebhookSubscription>().unwrap();
+        new_subscription.parse::<shared::AlertSubscription>().unwrap();
     dbg!(subscription_add(&cptestctx, rx_id, &new_subscription).await);
 
     // The new subscription should be there.
@@ -1673,9 +1675,9 @@ async fn subscription_remove_test(
     let id3 = AlertUuid::new_v4();
 
     let other_subscription =
-        "test.foo".parse::<shared::WebhookSubscription>().unwrap();
+        "test.foo".parse::<shared::AlertSubscription>().unwrap();
     let deleted_subscription =
-        deleted_subscription.parse::<shared::WebhookSubscription>().unwrap();
+        deleted_subscription.parse::<shared::AlertSubscription>().unwrap();
 
     // Create a webhook receiver.
     let webhook = webhook_create(
@@ -1708,7 +1710,7 @@ async fn subscription_remove_test(
                     .header("x-oxide-event-id", id1.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1789,7 +1791,7 @@ async fn subscription_remove_test(
                     .header("x-oxide-event-id", id3.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);

@@ -3547,10 +3547,10 @@ pub trait NexusExternalApi {
     /// List alert classes
     #[endpoint {
         method = GET,
-        path = "/v1/alerts/classes",
+        path = "/v1/alert-classes",
         tags = ["system/alerts"],
     }]
-    async fn webhook_event_class_list(
+    async fn alert_class_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<
             PaginationParams<EmptyScanParams, params::AlertClassPage>,
@@ -3558,33 +3558,100 @@ pub trait NexusExternalApi {
         filter: Query<params::AlertClassFilter>,
     ) -> Result<HttpResponseOk<ResultsPage<views::AlertClass>>, HttpError>;
 
-    /// List webhook receivers
+    /// List alert receivers
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/receivers",
-        tags = ["system/webhooks"],
+        path = "/v1/alert-receivers",
+        tags = ["system/alerts"],
     }]
-    async fn webhook_receiver_list(
+    async fn alert_receiver_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookReceiver>>, HttpError>;
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertReceiver>>, HttpError>;
 
-    /// Fetch webhook receiver
+    /// Fetch alert receiver
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/receivers/{receiver}",
-        tags = ["system/webhooks"],
+        path = "/v1/alert-receivers/{receiver}",
+        tags = ["system/alerts"],
     }]
-    async fn webhook_receiver_view(
+    async fn alert_receiver_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-    ) -> Result<HttpResponseOk<views::WebhookReceiver>, HttpError>;
+        path_params: Path<params::AlertReceiverSelector>,
+    ) -> Result<HttpResponseOk<views::AlertReceiver>, HttpError>;
+
+    /// Delete alert receiver
+    #[endpoint {
+            method = DELETE,
+            path = "/v1/alert-receivers/{receiver}",
+            tags = ["system/alerts"],
+        }]
+    async fn alert_receiver_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertReceiverSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Add alert receiver subscription
+    #[endpoint {
+            method = POST,
+            path = "/v1/alert-receivers/{receiver}/subscriptions",
+            tags = ["system/alerts"],
+        }]
+    async fn alert_receiver_subscription_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertReceiverSelector>,
+        params: TypedBody<params::AlertSubscriptionCreate>,
+    ) -> Result<HttpResponseCreated<views::AlertSubscriptionCreated>, HttpError>;
+
+    /// Remove alert receiver subscription
+    #[endpoint {
+            method = DELETE,
+            path = "/v1/alert-receivers/{receiver}/subscriptions/{subscription}",
+            tags = ["system/alerts"],
+        }]
+    async fn alert_receiver_subscription_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertSubscriptionSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List delivery attempts to alert receiver
+    ///
+    /// Optional query parameters to this endpoint may be used to filter
+    /// deliveries by state. If none of the `failed`, `pending` or `delivered`
+    /// query parameters are present, all deliveries are returned. If one or
+    /// more of these parameters are provided, only those which are set to
+    /// "true" are included in the response.
+    #[endpoint {
+            method = GET,
+            path = "/v1/alert-deliveries",
+            tags = ["system/alerts"],
+        }]
+    async fn alert_delivery_list(
+        rqctx: RequestContext<Self::Context>,
+        receiver: Query<params::AlertReceiverSelector>,
+        state_filter: Query<params::AlertDeliveryStateFilter>,
+        pagination: Query<PaginatedByTimeAndId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
+
+    /// Request re-delivery of alert
+    #[endpoint {
+                method = POST,
+                path = "/v1/alerts/{alert_id}/resend",
+                tags = ["system/alerts"],
+            }]
+    async fn alert_delivery_resend(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertSelector>,
+        receiver: Query<params::AlertReceiverSelector>,
+    ) -> Result<HttpResponseCreated<views::AlertDeliveryId>, HttpError>;
+
+    // ALERTS: WEBHOOKS
 
     /// Create webhook receiver
     #[endpoint {
         method = POST,
-        path = "/v1/webhooks/receivers",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-receivers",
+        tags = ["system/alerts"],
     }]
     async fn webhook_receiver_create(
         rqctx: RequestContext<Self::Context>,
@@ -3598,48 +3665,14 @@ pub trait NexusExternalApi {
     /// to add and remove secrets.
     #[endpoint {
         method = PUT,
-        path = "/v1/webhooks/receivers/{receiver}",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-receivers/{receiver}",
+        tags = ["system/alerts"],
     }]
     async fn webhook_receiver_update(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
+        path_params: Path<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Delete webhook receiver
-    #[endpoint {
-        method = DELETE,
-        path = "/v1/webhooks/receivers/{receiver}",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_receiver_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
-
-    /// Add webhook receiver subscription
-    #[endpoint {
-        method = POST,
-        path = "/v1/webhooks/receivers/{receiver}/subscriptions",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_receiver_subscription_add(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-        params: TypedBody<params::WebhookSubscriptionCreate>,
-    ) -> Result<HttpResponseCreated<views::WebhookSubscriptionCreated>, HttpError>;
-
-    /// Remove webhook receiver subscription
-    #[endpoint {
-        method = DELETE,
-        path = "/v1/webhooks/receivers/{receiver}/subscriptions/{subscription}",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_receiver_subscription_remove(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookSubscriptionSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Send liveness probe to webhook receiver
     ///
@@ -3660,79 +3693,48 @@ pub trait NexusExternalApi {
     /// queued for re-delivery.
     #[endpoint {
         method = POST,
-        path = "/v1/webhooks/receivers/{receiver}/probe",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-receivers/{receiver}/probe",
+        tags = ["system/alerts"],
     }]
     async fn webhook_receiver_probe(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
+        path_params: Path<params::AlertReceiverSelector>,
         query_params: Query<params::WebhookProbe>,
     ) -> Result<HttpResponseOk<views::WebhookProbeResult>, HttpError>;
 
     /// List webhook receiver secret IDs
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/secrets",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-secrets",
+        tags = ["system/alerts"],
     }]
     async fn webhook_secrets_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::WebhookReceiverSelector>,
+        query_params: Query<params::AlertReceiverSelector>,
     ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError>;
 
     /// Add secret to webhook receiver
     #[endpoint {
         method = POST,
-        path = "/v1/webhooks/secrets",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-secrets",
+        tags = ["system/alerts"],
     }]
     async fn webhook_secrets_add(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::WebhookReceiverSelector>,
+        query_params: Query<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError>;
 
     /// Remove secret from webhook receiver
     #[endpoint {
         method = DELETE,
-        path = "/v1/webhooks/secrets/{secret_id}",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-secrets/{secret_id}",
+        tags = ["system/alerts"],
     }]
     async fn webhook_secrets_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookSecretSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
-
-    /// List delivery attempts to webhook receiver
-    ///
-    /// Optional query parameters to this endpoint may be used to filter
-    /// deliveries by state. If none of the `failed`, `pending` or `delivered`
-    /// query parameters are present, all deliveries are returned. If one or
-    /// more of these parameters are provided, only those which are set to
-    /// "true" are included in the response.
-    #[endpoint {
-        method = GET,
-        path = "/v1/webhooks/deliveries",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_delivery_list(
-        rqctx: RequestContext<Self::Context>,
-        receiver: Query<params::WebhookReceiverSelector>,
-        state_filter: Query<params::WebhookDeliveryStateFilter>,
-        pagination: Query<PaginatedByTimeAndId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
-
-    /// Request re-delivery of webhook event
-    #[endpoint {
-        method = POST,
-        path = "/v1/webhooks/deliveries/{event_id}/resend",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_delivery_resend(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::AlertSelector>,
-        receiver: Query<params::WebhookReceiverSelector>,
-    ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError>;
 }
 
 /// Perform extra validations on the OpenAPI spec.
