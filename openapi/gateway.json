@@ -3669,10 +3669,6 @@
           }
         ]
       },
-      "TypedUuidForEreporterRestartKind": {
-        "type": "string",
-        "format": "uuid"
-      },
       "TaskDump": {
         "type": "object",
         "properties": {
@@ -3718,6 +3714,10 @@
           "task_index",
           "timestamp"
         ]
+      },
+      "TypedUuidForEreporterRestartKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "UpdateAbortBody": {
         "type": "object",
