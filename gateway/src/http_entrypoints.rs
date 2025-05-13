@@ -1042,7 +1042,7 @@ impl GatewayApi for GatewayImpl {
                 .into_iter()
                 .map(|ereport::Ereport { ena: ereport::Ena(ena), data }| {
                     ereport_types::Ereport {
-                        ena: ereport_types::Ena::new(ena),
+                        ena: ereport_types::Ena(ena.into()),
                         data,
                     }
                 })
