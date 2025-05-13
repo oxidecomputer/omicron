@@ -12,11 +12,14 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use fs_err::File;
 use illumos_utils::zfs::{
-    CreateSnapshotError, GetValueError, ListDatasetsError, Snapshot, Zfs,
+    CreateSnapshotError, DestroySnapshotError, GetValueError,
+    ListDatasetsError, Snapshot, Zfs,
 };
 use oxlog::LogFile;
+use oxlog::SvcLogs;
 use rand::{Rng, distributions::Alphanumeric, thread_rng};
 use slog::Logger;
+use std::collections::BTreeMap;
 use zip::{result::ZipError, write::FullFileOptions};
 
 // The name of the snapshot created from the zone root filesystem.
@@ -53,6 +56,9 @@ pub enum LogError {
     Snapshot(#[from] CreateSnapshotError),
 
     #[error(transparent)]
+    ZfsDestroySnapshot(#[from] DestroySnapshotError),
+
+    #[error(transparent)]
     ZfsGetValue(#[from] GetValueError),
 
     #[error(transparent)]
@@ -63,7 +69,7 @@ pub enum LogError {
 }
 
 /// A ZFS snapshot that is taken by the `sled-diagnostics` crate and handles
-/// snapshot deletion on `Drop`.
+/// snapshot deletion on `destroy`
 #[derive(Debug)]
 struct DiagnosticsSnapshot {
     log: Logger,
@@ -71,6 +77,8 @@ struct DiagnosticsSnapshot {
     snapshot: Snapshot,
     /// The mountpoint on disk where this snapshot is mounted.
     snapshot_mountpoint: Utf8PathBuf,
+    /// Whether or not this snapshot has been destroyed
+    destroyed: bool,
 }
 
 impl DiagnosticsSnapshot {
@@ -109,7 +117,12 @@ impl DiagnosticsSnapshot {
                 logger, &snapshot,
             )?;
 
-        Ok(Self { log: logger.clone(), snapshot, snapshot_mountpoint })
+        Ok(Self {
+            log: logger.clone(),
+            snapshot,
+            snapshot_mountpoint,
+            destroyed: false,
+        })
     }
 
     /// Return the full path to the snapshot directory within the filesystem.
@@ -174,41 +187,49 @@ impl DiagnosticsSnapshot {
                     .join(format!(".zfs/snapshot/{}", snapshot.snap_name))
             })
     }
+
+    async fn destroy(&mut self) -> Result<(), LogError> {
+        if !self.destroyed {
+            self.destroyed = true;
+            Zfs::destroy_snapshot(
+                &self.snapshot.filesystem,
+                &self.snapshot.snap_name,
+            )
+            .await
+            .inspect(|_| {
+                debug!(
+                    self.log,
+                    "destroyed sled-diagnostics ZFS snapshot";
+                    "snapshot" => %self.snapshot
+                );
+            })
+            .inspect_err(|e| {
+                error!(
+                    self.log,
+                    "failed to destroy sled-diagnostics ZFS snapshot";
+                    "snapshot" => %self.snapshot,
+                    "error" => ?e,
+                );
+            })?;
+        }
+        Ok(())
+    }
 }
 
 impl Drop for DiagnosticsSnapshot {
     fn drop(&mut self) {
-        let DiagnosticsSnapshot { log, snapshot, .. } = self;
-        tokio::task::spawn({
-            let log = log.clone();
-            let snapshot = snapshot.clone();
-            async move {
-                let _ = Zfs::destroy_snapshot(
-                    &snapshot.filesystem,
-                    &snapshot.snap_name,
-                )
-                .await
-                .inspect(|_| {
-                    debug!(
-                        log,
-                        "destroyed sled-diagnostics ZFS snapshot";
-                        "snapshot" => %snapshot
-                    );
-                })
-                .inspect_err(|e| {
-                    error!(
-                        log,
-                        "failed to destroy sled-diagnostics ZFS snapshot";
-                        "snapshot" => %snapshot,
-                        "error" => ?e,
-                    );
-                });
-            }
-        });
+        if !self.destroyed {
+            error!(
+                self.log,
+                "Snapshot dropped without being destroyed";
+                "filesystem" => self.snapshot.filesystem.clone(),
+                "snap_name" => self.snapshot.snap_name.clone(),
+            );
+        }
     }
 }
 
-/// A utility type that keeps track fo `DiagnosticsSnapshot`s keyed off of a
+/// A utility type that keeps track of `DiagnosticsSnapshot`s keyed off of a
 /// ZFS dataset name.
 struct LogSnapshots {
     inner: HashMap<String, DiagnosticsSnapshot>,
@@ -236,6 +257,12 @@ impl LogSnapshots {
         };
 
         Ok(snapshot)
+    }
+
+    async fn destroy(&mut self) {
+        for (_, mut snap) in self.inner.drain() {
+            let _ = snap.destroy().await;
+        }
     }
 }
 
@@ -515,6 +542,10 @@ impl LogsHandle {
     ///
     /// Note that this log retrieval will automatically take and cleanup
     /// necessary zfs snapshots along the way.
+    ///
+    /// NOTE: Cancelling this function may result in leaked log snapshots,
+    /// which will not be removed until "LogsHandle::cleanup_snapshots" is
+    /// invoked.
     pub async fn get_zone_logs<W: Write + Seek>(
         &self,
         zone: &str,
@@ -540,11 +571,37 @@ impl LogsHandle {
             },
         );
 
-        let mut zip = zip::ZipWriter::new(writer);
+        let zip = zip::ZipWriter::new(writer);
 
-        // Hold onto log snapshots so that they can be cleaned up on drop.
+        // Hold onto log snapshots so that they can be cleaned independent of
+        // "result".
+        //
+        // NOTE: This isn't cancel safe - if we drop this future after creating
+        // any number of logs, but before calling "log_snapshots.destroy()",
+        // we'll leak snapshots.
         let mut log_snapshots = LogSnapshots::new();
 
+        let result = self
+            .get_zone_logs_inner(
+                zone_logs,
+                max_rotated,
+                zip,
+                &mut log_snapshots,
+            )
+            .await;
+
+        log_snapshots.destroy().await;
+
+        result
+    }
+
+    async fn get_zone_logs_inner<W: Write + Seek>(
+        &self,
+        zone_logs: BTreeMap<String, SvcLogs>,
+        max_rotated: usize,
+        mut zip: zip::ZipWriter<W>,
+        mut log_snapshots: &mut LogSnapshots,
+    ) -> Result<(), LogError> {
         for (service, service_logs) in zone_logs {
             //  - Grab all of the service's SMF logs -
             if let Some(current) = service_logs.current {
@@ -933,10 +990,8 @@ mod illumos_tests {
             .unwrap()
                 == [SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE]
             {
-                continue;
+                snapshots.push(snap);
             };
-
-            snapshots.push(snap);
         }
 
         snapshots
@@ -978,7 +1033,7 @@ mod illumos_tests {
             assert_eq!(snapshots.len(), 1, "duplicate snapshots not taken");
 
             // Free all of the log_snapshots
-            drop(log_snapshots);
+            log_snapshots.destroy().await;
 
             let snapshots =
                 get_sled_diagnostics_snapshots(zfs_filesystem).await;
@@ -1097,6 +1152,7 @@ mod illumos_tests {
                     archive.by_name(&format!("mg-ddm/current/{name}"));
                 assert!(file_in_zip.is_err(), "file should not be in zip");
             }
+            log_snapshots.destroy().await;
         }
 
         // Cleanup
@@ -1174,6 +1230,7 @@ mod illumos_tests {
             // Confirm we have the data in the snapshot and not the newly
             // written data.
             assert_eq!(contents.as_str(), data1, "log file data matches");
+            log_snapshots.destroy().await;
         }
 
         // Cleanup
@@ -1226,6 +1283,7 @@ mod illumos_tests {
             let mut contents = String::new();
             snapshot_dendrite_log.read_to_string(&mut contents).await.unwrap();
             assert_eq!(contents.as_str(), data, "log file data matches");
+            log_snapshots.destroy().await;
         }
 
         // Cleanup

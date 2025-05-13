@@ -1927,6 +1927,12 @@ mod illumos_tests {
                     "Attempting automated cleanup of {}",
                     vdev_dir.path(),
                 );
+
+                // NOTE: There is an assertion in RealZfsTestHarness::new
+                // which should make this a safe invocation to call.
+                //
+                // Blocking the calling thread like this isn't ideal, but
+                // the scope is limited to "tests which are failing anyway".
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async move {
                         self.cleanup().await;
@@ -1940,6 +1946,12 @@ mod illumos_tests {
         pub const DEFAULT_VDEV_SIZE: u64 = 64 * (1 << 20);
 
         fn new(log: Logger) -> Self {
+            assert_eq!(
+                tokio::runtime::Handle::current().runtime_flavor(),
+                tokio::runtime::RuntimeFlavor::MultiThread,
+                "RealZfsTestHarness requires a multi-threaded runtime to ensure deletion on drop"
+            );
+
             let vdev_dir =
                 Utf8TempDir::new_in("/var/tmp").expect("created tempdir");
 
@@ -2078,7 +2090,7 @@ mod illumos_tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn ensure_datasets() {
         let logctx = dev::test_setup_log("ensure_datasets");
         let mut harness = RealZfsTestHarness::new(logctx.log.clone());
@@ -2150,7 +2162,7 @@ mod illumos_tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn ensure_datasets_get_mounted() {
         let logctx = dev::test_setup_log("ensure_datasets_get_mounted");
         let mut harness = RealZfsTestHarness::new(logctx.log.clone());
@@ -2210,7 +2222,7 @@ mod illumos_tests {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn ensure_datasets_get_mounted_even_with_data() {
         let logctx =
             dev::test_setup_log("ensure_datasets_get_mounted_even_with_data");
@@ -2298,7 +2310,7 @@ mod illumos_tests {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn ensure_many_datasets() {
         let logctx = dev::test_setup_log("ensure_many_datasets");
         let mut harness = RealZfsTestHarness::new(logctx.log.clone());
@@ -2352,7 +2364,7 @@ mod illumos_tests {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn nested_dataset() {
         let logctx = dev::test_setup_log("nested_dataset");
 
