@@ -618,6 +618,16 @@ mod test {
             .await
             .unwrap();
         assert_eq!(session.silo_user_id, fetched.silo_user_id);
+        assert_eq!(session.id, fetched.id);
+
+        // also try looking it up by ID
+        let (.., fetched) = LookupPath::new(&opctx, datastore)
+            .console_session_id(session.id.into())
+            .fetch()
+            .await
+            .unwrap();
+        assert_eq!(session.silo_user_id, fetched.silo_user_id);
+        assert_eq!(session.token, fetched.token);
 
         // trying to insert the same one again fails
         let duplicate =

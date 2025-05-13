@@ -955,7 +955,7 @@ authz_resource! {
 authz_resource! {
     name = "DeviceAccessToken",
     parent = "Fleet",
-    primary_key = String, // token
+    primary_key = { uuid_kind = AccessTokenKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

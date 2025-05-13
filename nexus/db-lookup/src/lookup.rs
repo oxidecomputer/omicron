@@ -26,8 +26,10 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
+use omicron_uuid_kinds::AccessTokenKind;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
+use omicron_uuid_kinds::ConsoleSessionKind;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufArtifactKind;
@@ -200,7 +202,10 @@ impl<'a> LookupPath<'a> {
     // Fleet-level resources
 
     /// Select a resource of type ConsoleSession, identified by its `id`
-    pub fn console_session_id(self, id: Uuid) -> ConsoleSession<'a> {
+    pub fn console_session_id(
+        self,
+        id: TypedUuid<ConsoleSessionKind>,
+    ) -> ConsoleSession<'a> {
         ConsoleSession::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -220,7 +225,10 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type DeviceAccessToken, identified by its `token`
-    pub fn device_access_token_id(self, id: Uuid) -> DeviceAccessToken<'a> {
+    pub fn device_access_token_id(
+        self,
+        id: TypedUuid<AccessTokenKind>,
+    ) -> DeviceAccessToken<'a> {
         DeviceAccessToken::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -742,7 +750,7 @@ lookup_resource! {
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
-        { column_name = "id", rust_type = Uuid },
+        { column_name = "id", uuid_kind = ConsoleSessionKind },
     ]
 }
 
@@ -761,9 +769,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [
-        { column_name = "id", rust_type = Uuid },
-    ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = AccessTokenKind } ]
 }
 
 lookup_resource! {
