@@ -31,7 +31,7 @@ blueprint-edit latest debug remove-sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e
 sled-remove e96e226f-4ed9-4c01-91b9-69a9cd076c9e
 inventory-generate
 
-# Edit sleds 1, 2, 4, 5, and the new one, and drop 6.
+# Edit sleds 1, 2, 4, 5, and the new one.
 blueprint-edit latest set-remove-mupdate-override 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 ffffffff-ffff-ffff-ffff-ffffffffffff
 blueprint-edit latest set-remove-mupdate-override 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 unset
 blueprint-edit latest set-remove-mupdate-override b82ede02-399c-48c6-a1de-411df4fa49a7 ffffffff-ffff-ffff-ffff-ffffffffffff

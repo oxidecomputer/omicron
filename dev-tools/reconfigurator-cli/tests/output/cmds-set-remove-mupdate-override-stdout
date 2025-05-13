@@ -1,45 +1,27 @@
 using provided RNG seed: reconfigurator-cli-test
 > # Load example system with 7 sleds:
-
 > #
-
 > # sled 0: unset -> unset (unchanged)
-
 > # sled 1: unset -> set
-
 > # sled 2: set -> unset
-
 > # sled 3: set -> set (unchanged)
-
 > # sled 4: set -> set (changed)
-
 > # sled 5: set -> set (unchanged) but change something else
-
 > # sled 6: set -> sled removed
-
 > #
-
 > # We'll also add another sled below (new_sled_id) with
-
 > # remove_mupdate_override set.
-
 > #
-
 > # We don't need any zones for this test, so disable that to keep the
-
 > # outputs minimal.
-
-> 
 
 > load-example --nsleds 7 --ndisks-per-sled 0 --no-zones
 loaded example system with:
 - collection: f45ba181-4b56-42cc-a762-874d90184a43
 - blueprint: dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 
-> 
 
 > # Set the field on sleds 2-6 (0-indexed).
-
 > blueprint-edit latest set-remove-mupdate-override 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 00000000-0000-0000-0000-000000000000
 blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 created from latest blueprint (dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21): set remove_mupdate_override to 00000000-0000-0000-0000-000000000000
 
@@ -55,7 +37,6 @@ blueprint df06bb57-ad42-4431-9206-abff322896c7 created from latest blueprint (af
 > blueprint-edit latest set-remove-mupdate-override e96e226f-4ed9-4c01-91b9-69a9cd076c9e 00000000-0000-0000-0000-000000000000
 blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba created from latest blueprint (df06bb57-ad42-4431-9206-abff322896c7): set remove_mupdate_override to 00000000-0000-0000-0000-000000000000
 
-> 
 
 > blueprint-show latest
 blueprint  7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
@@ -230,10 +211,8 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
  PENDING MGS-MANAGED UPDATES: 0
 
 
-> 
 
 > # Now make another blueprint, starting by adding a new sled and removing sled 6.
-
 > sled-add --ndisks 0
 added sled 00320471-945d-413c-85e7-03e091a70b3c
 
@@ -246,10 +225,8 @@ removed sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e from system
 > inventory-generate
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
 
-> 
 
-> # Edit sleds 1, 2, 4, 5, and the new one, and drop 6.
-
+> # Edit sleds 1, 2, 4, 5, and the new one.
 > blueprint-edit latest set-remove-mupdate-override 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 ffffffff-ffff-ffff-ffff-ffffffffffff
 blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 created from latest blueprint (9034c710-3e57-45f3-99e5-4316145e87ac): set remove_mupdate_override to ffffffff-ffff-ffff-ffff-ffffffffffff
 
@@ -265,7 +242,6 @@ blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b created from latest blueprint (62
 > blueprint-edit latest set-remove-mupdate-override 00320471-945d-413c-85e7-03e091a70b3c ffffffff-ffff-ffff-ffff-ffffffffffff
 blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 created from latest blueprint (c1a0d242-9160-40f4-96ae-61f8f40a0b1b): set remove_mupdate_override to ffffffff-ffff-ffff-ffff-ffffffffffff
 
-> 
 
 > blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba latest
 from: blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
