@@ -482,12 +482,12 @@ mod test {
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::VolumeUuid;
+    use omicron_uuid_kinds::{CollectionUuid, TypedUuid};
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -575,6 +575,7 @@ mod test {
         let silo_user_id = Uuid::new_v4();
 
         let session = ConsoleSession {
+            id: TypedUuid::new_v4().into(),
             token: token.clone(),
             time_created: Utc::now() - Duration::minutes(5),
             time_last_used: Utc::now() - Duration::minutes(5),
@@ -612,12 +613,21 @@ mod test {
         assert_eq!(DEFAULT_SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
+        let fetched = datastore
+            .session_lookup_by_token(&authn_opctx, token.clone())
+            .await
+            .unwrap();
+        assert_eq!(session.silo_user_id, fetched.silo_user_id);
+        assert_eq!(session.id, fetched.id);
+
+        // also try looking it up by ID
         let (.., fetched) = LookupPath::new(&opctx, datastore)
-            .console_session_token(&token)
+            .console_session_id(session.id.into())
             .fetch()
             .await
             .unwrap();
         assert_eq!(session.silo_user_id, fetched.silo_user_id);
+        assert_eq!(session.token, fetched.token);
 
         // trying to insert the same one again fails
         let duplicate =
@@ -641,10 +651,12 @@ mod test {
             renewed.console_session.time_last_used > session.time_last_used
         );
 
+        // TODO: check the opctx on these changes, make sure we're using the
+        // right thing between opctx or authn_opctx
+
         // time_last_used change persists in DB
-        let (.., fetched) = LookupPath::new(&opctx, datastore)
-            .console_session_token(&token)
-            .fetch()
+        let fetched = datastore
+            .session_lookup_by_token(&opctx, token.clone())
             .await
             .unwrap();
         assert!(fetched.time_last_used > session.time_last_used);
@@ -655,9 +667,8 @@ mod test {
         let delete =
             datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete, Ok(()));
-        let fetched = LookupPath::new(&opctx, datastore)
-            .console_session_token(&token)
-            .fetch()
+        let fetched = datastore
+            .session_lookup_by_token(&authn_opctx, token.clone())
             .await;
         assert!(fetched.is_ok());
 
@@ -676,10 +687,11 @@ mod test {
             .session_hard_delete(&silo_user_opctx, &authz_session)
             .await;
         assert_eq!(delete, Ok(()));
-        let fetched = LookupPath::new(&opctx, datastore)
-            .console_session_token(&token)
-            .fetch()
-            .await;
+        let fetched = dbg!(
+            datastore
+                .session_lookup_by_token(&authn_opctx, token.clone())
+                .await
+        );
         assert!(matches!(
             fetched,
             Err(Error::ObjectNotFound { type_name: _, lookup_type: _ })

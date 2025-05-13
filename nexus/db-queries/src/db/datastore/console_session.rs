@@ -13,13 +13,34 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_lookup::LookupPath;
+use nexus_db_schema::schema::console_session;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 
 impl DataStore {
+    pub async fn session_lookup_by_token(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> LookupResult<ConsoleSession> {
+        // TODO: some special system authz because the presence of the token _is_ the authz
+        console_session::table
+            .filter(console_session::token.eq(token))
+            .select(ConsoleSession::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|_e| Error::ObjectNotFound {
+                type_name: ResourceType::ConsoleSession,
+                lookup_type: LookupType::ByOther("session token".to_string()),
+            })
+    }
+
     // TODO-correctness: fix session method errors. the map_errs turn all errors
     // into 500s, most notably (and most frequently) session not found. they
     // don't end up as 500 in the http response because they get turned into a
