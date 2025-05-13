@@ -84,7 +84,7 @@ impl OmicronZones {
     pub(super) async fn shut_down_zones_if_needed<T: SledAgentFacilities>(
         &mut self,
         desired_zones: &IdMap<OmicronZoneConfig>,
-        sled_agent_facilities: &'static T,
+        sled_agent_facilities: &T,
         log: &Logger,
     ) -> Result<(), NonZeroUsize> {
         self.shut_down_zones_if_needed_impl(
