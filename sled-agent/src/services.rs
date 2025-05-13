@@ -102,7 +102,7 @@ use sled_agent_types::{
     sled::SWITCH_ZONE_BASEBOARD_FILE, time_sync::TimeSync,
     zone_bundle::ZoneBundleCause,
 };
-use sled_agent_zone_images::ZoneImageSourceResolver;
+use sled_agent_zone_images::{ZoneImageSourceResolver, ZoneImageZpools};
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
@@ -1728,10 +1728,17 @@ impl ServiceManager {
             ZoneArgs::Switch(_) => &OmicronZoneImageSource::InstallDataset,
         };
         let all_disks = self.inner.storage.get_latest_disks().await;
-        let file_source = self
-            .inner
-            .zone_image_resolver
-            .file_source_for(image_source, &all_disks);
+        let zpools = ZoneImageZpools {
+            root: &all_disks.mount_config().root,
+            all_m2_zpools: all_disks.all_m2_zpools(),
+        };
+        let boot_zpool =
+            all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
+        let file_source = self.inner.zone_image_resolver.file_source_for(
+            image_source,
+            &zpools,
+            boot_zpool.as_ref(),
+        );
 
         let zone_type_str = match &request {
             ZoneArgs::Omicron(zone_config) => {
