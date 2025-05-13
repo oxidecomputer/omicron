@@ -334,10 +334,10 @@ fn cmd_config(
                     &mut s,
                     "        preconditions: expected_slot_a_version {:?}
                                             expected_slot_b_version {:?}
-                                            active_slot {:?}
-                                            persistent_boot_preference {:?}
-                                            pending_persistent_boot_preference {:?}
-                                            transient_boot_preference {:?}",
+                                            expected active_slot {:?}
+                                            expected persistent_boot_preference {:?}
+                                            expected pending_persistent_boot_preference {:?}
+                                            expected transient_boot_preference {:?}",
                     expected_slot_a_version, expected_slot_b_version,
                     expected_active_slot, expected_persistent_boot_preference,
                     expected_pending_persistent_boot_preference,

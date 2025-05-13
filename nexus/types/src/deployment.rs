@@ -1317,22 +1317,22 @@ impl slog::KV for PendingMgsUpdateDetails {
                     &format!("{:?}", expected_slot_b_version),
                 )?;
                 serializer.emit_str(
-                    Key::from("active_slot"),
+                    Key::from("expected_active_slot"),
                     &format!("{:?}", expected_active_slot),
                 )?;
                 serializer.emit_str(
-                    Key::from("persistent_boot_preference"),
+                    Key::from("expected_persistent_boot_preference"),
                     &format!("{:?}", expected_persistent_boot_preference),
                 )?;
                 serializer.emit_str(
-                    Key::from("pending_persistent_boot_preference"),
+                    Key::from("expected_pending_persistent_boot_preference"),
                     &format!(
                         "{:?}",
                         expected_pending_persistent_boot_preference
                     ),
                 )?;
                 serializer.emit_str(
-                    Key::from("transient_boot_preference"),
+                    Key::from("expected_transient_boot_preference"),
                     &format!("{:?}", expected_transient_boot_preference),
                 )
             }
