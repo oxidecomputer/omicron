@@ -1418,25 +1418,25 @@ mod test {
     use super::*;
 
     #[cfg(target_os = "illumos")]
-    #[test]
-    fn directory_mutability() {
+    #[tokio::test]
+    async fn directory_mutability() {
         let dir = Utf8TempDir::new_in("/var/tmp").unwrap();
-        let immutablity = is_directory_immutable(dir.path()).unwrap();
+        let immutablity = is_directory_immutable(dir.path()).await.unwrap();
         assert!(
             matches!(immutablity, Immutability::No),
             "new directory should be mutable, is: {:?}",
             immutablity
         );
 
-        make_directory_immutable(dir.path()).unwrap();
-        let immutablity = is_directory_immutable(dir.path()).unwrap();
+        make_directory_immutable(dir.path()).await.unwrap();
+        let immutablity = is_directory_immutable(dir.path()).await.unwrap();
         assert!(
             matches!(immutablity, Immutability::Yes),
             "directory should be immutable"
         );
 
-        make_directory_mutable(dir.path()).unwrap();
-        let immutablity = is_directory_immutable(dir.path()).unwrap();
+        make_directory_mutable(dir.path()).await.unwrap();
+        let immutablity = is_directory_immutable(dir.path()).await.unwrap();
         assert!(
             matches!(immutablity, Immutability::No),
             "directory should be mutable"
@@ -1448,10 +1448,11 @@ mod test {
     // To minimize test setup, we rely on a zfs dataset named "rpool" existing,
     // but do not modify it within this test.
     #[cfg(target_os = "illumos")]
-    #[test]
-    fn get_values_of_rpool() {
+    #[tokio::test]
+    async fn get_values_of_rpool() {
         // If the rpool exists, it should have a name.
         let values = Zfs::get_values("rpool", &["name"; 1], None)
+            .await
             .expect("Failed to query rpool type");
         assert_eq!(values[0], "rpool");
 
@@ -1459,12 +1460,14 @@ mod test {
         // want this to throw an error.
         let _values =
             Zfs::get_values("rpool", &["name"; 1], Some(PropertySource::Local))
+                .await
                 .expect("Failed to query rpool type");
 
         // Also, the "all" property should not be queryable. It's normally fine
         // to pass this value, it just returns a variable number of properties,
         // which doesn't work with the current implementation's parsing.
         let err = Zfs::get_values("rpool", &["all"; 1], None)
+            .await
             .expect_err("Should not be able to query for 'all' property");
 
         assert!(

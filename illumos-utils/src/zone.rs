@@ -964,11 +964,11 @@ mod tests {
     // This test validates that we correctly detect an attempt to delete an
     // address that does not exist and return `Ok(())`.
     #[cfg(target_os = "illumos")]
-    #[test]
-    fn delete_nonexistent_address() {
+    #[tokio::test]
+    async fn delete_nonexistent_address() {
         // We'll pick a name that hopefully no system actually has...
         let addr = AddrObject::new("nonsense", "shouldnotexist").unwrap();
-        match Zones::delete_address(None, &addr) {
+        match Zones::delete_address(None, &addr).await {
             Ok(()) => (),
             Err(err) => panic!(
                 "unexpected error deleting nonexistent address: {}",

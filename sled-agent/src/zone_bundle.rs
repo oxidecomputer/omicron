@@ -1895,7 +1895,8 @@ mod illumos_tests {
             log,
             resource_wrapper.storage_test_harness.handle().clone(),
             context,
-        );
+        )
+        .await;
         Ok(CleanupTestContext {
             ctx: Arc::new(Mutex::new(CleanupTestContextInner {
                 resource_wrapper,

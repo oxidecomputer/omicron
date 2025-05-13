@@ -1927,7 +1927,11 @@ mod illumos_tests {
                     "Attempting automated cleanup of {}",
                     vdev_dir.path(),
                 );
-                self.cleanup();
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async move {
+                        self.cleanup().await;
+                    });
+                });
             }
         }
     }
@@ -2024,7 +2028,7 @@ mod illumos_tests {
             zpool
         }
 
-        fn cleanup(&mut self) {
+        async fn cleanup(&mut self) {
             let Some(vdev_dir) = self.vdev_dir.take() else {
                 // Already terminated
                 return;
@@ -2034,7 +2038,7 @@ mod illumos_tests {
 
             for pool in self.currently_managed_zpools_tx.borrow().iter() {
                 eprintln!("destroying pool: {pool}");
-                if let Err(err) = Zpool::destroy(&pool) {
+                if let Err(err) = Zpool::destroy(&pool).await {
                     eprintln!(
                         "failed to destroy {pool}: {}",
                         InlineErrorChain::new(&err)
@@ -2118,7 +2122,7 @@ mod illumos_tests {
             DatasetState::Ensured
         );
 
-        harness.cleanup();
+        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -2202,7 +2206,7 @@ mod illumos_tests {
         // ... and doing so mounts the dataset again.
         assert!(is_mounted(name).await);
 
-        harness.cleanup();
+        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -2290,7 +2294,7 @@ mod illumos_tests {
             "err: {err}"
         );
 
-        harness.cleanup();
+        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -2344,7 +2348,7 @@ mod illumos_tests {
             assert_matches!(result.state, DatasetState::Ensured);
         }
 
-        harness.cleanup();
+        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -2500,7 +2504,7 @@ mod illumos_tests {
             .expect("no error listing datasets");
         assert_eq!(nested_datasets.len(), 0);
 
-        harness.cleanup();
+        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 }

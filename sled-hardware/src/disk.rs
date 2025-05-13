@@ -297,7 +297,8 @@ impl PooledDisk {
         // Ensure the GPT has the right format. This does not necessarily
         // mean that the partitions are populated with the data we need.
         let partitions =
-            ensure_partition_layout(&log, &paths, variant, identity, zpool_id)?;
+            ensure_partition_layout(&log, &paths, variant, identity, zpool_id)
+                .await?;
 
         // Find the path to the zpool which exists on this disk.
         //

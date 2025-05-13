@@ -2063,6 +2063,7 @@ mod tests {
             &[dataset_name.full_name()],
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap()[0];
         assert_eq!(observed_dataset.id, Some(dataset_id));
 
@@ -2077,6 +2078,7 @@ mod tests {
             &[dataset_name.full_name()],
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap()[0];
         assert_eq!(observed_dataset.id, Some(dataset_id));
 
@@ -2114,6 +2116,7 @@ mod tests {
             &[dataset_name.full_name()],
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap()[0];
         assert_eq!(observed_dataset.id, None);
 
@@ -2128,6 +2131,7 @@ mod tests {
             &[dataset_name.full_name()],
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap()[0];
         assert_eq!(observed_dataset.id, Some(dataset_id));
 

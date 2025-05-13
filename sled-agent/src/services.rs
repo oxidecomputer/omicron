@@ -5366,7 +5366,8 @@ mod illumos_tests {
                 log.clone(),
                 storage_test_harness.handle().clone(),
                 Default::default(),
-            );
+            )
+            .await;
 
             let mut storage_manager = storage_test_harness.handle().clone();
             let all_disks = storage_manager.get_latest_disks().await;

@@ -917,29 +917,29 @@ mod illumos_tests {
 
     /// Find all sled-diagnostics created snapshots
     async fn get_sled_diagnostics_snapshots(filesystem: &str) -> Vec<Snapshot> {
-        list_snapshots(filesystem)
-            .into_iter()
-            .filter(|snap| {
-                if !snap.snap_name.starts_with(SLED_DIAGNOSTICS_SNAPSHOT_PREFIX)
-                {
-                    return false;
-                }
-                let name = snap.to_string();
-                if Zfs::get_values(
-                    &name,
-                    &[SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME],
-                    Some(illumos_utils::zfs::PropertySource::Local),
-                )
-                .await
-                .unwrap()
-                    == [SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE]
-                {
-                    return true;
-                };
+        let mut snapshots = Vec::new();
 
-                false
-            })
-            .collect()
+        for snap in list_snapshots(filesystem).into_iter() {
+            if !snap.snap_name.starts_with(SLED_DIAGNOSTICS_SNAPSHOT_PREFIX) {
+                continue;
+            }
+            let name = snap.to_string();
+            if Zfs::get_values(
+                &name,
+                &[SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME],
+                Some(illumos_utils::zfs::PropertySource::Local),
+            )
+            .await
+            .unwrap()
+                == [SLED_DIAGNOSTICS_ZFS_PROPERTY_VALUE]
+            {
+                continue;
+            };
+
+            snapshots.push(snap);
+        }
+
+        snapshots
     }
 
     #[tokio::test]
@@ -965,14 +965,14 @@ mod illumos_tests {
             let mut log_snapshots = LogSnapshots::new();
 
             // Create a new snapshot
-            log_snapshots.get_or_create(&log, &mountpoint).unwrap();
+            log_snapshots.get_or_create(&log, &mountpoint).await.unwrap();
             let snapshots =
                 get_sled_diagnostics_snapshots(zfs_filesystem).await;
             assert_eq!(snapshots.len(), 1, "single snapshot created");
 
             // Creating a second snapshot from the same dataset doesn't create a
             // new snapshot
-            log_snapshots.get_or_create(&log, &mountpoint).unwrap();
+            log_snapshots.get_or_create(&log, &mountpoint).await.unwrap();
             let snapshots =
                 get_sled_diagnostics_snapshots(zfs_filesystem).await;
             assert_eq!(snapshots.len(), 1, "duplicate snapshots not taken");
@@ -986,7 +986,7 @@ mod illumos_tests {
 
             // Simulate a crash leaving behind stale snapshots
             let mut log_snapshots = LogSnapshots::new();
-            log_snapshots.get_or_create(&log, &mountpoint).unwrap();
+            log_snapshots.get_or_create(&log, &mountpoint).await.unwrap();
 
             // Don't run the drop handler for any log_snapshots
             std::mem::forget(log_snapshots);
@@ -996,7 +996,7 @@ mod illumos_tests {
             assert_eq!(snapshots.len(), 1, "single snapshot created");
 
             let handle = LogsHandle::new(log.clone());
-            handle.cleanup_snapshots();
+            handle.cleanup_snapshots().await;
 
             let snapshots =
                 get_sled_diagnostics_snapshots(zfs_filesystem).await;
@@ -1139,7 +1139,7 @@ mod illumos_tests {
             let mut log_snapshots = LogSnapshots::new();
 
             // Create a snapshot first
-            log_snapshots.get_or_create(&log, &logfile).unwrap();
+            log_snapshots.get_or_create(&log, &logfile).await.unwrap();
 
             // Change the data on disk by truncating the old file first
             let mut logfile_handle =
@@ -1158,6 +1158,7 @@ mod illumos_tests {
                     &logfile,
                     LogType::Current,
                 )
+                .await
                 .unwrap();
 
             zip.finish().unwrap();
