@@ -10,8 +10,6 @@ use crate::config::SimulatedSpsConfig;
 use crate::config::SpComponentConfig;
 use crate::ereport;
 use crate::ereport::EreportState;
-use crate::helpers::rot_slot_id_from_u16;
-use crate::helpers::rot_slot_id_to_u16;
 use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
 use crate::serial_number_padded;
