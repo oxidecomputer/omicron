@@ -111,7 +111,7 @@ pub(crate) async fn fetch_hubris_artifacts(
                 }
             }
             if let Some(corpus) = hash_manifest.corpus {
-                let hash = match corpus {
+                let hash = match corpus.source {
                     Source::File(file) => file.hash,
                     _ => anyhow::bail!("Unexpected file type"),
                 };
@@ -178,7 +178,7 @@ struct Manifest {
     #[serde(rename = "artifact")]
     artifacts: HashMap<KnownArtifactKind, Vec<Artifact>>,
     #[serde(rename = "measurement_corpus")]
-    corpus: Option<Source>,
+    corpus: Option<Artifact>,
 }
 
 #[derive(Deserialize)]
