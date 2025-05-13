@@ -560,8 +560,8 @@ source.type = "prebuilt"
 source.repo = "management-gateway-service"
 # In general, this commit should match the pinned revision of `gateway-sp-comms`
 # in `Cargo.toml`.
-source.commit = "319e7b92db69792ab8efa4c68554ad0cf83adf93"
-source.sha256 = "f4cbc480c8cfc2605c13b319291e69cbf8c213bb9c625ff79d339f90a7124358"
+source.commit = "57536869418e08667824c9a1b2cf115ed91b713f"
+source.sha256 = "2e1385c81fd4add9459a73032de363028ac3fc3a71e59f243529eba39afd1da4"
 output.type = "zone"
 output.intermediate_only = true
 
