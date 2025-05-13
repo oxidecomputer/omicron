@@ -51,6 +51,7 @@
 
 mod dataset_serialization_task;
 mod disks_common;
+mod dump_setup_task;
 mod handle;
 mod internal_disks;
 mod ledger;
