@@ -640,8 +640,8 @@ mod test {
         // update last used (i.e., renew token)
         let authz_session = authz::ConsoleSession::new(
             authz::FLEET,
-            token.clone(),
-            LookupType::ByCompositeId(token.clone()),
+            session.id.into(),
+            LookupType::ById(session.id.into_untyped_uuid()),
         );
         let renewed = datastore
             .session_update_last_used(&opctx, &authz_session)
@@ -687,11 +687,9 @@ mod test {
             .session_hard_delete(&silo_user_opctx, &authz_session)
             .await;
         assert_eq!(delete, Ok(()));
-        let fetched = dbg!(
-            datastore
-                .session_lookup_by_token(&authn_opctx, token.clone())
-                .await
-        );
+        let fetched = datastore
+            .session_lookup_by_token(&authn_opctx, token.clone())
+            .await;
         assert!(matches!(
             fetched,
             Err(Error::ObjectNotFound { type_name: _, lookup_type: _ })

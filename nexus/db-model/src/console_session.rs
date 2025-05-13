@@ -34,7 +34,7 @@ impl ConsoleSession {
         }
     }
 
-    pub fn id(&self) -> String {
-        self.token.clone()
+    pub fn id(&self) -> TypedUuid<ConsoleSessionKind> {
+        self.id.0
     }
 }
