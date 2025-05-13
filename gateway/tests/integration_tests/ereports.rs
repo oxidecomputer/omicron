@@ -73,7 +73,7 @@ mod sled0 {
     });
 
     def_ereport! {
-        EREPORT_0: {
+        EREPORT_1: {
             "chassis_model": "SimGimletSp",
             "chassis_serial": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
@@ -87,7 +87,7 @@ mod sled0 {
         }
     }
     def_ereport! {
-        EREPORT_1: {
+        EREPORT_2: {
             "chassis_model": "SimGimletSp",
             "chassis_serial": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
@@ -110,7 +110,7 @@ mod sled0 {
         }
     }
     def_ereport! {
-        EREPORT_2: {
+        EREPORT_3: {
             "chassis_model": "SimGimletSp",
             "chassis_serial": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
@@ -130,7 +130,7 @@ mod sled0 {
     }
 
     def_ereport! {
-        EREPORT_3: {
+        EREPORT_4: {
             "chassis_model": "SimGimletSp",
             "chassis_serial": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
@@ -145,7 +145,7 @@ mod sled0 {
     }
 
     def_ereport! {
-        EREPORT_4: {
+        EREPORT_5: {
             "chassis_model": "SimGimletSp",
             "chassis_serial": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
@@ -167,7 +167,7 @@ mod sled1 {
     });
 
     def_ereport! {
-        EREPORT_0: {
+        EREPORT_1: {
             "chassis_model": "SimGimletSp",
             "chassis_serial": "SimGimlet01",
             "hubris_archive_id": "ffffffff",
@@ -235,8 +235,8 @@ async fn ereports_basic() {
     let reports = reports.items;
     assert_eq!(reports.len(), 1, "expected 1 ereport, found: {:#?}", reports);
     let report = &reports[0];
-    assert_eq!(report.ena, ereport_types::Ena(0));
-    assert_eq!(report.data, *sled1::EREPORT_0);
+    assert_eq!(report.ena, ereport_types::Ena(1));
+    assert_eq!(report.data, *sled1::EREPORT_1);
 
     testctx.teardown().await;
 }
@@ -264,18 +264,18 @@ async fn ereports_limit() {
     let reports = reports.items;
     assert_eq!(reports.len(), 2, "expected 2 ereports, found: {:#?}", reports);
     let report = &reports[0];
-    assert_eq!(report.ena, ereport_types::Ena(0));
-    assert_eq!(report.data, *sled0::EREPORT_0);
-
-    let report = &reports[1];
     assert_eq!(report.ena, ereport_types::Ena(1));
     assert_eq!(report.data, *sled0::EREPORT_1);
+
+    let report = &reports[1];
+    assert_eq!(report.ena, ereport_types::Ena(2));
+    assert_eq!(report.data, *sled0::EREPORT_2);
 
     let ereport_types::Ereports { restart_id, reports } = dbg!(
         EreportRequest {
             sled: 0,
             restart_id: restart_id.into_untyped_uuid(),
-            start_ena: 2,
+            start_ena: 3,
             committed_ena: None,
             limit: 2
         }
@@ -287,12 +287,12 @@ async fn ereports_limit() {
     let reports = reports.items;
     assert_eq!(reports.len(), 2, "expected 2 ereports, found: {:#?}", reports);
     let report = &reports[0];
-    assert_eq!(report.ena, ereport_types::Ena(2));
-    assert_eq!(report.data, *sled0::EREPORT_2);
-
-    let report = &reports[1];
     assert_eq!(report.ena, ereport_types::Ena(3));
     assert_eq!(report.data, *sled0::EREPORT_3);
+
+    let report = &reports[1];
+    assert_eq!(report.ena, ereport_types::Ena(4));
+    assert_eq!(report.data, *sled0::EREPORT_4);
 
     testctx.teardown().await;
 }
@@ -308,8 +308,8 @@ async fn ereports_commit() {
         EreportRequest {
             sled: 0,
             restart_id: Uuid::new_v4(),
-            start_ena: 2,
-            committed_ena: Some(1),
+            start_ena: 3,
+            committed_ena: Some(2),
             limit: 2
         }
         .response(client)
@@ -322,12 +322,12 @@ async fn ereports_commit() {
     let reports = reports.items;
     assert_eq!(reports.len(), 2, "expected 2 ereports, found: {:#?}", reports);
     let report = &reports[0];
-    assert_eq!(report.ena, ereport_types::Ena(0));
-    assert_eq!(report.data, *sled0::EREPORT_0);
-
-    let report = &reports[1];
     assert_eq!(report.ena, ereport_types::Ena(1));
     assert_eq!(report.data, *sled0::EREPORT_1);
+
+    let report = &reports[1];
+    assert_eq!(report.ena, ereport_types::Ena(2));
+    assert_eq!(report.data, *sled0::EREPORT_2);
 
     // Now, send a request with a committed ENA *and* a matching restart ID.
     let ereport_types::Ereports { restart_id, reports } = dbg!(
@@ -335,7 +335,7 @@ async fn ereports_commit() {
             sled: 0,
             restart_id: restart_id.into_untyped_uuid(),
             start_ena: 0,
-            committed_ena: Some(1),
+            committed_ena: Some(2),
             limit: 2
         }
         .response(client)
@@ -346,12 +346,12 @@ async fn ereports_commit() {
     let reports = reports.items;
     assert_eq!(reports.len(), 2, "expected 2 ereports, found: {:#?}", reports);
     let report = &reports[0];
-    assert_eq!(report.ena, ereport_types::Ena(2));
-    assert_eq!(report.data, *sled0::EREPORT_2);
-
-    let report = &reports[1];
     assert_eq!(report.ena, ereport_types::Ena(3));
     assert_eq!(report.data, *sled0::EREPORT_3);
+
+    let report = &reports[1];
+    assert_eq!(report.ena, ereport_types::Ena(4));
+    assert_eq!(report.data, *sled0::EREPORT_4);
 
     // Even if the start ENA of a subsequent request is 0, we shouldn't see any
     // ereports with ENAs lower than the committed ENA.
@@ -371,16 +371,16 @@ async fn ereports_commit() {
     let reports = reports.items;
     assert_eq!(reports.len(), 3, "expected 3 ereports, found: {:#?}", reports);
     let report = &reports[0];
-    assert_eq!(report.ena, ereport_types::Ena(2));
-    assert_eq!(report.data, *sled0::EREPORT_2);
-
-    let report = &reports[1];
     assert_eq!(report.ena, ereport_types::Ena(3));
     assert_eq!(report.data, *sled0::EREPORT_3);
 
-    let report = &reports[2];
+    let report = &reports[1];
     assert_eq!(report.ena, ereport_types::Ena(4));
     assert_eq!(report.data, *sled0::EREPORT_4);
+
+    let report = &reports[2];
+    assert_eq!(report.ena, ereport_types::Ena(5));
+    assert_eq!(report.data, *sled0::EREPORT_5);
 
     testctx.teardown().await;
 }
