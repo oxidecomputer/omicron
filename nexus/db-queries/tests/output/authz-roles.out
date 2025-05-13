@@ -1174,7 +1174,7 @@ resource: DeviceAuthRequest "a-device-user-code"
   silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: DeviceAccessToken "a-device-access-token"
+resource: DeviceAccessToken id "3b80c7f9-bee0-4b42-8550-6cdfc74dafdb"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔

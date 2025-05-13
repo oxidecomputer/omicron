@@ -928,7 +928,7 @@ table! {
 }
 
 table! {
-    console_session (token) {
+    console_session (id) {
         id -> Uuid,
         token -> Text,
         time_created -> Timestamptz,
@@ -1355,7 +1355,7 @@ table! {
 }
 
 table! {
-    device_access_token (token) {
+    device_access_token (id) {
         id -> Uuid,
         token -> Text,
         client_id -> Uuid,

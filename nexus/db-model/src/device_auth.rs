@@ -151,9 +151,8 @@ impl DeviceAccessToken {
         }
     }
 
-    // TODO: uhhhh
-    pub fn id(&self) -> String {
-        self.token.clone()
+    pub fn id(&self) -> TypedUuid<AccessTokenKind> {
+        self.id.0
     }
 
     pub fn expires(mut self, time: DateTime<Utc>) -> Self {
