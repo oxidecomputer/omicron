@@ -372,25 +372,6 @@ impl Inner {
         let mut throttle_count = usize::MAX;
         let mut throttler: Option<mpsc::UnboundedReceiver<usize>> = None;
 
-        async fn ereport_recv(
-            sock: Option<&mut UdpServer>,
-        ) -> anyhow::Result<(EreportRequest, SocketAddrV6, &mut UdpServer)>
-        {
-            use zerocopy::TryFromBytes;
-            match sock {
-                Some(sock) => {
-                    let (msg, addr) = sock.recv_from().await?;
-                    let req = EreportRequest::try_read_from_bytes(msg)
-                        .map_err(|e| {
-                            anyhow::anyhow!(
-                                "couldn't zerocopy ereport header: {e:?}"
-                            )
-                        })?;
-                    Ok((req, addr, sock))
-                }
-                None => futures::future::pending().await,
-            }
-        }
         loop {
             let incr_throttle_count: Pin<
                 Box<dyn Future<Output = Option<usize>> + Send>,
@@ -432,13 +413,13 @@ impl Inner {
                     }
                 }
 
-                recv = ereport_recv(self.ereport0.as_mut()) => {
+                recv = ereport::recv_request(self.ereport0.as_mut()) => {
                     let (req, addr, sock) = recv?;
                     let rsp = self.ereport_state.handle_request(&req, &mut out_buf);
                     sock.send_to(rsp, addr).await?;
                 }
 
-                recv = ereport_recv(self.ereport1.as_mut()) => {
+                recv = ereport::recv_request(self.ereport1.as_mut()) => {
                     let (req, addr, sock) = recv?;
                     let rsp = self.ereport_state.handle_request(&req, &mut out_buf);
                     sock.send_to(rsp, addr).await?;

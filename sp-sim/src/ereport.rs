@@ -5,6 +5,7 @@
 use crate::config::Ereport;
 use crate::config::EreportConfig;
 use crate::config::EreportRestart;
+use crate::server::UdpServer;
 use gateway_ereport_messages::Ena;
 use gateway_ereport_messages::Request;
 use gateway_ereport_messages::ResponseHeader;
@@ -12,6 +13,7 @@ use gateway_ereport_messages::ResponseHeaderV0;
 use gateway_ereport_messages::RestartId;
 use std::collections::VecDeque;
 use std::io::Cursor;
+use std::net::SocketAddrV6;
 use tokio::sync::oneshot;
 use zerocopy::IntoBytes;
 
@@ -34,6 +36,24 @@ struct EreportListEntry {
     ena: Ena,
     ereport: Ereport,
     bytes: Vec<u8>,
+}
+
+pub(crate) async fn recv_request(
+    sock: Option<&mut UdpServer>,
+) -> anyhow::Result<(Request, SocketAddrV6, &mut UdpServer)> {
+    use zerocopy::TryFromBytes;
+    match sock {
+        Some(sock) => {
+            let (packet, addr) = sock.recv_from().await?;
+            let req = Request::try_read_from_bytes(packet).map_err(|e| {
+                anyhow::anyhow!(
+                    "couldn't understand ereport header from {addr}: {e:?}"
+                )
+            })?;
+            Ok((req, addr, sock))
+        }
+        None => futures::future::pending().await,
+    }
 }
 
 impl EreportState {
