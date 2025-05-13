@@ -93,10 +93,9 @@ impl super::Nexus {
 
         let short_timeout = std::time::Duration::from_secs(60);
         let long_timeout = std::time::Duration::from_secs(3600);
-        let client = reqwest::ClientBuilder::new()
-            // Connecting and continuing to read from the sled agent should
-            // happen relatively quickly.
-            .connect_timeout(short_timeout)
+        let client = nexus_networking::default_reqwest_client_builder()
+            // Continuing to read from the sled agent should happen relatively
+            // quickly.
             .read_timeout(short_timeout)
             // However, the bundle itself may be large. As long as we're
             // continuing to make progress (see: read_timeout) we should be

@@ -25,13 +25,9 @@ pub fn sled_lookup<'a>(
     Ok(sled)
 }
 
-pub fn default_reqwest_client() -> reqwest::Client {
+pub fn default_reqwest_client_builder() -> reqwest::ClientBuilder {
     let dur = std::time::Duration::from_secs(60);
-    reqwest::ClientBuilder::new()
-        .connect_timeout(dur)
-        .timeout(dur)
-        .build()
-        .expect("Failed to build reqwest Client")
+    reqwest::ClientBuilder::new().connect_timeout(dur).timeout(dur)
 }
 
 pub async fn sled_client(
@@ -40,7 +36,7 @@ pub async fn sled_client(
     sled_id: Uuid,
     log: &Logger,
 ) -> Result<SledAgentClient, Error> {
-    let client = default_reqwest_client();
+    let client = default_reqwest_client_builder().build().unwrap();
     sled_client_ext(datastore, lookup_opctx, sled_id, log, client).await
 }
 
@@ -62,7 +58,7 @@ pub fn sled_client_from_address(
     address: SocketAddrV6,
     log: &Logger,
 ) -> SledAgentClient {
-    let client = default_reqwest_client();
+    let client = default_reqwest_client_builder().build().unwrap();
     sled_client_from_address_ext(sled_id, address, log, client)
 }
 
