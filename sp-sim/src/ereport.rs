@@ -110,7 +110,7 @@ impl EreportState {
         self.restart_id = RestartId::new(restart_id.as_u128());
         self.meta = metadata;
         self.ereports.clear();
-        self.next_ena = Ena::ZERO;
+        self.next_ena = Ena::new(1);
     }
 
     pub(crate) fn append_ereport(&mut self, ereport: Ereport) -> Ena {
