@@ -1476,6 +1476,7 @@ table! {
         git_commit -> Text,
         name -> Text,
         version -> Text,
+        sign -> Nullable<Text>,
     }
 }
 

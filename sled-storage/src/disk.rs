@@ -383,7 +383,7 @@ impl Disk {
         }
     }
 
-    pub(crate) fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
+    pub fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
         match self {
             Disk::Real(pooled_disk) => {
                 pooled_disk.firmware = raw_disk.firmware().clone();

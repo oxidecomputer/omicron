@@ -356,7 +356,6 @@ impl SledEditor {
     /// Sets remove-mupdate-override configuration for this sled.
     ///
     /// Currently only used in test code.
-    #[cfg_attr(not(test), expect(dead_code))]
     pub fn set_remove_mupdate_override(
         &mut self,
         remove_mupdate_override: Option<MupdateOverrideUuid>,
@@ -375,6 +374,16 @@ impl SledEditor {
     ) -> Result<(), SledEditError> {
         self.as_active_mut()?.ensure_datasets_for_running_zones(rng)
     }
+
+    /// Debug method to force a sled agent generation number to be bumped, even
+    /// if there are no changes to the sled.
+    ///
+    /// Do not use in production. Instead, update the logic that decides if the
+    /// generation number should be bumped.
+    pub fn debug_force_generation_bump(&mut self) -> Result<(), SledEditError> {
+        self.as_active_mut()?.debug_force_generation_bump();
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -385,6 +394,7 @@ struct ActiveSledEditor {
     disks: DisksEditor,
     datasets: DatasetsEditor,
     remove_mupdate_override: ScalarEditor<Option<MupdateOverrideUuid>>,
+    debug_force_generation_bump: bool,
 }
 
 #[derive(Debug)]
@@ -419,6 +429,7 @@ impl ActiveSledEditor {
             remove_mupdate_override: ScalarEditor::new(
                 config.remove_mupdate_override,
             ),
+            debug_force_generation_bump: false,
         })
     }
 
@@ -437,6 +448,7 @@ impl ActiveSledEditor {
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(),
             remove_mupdate_override: ScalarEditor::new(None),
+            debug_force_generation_bump: false,
         }
     }
 
@@ -449,7 +461,8 @@ impl ActiveSledEditor {
         let mut sled_agent_generation = self.incoming_sled_agent_generation;
 
         // Bump the generation if we made any changes of concern to sled-agent.
-        if disks_counts.has_nonzero_counts()
+        if self.debug_force_generation_bump
+            || disks_counts.has_nonzero_counts()
             || datasets_counts.has_nonzero_counts()
             || zones_counts.has_nonzero_counts()
             || remove_mupdate_override_is_modified
@@ -679,6 +692,15 @@ impl ActiveSledEditor {
         remove_mupdate_override: Option<MupdateOverrideUuid>,
     ) {
         self.remove_mupdate_override.set_value(remove_mupdate_override);
+    }
+
+    /// Debug method to force a sled agent generation number to be bumped, even
+    /// if there are no changes to the sled.
+    ///
+    /// Do not use in production. Instead, update the logic that decides if the
+    /// generation number should be bumped.
+    pub fn debug_force_generation_bump(&mut self) {
+        self.debug_force_generation_bump = true;
     }
 }
 

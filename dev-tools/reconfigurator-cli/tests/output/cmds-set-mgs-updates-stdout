@@ -1,7 +1,9 @@
-using provided RNG seed: test_set_mgs_updates
+using provided RNG seed: reconfigurator-cli-test
 > # Load example system
 
-> load-example --nsleds 3 --ndisks-per-sled 3
+> # This is a legacy test; new tests shouldn't need to set a seed
+
+> load-example --nsleds 3 --ndisks-per-sled 3 --seed test_set_mgs_updates
 loaded example system with:
 - collection: 365bdc65-0d27-4f02-aa72-09c39232ebfc
 - blueprint: ad97e762-7bf1-45a6-a98f-60afb7e491c0
@@ -2759,16 +2761,18 @@ edit contents of a blueprint directly
 Usage: blueprint-edit [OPTIONS] <BLUEPRINT_ID> <COMMAND>
 
 Commands:
-  add-nexus         add a Nexus instance to a particular sled
-  add-cockroach     add a CockroachDB instance to a particular sled
-  set-zone-image    set the image source for a zone
-  expunge-zone      expunge a zone
-  set-sp-update     configure an SP update
-  delete-sp-update  delete a configured SP update
-  help              Print this message or the help of the given subcommand(s)
+  add-nexus                    add a Nexus instance to a particular sled
+  add-cockroach                add a CockroachDB instance to a particular sled
+  set-zone-image               set the image source for a zone
+  set-remove-mupdate-override  set the remove_mupdate_override field for a sled
+  expunge-zone                 expunge a zone
+  set-sp-update                configure an SP update
+  delete-sp-update             delete a configured SP update
+  debug                        debug commands that bypass normal checks
+  help                         Print this message or the help of the given subcommand(s)
 
 Arguments:
-  <BLUEPRINT_ID>  id of the blueprint to edit
+  <BLUEPRINT_ID>  id of the blueprint to edit, "latest", or "target"
 
 Options:
       --creator <CREATOR>  "creator" field for the new blueprint

@@ -348,6 +348,20 @@ impl SystemDescription {
         Ok(self)
     }
 
+    /// Remove a sled from the system.
+    ///
+    /// Returns the [`Sled`] structure that was just removed.
+    pub fn sled_remove(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Arc<Sled>> {
+        self.sleds.shift_remove(&sled_id).ok_or_else(|| {
+            anyhow!(
+                "attempted to remove sled with id {sled_id} that does not exist"
+            )
+        })
+    }
+
     /// Return true if the system has any sleds in it.
     pub fn has_sleds(&self) -> bool {
         !self.sleds.is_empty()
@@ -373,6 +387,19 @@ impl SystemDescription {
             format!("attempted to access sled {} not found in system", sled_id)
         })?;
         Arc::make_mut(sled).inventory_sled_agent.omicron_zones = omicron_zones;
+        Ok(self)
+    }
+
+    /// Set the policy for a sled in the system.
+    pub fn sled_set_policy(
+        &mut self,
+        sled_id: SledUuid,
+        policy: SledPolicy,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        Arc::make_mut(sled).policy = policy;
         Ok(self)
     }
 

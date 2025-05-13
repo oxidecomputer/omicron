@@ -90,15 +90,18 @@ impl AllMupdateOverrides {
             })
             .collect();
 
-        Self {
+        let ret = Self {
             boot_zpool: *boot_zpool,
             boot_disk_path,
             boot_disk_override: boot_disk_res,
             non_boot_disk_overrides: non_boot_disks_overrides,
-        }
+        };
+
+        ret.log_results(&log);
+        ret
     }
 
-    pub(crate) fn log_results(&self, log: &slog::Logger) {
+    fn log_results(&self, log: &slog::Logger) {
         let log = log.new(o!(
             "boot_zpool" => self.boot_zpool.to_string(),
             "boot_disk_path" => self.boot_disk_path.to_string(),
@@ -154,9 +157,15 @@ fn read_mupdate_override(
         dataset_dir: &Utf8Path,
         override_path: &Utf8Path,
     ) -> Result<Option<MupdateOverrideInfo>, MupdateOverrideReadError> {
-        // First check that the dataset directory exists. It would be nice if we
-        // could use openat-style APIs to read the file from the opened directory,
-        // but:
+        // First check that the dataset directory exists. This distinguishes the
+        // two cases:
+        //
+        // 1. The install dataset is missing (an error).
+        // 2. The install dataset is present, but the override file is missing
+        //    (expected).
+        //
+        // It would be nice if we could use openat-style APIs to read the file
+        // from the opened directory, but:
         //
         // * those don't exist in rust std
         // * it's not crucial -- we don't expect TOCTTOU races much in this code
@@ -415,7 +424,8 @@ enum MupdateOverrideReadError {
     },
 
     #[error(
-        "error deserializing into MupdateOverrideInfo, contents: {contents:?}"
+        "error deserializing `{path}` into MupdateOverrideInfo, \
+         contents: {contents:?}"
     )]
     Deserialize {
         path: Utf8PathBuf,
