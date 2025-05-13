@@ -50,6 +50,7 @@ use crate::dump_setup_task;
 use crate::internal_disks::InternalDisksReceiver;
 use crate::ledger::LedgerTaskHandle;
 use crate::raw_disks;
+use crate::raw_disks::RawDisksReceiver;
 use crate::raw_disks::RawDisksSender;
 use crate::reconciler_task;
 use crate::reconciler_task::CurrentlyManagedZpools;
@@ -71,6 +72,7 @@ pub struct ConfigReconcilerSpawnToken {
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
     external_disks_tx: watch::Sender<HashSet<Disk>>,
+    raw_disks_rx: RawDisksReceiver,
     ledger_task_log: Logger,
     reconciler_task_log: Logger,
 }
@@ -110,7 +112,7 @@ impl ConfigReconcilerHandle {
         let internal_disks_rx =
             InternalDisksReceiver::spawn_internal_disks_task(
                 Arc::clone(&mount_config),
-                raw_disks_rx,
+                raw_disks_rx.clone(),
                 base_log,
             );
 
@@ -125,7 +127,7 @@ impl ConfigReconcilerHandle {
         );
 
         let (reconciler_result_tx, reconciler_result_rx) =
-            watch::channel(ReconcilerResult::default());
+            watch::channel(ReconcilerResult::new(Arc::clone(&mount_config)));
         let (currently_managed_zpools_tx, currently_managed_zpools_rx) =
             watch::channel(Arc::default());
         let currently_managed_zpools_rx =
@@ -156,6 +158,7 @@ impl ConfigReconcilerHandle {
                 reconciler_result_tx,
                 currently_managed_zpools_tx,
                 external_disks_tx,
+                raw_disks_rx,
                 ledger_task_log: base_log
                     .new(slog::o!("component" => "SledConfigLedgerTask")),
                 reconciler_task_log: base_log
@@ -188,6 +191,7 @@ impl ConfigReconcilerHandle {
             reconciler_result_tx,
             currently_managed_zpools_tx,
             external_disks_tx,
+            raw_disks_rx,
             ledger_task_log,
             reconciler_task_log,
         } = token;
@@ -213,12 +217,14 @@ impl ConfigReconcilerHandle {
 
         reconciler_task::spawn(
             Arc::clone(self.internal_disks_rx.mount_config()),
+            self.dataset_task.clone(),
             key_requester,
             time_sync_config,
             current_config_rx,
             reconciler_result_tx,
             currently_managed_zpools_tx,
             external_disks_tx,
+            raw_disks_rx,
             sled_agent_facilities,
             reconciler_task_log,
         );

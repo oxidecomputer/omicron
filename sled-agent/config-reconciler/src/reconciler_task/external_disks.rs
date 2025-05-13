@@ -189,6 +189,19 @@ impl ExternalDisks {
         }
     }
 
+    pub(crate) fn has_retryable_error(&self) -> bool {
+        self.disks.iter().any(|disk| match &disk.state {
+            DiskState::Managed(_) => false,
+            DiskState::FailedToManage(err) => err.retryable(),
+        })
+    }
+
+    pub(super) fn currently_managed_zpools(
+        &self,
+    ) -> Arc<CurrentlyManagedZpools> {
+        Arc::clone(&*self.currently_managed_zpools_tx.borrow())
+    }
+
     fn update_output_watch_channels(&self) {
         let current_disks = self
             .disks

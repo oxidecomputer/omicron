@@ -24,6 +24,8 @@ use illumos_utils::zfs::DestroyDatasetError;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
+use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::ZpoolOrRamdisk;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
@@ -32,6 +34,8 @@ use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetUuid;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::U2_DEBUG_DATASET;
+use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::NestedDatasetLocation;
@@ -83,6 +87,29 @@ pub enum DatasetEnsureError {
     TestError(&'static str),
 }
 
+impl DatasetEnsureError {
+    fn is_retryable(&self) -> bool {
+        match self {
+            // Errors that we don't know for sure _aren't_ retryable.
+            DatasetEnsureError::ZpoolNotFound(_)
+            | DatasetEnsureError::EnsureFailed { .. } => true,
+
+            // Errors that we know aren't retryable: recovering from these
+            // require config changes, so there's no need to retry until that
+            // happens.
+            DatasetEnsureError::TransientZoneRootNoConfig(_)
+            | DatasetEnsureError::UuidMismatch { .. } => false,
+
+            DatasetEnsureError::TransientZoneRootFailure { err, .. } => {
+                err.is_retryable()
+            }
+
+            #[cfg(test)]
+            DatasetEnsureError::TestError(_) => false,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum NestedDatasetMountError {
     #[error("could not mount dataset {}", .name)]
@@ -129,6 +156,60 @@ pub enum NestedDatasetListError {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DatasetEnsureResult(IdMap<SingleDatasetEnsureResult>);
 
+impl DatasetEnsureResult {
+    pub(crate) fn has_retryable_error(&self) -> bool {
+        self.0.iter().any(|result| match &result.state {
+            DatasetState::Ensured => false,
+            DatasetState::FailedToEnsure(err) => err.is_retryable(),
+        })
+    }
+
+    pub(crate) fn all_mounted_debug_datasets<'a>(
+        &'a self,
+        mount_config: &'a MountConfig,
+    ) -> impl Iterator<Item = PathInPool> + 'a {
+        self.all_mounted_datasets(mount_config, DatasetKind::Debug)
+    }
+
+    pub(crate) fn all_mounted_zone_root_datasets<'a>(
+        &'a self,
+        mount_config: &'a MountConfig,
+    ) -> impl Iterator<Item = PathInPool> + 'a {
+        self.all_mounted_datasets(mount_config, DatasetKind::TransientZoneRoot)
+    }
+
+    fn all_mounted_datasets<'a>(
+        &'a self,
+        mount_config: &'a MountConfig,
+        kind: DatasetKind,
+    ) -> impl Iterator<Item = PathInPool> + 'a {
+        // We're a helper called by the pub methods on this type, so we only
+        // have to handle the `kind`s they call us with.
+        let mountpoint = match &kind {
+            DatasetKind::Debug => U2_DEBUG_DATASET,
+            DatasetKind::TransientZoneRoot => ZONE_DATASET,
+            _ => unreachable!(
+                "private function called with unexpected kind {kind:?}"
+            ),
+        };
+        self.0
+            .iter()
+            .filter(|result| match &result.state {
+                DatasetState::Ensured => true,
+                DatasetState::FailedToEnsure(_) => false,
+            })
+            .filter(move |result| *result.config.name.kind() == kind)
+            .map(|result| {
+                let pool = *result.config.name.pool();
+                PathInPool {
+                    pool: ZpoolOrRamdisk::Zpool(pool),
+                    path: pool
+                        .dataset_mountpoint(&mount_config.root, mountpoint),
+                }
+            })
+    }
+}
+
 #[derive(Debug, Clone)]
 struct SingleDatasetEnsureResult {
     config: DatasetConfig,
@@ -149,7 +230,7 @@ enum DatasetState {
     FailedToEnsure(Arc<DatasetEnsureError>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct DatasetTaskHandle(mpsc::Sender<DatasetTaskRequest>);
 
 impl DatasetTaskHandle {
