@@ -1695,7 +1695,7 @@ struct CrucibleDatasetRow {
     size_left: Option<i128>,
 }
 
-fn option_impl_display<T: std::fmt::Display>(t: &Option<T>) -> String {
+pub fn option_impl_display<T: std::fmt::Display>(t: &Option<T>) -> String {
     match t {
         Some(v) => format!("{v}"),
         None => String::from("n/a"),
