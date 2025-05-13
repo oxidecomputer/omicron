@@ -700,13 +700,13 @@ impl UdpTask {
 
                 recv = ereport::recv_request(ereport0) => {
                     let (req, addr, sock) = recv?;
-                    let rsp = self.ereport_state.handle_request(&req, &mut out_buf);
+                    let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
                     sock.send_to(rsp, addr).await?;
                 }
 
                 recv = ereport::recv_request(ereport1) => {
                     let (req, addr, sock) = recv?;
-                    let rsp = self.ereport_state.handle_request(&req, &mut out_buf);
+                    let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
                     sock.send_to(rsp, addr).await?;
                 }
 

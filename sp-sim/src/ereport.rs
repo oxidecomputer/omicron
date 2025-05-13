@@ -129,12 +129,19 @@ impl EreportState {
     pub(crate) fn handle_request<'buf>(
         &mut self,
         request: &Request,
+        addr: SocketAddrV6,
         buf: &'buf mut [u8],
     ) -> &'buf [u8] {
         use serde::ser::Serializer;
 
         let Request::V0(req) = request;
-        slog::info!(self.log, "ereport request: {req:?}");
+        slog::info!(
+            self.log,
+            "received ereport request";
+            "src_addr" => %addr,
+            "req_id" => ?req.request_id,
+            "req" => ?req,
+        );
 
         // If we "restarted", encode the current metadata map, and start at ENA
         // 0.
@@ -143,17 +150,22 @@ impl EreportState {
                 self.log,
                 "requested restart ID is not current, pretending to have \
                  restarted...";
+                "src_addr" => %addr,
+                "req_id" => ?req.request_id,
                 "req_restart_id" => ?req.restart_id,
                 "current_restart_id" => ?self.restart_id,
             );
-            (&self.meta, Ena::new(0))
+            (Some(&self.meta), Ena::new(0))
         } else {
             // If we didn't "restart", we should honor the committed ENA (if the
             // request includes one), and we should start at the requested ENA.
             if let Some(committed_ena) = req.committed_ena() {
                 slog::debug!(
                     self.log,
-                    "MGS committed ereports up to {committed_ena:?}"
+                    "MGS committed ereports up to {committed_ena:?}";
+                    "src_addr" => %addr,
+                    "req_id" => ?req.request_id,
+                    "committed_ena" => ?committed_ena,
                 );
                 let mut discarded = 0;
                 while self
@@ -168,11 +180,14 @@ impl EreportState {
 
                 slog::info!(
                     self.log,
-                    "discarded {discarded} ereports up to {committed_ena:?}"
+                    "discarded {discarded} ereports up to {committed_ena:?}";
+                    "src_addr" => %addr,
+                    "req_id" => ?req.request_id,
+                    "committed_ena" => ?committed_ena,
                 );
             }
 
-            (&Default::default(), req.start_ena)
+            (None, req.start_ena)
         };
 
         let mut respondant_ereports = self
@@ -198,26 +213,36 @@ impl EreportState {
         let mut pos = std::mem::size_of::<ResponseHeader>();
 
         // Serialize the metadata map.
-        pos += {
-            use serde::ser::SerializeMap;
+        use serde::ser::SerializeMap;
 
-            let mut cursor = Cursor::new(&mut buf[pos..]);
-            // Rather than just using `serde_cbor::to_writer`, we'll manually
-            // construct a `Serializer`, so that we can call the `serialize_map`
-            // method *without* a length to force it to use the "indefinite-length"
-            // encoding.
-            let mut serializer = serde_cbor::Serializer::new(
-                serde_cbor::ser::IoWrite::new(&mut cursor),
-            );
-            let mut map =
-                serializer.serialize_map(None).expect("map should start");
-            for (key, value) in meta_map {
-                map.serialize_entry(key, value)
-                    .expect("element should serialize");
-            }
-            map.end().expect("map should end");
-            cursor.position() as usize
-        };
+        let mut cursor = Cursor::new(&mut buf[pos..]);
+        // Rather than just using `serde_cbor::to_writer`, we'll manually
+        // construct a `Serializer`, so that we can call the `serialize_map`
+        // method *without* a length to force it to use the "indefinite-length"
+        // encoding.
+        let mut serializer = serde_cbor::Serializer::new(
+            serde_cbor::ser::IoWrite::new(&mut cursor),
+        );
+        let mut map = serializer.serialize_map(None).expect("map should start");
+
+        for (key, value) in
+            meta_map.into_iter().flat_map(IntoIterator::into_iter)
+        {
+            map.serialize_entry(key, value).expect("element should serialize");
+        }
+
+        map.end().expect("map should end");
+
+        let meta_bytes = cursor.position() as usize;
+        slog::debug!(
+            self.log,
+            "wrote metadata map";
+            "src_addr" => %addr,
+            "req_id" => ?req.request_id,
+            "entries" => meta_map.map(|map| map.len()).unwrap_or(0),
+            "bytes" => meta_bytes,
+        );
+        pos += meta_bytes;
 
         // Is there enough remaining space for ereports? We need at least two
         // bytes to encode an empty CBOR list
@@ -225,10 +250,12 @@ impl EreportState {
             return &buf[..pos];
         }
 
+        let ereport_start_pos = pos;
         buf[pos] = 0x9f; // start list
         pos += 1;
 
         // try to fill the rest of the packet with ereports
+        let mut encoded_ereports = 0;
         for EreportListEntry { ena, ereport, bytes } in respondant_ereports {
             // packet full!
             if buf[pos..].len() < (bytes.len() + 1) {
@@ -240,14 +267,31 @@ impl EreportState {
             slog::debug!(
                 self.log,
                 "wrote ereport: {ereport:#?}";
+                "src_addr" => %addr,
+                "req_id" => ?req.request_id,
                 "ena" => ?ena,
                 "packet_bytes" => pos,
                 "ereport_bytes" => bytes.len(),
             );
+            encoded_ereports += 1;
         }
 
         buf[pos] = 0xff; // break list;
         pos += 1;
+
+        slog::info!(
+            self.log,
+            "encoded ereport packet";
+            "src_addr" => %addr,
+            "req_id" => ?req.request_id,
+            "req_start_ena" => ?req.start_ena,
+            "start_ena" => ?start_ena,
+            "meta_entries" => meta_map.map(|m| m.len()).unwrap_or(0),
+            "ereports" => ?encoded_ereports,
+            "packet_bytes" => pos,
+            "meta_bytes" => meta_bytes,
+            "ereport_bytes" => pos - ereport_start_pos,
+        );
 
         &buf[..pos]
     }
