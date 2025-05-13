@@ -363,8 +363,6 @@ impl Inner {
     }
 
     async fn run(mut self) -> Result<()> {
-        use gateway_ereport_messages::Request as EreportRequest;
-
         let mut out_buf = [0; gateway_messages::MAX_SERIALIZED_SIZE];
         let mut responsiveness = Responsiveness::Responsive;
         let mut throttle_count = usize::MAX;
