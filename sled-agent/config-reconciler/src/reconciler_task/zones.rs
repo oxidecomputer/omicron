@@ -682,6 +682,7 @@ mod tests {
     use super::*;
     use crate::CurrentlyManagedZpoolsReceiver;
     use anyhow::anyhow;
+    use camino_tempfile::Utf8TempDir;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::dladm::EtherstubVnic;
     use illumos_utils::link::VnicAllocator;
@@ -702,6 +703,7 @@ mod tests {
     struct FakeZoneBuilder {
         vnic_alloc: VnicAllocator<Etherstub>,
         factory: ZoneBuilderFactory,
+        tempdir: Utf8TempDir,
     }
 
     impl FakeZoneBuilder {
@@ -712,11 +714,14 @@ mod tests {
                 vnic_source,
                 illumos_utils::fakes::dladm::Dladm::new(),
             );
+            let tempdir =
+                Utf8TempDir::with_prefix("test-config-reconciler-zones-")
+                    .expect("created temp dir");
             let factory = ZoneBuilderFactory::fake(
-                None,
+                Some(tempdir.path().as_str()),
                 illumos_utils::fakes::zone::Zones::new(),
             );
-            Self { vnic_alloc, factory }
+            Self { vnic_alloc, factory, tempdir }
         }
 
         async fn make_running_zone(
@@ -891,7 +896,8 @@ mod tests {
             OmicronZones::new(nonexistent_mount_config(), TimeSyncConfig::Skip);
 
         let fake_zone_id = OmicronZoneUuid::new_v4();
-        let fake_zone = FakeZoneBuilder::new()
+        let fake_zone_builder = FakeZoneBuilder::new();
+        let fake_zone = fake_zone_builder
             .make_running_zone("test", logctx.log.clone())
             .await;
         zones.zones.insert(OmicronZone {
@@ -1011,7 +1017,8 @@ mod tests {
         }
 
         // Set up our fake sled-agent to return success.
-        let fake_zone = FakeZoneBuilder::new()
+        let fake_zone_builder = FakeZoneBuilder::new();
+        let fake_zone = fake_zone_builder
             .make_running_zone("test", logctx.log.clone())
             .await;
         sled_agent_facilities.push_start_response(Ok(fake_zone));
@@ -1066,7 +1073,8 @@ mod tests {
             },
             image_source: OmicronZoneImageSource::InstallDataset,
         };
-        let fake_zone = FakeZoneBuilder::new()
+        let fake_zone_builder = FakeZoneBuilder::new();
+        let fake_zone = fake_zone_builder
             .make_running_zone("test", logctx.log.clone())
             .await;
 

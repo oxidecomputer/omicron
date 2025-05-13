@@ -1008,7 +1008,7 @@ impl ZoneBuilderFactory {
 
     /// For use in unit tests that don't require actual zone creation to occur.
     pub fn fake(
-        temp_dir: Option<&String>,
+        temp_dir: Option<&str>,
         zones_api: Arc<dyn crate::zone::Api>,
     ) -> Self {
         let temp_dir = match temp_dir {
