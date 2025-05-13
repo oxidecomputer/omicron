@@ -19,9 +19,9 @@ use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
-use nexus_reconfigurator_simulation::SimState;
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::Simulator;
+use nexus_reconfigurator_simulation::{BlueprintId, SimState};
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -53,6 +53,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::io::IsTerminal;
+use std::str::FromStr;
 use swrite::{SWrite, swriteln};
 use tabled::Tabled;
 use tufaceous_artifact::ArtifactHash;
@@ -333,8 +334,9 @@ struct InventoryArgs {
 
 #[derive(Debug, Args)]
 struct BlueprintPlanArgs {
-    /// id of the blueprint on which this one will be based
-    parent_blueprint_id: BlueprintUuid,
+    /// id of the blueprint on which this one will be based, "latest", or
+    /// "target"
+    parent_blueprint_id: BlueprintIdOpt,
     /// id of the inventory collection to use in planning
     ///
     /// Must be provided unless there is only one collection in the loaded
@@ -344,8 +346,8 @@ struct BlueprintPlanArgs {
 
 #[derive(Debug, Args)]
 struct BlueprintEditArgs {
-    /// id of the blueprint to edit
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint to edit, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
     /// "creator" field for the new blueprint
     #[arg(long)]
     creator: Option<String>,
@@ -391,6 +393,41 @@ enum BlueprintEditCommands {
         /// baseboard serial number whose update to delete
         serial: String,
     },
+}
+
+#[derive(Clone, Debug)]
+enum BlueprintIdOpt {
+    /// use the target blueprint
+    Target,
+    /// use the latest blueprint sorted by time created
+    Latest,
+    /// use a specific blueprint
+    Id(BlueprintUuid),
+}
+
+impl FromStr for BlueprintIdOpt {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "latest" => Ok(BlueprintIdOpt::Latest),
+            // These values match the ones supported in omdb.
+            "current-target" | "current" | "target" => {
+                Ok(BlueprintIdOpt::Target)
+            }
+            _ => Ok(BlueprintIdOpt::Id(s.parse()?)),
+        }
+    }
+}
+
+impl From<BlueprintIdOpt> for BlueprintId {
+    fn from(value: BlueprintIdOpt) -> Self {
+        match value {
+            BlueprintIdOpt::Latest => BlueprintId::Latest,
+            BlueprintIdOpt::Target => BlueprintId::Target,
+            BlueprintIdOpt::Id(id) => BlueprintId::Id(id),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Subcommand)]
@@ -442,8 +479,8 @@ fn parse_blueprint_zone_image_version(
 
 #[derive(Debug, Args)]
 struct BlueprintArgs {
-    /// id of the blueprint
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
 }
 
 #[derive(Debug, Args)]
@@ -452,8 +489,8 @@ struct BlueprintDiffDnsArgs {
     dns_group: CliDnsGroup,
     /// DNS version to diff against
     dns_version: u32,
-    /// id of the blueprint
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -466,24 +503,24 @@ enum CliDnsGroup {
 struct BlueprintDiffInventoryArgs {
     /// id of the inventory collection
     collection_id: CollectionUuid,
-    /// id of the blueprint
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintSaveArgs {
-    /// id of the blueprint
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
     /// output file
     filename: Utf8PathBuf,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintDiffArgs {
-    /// id of the first blueprint
-    blueprint1_id: BlueprintUuid,
-    /// id of the second blueprint
-    blueprint2_id: BlueprintUuid,
+    /// id of the first blueprint, "latest", or "target"
+    blueprint1_id: BlueprintIdOpt,
+    /// id of the second blueprint, "latest", or "target"
+    blueprint2_id: BlueprintIdOpt,
 }
 
 #[derive(Debug, Subcommand)]
@@ -777,7 +814,9 @@ fn cmd_blueprint_blippy(
     args: BlueprintArgs,
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
-    let blueprint = state.system().get_blueprint(args.blueprint_id)?;
+    let resolved_id =
+        state.system().resolve_blueprint_id(args.blueprint_id.into())?;
+    let blueprint = state.system().get_blueprint(&resolved_id)?;
     let report =
         Blippy::new(&blueprint).into_report(BlippyReportSortKey::Severity);
     Ok(Some(format!("{}", report.display())))
@@ -791,9 +830,10 @@ fn cmd_blueprint_plan(
     let rng = state.rng_mut().next_planner_rng();
     let system = state.system_mut();
 
-    let parent_blueprint_id = args.parent_blueprint_id;
+    let parent_blueprint_id =
+        system.resolve_blueprint_id(args.parent_blueprint_id.into())?;
     let collection_id = args.collection_id;
-    let parent_blueprint = system.get_blueprint(parent_blueprint_id)?;
+    let parent_blueprint = system.get_blueprint(&parent_blueprint_id)?;
     let collection = match collection_id {
         Some(collection_id) => system.get_collection(collection_id)?,
         None => {
@@ -826,7 +866,7 @@ fn cmd_blueprint_plan(
     let blueprint = planner.plan().context("generating blueprint")?;
     let rv = format!(
         "generated blueprint {} based on parent blueprint {}",
-        blueprint.id, parent_blueprint_id,
+        blueprint.id, parent_blueprint.id,
     );
     system.add_blueprint(blueprint)?;
 
@@ -843,8 +883,8 @@ fn cmd_blueprint_edit(
     let rng = state.rng_mut().next_planner_rng();
     let system = state.system_mut();
 
-    let blueprint_id = args.blueprint_id;
-    let blueprint = system.get_blueprint(blueprint_id)?;
+    let resolved_id = system.resolve_blueprint_id(args.blueprint_id.into())?;
+    let blueprint = system.get_blueprint(&resolved_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
     let planning_input = sim
         .planning_input(blueprint)
@@ -972,8 +1012,8 @@ fn cmd_blueprint_edit(
         .clone_from(&blueprint.cockroachdb_fingerprint);
 
     let rv = format!(
-        "blueprint {} created from blueprint {}: {}",
-        new_blueprint.id, blueprint_id, label
+        "blueprint {} created from {}: {}",
+        new_blueprint.id, resolved_id, label
     );
     system.add_blueprint(new_blueprint)?;
 
@@ -1006,7 +1046,8 @@ fn cmd_blueprint_show(
     args: BlueprintArgs,
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
-    let blueprint = state.system().get_blueprint(args.blueprint_id)?;
+    let blueprint =
+        state.system().resolve_and_get_blueprint(args.blueprint_id.into())?;
     Ok(Some(format!("{}", blueprint.display())))
 }
 
@@ -1019,8 +1060,10 @@ fn cmd_blueprint_diff(
     let blueprint2_id = args.blueprint2_id;
 
     let state = sim.current_state();
-    let blueprint1 = state.system().get_blueprint(blueprint1_id)?;
-    let blueprint2 = state.system().get_blueprint(blueprint2_id)?;
+    let blueprint1 =
+        state.system().resolve_and_get_blueprint(blueprint1_id.into())?;
+    let blueprint2 =
+        state.system().resolve_and_get_blueprint(blueprint2_id.into())?;
 
     let sled_diff = blueprint2.diff_since_blueprint(&blueprint1);
     swriteln!(rv, "{}", sled_diff.display());
@@ -1098,7 +1141,8 @@ fn cmd_blueprint_diff_dns(
     let blueprint_id = args.blueprint_id;
 
     let state = sim.current_state();
-    let blueprint = state.system().get_blueprint(blueprint_id)?;
+    let blueprint =
+        state.system().resolve_and_get_blueprint(blueprint_id.into())?;
 
     let existing_dns_config = match dns_group {
         CliDnsGroup::Internal => {
@@ -1140,7 +1184,8 @@ fn cmd_blueprint_diff_inventory(
 
     let state = sim.current_state();
     let _collection = state.system().get_collection(collection_id)?;
-    let _blueprint = state.system().get_blueprint(blueprint_id)?;
+    let _blueprint =
+        state.system().resolve_and_get_blueprint(blueprint_id.into())?;
     // See https://github.com/oxidecomputer/omicron/issues/7242
     // let diff = blueprint.diff_since_collection(&collection);
     // Ok(Some(diff.display().to_string()))
@@ -1154,14 +1199,16 @@ fn cmd_blueprint_save(
     let blueprint_id = args.blueprint_id;
 
     let state = sim.current_state();
-    let blueprint = state.system().get_blueprint(blueprint_id)?;
+    let resolved_id =
+        state.system().resolve_blueprint_id(blueprint_id.into())?;
+    let blueprint = state.system().get_blueprint(&resolved_id)?;
 
     let output_path = &args.filename;
     let output_str = serde_json::to_string_pretty(&blueprint)
         .context("serializing blueprint")?;
     std::fs::write(&output_path, &output_str)
         .with_context(|| format!("write {:?}", output_path))?;
-    Ok(Some(format!("saved blueprint {} to {:?}", blueprint_id, output_path)))
+    Ok(Some(format!("saved {} to {:?}", resolved_id, output_path)))
 }
 
 fn cmd_save(
