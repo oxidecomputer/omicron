@@ -29,6 +29,7 @@ omicron-uuid-kinds.workspace = true
 once_cell.workspace = true
 oxnet.workspace = true
 rand.workspace = true
+semver.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true

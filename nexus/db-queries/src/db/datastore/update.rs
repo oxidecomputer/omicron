@@ -17,18 +17,21 @@ use diesel::result::Error as DieselError;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::{ArtifactHash, TufArtifact, TufRepo, TufRepoDescription};
+use nexus_db_model::{
+    ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, to_db_typed_uuid,
+};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Generation, ListResultVec,
     LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
 };
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
-/// The return value of [`DataStore::update_tuf_repo_insert`].
+/// The return value of [`DataStore::tuf_repo_insert`].
 ///
 /// This is similar to [`external::TufRepoInsertResponse`], but uses
 /// nexus-db-model's types instead of external types.
@@ -75,7 +78,7 @@ impl DataStore {
     /// `TufRepoDescription` if one was already found. (This is not an upsert,
     /// because if we know about an existing repo but with different contents,
     /// we reject that.)
-    pub async fn update_tuf_repo_insert(
+    pub async fn tuf_repo_insert(
         &self,
         opctx: &OpContext,
         description: &external::TufRepoDescription,
@@ -106,8 +109,40 @@ impl DataStore {
             })
     }
 
+    /// Returns a TUF repo description.
+    pub async fn tuf_repo_get_by_id(
+        &self,
+        opctx: &OpContext,
+        repo_id: TypedUuid<TufRepoKind>,
+    ) -> LookupResult<TufRepoDescription> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::tuf_repo::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let repo = dsl::tuf_repo
+            .filter(dsl::id.eq(to_db_typed_uuid(repo_id)))
+            .select(TufRepo::as_select())
+            .first_async::<TufRepo>(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::TufRepo,
+                        LookupType::ById(repo_id.into_untyped_uuid()),
+                    ),
+                )
+            })?;
+
+        let artifacts = artifacts_for_repo(repo.id.into(), &conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(TufRepoDescription { repo, artifacts })
+    }
+
     /// Returns the TUF repo description corresponding to this system version.
-    pub async fn update_tuf_repo_get(
+    pub async fn tuf_repo_get_by_version(
         &self,
         opctx: &OpContext,
         system_version: SemverVersion,
@@ -140,7 +175,7 @@ impl DataStore {
     }
 
     /// Returns the list of all TUF repo artifacts known to the system.
-    pub async fn update_tuf_artifact_list(
+    pub async fn tuf_list_repos(
         &self,
         opctx: &OpContext,
         generation: Generation,
@@ -160,7 +195,7 @@ impl DataStore {
     }
 
     /// Returns the current TUF repo generation number.
-    pub async fn update_tuf_generation_get(
+    pub async fn tuf_get_generation(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<Generation> {

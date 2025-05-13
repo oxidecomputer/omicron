@@ -590,18 +590,13 @@ impl ArtifactReplication {
         &self,
         opctx: &OpContext,
     ) -> Result<(ArtifactConfig, Inventory)> {
-        let generation =
-            self.datastore.update_tuf_generation_get(opctx).await?;
+        let generation = self.datastore.tuf_get_generation(opctx).await?;
         let mut inventory = Inventory::default();
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
             let batch = self
                 .datastore
-                .update_tuf_artifact_list(
-                    opctx,
-                    generation,
-                    &p.current_pagparams(),
-                )
+                .tuf_list_repos(opctx, generation, &p.current_pagparams())
                 .await?;
             paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
             for artifact in batch {
