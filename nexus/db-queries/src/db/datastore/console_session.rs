@@ -22,6 +22,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::GenericUuid;
 
 impl DataStore {
     pub async fn session_lookup_by_token(
@@ -85,7 +86,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::console_session::dsl;
         let console_session = diesel::update(dsl::console_session)
-            .filter(dsl::token.eq(authz_session.id()))
+            .filter(dsl::id.eq(authz_session.id().into_untyped_uuid()))
             .set((dsl::time_last_used.eq(Utc::now()),))
             .returning(ConsoleSession::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
@@ -149,7 +150,7 @@ impl DataStore {
         use nexus_db_schema::schema::console_session::dsl;
         diesel::delete(dsl::console_session)
             .filter(dsl::silo_user_id.eq(silo_user_id))
-            .filter(dsl::token.eq(authz_session.id()))
+            .filter(dsl::id.eq(authz_session.id().into_untyped_uuid()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|_rows_deleted| ())

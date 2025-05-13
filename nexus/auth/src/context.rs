@@ -11,6 +11,8 @@ use crate::authz::AuthorizedResource;
 use crate::storage::Storage;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::ConsoleSessionKind;
+use omicron_uuid_kinds::TypedUuid;
 use slog::debug;
 use slog::o;
 use slog::trace;
@@ -352,6 +354,10 @@ impl OpContext {
 }
 
 impl Session for ConsoleSessionWithSiloId {
+    fn id(&self) -> TypedUuid<ConsoleSessionKind> {
+        self.console_session.id()
+    }
+
     fn silo_user_id(&self) -> Uuid {
         self.console_session.silo_user_id
     }

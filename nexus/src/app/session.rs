@@ -18,6 +18,9 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::ConsoleSessionKind;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::TypedUuid;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use uuid::Uuid;
 
@@ -68,12 +71,12 @@ impl super::Nexus {
     pub(crate) async fn session_update_last_used(
         &self,
         opctx: &OpContext,
-        token: &str,
+        id: TypedUuid<ConsoleSessionKind>,
     ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
         let authz_session = authz::ConsoleSession::new(
             authz::FLEET,
-            token.to_string(),
-            LookupType::ByCompositeId(token.to_string()),
+            id,
+            LookupType::ById(id.into_untyped_uuid()),
         );
         self.db_datastore.session_update_last_used(opctx, &authz_session).await
     }
@@ -81,12 +84,12 @@ impl super::Nexus {
     pub(crate) async fn session_hard_delete(
         &self,
         opctx: &OpContext,
-        token: &str,
+        id: TypedUuid<ConsoleSessionKind>,
     ) -> DeleteResult {
         let authz_session = authz::ConsoleSession::new(
             authz::FLEET,
-            token.to_string(),
-            LookupType::ByCompositeId(token.to_string()),
+            id,
+            LookupType::ById(id.into_untyped_uuid()),
         );
         self.db_datastore.session_hard_delete(opctx, &authz_session).await
     }

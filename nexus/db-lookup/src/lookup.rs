@@ -749,9 +749,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [
-        { column_name = "id", uuid_kind = ConsoleSessionKind },
-    ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = ConsoleSessionKind } ]
 }
 
 lookup_resource! {

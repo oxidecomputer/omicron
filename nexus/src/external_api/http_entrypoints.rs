@@ -7587,7 +7587,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             if let Ok(opctx) = opctx {
                 if let Some(token) = token {
-                    nexus.session_hard_delete(&opctx, token.value()).await?;
+                    // TODO: This is the ONE spot where we do the hard delete
+                    // by token and we haven't already looked up the session
+                    // by token. Looking up the token first works but it would
+                    // be nice to avoid it
+
+                    // look up session and delete it if present. noop on any errors
+                    let session = nexus
+                        .session_fetch(&opctx, token.value().to_string())
+                        .await;
+                    if let Ok(session) = session {
+                        let session_id = session.console_session.id();
+                        let _ =
+                            nexus.session_hard_delete(&opctx, session_id).await;
+                    }
                 }
             }
 

@@ -939,7 +939,7 @@ authz_resource! {
 authz_resource! {
     name = "ConsoleSession",
     parent = "Fleet",
-    primary_key = String,
+    primary_key = { uuid_kind = ConsoleSessionKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
