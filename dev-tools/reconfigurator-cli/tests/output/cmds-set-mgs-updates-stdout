@@ -1,7 +1,9 @@
-using provided RNG seed: test_set_mgs_updates
+using provided RNG seed: reconfigurator-cli-test
 > # Load example system
 
-> load-example --nsleds 3 --ndisks-per-sled 3
+> # This is a legacy test; new tests shouldn't need to set a seed
+
+> load-example --nsleds 3 --ndisks-per-sled 3 --seed test_set_mgs_updates
 loaded example system with:
 - collection: 365bdc65-0d27-4f02-aa72-09c39232ebfc
 - blueprint: ad97e762-7bf1-45a6-a98f-60afb7e491c0
@@ -2768,7 +2770,7 @@ Commands:
   help              Print this message or the help of the given subcommand(s)
 
 Arguments:
-  <BLUEPRINT_ID>  id of the blueprint to edit
+  <BLUEPRINT_ID>  id of the blueprint to edit, "latest", or "target"
 
 Options:
       --creator <CREATOR>  "creator" field for the new blueprint
