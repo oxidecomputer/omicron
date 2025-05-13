@@ -184,7 +184,8 @@ impl EreportState {
         let start_ena = respondant_ereports
             .peek()
             .map(|ereport| ereport.ena)
-            .unwrap_or(Ena(start_ena.0 + 1));
+            // If there are no ereports, send ENA zero (which means "no ereports").
+            .unwrap_or(Ena::ZERO);
 
         // Serialize the header.
         ResponseHeader::V0(ResponseHeaderV0 {
