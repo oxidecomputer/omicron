@@ -5382,7 +5382,13 @@
             "description": "the RoT is being updated",
             "type": "object",
             "properties": {
-              "active_slot": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "rot"
+                ]
+              },
+              "expected_active_slot": {
                 "description": "the slot of the currently running image",
                 "allOf": [
                   {
@@ -5390,10 +5396,21 @@
                   }
                 ]
               },
-              "component": {
-                "type": "string",
-                "enum": [
-                  "rot"
+              "expected_pending_persistent_boot_preference": {
+                "nullable": true,
+                "description": "the persistent boot preference written into the CFPA scratch page that will become the persistent boot preference in the authoritative CFPA page upon reboot, unless CFPA update of the authoritative page fails for some reason.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "expected_persistent_boot_preference": {
+                "description": "the persistent boot preference written into the current authoritative CFPA page (ping or pong)",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
                 ]
               },
               "expected_slot_a_version": {
@@ -5412,24 +5429,7 @@
                   }
                 ]
               },
-              "pending_persistent_boot_preference": {
-                "nullable": true,
-                "description": "the persistent boot preference written into the CFPA scratch page that will become the persistent boot preference in the authoritative CFPA page upon reboot, unless CFPA update of the authoritative page fails for some reason.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RotSlot"
-                  }
-                ]
-              },
-              "persistent_boot_preference": {
-                "description": "the persistent boot preference written into the current authoritative CFPA page (ping or pong)",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RotSlot"
-                  }
-                ]
-              },
-              "transient_boot_preference": {
+              "expected_transient_boot_preference": {
                 "nullable": true,
                 "description": "override persistent preference selection for a single boot",
                 "allOf": [
@@ -5440,11 +5440,11 @@
               }
             },
             "required": [
-              "active_slot",
               "component",
+              "expected_active_slot",
+              "expected_persistent_boot_preference",
               "expected_slot_a_version",
-              "expected_slot_b_version",
-              "persistent_boot_preference"
+              "expected_slot_b_version"
             ]
           }
         ]
@@ -6083,7 +6083,6 @@
         ]
       },
       "RotSlot": {
-        "description": "RotSlot\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"slot\" ], \"properties\": { \"slot\": { \"type\": \"string\", \"enum\": [ \"a\" ] } } }, { \"type\": \"object\", \"required\": [ \"slot\" ], \"properties\": { \"slot\": { \"type\": \"string\", \"enum\": [ \"b\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",

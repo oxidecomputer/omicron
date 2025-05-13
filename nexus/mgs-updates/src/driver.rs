@@ -304,15 +304,15 @@ impl MgsUpdateDriver {
         ));
         info!(&log, "begin update attempt for baseboard");
 
-        let (sp_update, updater) = match &request.details {
+        let (sp_update, updater): (
+            _,
+            Box<dyn SpComponentUpdateHelper + Send + Sync>,
+        ) = match &request.details {
             nexus_types::deployment::PendingMgsUpdateDetails::Sp { .. } => {
                 let sp_update =
                     SpComponentUpdate::from_request(&log, &request, update_id);
 
-                (
-                    sp_update,
-                    ReconfiguratorUpdater::Sp(ReconfiguratorSpUpdater {}),
-                )
+                (sp_update, Box::new(ReconfiguratorSpUpdater {}))
             }
             nexus_types::deployment::PendingMgsUpdateDetails::Rot {
                 ..
@@ -320,10 +320,7 @@ impl MgsUpdateDriver {
                 let sp_update =
                     SpComponentUpdate::from_request(&log, &request, update_id);
 
-                (
-                    sp_update,
-                    ReconfiguratorUpdater::Rot(ReconfiguratorRotUpdater {}),
-                )
+                (sp_update, Box::new(ReconfiguratorRotUpdater {}))
             }
         };
 
@@ -360,7 +357,7 @@ impl MgsUpdateDriver {
             let result = apply_update(
                 artifacts,
                 &sp_update,
-                &*updater.inner(),
+                &*updater,
                 mgs_rx,
                 &request,
                 status_updater,
@@ -501,21 +498,6 @@ impl MgsUpdateDriver {
             request: my_request,
             nattempts_done: waiting.internal_request.nattempts_done,
         });
-    }
-}
-
-/// the component reconfigurator will update
-enum ReconfiguratorUpdater {
-    Sp(ReconfiguratorSpUpdater),
-    Rot(ReconfiguratorRotUpdater),
-}
-
-impl ReconfiguratorUpdater {
-    fn inner(self) -> Box<dyn SpComponentUpdateHelper + Send + Sync> {
-        match self {
-            ReconfiguratorUpdater::Sp(updater) => Box::new(updater),
-            ReconfiguratorUpdater::Rot(updater) => Box::new(updater),
-        }
     }
 }
 
