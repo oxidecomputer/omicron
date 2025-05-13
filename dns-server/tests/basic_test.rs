@@ -378,7 +378,11 @@ pub async fn soa() -> Result<(), anyhow::Error> {
     let ns1_aaaa = DnsRecord::Aaaa(ns1_addr);
     let ns1_name = format!("ns1.{TEST_ZONE}.");
     let ns1 = DnsRecord::Ns(ns1_name.clone());
-    let service_addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
+    let ns2_addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
+    let ns2_aaaa = DnsRecord::Aaaa(ns2_addr);
+    let ns2_name = format!("ns2.{TEST_ZONE}.");
+    let ns2 = DnsRecord::Ns(ns2_name.clone());
+    let service_addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x3);
     let service_aaaa = DnsRecord::Aaaa(service_addr);
 
     // If an update defines a zone with records, but defines no nameservers,
@@ -400,7 +404,8 @@ pub async fn soa() -> Result<(), anyhow::Error> {
     // able to tell it about a zone.
     let mut records = HashMap::new();
     records.insert("ns1".to_string(), vec![ns1_aaaa.clone()]);
-    records.insert(ZONE_APEX_NAME.to_string(), vec![ns1.clone()]);
+    records.insert("ns2".to_string(), vec![ns2_aaaa.clone()]);
+    records.insert(ZONE_APEX_NAME.to_string(), vec![ns1.clone(), ns2.clone()]);
 
     dns_records_create(client, TEST_ZONE, records).await?;
 
@@ -411,8 +416,11 @@ pub async fn soa() -> Result<(), anyhow::Error> {
         soa_answer.iter().collect();
 
     assert_eq!(soa_records.len(), 1);
+    // As an implementation detail, we return the lowest-numbered name server
+    // for the zone as the primary name server.
+    assert_eq!(soa_records[0].mname().to_utf8(), ns1_name);
 
-    // We should be able to query nameservers for the zone
+    // We should be able to query nameservers for the zone.
     let zone_ns_answer = resolver.ns_lookup(TEST_ZONE).await?;
     let has_ns_record =
         zone_ns_answer.as_lookup().records().iter().any(|record| {
@@ -450,6 +458,20 @@ pub async fn soa() -> Result<(), anyhow::Error> {
         .await
         .expect_err("test zone should not exist");
     expect_no_records_error_code(&lookup_err, ResponseCode::NXDomain);
+
+    // If the zone has no ns1 for some reason, we ought to see an SOA record
+    // referencing the next lowest-numbered name server.
+    let mut records = HashMap::new();
+    records.insert("ns2".to_string(), vec![ns2_aaaa.clone()]);
+    records.insert(ZONE_APEX_NAME.to_string(), vec![ns2.clone()]);
+
+    dns_records_create(client, TEST_ZONE, records).await?;
+
+    let soa_records: Vec<hickory_proto::rr::rdata::soa::SOA> =
+        resolver.soa_lookup(TEST_ZONE).await?.into_iter().collect();
+
+    assert_eq!(soa_records.len(), 1);
+    assert_eq!(soa_records[0].mname().to_utf8(), ns2_name);
 
     test_ctx.cleanup().await;
     Ok(())

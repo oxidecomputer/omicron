@@ -7,8 +7,7 @@
 use crate::storage::{self, UpdateError};
 use dns_server_api::DnsServerApi;
 use dns_service_client::{
-    ERROR_CODE_BAD_UPDATE_GENERATION, ERROR_CODE_UPDATE_DEFINES_SOA_RECORD,
-    ERROR_CODE_UPDATE_IN_PROGRESS,
+    ERROR_CODE_BAD_UPDATE_GENERATION, ERROR_CODE_UPDATE_IN_PROGRESS,
 };
 use dropshot::RequestContext;
 use internal_dns_types::{v1, v2};
@@ -115,16 +114,6 @@ impl From<UpdateError> for dropshot::HttpError {
             UpdateError::UpdateInProgress { .. } => dropshot::HttpError {
                 status_code: dropshot::ErrorStatusCode::CONFLICT,
                 error_code: Some(String::from(ERROR_CODE_UPDATE_IN_PROGRESS)),
-                external_message: message.clone(),
-                internal_message: message,
-                headers: None,
-            },
-
-            UpdateError::UpdateDefinesSoaRecord => dropshot::HttpError {
-                status_code: dropshot::ErrorStatusCode::BAD_REQUEST,
-                error_code: Some(String::from(
-                    ERROR_CODE_UPDATE_DEFINES_SOA_RECORD,
-                )),
                 external_message: message.clone(),
                 internal_message: message,
                 headers: None,

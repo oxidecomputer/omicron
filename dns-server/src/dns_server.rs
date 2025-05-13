@@ -200,7 +200,7 @@ async fn handle_dns_packet(request: Request) {
 #[derive(Debug, Error)]
 enum RequestError {
     #[error("NXDOMAIN: {0:#}")]
-    NxDomain(#[source] QueryError),
+    NxDomain(String),
     #[error("SERVFAIL: {0:#}")]
     ServFail(#[source] anyhow::Error),
 }
@@ -208,7 +208,6 @@ enum RequestError {
 impl From<QueryError> for RequestError {
     fn from(source: QueryError) -> Self {
         match &source {
-            QueryError::NoRecords(_) => RequestError::NxDomain(source),
             // Bail with servfail when this query is for a zone that we don't
             // own (and other server-side failures) so that resolvers will look
             // to other DNS servers for this query.
@@ -249,9 +248,9 @@ fn dns_record_to_record(
                 ))
             })?;
             let mut srv = Record::new();
-            srv.set_name(name.clone())
-                .set_rr_type(RecordType::SRV)
-                .set_data(Some(RData::SRV(SRV::new(*prio, *weight, *port, tgt))));
+            srv.set_name(name.clone()).set_rr_type(RecordType::SRV).set_data(
+                Some(RData::SRV(SRV::new(*prio, *weight, *port, tgt))),
+            );
             Ok(srv)
         }
 
@@ -288,27 +287,48 @@ async fn handle_dns_message(
     let answer = store.query(mr)?;
     let rb = MessageResponseBuilder::from_message_request(mr);
     let mut additional_records = vec![];
-    let mut response_records = answer.records
+
+    let mut name_records = answer
+        .records
         .as_ref()
         .unwrap_or(&Vec::new())
         .iter()
+        .map(|record| dns_record_to_record(&name, record))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if answer.name.is_none() && query.query_type() == RecordType::SOA {
+        // The query was for an SOA record at the apex. There isn't an SOA
+        // record in the database, but we can build one from the answer.
+        name_records.push(store.soa_for(&answer)?);
+    }
+
+    // If there were no records for the name at all, the name simply is not
+    // known to us. Bail now to return NXDomain.
+    //
+    // If there are no records after filtering, the name is known, just not with
+    // any records.  Returning NXDomain later on would be incorrect.
+    if name_records.is_empty() {
+        return Err(RequestError::NxDomain(answer.queried_fqdn()));
+    }
+
+    let response_records = name_records
+        .into_iter()
         .filter(|record| {
             let ty = query.query_type();
             if ty == RecordType::ANY {
                 return true;
             }
 
-            match (ty, record) {
-                (RecordType::A, DnsRecord::A(_)) => true,
-                (RecordType::AAAA, DnsRecord::Aaaa(_)) => true,
-                (RecordType::SRV, DnsRecord::Srv(_)) => true,
-                (RecordType::NS, DnsRecord::Ns(_)) => true,
+            match (ty, record.data()) {
+                (RecordType::A, Some(RData::A(_))) => true,
+                (RecordType::AAAA, Some(RData::AAAA(_))) => true,
+                (RecordType::SRV, Some(RData::SRV(_))) => true,
+                (RecordType::NS, Some(RData::NS(_))) => true,
+                (RecordType::SOA, Some(RData::SOA(_))) => true,
                 _ => false,
             }
         })
         .map(|record| {
-            let record = dns_record_to_record(&name, record)?;
-
             // DNS allows for the server to return additional records that
             // weren't explicitly asked for by the client but that the server
             // expects the client will want. SRV and NS records both use names
@@ -328,7 +348,9 @@ async fn handle_dns_message(
 
             if let Some(target) = additionals_target {
                 let target_records = store.query_name(target).map(|answer| {
-                    answer.records.unwrap_or(Vec::new())
+                    answer
+                        .records
+                        .unwrap_or(Vec::new())
                         .into_iter()
                         .map(|record| dns_record_to_record(target, &record))
                         .collect::<Result<Vec<_>, _>>()
@@ -364,17 +386,6 @@ async fn handle_dns_message(
             Ok(record)
         })
         .collect::<Result<Vec<_>, RequestError>>()?;
-
-    if answer.name.is_empty() && query.query_type() == RecordType::SOA {
-        // The query was for an SOA record at the apex. There isn't an SOA record in the database,
-        // but we can build one from the answer.
-        response_records.push(store.soa_for(&answer)?);
-    }
-
-    if response_records.is_empty() {
-        return Err(RequestError::NxDomain(QueryError::NoRecords(answer.name.to_owned())));
-    }
-
 
     debug!(
         &log,
