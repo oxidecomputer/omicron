@@ -6696,6 +6696,7 @@ dependencies = [
  "dropshot",
  "futures",
  "gateway-client",
+ "gateway-types",
  "http",
  "humantime",
  "id-map",
