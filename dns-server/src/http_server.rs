@@ -7,10 +7,11 @@
 use crate::storage::{self, UpdateError};
 use dns_server_api::DnsServerApi;
 use dns_service_client::{
-    ERROR_CODE_BAD_UPDATE_GENERATION, ERROR_CODE_UPDATE_IN_PROGRESS,
+    ERROR_CODE_BAD_UPDATE_GENERATION, ERROR_CODE_INCOMPATIBLE_RECORD,
+    ERROR_CODE_UPDATE_IN_PROGRESS,
 };
 use dropshot::RequestContext;
-use internal_dns_types::{v1, v2};
+use internal_dns_types::{config::TranslationError, v1, v2};
 
 pub struct Context {
     store: storage::Store,
@@ -38,9 +39,16 @@ impl DnsServerApi for DnsServerApiImpl {
         dropshot::HttpResponseOk<v1::config::DnsConfig>,
         dropshot::HttpError,
     > {
-        Self::dns_config_get(rqctx)
-            .await
-            .map(|ok| dropshot::HttpResponseOk(ok.0.as_v1()))
+        let result = Self::dns_config_get(rqctx).await?;
+        match result.0.try_into() {
+            Ok(config) => Ok(dropshot::HttpResponseOk(config)),
+            Err(TranslationError::IncompatibleRecord) => {
+                Err(dropshot::HttpError::for_bad_request(
+                    None,
+                    ERROR_CODE_INCOMPATIBLE_RECORD.to_string(),
+                ))
+            }
+        }
     }
 
     async fn dns_config_get_v2(

@@ -110,25 +110,24 @@ mod v1_client {
 
 // A V2 server can productively handle requests from a V1 client, and a V1
 // client *can* provide records to a V2 server (though this really shouldn't
-// ever happen)
+// ever happen). A V1 client will get an error trying to list records that its
+// API doesn't support.
 #[tokio::test]
 pub async fn cross_version_works() -> Result<(), anyhow::Error> {
     let test_ctx = init_client_server("cross_version_works").await?;
 
+    use internal_dns_types::v1::config::DnsRecord as V1DnsRecord;
+    use internal_dns_types::v2::config::DnsRecord as V2DnsRecord;
+
     let ns1_addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
-    let ns1_aaaa = DnsRecord::Aaaa(ns1_addr);
     let ns1_name = format!("ns1.{TEST_ZONE}.");
-    let ns1 = DnsRecord::Ns(ns1_name.clone());
     let service_addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
-    let service_aaaa = DnsRecord::Aaaa(service_addr);
-    let v1_service_aaaa =
-        internal_dns_types::v1::config::DnsRecord::Aaaa(service_addr);
 
     let mut records = HashMap::new();
-    records.insert("ns1".to_string(), vec![ns1_aaaa]);
-    records.insert(ZONE_APEX_NAME.to_string(), vec![ns1.clone()]);
+    records.insert("ns1".to_string(), vec![V1DnsRecord::Aaaa(ns1_addr)]);
 
-    dns_records_create(&test_ctx.latest_client, TEST_ZONE, records)
+    // A V1 client can create records that V2 clients can read.
+    v1_client::dns_records_create(&test_ctx.v1_client, TEST_ZONE, records)
         .await
         .expect("can create zone");
 
@@ -136,48 +135,53 @@ pub async fn cross_version_works() -> Result<(), anyhow::Error> {
         v1_client::dns_records_list(&test_ctx.v1_client, TEST_ZONE)
             .await
             .expect("zone exists");
+    let v2_records = dns_records_list(&test_ctx.latest_client, TEST_ZONE)
+        .await
+        .expect("zone exists");
+
+    // V1 and V2 APIs return the same content, when both get content.
+    let v1_as_v2: HashMap<String, Vec<V2DnsRecord>> = v1_records
+        .into_iter()
+        .map(|(k, v)| (k, v.into_iter().map(Into::into).collect()))
+        .collect();
+    assert_eq!(v2_records, v1_as_v2);
+
+    // A V2 client can create records including the new NS type.
+    let mut records = HashMap::new();
+    records
+        .insert("service".to_string(), vec![V2DnsRecord::Aaaa(service_addr)]);
+    records.insert("ns1".to_string(), vec![V2DnsRecord::Aaaa(ns1_addr)]);
+    records.insert(
+        ZONE_APEX_NAME.to_string(),
+        vec![V2DnsRecord::Ns(ns1_name.clone())],
+    );
+    dns_records_create(&test_ctx.latest_client, TEST_ZONE, records.clone())
+        .await
+        .expect("can create zone");
+
+    match test_ctx.v1_client.dns_config_get().await {
+        Err(dns_service_client::Error::ErrorResponse(rv)) => {
+            assert_eq!(
+                rv.message,
+                dns_service_client::ERROR_CODE_INCOMPATIBLE_RECORD
+            );
+        }
+        o => {
+            panic!(
+                "expected V1 config get to fail with an ErrorResponse, got {:?}",
+                o
+            );
+        }
+    }
+
     let records = dns_records_list(&test_ctx.latest_client, TEST_ZONE)
         .await
         .expect("zone exists");
 
-    // The only apex records NS and SOA, which are not returned in V1 APIs, so
-    // we should see no records at the apex.
-    assert!(!v1_records.contains_key(ZONE_APEX_NAME));
-
-    // But via V2 APIs we should see both.
-    assert_eq!(records[ZONE_APEX_NAME].len(), 2);
-    assert!(records[ZONE_APEX_NAME].contains(&ns1));
-
-    // And a V1 client can create DNS records, limited they may be.
-    let mut v1_style_records = HashMap::new();
-    v1_style_records
-        .insert("service".to_string(), vec![v1_service_aaaa.clone()]);
-    // Explicitly redefine the ns1 records to an empty vec so they are cleared
-    // rather than unmodified.
-    v1_style_records.insert("ns1".to_string(), Vec::new());
-    v1_client::dns_records_create(
-        &test_ctx.v1_client,
-        TEST_ZONE,
-        v1_style_records,
-    )
-    .await
-    .expect("can redefine zone");
-
-    let v1_records =
-        v1_client::dns_records_list(&test_ctx.v1_client, TEST_ZONE)
-            .await
-            .expect("zone exists");
-    let records = dns_records_list(&test_ctx.latest_client, TEST_ZONE)
-        .await
-        .expect("zone exists");
-
-    // Now there really are no records at the zone apex.
-    assert!(!records.contains_key(ZONE_APEX_NAME));
-    eprintln!("records: {:?}", records);
-    assert_eq!(records.len(), 1);
-    assert_eq!(v1_records.len(), 1);
-    assert_eq!(records["service"], vec![service_aaaa.clone()]);
-    assert_eq!(v1_records["service"], vec![v1_service_aaaa.clone()]);
+    // The V2 records are what we PUT.
+    assert_eq!(records.len(), 3);
+    assert_eq!(records["service"], vec![V2DnsRecord::Aaaa(service_addr)]);
+    assert_eq!(records[ZONE_APEX_NAME], vec![V2DnsRecord::Ns(ns1_name)]);
 
     test_ctx.cleanup().await;
 

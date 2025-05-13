@@ -43,33 +43,25 @@ pub struct DnsConfig {
     pub zones: Vec<DnsConfigZone>,
 }
 
-impl DnsConfig {
-    /// Perform a *lossy* conversion from the V2 [`DnsConfig`] to the V1
-    /// [`v1::config::DnsConfig`].  In particular, V2 adds NS and SOA records,
-    /// which did not exist in V1, so they are silently discarded when
-    /// converting down.
-    ///
-    /// If this conversion would leave an empty zone, the zone is omitted
-    /// entirely.
-    pub fn as_v1(self) -> v1::config::DnsConfig {
-        let DnsConfig { generation, time_created, time_applied, zones } = self;
+pub enum TranslationError {
+    IncompatibleRecord,
+}
 
-        v1::config::DnsConfig {
+impl TryFrom<DnsConfig> for v1::config::DnsConfig {
+    type Error = TranslationError;
+
+    fn try_from(v2: DnsConfig) -> Result<Self, Self::Error> {
+        let DnsConfig { generation, time_created, time_applied, zones } = v2;
+
+        Ok(v1::config::DnsConfig {
             generation,
             time_created,
             time_applied,
             zones: zones
                 .into_iter()
-                .filter_map(|zone| {
-                    let converted_zone = zone.as_v1();
-                    if converted_zone.records.is_empty() {
-                        None
-                    } else {
-                        Some(converted_zone)
-                    }
-                })
-                .collect(),
-        }
+                .map(|zone| zone.try_into())
+                .collect::<Result<Vec<_>, _>>()?,
+        })
     }
 }
 
@@ -88,25 +80,25 @@ pub struct DnsConfigZone {
     pub records: HashMap<String, Vec<DnsRecord>>,
 }
 
-impl DnsConfigZone {
-    fn as_v1(self) -> v1::config::DnsConfigZone {
-        let DnsConfigZone { zone_name, records } = self;
+impl TryFrom<DnsConfigZone> for v1::config::DnsConfigZone {
+    type Error = TranslationError;
 
-        v1::config::DnsConfigZone {
+    fn try_from(v2: DnsConfigZone) -> Result<Self, Self::Error> {
+        let DnsConfigZone { zone_name, records } = v2;
+
+        Ok(v1::config::DnsConfigZone {
             zone_name,
             records: records
                 .into_iter()
-                .filter_map(|(k, v)| {
-                    let converted_records: Vec<v1::config::DnsRecord> =
-                        v.into_iter().filter_map(|rec| rec.as_v1()).collect();
-                    if converted_records.is_empty() {
-                        None
-                    } else {
-                        Some((k, converted_records))
-                    }
+                .map(|(name, records)| {
+                    let converted_records = records
+                        .into_iter()
+                        .map(|v| v.try_into())
+                        .collect::<Result<_, _>>();
+                    converted_records.map(|records| (name, records))
                 })
-                .collect(),
-        }
+                .collect::<Result<_, _>>()?,
+        })
     }
 }
 
@@ -135,17 +127,15 @@ pub enum DnsRecord {
     Ns(String),
 }
 
-impl DnsRecord {
-    fn as_v1(self) -> Option<v1::config::DnsRecord> {
-        match self {
-            DnsRecord::A(ip) => Some(v1::config::DnsRecord::A(ip)),
-            DnsRecord::Aaaa(ip) => Some(v1::config::DnsRecord::Aaaa(ip)),
-            DnsRecord::Srv(srv) => Some(v1::config::DnsRecord::Srv(srv.into())),
-            DnsRecord::Ns(_) => {
-                // V1 DNS records do not have variants for NS or SOA records, so
-                // we're lossy here.
-                None
-            }
+impl TryFrom<DnsRecord> for v1::config::DnsRecord {
+    type Error = TranslationError;
+
+    fn try_from(v2: DnsRecord) -> Result<Self, Self::Error> {
+        match v2 {
+            DnsRecord::A(ip) => Ok(v1::config::DnsRecord::A(ip)),
+            DnsRecord::Aaaa(ip) => Ok(v1::config::DnsRecord::Aaaa(ip)),
+            DnsRecord::Srv(srv) => Ok(v1::config::DnsRecord::Srv(srv.into())),
+            DnsRecord::Ns(_) => Err(TranslationError::IncompatibleRecord),
         }
     }
 }
