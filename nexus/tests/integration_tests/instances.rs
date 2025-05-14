@@ -1515,22 +1515,12 @@ async fn test_instance_failed_by_stop_request_does_not_reincarnate(
     )
     .await;
 
-    // Wait for the instance to transition to Failed.
-    dbg!(
-        instance_wait_for_state(client, instance_id, InstanceState::Failed)
-            .await
-    );
-
-    // Activate the reincarnation task.
-    dbg!(
-        nexus_test_utils::background::activate_background_task(
-            &cptestctx.internal_client,
-            "instance_reincarnation",
-        )
-        .await
-    );
-
-    // This time, it should come back.
+    // Because the instance can be restarted, the discovery of its failure above
+    // will result in the reincarnation background task being activated. Don't
+    // bother checking for Failed here because it's possible that task could
+    // have restarted the instance before we poll it (issue #8119 has two cases
+    // of just this!). Instead, we'll just wait for the final Starting state
+    // that reincarnation should leave the instance in.
     dbg!(
         instance_wait_for_state(client, instance_id, InstanceState::Starting)
             .await
