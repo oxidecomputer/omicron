@@ -35,6 +35,7 @@ use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -570,8 +571,17 @@ impl fmt::Display for BlueprintDisplay<'_> {
             writeln!(
                 f,
                 "\n  sled: {sled_id} ({sled_state}, config generation \
-                 {generation})\n\n{disks_table}\n",
+                 {generation})",
             )?;
+
+            let mut rows = Vec::new();
+            if let Some(id) = config.remove_mupdate_override {
+                rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
+            }
+            let list = KvList::new_unchanged(None, rows);
+            writeln!(f, "{list}")?;
+
+            writeln!(f, "{disks_table}\n")?;
 
             // Construct the datasets subtable
             let datasets_tab = BpTable::new(
@@ -657,6 +667,7 @@ pub struct BlueprintSledConfig {
     pub disks: IdMap<BlueprintPhysicalDiskConfig>,
     pub datasets: IdMap<BlueprintDatasetConfig>,
     pub zones: IdMap<BlueprintZoneConfig>,
+    pub remove_mupdate_override: Option<MupdateOverrideUuid>,
 }
 
 impl BlueprintSledConfig {
@@ -701,6 +712,7 @@ impl BlueprintSledConfig {
                     }
                 })
                 .collect(),
+            remove_mupdate_override: self.remove_mupdate_override,
         }
     }
 

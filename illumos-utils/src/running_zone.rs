@@ -508,6 +508,12 @@ impl RunningZone {
         Ok(running_zone)
     }
 
+    /// Create a fake running zone for use in tests.
+    #[cfg(feature = "testing")]
+    pub fn fake_boot(zone_id: i32, zone: InstalledZone) -> Self {
+        RunningZone { id: Some(zone_id), inner: zone }
+    }
+
     pub async fn ensure_address(
         &self,
         addrtype: AddressRequest,
@@ -1005,7 +1011,7 @@ impl ZoneBuilderFactory {
 
     /// For use in unit tests that don't require actual zone creation to occur.
     pub fn fake(
-        temp_dir: Option<&String>,
+        temp_dir: Option<&str>,
         zones_api: Arc<dyn crate::zone::Api>,
     ) -> Self {
         let temp_dir = match temp_dir {
