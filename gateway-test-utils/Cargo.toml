@@ -10,10 +10,12 @@ workspace = true
 [dependencies]
 camino.workspace = true
 dropshot.workspace = true
+gateway-client.workspace = true
 gateway-messages.workspace = true
 gateway-types.workspace = true
 omicron-gateway.workspace = true
 omicron-test-utils.workspace = true
+qorb.workspace = true
 slog.workspace = true
 sp-sim.workspace = true
 tokio.workspace = true

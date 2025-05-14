@@ -706,7 +706,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn saml_identity_provider_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ProviderPath>,
-        query_params: Query<params::SiloSelector>,
+        query_params: Query<params::OptionalSiloSelector>,
     ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -717,7 +717,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let query = query_params.into_inner();
             let saml_identity_provider_selector =
                 params::SamlIdentityProviderSelector {
-                    silo: Some(query.silo),
+                    silo: query.silo,
                     saml_identity_provider: path.provider,
                 };
             let (.., provider) = nexus
@@ -8089,7 +8089,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::WebhookReceiverSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
-    ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError> {
+    ) -> Result<HttpResponseCreated<views::WebhookSecret>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

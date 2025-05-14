@@ -322,6 +322,28 @@ fn cmd_config(
                     expected_active_version, expected_inactive_version,
                 )?;
             }
+            PendingMgsUpdateDetails::Rot {
+                expected_slot_a_version,
+                expected_slot_b_version,
+                expected_active_slot,
+                expected_persistent_boot_preference,
+                expected_pending_persistent_boot_preference,
+                expected_transient_boot_preference,
+            } => {
+                writeln!(
+                    &mut s,
+                    "        preconditions: expected_slot_a_version {:?}
+                                            expected_slot_b_version {:?}
+                                            expected active_slot {:?}
+                                            expected persistent_boot_preference {:?}
+                                            expected pending_persistent_boot_preference {:?}
+                                            expected transient_boot_preference {:?}",
+                    expected_slot_a_version, expected_slot_b_version,
+                    expected_active_slot, expected_persistent_boot_preference,
+                    expected_pending_persistent_boot_preference,
+                    expected_transient_boot_preference,
+                )?;
+            }
         }
 
         writeln!(&mut s)?;

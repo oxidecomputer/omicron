@@ -68,6 +68,7 @@ pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
 pub use clickhouse::ClickhouseClusterConfig;
 use gateway_client::types::SpType;
+use gateway_types::rot::RotSlot;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
@@ -104,7 +105,7 @@ pub use zone_type::blueprint_zone_type;
 
 use blueprint_display::{
     BpDiffState, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
-    BpTable, BpTableData, BpTableRow, KvListWithHeading, constants::*,
+    BpTable, BpTableData, BpTableRow, KvList, constants::*,
 };
 use id_map::{IdMap, IdMappable};
 use serde::de::SeqAccess;
@@ -430,15 +431,15 @@ pub struct BlueprintDisplay<'a> {
 }
 
 impl BlueprintDisplay<'_> {
-    fn make_cockroachdb_table(&self) -> KvListWithHeading {
+    fn make_cockroachdb_table(&self) -> KvList {
         let fingerprint = if self.blueprint.cockroachdb_fingerprint.is_empty() {
             NONE_PARENS.to_string()
         } else {
             self.blueprint.cockroachdb_fingerprint.clone()
         };
 
-        KvListWithHeading::new_unchanged(
-            COCKROACHDB_HEADING,
+        KvList::new_unchanged(
+            Some(COCKROACHDB_HEADING),
             vec![
                 (COCKROACHDB_FINGERPRINT, fingerprint),
                 (
@@ -451,9 +452,9 @@ impl BlueprintDisplay<'_> {
         )
     }
 
-    fn make_oximeter_table(&self) -> KvListWithHeading {
-        KvListWithHeading::new_unchanged(
-            OXIMETER_HEADING,
+    fn make_oximeter_table(&self) -> KvList {
+        KvList::new_unchanged(
+            Some(OXIMETER_HEADING),
             vec![
                 (GENERATION, self.blueprint.oximeter_read_version.to_string()),
                 (
@@ -464,15 +465,15 @@ impl BlueprintDisplay<'_> {
         )
     }
 
-    fn make_metadata_table(&self) -> KvListWithHeading {
+    fn make_metadata_table(&self) -> KvList {
         let comment = if self.blueprint.comment.is_empty() {
             NONE_PARENS.to_string()
         } else {
             self.blueprint.comment.clone()
         };
 
-        KvListWithHeading::new_unchanged(
-            METADATA_HEADING,
+        KvList::new_unchanged(
+            Some(METADATA_HEADING),
             vec![
                 (CREATED_BY, self.blueprint.creator.clone()),
                 (
@@ -498,7 +499,7 @@ impl BlueprintDisplay<'_> {
     // Return tables representing a [`ClickhouseClusterConfig`] in a given blueprint
     fn make_clickhouse_cluster_config_tables(
         &self,
-    ) -> Option<(KvListWithHeading, BpTable, BpTable)> {
+    ) -> Option<(KvList, BpTable, BpTable)> {
         let config = &self.blueprint.clickhouse_cluster_config.as_ref()?;
 
         let diff_table =
@@ -811,7 +812,7 @@ impl BlueprintZoneConfig {
             Some(self.id),
         );
         let kind = DatasetKind::TransientZone { name };
-        DatasetName::new(self.filesystem_pool.clone(), kind)
+        DatasetName::new(self.filesystem_pool, kind)
     }
 
     pub fn kind(&self) -> ZoneKind {
@@ -1245,6 +1246,36 @@ pub enum PendingMgsUpdateDetails {
         /// expected contents of the inactive slot
         expected_inactive_version: ExpectedVersion,
     },
+    /// the RoT is being updated
+    Rot {
+        // implicit: component = ROT
+        // implicit: firmware slot id will be the inactive slot
+        /// expected contents of "A" slot
+        expected_slot_a_version: ExpectedVersion,
+        /// expected contents of "B" slot
+        expected_slot_b_version: ExpectedVersion,
+        /// the slot of the currently running image
+        expected_active_slot: RotSlot,
+        // under normal operation, this should always match the active slot.
+        // if this field changed without the active slot changing, that might
+        // reflect a bad update.
+        //
+        /// the persistent boot preference written into the current authoritative
+        /// CFPA page (ping or pong)
+        expected_persistent_boot_preference: RotSlot,
+        // if this value changed, but not any of this other information, that could
+        // reflect an attempt to switch to the other slot.
+        //
+        /// the persistent boot preference written into the CFPA scratch page that
+        /// will become the persistent boot preference in the authoritative CFPA
+        /// page upon reboot, unless CFPA update of the authoritative page fails
+        /// for some reason.
+        expected_pending_persistent_boot_preference: Option<RotSlot>,
+        // this field is not in use yet.
+        //
+        /// override persistent preference selection for a single boot
+        expected_transient_boot_preference: Option<RotSlot>,
+    },
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
@@ -1266,6 +1297,43 @@ impl slog::KV for PendingMgsUpdateDetails {
                 serializer.emit_str(
                     Key::from("expected_inactive_version"),
                     &format!("{:?}", expected_inactive_version),
+                )
+            }
+            PendingMgsUpdateDetails::Rot {
+                expected_slot_a_version,
+                expected_slot_b_version,
+                expected_active_slot,
+                expected_persistent_boot_preference,
+                expected_pending_persistent_boot_preference,
+                expected_transient_boot_preference,
+            } => {
+                serializer.emit_str(Key::from("component"), "rot")?;
+                serializer.emit_str(
+                    Key::from("expected_slot_a_version"),
+                    &format!("{:?}", expected_slot_a_version),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_slot_b_version"),
+                    &format!("{:?}", expected_slot_b_version),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_active_slot"),
+                    &format!("{:?}", expected_active_slot),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_persistent_boot_preference"),
+                    &format!("{:?}", expected_persistent_boot_preference),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_pending_persistent_boot_preference"),
+                    &format!(
+                        "{:?}",
+                        expected_pending_persistent_boot_preference
+                    ),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_transient_boot_preference"),
+                    &format!("{:?}", expected_transient_boot_preference),
                 )
             }
         }
@@ -1546,7 +1614,7 @@ fn unwrap_or_none<T: ToString>(opt: &Option<T>) -> String {
 impl BlueprintDatasetConfig {
     fn as_strings(&self) -> Vec<String> {
         vec![
-            DatasetName::new(self.pool.clone(), self.kind.clone()).full_name(),
+            DatasetName::new(self.pool, self.kind.clone()).full_name(),
             self.id.to_string(),
             self.disposition.to_string(),
             unwrap_or_none(&self.quota),
@@ -1623,7 +1691,7 @@ impl From<&BlueprintDatasetConfig> for CollectionDatasetIdentifier {
     fn from(d: &BlueprintDatasetConfig) -> Self {
         Self {
             id: Some(d.id),
-            name: DatasetName::new(d.pool.clone(), d.kind.clone()).full_name(),
+            name: DatasetName::new(d.pool, d.kind.clone()).full_name(),
         }
     }
 }

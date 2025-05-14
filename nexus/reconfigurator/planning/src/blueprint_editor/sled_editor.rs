@@ -517,7 +517,7 @@ impl ActiveSledEditor {
 
         // Every disk also gets a Debug and Transient Zone Root dataset; ensure
         // both of those exist as well.
-        let debug = PartialDatasetConfig::for_debug(zpool.clone());
+        let debug = PartialDatasetConfig::for_debug(zpool);
         let zone_root = PartialDatasetConfig::for_transient_zone_root(zpool);
 
         self.datasets.ensure_in_service(debug, rng);
@@ -672,7 +672,7 @@ impl ZoneDatasetConfigs {
                 _ => None,
             };
             PartialDatasetConfig::for_durable_zone(
-                dataset.dataset.pool_name.clone(),
+                dataset.dataset.pool_name,
                 dataset.kind,
                 address,
             )
@@ -684,8 +684,8 @@ impl ZoneDatasetConfigs {
             if filesystem_dataset.zpool() != dur.zpool() {
                 return Err(SledEditError::ZoneInvalidZpoolCombination {
                     zone_id: zone.id,
-                    fs_zpool: filesystem_dataset.zpool().clone(),
-                    dur_zpool: dur.zpool().clone(),
+                    fs_zpool: *filesystem_dataset.zpool(),
+                    dur_zpool: *dur.zpool(),
                 });
             }
         }
@@ -695,7 +695,7 @@ impl ZoneDatasetConfigs {
         if !disks.contains_zpool(&filesystem_dataset.zpool().id()) {
             return Err(SledEditError::ZoneOnNonexistentZpool {
                 zone_id: zone.id,
-                zpool: filesystem_dataset.zpool().clone(),
+                zpool: *filesystem_dataset.zpool(),
             });
         }
 

@@ -179,6 +179,12 @@ async fn test_repo_upload() -> Result<()> {
     // The local repo is not deleted until the next task run.
     assert_eq!(status.local_repos, 1);
 
+    // Wait for all the copy requests to complete.
+    futures::future::join_all(cptestctx.sled_agents.iter().map(|sled_agent| {
+        sled_agent.sled_agent().artifact_store().wait_for_copy_tasks()
+    }))
+    .await;
+
     // Run the replication background task again; the local repos should be
     // dropped.
     let status =
