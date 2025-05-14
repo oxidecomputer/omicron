@@ -38,7 +38,7 @@ trait ParallelCommandExecution {
     type Output;
 
     /// Add a command to the set of commands to be executed.
-    async fn add_command<F>(&mut self, command: F)
+    fn add_command<F>(&mut self, command: F)
     where
         F: std::future::Future<Output = Self::Output> + Send + 'static;
 }
@@ -68,15 +68,14 @@ where
 {
     type Output = T;
 
-    async fn add_command<F>(&mut self, command: F)
+    fn add_command<F>(&mut self, command: F)
     where
         F: std::future::Future<Output = Self::Output> + Send + 'static,
     {
-        let permit = Arc::clone(&self.semaphore)
-            .acquire_owned()
-            .await
-            .expect("semaphore acquire");
+        let semaphore = Arc::clone(&self.semaphore);
         let _abort_handle = self.set.spawn(async move {
+            let permit =
+                semaphore.acquire_owned().await.expect("semaphore acquire");
             let res = command.await;
             drop(permit);
             res
@@ -99,7 +98,6 @@ pub async fn ipadm_info()
     {
         commands
             .add_command(execute_command_with_timeout(command, DEFAULT_TIMEOUT))
-            .await
     }
     commands.join_all().await
 }
@@ -117,7 +115,6 @@ pub async fn dladm_info()
     ] {
         commands
             .add_command(execute_command_with_timeout(command, DEFAULT_TIMEOUT))
-            .await
     }
     commands.join_all().await
 }
@@ -140,12 +137,10 @@ pub async fn pargs_oxide_processes(
 
     let mut commands = MultipleCommands::new();
     for pid in pids {
-        commands
-            .add_command(execute_command_with_timeout(
-                pargs_process(pid),
-                DEFAULT_TIMEOUT,
-            ))
-            .await;
+        commands.add_command(execute_command_with_timeout(
+            pargs_process(pid),
+            DEFAULT_TIMEOUT,
+        ));
     }
     commands.join_all().await
 }
@@ -163,12 +158,10 @@ pub async fn pstack_oxide_processes(
 
     let mut commands = MultipleCommands::new();
     for pid in pids {
-        commands
-            .add_command(execute_command_with_timeout(
-                pstack_process(pid),
-                DEFAULT_TIMEOUT,
-            ))
-            .await;
+        commands.add_command(execute_command_with_timeout(
+            pstack_process(pid),
+            DEFAULT_TIMEOUT,
+        ));
     }
     commands.join_all().await
 }
@@ -186,12 +179,10 @@ pub async fn pfiles_oxide_processes(
 
     let mut commands = MultipleCommands::new();
     for pid in pids {
-        commands
-            .add_command(execute_command_with_timeout(
-                pfiles_process(pid),
-                DEFAULT_TIMEOUT,
-            ))
-            .await;
+        commands.add_command(execute_command_with_timeout(
+            pfiles_process(pid),
+            DEFAULT_TIMEOUT,
+        ));
     }
     commands.join_all().await
 }
