@@ -340,7 +340,10 @@ impl ConfigReconcilerHandle {
     }
 
     /// Collect inventory fields relevant to config reconciliation.
-    pub fn inventory(&self) -> Result<ReconcilerInventory, InventoryError> {
+    pub async fn inventory(
+        &self,
+        log: &Logger,
+    ) -> Result<ReconcilerInventory, InventoryError> {
         let ledgered_sled_config = match self
             .ledger_task
             .get()
@@ -365,9 +368,11 @@ impl ConfigReconcilerHandle {
         let (reconciler_status, last_reconciliation) =
             self.reconciler_result_rx.borrow().to_inventory();
 
+        let zpools = self.currently_managed_zpools_rx.to_inventory(log).await;
+
         Ok(ReconcilerInventory {
             disks: self.raw_disks_tx.to_inventory(),
-            zpools: Vec::new(),
+            zpools,
             datasets: Vec::new(),
             ledgered_sled_config,
             reconciler_status,

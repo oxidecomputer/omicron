@@ -10,9 +10,12 @@
 use futures::future;
 use id_map::IdMap;
 use id_map::IdMappable;
+use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+use nexus_sled_agent_shared::inventory::InventoryZpool;
+use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DiskManagementError;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
@@ -159,6 +162,55 @@ impl CurrentlyManagedZpoolsReceiver {
                 std::future::pending().await
             }
         }
+    }
+
+    pub(crate) async fn to_inventory(
+        &self,
+        log: &Logger,
+    ) -> Vec<InventoryZpool> {
+        let current_zpools = self.current();
+
+        let zpool_futs =
+            current_zpools.0.iter().map(|&zpool_name| async move {
+                let info_result = tokio::task::spawn_blocking(move || {
+                    Zpool::get_info(&zpool_name.to_string())
+                })
+                .await
+                .expect("task did not panic");
+
+                (zpool_name, info_result)
+            });
+
+        future::join_all(zpool_futs)
+            .await
+            .into_iter()
+            .filter_map(|(zpool_name, info_result)| {
+                let info = match info_result {
+                    Ok(info) => info,
+                    Err(err) => {
+                        warn!(
+                            log, "Failed to access zpool info";
+                            "zpool" => %zpool_name,
+                            InlineErrorChain::new(&err),
+                        );
+                        return None;
+                    }
+                };
+                let total_size = match ByteCount::try_from(info.size()) {
+                    Ok(n) => n,
+                    Err(err) => {
+                        warn!(
+                            log, "Failed to parse zpool size";
+                            "zpool" => %zpool_name,
+                            "raw_size" => info.size(),
+                            InlineErrorChain::new(&err),
+                        );
+                        return None;
+                    }
+                };
+                Some(InventoryZpool { id: zpool_name.id(), total_size })
+            })
+            .collect()
     }
 }
 
