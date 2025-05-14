@@ -5,6 +5,8 @@
 use camino::Utf8PathBuf;
 use illumos_utils::zpool::PathInPool;
 use key_manager::StorageKeyRequester;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
@@ -332,7 +334,16 @@ impl ConfigReconcilerHandle {
 
     /// Collect inventory fields relevant to config reconciliation.
     pub fn inventory(&self) -> ReconcilerInventory {
-        unimplemented!()
+        let (reconciler_status, last_reconciliation) =
+            self.reconciler_result_rx.borrow().to_inventory();
+        ReconcilerInventory {
+            disks: Vec::new(),
+            zpools: Vec::new(),
+            datasets: Vec::new(),
+            ledgered_sled_config: None,
+            reconciler_status,
+            last_reconciliation,
+        }
     }
 }
 
@@ -346,12 +357,20 @@ struct ReconcilerTaskDependencies {
     reconciler_task_log: Logger,
 }
 
+/// Fields of sled-agent inventory reported by the config reconciler subsystem.
+///
+/// Note that much like inventory in general, these fields are not collected
+/// atomically; if there are active changes being made while this struct is
+/// being assembled, different fields may have be populated from different
+/// states of the world.
 #[derive(Debug)]
 pub struct ReconcilerInventory {
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
     pub datasets: Vec<InventoryDataset>,
     pub ledgered_sled_config: Option<OmicronSledConfig>,
+    pub reconciler_status: ConfigReconcilerInventoryStatus,
+    pub last_reconciliation: Option<ConfigReconcilerInventory>,
 }
 
 #[derive(Debug, Clone)]

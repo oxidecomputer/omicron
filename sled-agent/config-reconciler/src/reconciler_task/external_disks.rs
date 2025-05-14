@@ -12,6 +12,7 @@ use id_map::IdMap;
 use id_map::IdMappable;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use omicron_common::disk::DiskManagementError;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
@@ -26,6 +27,7 @@ use slog::Logger;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::future::Future;
@@ -194,6 +196,25 @@ impl ExternalDisks {
             DiskState::Managed(_) => false,
             DiskState::FailedToManage(err) => err.retryable(),
         })
+    }
+
+    pub(crate) fn to_inventory(
+        &self,
+    ) -> BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult> {
+        self.disks
+            .iter()
+            .map(|disk| match &disk.state {
+                DiskState::Managed(_) => {
+                    (disk.config.id, ConfigReconcilerInventoryResult::Ok)
+                }
+                DiskState::FailedToManage(err) => (
+                    disk.config.id,
+                    ConfigReconcilerInventoryResult::Err {
+                        message: InlineErrorChain::new(err).to_string(),
+                    },
+                ),
+            })
+            .collect()
     }
 
     pub(super) fn currently_managed_zpools(

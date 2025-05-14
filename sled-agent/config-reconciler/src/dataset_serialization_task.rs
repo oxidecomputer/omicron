@@ -26,6 +26,7 @@ use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
@@ -167,6 +168,25 @@ impl DatasetEnsureResult {
             DatasetState::Ensured => false,
             DatasetState::FailedToEnsure(err) => err.is_retryable(),
         })
+    }
+
+    pub(crate) fn to_inventory(
+        &self,
+    ) -> BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult> {
+        self.0
+            .iter()
+            .map(|dataset| match &dataset.state {
+                DatasetState::Ensured => {
+                    (dataset.config.id, ConfigReconcilerInventoryResult::Ok)
+                }
+                DatasetState::FailedToEnsure(err) => (
+                    dataset.config.id,
+                    ConfigReconcilerInventoryResult::Err {
+                        message: InlineErrorChain::new(err).to_string(),
+                    },
+                ),
+            })
+            .collect()
     }
 
     pub(crate) fn all_mounted_debug_datasets<'a>(
