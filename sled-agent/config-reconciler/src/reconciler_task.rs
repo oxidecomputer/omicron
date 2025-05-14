@@ -82,7 +82,7 @@ pub(crate) fn spawn<T: SledAgentFacilities>(
 pub(crate) struct ReconcilerResult {
     mount_config: Arc<MountConfig>,
     status: ReconcilerTaskStatus,
-    latest_result: Option<Arc<LatestReconcilerTaskResultInner>>,
+    latest_result: Option<Arc<LatestReconciliationResult>>,
 }
 
 impl ReconcilerResult {
@@ -145,7 +145,7 @@ pub enum ReconcilerTaskStatus {
 }
 
 #[derive(Debug)]
-struct LatestReconcilerTaskResultInner {
+struct LatestReconciliationResult {
     sled_config: OmicronSledConfig,
     datasets: DatasetEnsureResult,
     timesync_status: TimeSyncStatus,
@@ -415,7 +415,7 @@ impl ReconcilerTask {
             ReconciliationResult::NoRetryNeeded
         };
 
-        let inner = LatestReconcilerTaskResultInner {
+        let inner = LatestReconciliationResult {
             sled_config,
             datasets,
             timesync_status,
