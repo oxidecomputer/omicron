@@ -154,6 +154,10 @@ impl InternalDisksReceiver {
         )
     }
 
+    pub(crate) fn mount_config(&self) -> &Arc<MountConfig> {
+        &self.mount_config
+    }
+
     fn spawn_with_disk_adopter<T: DiskAdopter>(
         mount_config: Arc<MountConfig>,
         raw_disks_rx: watch::Receiver<IdMap<RawDiskWithId>>,
