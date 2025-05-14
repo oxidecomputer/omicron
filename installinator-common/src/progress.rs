@@ -15,6 +15,7 @@ use schemars::{
 use serde::{Deserialize, Serialize};
 use serde_with::rust::deserialize_ignore_any;
 use thiserror::Error;
+use tokio::task::JoinError;
 use update_engine::{AsError, StepSpec, errors::NestedEngineError};
 
 // ---
@@ -239,6 +240,8 @@ pub enum WriteError {
     ChecksumValidationError(#[source] anyhow::Error),
     #[error("error removing files from {path}: {error}")]
     RemoveFilesError { path: Utf8PathBuf, error: std::io::Error },
+    #[error("error computing control plane hashes")]
+    ControlPlaneHashComputeError(#[source] JoinError),
     #[error("error fsyncing output directory: {error}")]
     SyncOutputDirError { error: std::io::Error },
     #[error("error interacting with zpool: {error}")]
