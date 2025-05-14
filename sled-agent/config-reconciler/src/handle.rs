@@ -366,7 +366,7 @@ impl ConfigReconcilerHandle {
             self.reconciler_result_rx.borrow().to_inventory();
 
         Ok(ReconcilerInventory {
-            disks: Vec::new(),
+            disks: self.raw_disks_tx.to_inventory(),
             zpools: Vec::new(),
             datasets: Vec::new(),
             ledgered_sled_config,
