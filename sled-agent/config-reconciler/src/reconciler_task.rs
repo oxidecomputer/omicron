@@ -84,11 +84,11 @@ pub(crate) fn spawn<T: SledAgentFacilities>(
     );
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct ReconcilerResult {
     mount_config: Arc<MountConfig>,
     status: ReconcilerTaskStatus,
-    latest_result: Option<Arc<LatestReconciliationResult>>,
+    latest_result: Option<LatestReconciliationResult>,
 }
 
 impl ReconcilerResult {
@@ -102,7 +102,7 @@ impl ReconcilerResult {
 
     pub(crate) fn timesync_status(&self) -> TimeSyncStatus {
         self.latest_result
-            .as_deref()
+            .as_ref()
             .map(|inner| inner.timesync_status.clone())
             .unwrap_or(TimeSyncStatus::NotYetChecked)
     }
@@ -484,7 +484,7 @@ impl ReconcilerTask {
                 completed_at_time: Utc::now(),
                 ran_for: started_at_instant.elapsed(),
             };
-            r.latest_result = Some(Arc::new(inner));
+            r.latest_result = Some(inner);
         });
 
         result
