@@ -30,6 +30,7 @@ use gateway_messages::DumpTask;
 use gateway_messages::Header;
 use gateway_messages::MgsRequest;
 use gateway_messages::MgsResponse;
+use gateway_messages::PowerStateTransition;
 use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
 use gateway_messages::RotResponse;
@@ -1183,14 +1184,22 @@ impl SpHandler for Handler {
         &mut self,
         sender: Sender<Self::VLanId>,
         power_state: PowerState,
-    ) -> Result<(), SpError> {
+    ) -> Result<PowerStateTransition, SpError> {
+        let transition = if power_state != self.power_state {
+            PowerStateTransition::Changed
+        } else {
+            PowerStateTransition::Unchanged
+        };
+
         debug!(
             &self.log, "received set power state";
             "sender" => ?sender,
+            "prev_power_state" => ?self.power_state,
             "power_state" => ?power_state,
+            "transition" => ?transition,
         );
         self.power_state = power_state;
-        Ok(())
+        Ok(transition)
     }
 
     fn reset_component_prepare(

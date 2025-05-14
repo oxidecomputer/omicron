@@ -155,7 +155,7 @@ impl EreportState {
                 "req_restart_id" => ?req.restart_id,
                 "current_restart_id" => ?self.restart_id,
             );
-            (Some(&self.meta), Ena::new(0))
+            (Some(&self.meta), Ena::NONE)
         } else {
             // If we didn't "restart", we should honor the committed ENA (if the
             // request includes one), and we should start at the requested ENA.
@@ -171,7 +171,7 @@ impl EreportState {
                 while self
                     .ereports
                     .front()
-                    .map(|ereport| ereport.ena <= committed_ena)
+                    .map(|ereport| &ereport.ena <= committed_ena)
                     .unwrap_or(false)
                 {
                     self.ereports.pop_front();
@@ -200,7 +200,7 @@ impl EreportState {
             .peek()
             .map(|ereport| ereport.ena)
             // If there are no ereports, send ENA zero (which means "no ereports").
-            .unwrap_or(Ena::ZERO);
+            .unwrap_or(Ena::NONE);
 
         // Serialize the header.
         ResponseHeader::V0(ResponseHeaderV0 {
