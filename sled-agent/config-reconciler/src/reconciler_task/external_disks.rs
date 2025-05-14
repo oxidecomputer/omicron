@@ -14,7 +14,6 @@ use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
-use nexus_sled_agent_shared::inventory::InventoryZpool;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DiskManagementError;
 use omicron_common::disk::DiskVariant;
@@ -164,10 +163,14 @@ impl CurrentlyManagedZpoolsReceiver {
         }
     }
 
+    // This returns a tuple that can be converted into an `InventoryZpool`. It
+    // doesn't return an `InventoryZpool` directly because the latter only
+    // contains the zpool's ID, not the full name, and our caller wants the
+    // names too.
     pub(crate) async fn to_inventory(
         &self,
         log: &Logger,
-    ) -> Vec<InventoryZpool> {
+    ) -> Vec<(ZpoolName, ByteCount)> {
         let current_zpools = self.current();
 
         let zpool_futs =
@@ -208,7 +211,7 @@ impl CurrentlyManagedZpoolsReceiver {
                         return None;
                     }
                 };
-                Some(InventoryZpool { id: zpool_name.id(), total_size })
+                Some((zpool_name, total_size))
             })
             .collect()
     }

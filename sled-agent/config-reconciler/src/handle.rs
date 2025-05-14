@@ -64,6 +64,8 @@ use crate::reconciler_task::ReconcilerResult;
 pub enum InventoryError {
     #[error("ledger contents not yet available")]
     LedgerContentsNotAvailable,
+    #[error("could not contact dataset task")]
+    DatasetTaskError(#[from] DatasetTaskError),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -365,15 +367,26 @@ impl ConfigReconcilerHandle {
             Some(CurrentSledConfig::Ledgered(config)) => Some(config),
         };
 
+        let zpools = self.currently_managed_zpools_rx.to_inventory(log).await;
+
+        let datasets = self
+            .dataset_task
+            .inventory(zpools.iter().map(|&(name, _)| name).collect())
+            .await?;
+
         let (reconciler_status, last_reconciliation) =
             self.reconciler_result_rx.borrow().to_inventory();
 
-        let zpools = self.currently_managed_zpools_rx.to_inventory(log).await;
-
         Ok(ReconcilerInventory {
             disks: self.raw_disks_tx.to_inventory(),
-            zpools,
-            datasets: Vec::new(),
+            zpools: zpools
+                .into_iter()
+                .map(|(name, total_size)| InventoryZpool {
+                    id: name.id(),
+                    total_size,
+                })
+                .collect(),
+            datasets,
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
