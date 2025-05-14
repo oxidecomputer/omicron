@@ -127,13 +127,20 @@ pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
 pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
 
 pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
-// This is larger than total memory (let alone reservoir) on some sleds. Theoretically, we should
-// fail to create an instance like this if we can't find a sled with enough available reservoir to
-// run it. If the instance were created in the control plane and got to Propolis, it should fail to
-// start.
+// This is larger than total memory (let alone reservoir) on some sleds; it is
+// not to guard against overallocation, but to keep instance memory sizes in
+// ranges that we've tested. It is bounded only by the intersection of
+// large-memory hardware configurations and tested instance sizes.
 //
-// This is just for testing at the momet!
-pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 1024 * (1 << 30); // 1024 GiB
+// Propolis has a similar limit in MAX_PHYSMEM. There, we would like to remove
+// the limit entirely. Here, we may want to make the max size operator
+// configurable as it may have implications on migratability for racks with
+// mixed sled configurations.
+//
+// Before raising or removing this limit, testing has been valuable. See:
+// * illumos bug #17403
+// * Propolis issue #903
+pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 1536 * (1 << 30); // 1.5 TiB
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
