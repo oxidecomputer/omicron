@@ -94,7 +94,7 @@ path_param!(AddressLotPath, address_lot, "address lot");
 path_param!(ProbePath, probe, "probe");
 path_param!(CertificatePath, certificate, "certificate");
 
-id_path_param!(SupportBundlePath, support_bundle, "support bundle");
+id_path_param!(SupportBundlePath, bundle_id, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
