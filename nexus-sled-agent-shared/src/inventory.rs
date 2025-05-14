@@ -223,6 +223,13 @@ impl OmicronZoneConfig {
     pub fn underlay_ip(&self) -> Ipv6Addr {
         self.zone_type.underlay_ip()
     }
+
+    pub fn zone_name(&self) -> String {
+        illumos_utils::running_zone::InstalledZone::get_zone_name(
+            self.zone_type.kind().zone_prefix(),
+            Some(self.id),
+        )
+    }
 }
 
 /// Describes a persistent ZFS dataset associated with an Omicron zone

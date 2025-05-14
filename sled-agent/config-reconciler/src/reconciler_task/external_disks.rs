@@ -55,6 +55,14 @@ impl CurrentlyManagedZpools {
     pub fn contains(&self, zpool: &ZpoolName) -> bool {
         self.0.contains(zpool)
     }
+
+    /// Within this crate, directly expose the set of zpools.
+    ///
+    /// We should remove this once we clean up zone starting; starting a zone
+    /// should already know where to place datasets.
+    pub(crate) fn into_vec(self) -> Vec<ZpoolName> {
+        self.0.into_iter().collect()
+    }
 }
 
 /// Wrapper around a tokio watch channel containing the set of currently managed
