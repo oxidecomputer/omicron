@@ -2428,7 +2428,7 @@ mod tests {
         propolis_addr: SocketAddr,
         nexus_client: NexusClient,
         storage_handle: StorageHandle,
-        temp_dir: &String,
+        temp_dir: &str,
     ) -> (Instance, MetricsRx) {
         let id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
@@ -2524,7 +2524,7 @@ mod tests {
         log: &Logger,
         storage_handle: StorageHandle,
         nexus_client: NexusClient,
-        temp_dir: &String,
+        temp_dir: &str,
     ) -> (InstanceManagerServices, MetricsRx) {
         let vnic_allocator = VnicAllocator::new(
             "Instance",
@@ -2579,7 +2579,7 @@ mod tests {
                 log,
                 storage_harness.handle().clone(),
                 nexus.nexus_client.clone(),
-                &temp_guard.path().to_string(),
+                temp_guard.path().as_str(),
             );
 
             let InstanceManagerServices {
@@ -2643,7 +2643,6 @@ mod tests {
         let storage_handle = storage_harness.handle().clone();
 
         let temp_guard = Utf8TempDir::new().unwrap();
-        let temp_dir = temp_guard.path().to_string();
 
         let (inst, mut metrics_rx) = timeout(
             TIMEOUT_DURATION,
@@ -2652,7 +2651,7 @@ mod tests {
                 propolis_addr,
                 nexus_client,
                 storage_handle,
-                &temp_dir,
+                temp_guard.path().as_str(),
             ),
         )
         .await
@@ -2729,7 +2728,6 @@ mod tests {
         let storage_handle = storage_harness.handle().clone();
 
         let temp_guard = Utf8TempDir::new().unwrap();
-        let temp_dir = temp_guard.path().to_string();
 
         let (inst, _) = timeout(
             TIMEOUT_DURATION,
@@ -2739,7 +2737,7 @@ mod tests {
                 SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
                 nexus_client,
                 storage_handle,
-                &temp_dir,
+                temp_guard.path().as_str(),
             ),
         )
         .await
@@ -3142,7 +3140,7 @@ mod tests {
                 &log,
                 storage_harness.handle().clone(),
                 nexus_client,
-                &temp_guard.path().to_string(),
+                temp_guard.path().as_str(),
             );
             let propolis_id = PropolisUuid::new_v4();
             let propolis_addr = SocketAddr::V4(SocketAddrV4::new(

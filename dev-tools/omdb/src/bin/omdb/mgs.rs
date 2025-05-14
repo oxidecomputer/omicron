@@ -5,6 +5,7 @@
 //! Prototype code for collecting information from systems in the rack
 
 use crate::Omdb;
+use crate::db::option_impl_display;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
 use clap::Args;
@@ -533,6 +534,8 @@ async fn show_sp_details(
         git_commit: String,
         name: String,
         version: String,
+        #[tabled(display_with = "option_impl_display")]
+        sign: Option<String>,
     }
 
     impl<'a> From<(&'a SpIdentifier, &'a SpComponentInfo, SpComponentCaboose)>
@@ -551,6 +554,7 @@ async fn show_sp_details(
                 git_commit: caboose.git_commit,
                 name: caboose.name,
                 version: caboose.version,
+                sign: caboose.sign,
             }
         }
     }

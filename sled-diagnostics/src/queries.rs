@@ -288,8 +288,8 @@ pub fn count_disks() -> Command {
     let mut cmd = std::process::Command::new("bash");
     cmd.env_clear().args([
         "-c",
-        "(pfexec diskinfo -pH | tee | wc -l | xargs | grep -x '12' > /dev/null)
-            && echo 'OK: All expected disks found'
+        "(pfexec diskinfo -pH | tee | wc -l | xargs | grep -x '12' > /dev/null) \
+            && echo 'OK: All expected disks found' \
             || echo 'WARN: Unexpected number of physical disks (expected 12)'",
     ]);
     cmd
@@ -299,8 +299,8 @@ pub fn zfs_list_unmounted() -> Command {
     let mut cmd = std::process::Command::new("bash");
     cmd.env_clear().args([
         "-c",
-        "pfexec zfs list -r -o name,mounted | grep oxp | grep -v yes$
-             && echo 'WARN: Found unmounted dataset(s)'
+        "pfexec zfs list -r -o name,mounted | grep oxp | grep -v yes$ \
+             && echo 'WARN: Found unmounted dataset(s)' \
              || echo 'OK: No unmounted datasets'",
     ]);
     cmd
@@ -311,8 +311,8 @@ pub fn count_crucibles() -> Command {
     cmd.env_clear()
         .args([
             "-c",
-            "(zoneadm list | grep crucible | grep -v pantry | tee | wc -l | xargs | grep -x '10' > /dev/null)
-            && echo 'OK: 10 Crucibles found'
+            "(zoneadm list | grep crucible | grep -v pantry | tee | wc -l | xargs | grep -x '10' > /dev/null) \
+            && echo 'OK: 10 Crucibles found' \
             || echo 'WARN: Unexpected number of crucible zones (expected 10)'"
         ]);
     cmd
@@ -323,11 +323,11 @@ pub fn identify_datasets_close_to_quota() -> Command {
     cmd.env_clear()
         .args([
             "-c",
-            "zfs list -Hp -o used,quota,name,avail,mountpoint |
-                egrep 'oxp|oxi' |
-                egrep -v 'none|crucible' |
-                awk '$2 > 0 && $1 / $2 >= 0.8 { any=1; print } END { exit !any }'
-            && echo 'WARN: Found near-quota datasets'
+            "zfs list -Hp -o used,quota,name,avail,mountpoint | \
+                egrep 'oxp|oxi' | \
+                egrep -v 'none|crucible' | \
+                awk '$2 > 0 && $1 / $2 >= 0.8 { any=1; print } END { exit !any }' \
+            && echo 'WARN: Found near-quota datasets' \
             || echo 'OK: No near-quota datasets found'"
         ]);
     cmd
@@ -337,11 +337,11 @@ pub fn identify_datasets_with_less_than_300_gib_avail() -> Command {
     let mut cmd = std::process::Command::new("bash");
     cmd.env_clear().args([
         "-c",
-        "zfs list -Hp -o used,quota,name,avail,mountpoint |
-                egrep 'oxp|oxi' |
-                egrep -v 'none|crucible' |
-                awk '$4 < (300 * (1024^3)) { any=1; print } END { exit !any }'
-            && echo 'WARN: Found low-space datasets'
+        "zfs list -Hp -o used,quota,name,avail,mountpoint | \
+                egrep 'oxp|oxi' | \
+                egrep -v 'none|crucible' | \
+                awk '$4 < (300 * (1024^3)) { any=1; print } END { exit !any }' \
+            && echo 'WARN: Found low-space datasets' \
             || echo 'OK: No low-space datasets found'",
     ]);
     cmd
@@ -351,9 +351,9 @@ pub fn dimm_check() -> Command {
     let mut cmd = std::process::Command::new("bash");
     cmd.env_clear().args([
         "-c",
-        "prtconf -m |
-                grep -v -e 1036271 -e 2084847
-            && echo 'WARN: Unexpected quantity of system memory'
+        "prtconf -m | \
+                grep -v -e 1036271 -e 2084847 \
+            && echo 'WARN: Unexpected quantity of system memory' \
             || echo 'OK: Found expected quantity of system memory'",
     ]);
     cmd
