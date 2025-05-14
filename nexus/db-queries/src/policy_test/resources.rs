@@ -172,12 +172,12 @@ pub async fn make_resources(
         LookupType::ById(loopback_address_id.into_untyped_uuid()),
     ));
 
-    let webhook_event_id =
+    let webhook_alert_id =
         "31cb17da-4164-4cbf-b9a3-b3e4a687c08b".parse().unwrap();
     builder.new_resource(authz::Alert::new(
         authz::FLEET,
-        webhook_event_id,
-        LookupType::ById(webhook_event_id.into_untyped_uuid()),
+        webhook_alert_id,
+        LookupType::ById(webhook_alert_id.into_untyped_uuid()),
     ));
 
     make_webhook_rx(&mut builder).await;

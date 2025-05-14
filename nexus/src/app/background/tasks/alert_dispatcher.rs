@@ -136,7 +136,7 @@ impl AlertDispatcher {
         while let Some(p) = paginator.next() {
             let batch = self
                 .datastore
-                .webhook_glob_list_reprocessable(opctx, &p.current_pagparams())
+                .alert_glob_list_reprocessable(opctx, &p.current_pagparams())
                 .await
                 .map_err(|e| {
                     e.internal_context("failed to list outdated webhook globs")
@@ -154,7 +154,7 @@ impl AlertDispatcher {
             for glob in batch {
                 let result = self
                     .datastore
-                    .webhook_glob_reprocess(opctx, &glob)
+                    .alert_glob_reprocess(opctx, &glob)
                     .await
                     .map_err(|e| {
                         globs_failed += 1;
@@ -203,13 +203,13 @@ impl AlertDispatcher {
         // Select the next event that has yet to be dispatched in order of
         // creation, until there are none left in need of dispatching.
         while let Some(event) =
-            self.datastore.webhook_event_select_next_for_dispatch(opctx).await?
+            self.datastore.alert_select_next_for_dispatch(opctx).await?
         {
             slog::trace!(
                 &opctx.log,
                 "dispatching webhook event...";
-                "event_id" => ?event.id(),
-                "event_class" => %event.event_class,
+                "alert_id" => ?event.id(),
+                "alert_class" => %event.alert_class,
             );
 
             // Okay, we found an event that needs to be dispatched. Next, get
@@ -217,7 +217,7 @@ impl AlertDispatcher {
             // create delivery records for them.
             let rxs = match self
                 .datastore
-                .webhook_rx_list_subscribed_to_event(&opctx, event.event_class)
+                .webhook_rx_list_subscribed_to_event(&opctx, event.alert_class)
                 .await
             {
                 Ok(rxs) => rxs,
@@ -227,14 +227,14 @@ impl AlertDispatcher {
                     slog::error!(
                         &opctx.log,
                         "{MSG}";
-                        "event_id" => ?event.id(),
-                        "event_class" => %event.event_class,
+                        "alert_id" => ?event.id(),
+                        "alert_class" => %event.alert_class,
                         "error" => &error,
                     );
                     status.errors.push(format!(
                         "{MSG} {} ({}): {error}",
                         event.id(),
-                        event.event_class
+                        event.alert_class
                     ));
                     // We weren't able to find receivers for this event, so
                     // *don't* mark it as dispatched --- it's someone else's
@@ -256,8 +256,8 @@ impl AlertDispatcher {
                         "webhook receiver is subscribed to event";
                         "rx_name" => %rx.name(),
                         "rx_id" => ?rx.id(),
-                        "event_id" => ?event.id(),
-                        "event_class" => %event.event_class,
+                        "alert_id" => ?event.id(),
+                        "alert_class" => %event.alert_class,
                         "glob" => ?sub.glob,
                     );
                     WebhookDelivery::new(
@@ -280,8 +280,8 @@ impl AlertDispatcher {
                         slog::error!(
                             &opctx.log,
                             "failed to insert webhook deliveries";
-                            "event_id" => ?event.id(),
-                            "event_class" => %event.event_class,
+                            "alert_id" => ?event.id(),
+                            "alert_class" => %event.alert_class,
                             "error" => %error,
                             "num_subscribed" => ?subscribed,
                         );
@@ -289,7 +289,7 @@ impl AlertDispatcher {
                             "failed to insert {subscribed} webhook deliveries \
                              for event {} ({}): {error}",
                             event.id(),
-                            event.event_class,
+                            event.alert_class,
                         ));
                         // We weren't able to create deliveries for this event, so
                         // *don't* mark it as dispatched.
@@ -297,15 +297,15 @@ impl AlertDispatcher {
                     }
                 };
                 status.dispatched.push(WebhookDispatched {
-                    event_id: event.id(),
+                    alert_id: event.id(),
                     subscribed,
                     dispatched,
                 });
                 slog::debug!(
                     &opctx.log,
                     "dispatched webhook event";
-                    "event_id" => ?event.id(),
-                    "event_class" => %event.event_class,
+                    "alert_id" => ?event.id(),
+                    "alert_class" => %event.alert_class,
                     "num_subscribed" => subscribed,
                     "num_dispatched" => dispatched,
                 );
@@ -314,8 +314,8 @@ impl AlertDispatcher {
                 slog::debug!(
                     &opctx.log,
                     "no webhook receivers subscribed to event";
-                    "event_id" => ?event.id(),
-                    "event_class" => %event.event_class,
+                    "alert_id" => ?event.id(),
+                    "alert_class" => %event.alert_class,
                 );
                 status.no_receivers.push(event.id());
                 0
@@ -323,14 +323,14 @@ impl AlertDispatcher {
 
             if let Err(error) = self
                 .datastore
-                .webhook_event_mark_dispatched(&opctx, &event.id(), subscribed)
+                .alert_mark_dispatched(&opctx, &event.id(), subscribed)
                 .await
             {
                 slog::error!(
                     &opctx.log,
                     "failed to mark webhook event as dispatched";
-                    "event_id" => ?event.id(),
-                    "event_class" => %event.event_class,
+                    "alert_id" => ?event.id(),
+                    "alert_class" => %event.alert_class,
                     "error" => %error,
                     "num_subscribed" => subscribed,
                 );
@@ -338,7 +338,7 @@ impl AlertDispatcher {
                     "failed to mark webhook event {} ({}) as dispatched: \
                      {error}",
                     event.id(),
-                    event.event_class,
+                    event.alert_class,
                 ));
             }
         }
@@ -448,11 +448,11 @@ mod test {
         // to publishing a webhook event) because `webhook_event_publish` also
         // activates the dispatcher task, and for this test, we would like to be
         // responsible for activating it.
-        let event_id = AlertUuid::new_v4();
+        let alert_id = AlertUuid::new_v4();
         datastore
-            .webhook_event_create(
+            .alert_create(
                 &opctx,
-                event_id,
+                alert_id,
                 db::model::AlertClass::TestQuuxBar,
                 serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
             )
@@ -491,9 +491,9 @@ mod test {
                     sub.glob.as_deref(),
                     Some(GLOB_PATTERN),
                     "found a subscription to {} that was not from our glob: {sub:?}",
-                    sub.event_class,
+                    sub.alert_class,
                 );
-                sub.event_class
+                sub.alert_class
             }).collect::<std::collections::HashSet<_>>();
         assert_eq!(subscriptions.len(), 2);
         assert!(
@@ -546,7 +546,7 @@ mod test {
             deliveries.extend(batch);
         }
         let event =
-            deliveries.iter().find(|(d, _, _)| d.event_id == event_id.into());
+            deliveries.iter().find(|(d, _, _)| d.alert_id == alert_id.into());
         assert!(
             dbg!(event).is_some(),
             "delivery entry for dispatched event must exist"

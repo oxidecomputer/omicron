@@ -25856,11 +25856,11 @@
               "$ref": "#/components/schemas/WebhookDeliveryAttempt"
             }
           },
-          "event_class": {
+          "alert_class": {
             "description": "The event class.",
             "type": "string"
           },
-          "event_id": {
+          "alert_id": {
             "description": "The UUID of the event.",
             "allOf": [
               {
@@ -25905,8 +25905,8 @@
         },
         "required": [
           "attempts",
-          "event_class",
-          "event_id",
+          "alert_class",
+          "alert_id",
           "id",
           "state",
           "time_started",

@@ -122,7 +122,7 @@
 //! of a probe.
 //!
 //! [RFD 538]: https://rfd.shared.oxide.computer/538
-//! [event classes]: https://rfd.shared.oxide.computer/rfd/538#_event_classes
+//! [event classes]: https://rfd.shared.oxide.computer/rfd/538#_alert_classes
 //!
 //! [^1]: Read _Snow Crash_, if you haven't already.
 //! [^2]: Presently, all weebhook receivers have the fleet.viewer role, so
@@ -355,8 +355,8 @@ impl Nexus {
                         "rx_id" => ?authz_rx.id(),
                         "rx_name" => %rx.name(),
                         "delivery_id" => ?delivery.id,
-                        "event_id" => ?event.id(),
-                        "event_class" => %event.event_class,
+                        "alert_id" => ?event.id(),
+                        "alert_class" => %event.alert_class,
                     );
                     WebhookDelivery::new(
                         &event.id(),
@@ -523,7 +523,7 @@ impl<'a> ReceiverClient<'a> {
         &mut self,
         opctx: &OpContext,
         delivery: &WebhookDelivery,
-        event_class: AlertClass,
+        alert_class: AlertClass,
         data: &serde_json::Value,
     ) -> Result<WebhookDeliveryAttempt, anyhow::Error> {
         const HDR_DELIVERY_ID: HeaderName =
@@ -539,8 +539,8 @@ impl<'a> ReceiverClient<'a> {
 
         #[derive(serde::Serialize, Debug)]
         struct Payload<'a> {
-            event_class: AlertClass,
-            event_id: AlertUuid,
+            alert_class: AlertClass,
+            alert_id: AlertUuid,
             data: &'a serde_json::Value,
             delivery: DeliveryMetadata<'a>,
         }
@@ -557,8 +557,8 @@ impl<'a> ReceiverClient<'a> {
         let time_attempted = Utc::now();
         let sent_at = time_attempted.to_rfc3339();
         let payload = Payload {
-            event_class,
-            event_id: delivery.event_id.into(),
+            alert_class,
+            alert_id: delivery.alert_id.into(),
             data,
             delivery: DeliveryMetadata {
                 id: delivery.id.into(),
@@ -579,8 +579,8 @@ impl<'a> ReceiverClient<'a> {
                 slog::error!(
                     &opctx.log,
                     "webhook {MSG}";
-                    "event_id" => %delivery.event_id,
-                    "event_class" => %event_class,
+                    "alert_id" => %delivery.alert_id,
+                    "alert_class" => %alert_class,
                     "delivery_id" => %delivery.id,
                     "delivery_trigger" => %delivery.triggered_by,
                     "error" => %e,
@@ -605,8 +605,8 @@ impl<'a> ReceiverClient<'a> {
             .post(&self.rx.endpoint)
             .header(HDR_RX_ID, self.hdr_rx_id.clone())
             .header(HDR_DELIVERY_ID, delivery.id.to_string())
-            .header(HDR_EVENT_ID, delivery.event_id.to_string())
-            .header(HDR_EVENT_CLASS, event_class.to_string())
+            .header(HDR_EVENT_ID, delivery.alert_id.to_string())
+            .header(HDR_EVENT_CLASS, alert_class.to_string())
             .header(http::header::CONTENT_TYPE, "application/json");
 
         // For each secret assigned to this webhook, calculate the HMAC and add a signature header.
@@ -627,8 +627,8 @@ impl<'a> ReceiverClient<'a> {
                 slog::error!(
                     &opctx.log,
                     "{MSG}";
-                    "event_id" => %delivery.event_id,
-                    "event_class" => %event_class,
+                    "alert_id" => %delivery.alert_id,
+                    "alert_class" => %alert_class,
                     "delivery_id" => %delivery.id,
                     "delivery_trigger" => %delivery.triggered_by,
                     "error" => %e,
@@ -649,8 +649,8 @@ impl<'a> ReceiverClient<'a> {
                 slog::error!(
                     &opctx.log,
                     "{MSG}";
-                    "event_id" => %delivery.event_id,
-                    "event_class" => %event_class,
+                    "alert_id" => %delivery.alert_id,
+                    "alert_class" => %alert_class,
                     "delivery_id" => %delivery.id,
                     "delivery_trigger" => %delivery.triggered_by,
                     "error" => %e,
@@ -662,8 +662,8 @@ impl<'a> ReceiverClient<'a> {
                     slog::warn!(
                         &opctx.log,
                         "webhook receiver endpoint returned an HTTP error";
-                        "event_id" => %delivery.event_id,
-                        "event_class" => %event_class,
+                        "alert_id" => %delivery.alert_id,
+                        "alert_class" => %alert_class,
                         "delivery_id" => %delivery.id,
                         "delivery_trigger" => %delivery.triggered_by,
                         "response_status" => ?status,
@@ -686,8 +686,8 @@ impl<'a> ReceiverClient<'a> {
                     slog::warn!(
                         &opctx.log,
                         "webhook delivery request failed";
-                        "event_id" => %delivery.event_id,
-                        "event_class" => %event_class,
+                        "alert_id" => %delivery.alert_id,
+                        "alert_class" => %alert_class,
                         "delivery_id" => %delivery.id,
                         "delivery_trigger" => %delivery.triggered_by,
                         "error" => %e,
@@ -701,8 +701,8 @@ impl<'a> ReceiverClient<'a> {
                     slog::debug!(
                         &opctx.log,
                         "webhook event delivered successfully";
-                        "event_id" => %delivery.event_id,
-                        "event_class" => %event_class,
+                        "alert_id" => %delivery.alert_id,
+                        "alert_class" => %alert_class,
                         "delivery_id" => %delivery.id,
                         "delivery_trigger" => %delivery.triggered_by,
                         "response_status" => ?status,
@@ -713,8 +713,8 @@ impl<'a> ReceiverClient<'a> {
                     slog::warn!(
                         &opctx.log,
                         "webhook receiver endpoint returned an HTTP error";
-                        "event_id" => %delivery.event_id,
-                        "event_class" => %event_class,
+                        "alert_id" => %delivery.alert_id,
+                        "alert_class" => %alert_class,
                         "delivery_id" => %delivery.id,
                         "delivery_trigger" => %delivery.triggered_by,
                         "response_status" => ?status,

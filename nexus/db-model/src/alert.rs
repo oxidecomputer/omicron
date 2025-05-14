@@ -33,7 +33,7 @@ pub struct Alert {
     pub time_dispatched: Option<DateTime<Utc>>,
 
     /// The class of this event.
-    pub event_class: AlertClass,
+    pub alert_class: AlertClass,
 
     /// The event's data payload.
     pub event: serde_json::Value,

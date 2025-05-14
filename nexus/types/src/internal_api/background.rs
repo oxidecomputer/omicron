@@ -486,7 +486,7 @@ pub enum AlertGlobStatus {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct WebhookDispatched {
-    pub event_id: AlertUuid,
+    pub alert_id: AlertUuid,
     pub subscribed: usize,
     pub dispatched: usize,
 }
@@ -511,7 +511,7 @@ pub struct WebhookRxDeliveryStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookDeliveryFailure {
     pub delivery_id: WebhookDeliveryUuid,
-    pub event_id: AlertUuid,
+    pub alert_id: AlertUuid,
     pub attempt: usize,
     pub result: views::WebhookDeliveryAttemptResult,
     pub response_status: Option<u16>,

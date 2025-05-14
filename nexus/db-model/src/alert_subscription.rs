@@ -21,7 +21,7 @@ use std::str::FromStr;
 #[diesel(table_name = alert_subscription)]
 pub struct AlertRxSubscription {
     pub rx_id: DbTypedUuid<AlertReceiverKind>,
-    pub event_class: AlertClass,
+    pub alert_class: AlertClass,
     pub glob: Option<String>,
     pub time_created: DateTime<Utc>,
 }
@@ -223,20 +223,20 @@ impl AlertGlob {
 }
 
 impl AlertRxSubscription {
-    pub fn exact(rx_id: AlertReceiverUuid, event_class: AlertClass) -> Self {
+    pub fn exact(rx_id: AlertReceiverUuid, alert_class: AlertClass) -> Self {
         Self {
             rx_id: DbTypedUuid(rx_id),
-            event_class,
+            alert_class,
             glob: None,
             time_created: Utc::now(),
         }
     }
 
-    pub fn for_glob(glob: &AlertRxGlob, event_class: AlertClass) -> Self {
+    pub fn for_glob(glob: &AlertRxGlob, alert_class: AlertClass) -> Self {
         Self {
             rx_id: glob.rx_id,
             glob: Some(glob.glob.glob.clone()),
-            event_class,
+            alert_class,
             time_created: Utc::now(),
         }
     }

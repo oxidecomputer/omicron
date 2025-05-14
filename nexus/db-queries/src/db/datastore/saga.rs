@@ -450,9 +450,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_create_event_idempotent() {
+    async fn test_create_alert_idempotent() {
         // Test setup
-        let logctx = dev::test_setup_log("test_create_event_idempotent");
+        let logctx = dev::test_setup_log("test_create_alert_idempotent");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let datastore = db.datastore();
         let node_cx = SagaTestContext::new(SecId(Uuid::new_v4()));
@@ -494,7 +494,7 @@ mod test {
     #[tokio::test]
     async fn test_update_state_idempotent() {
         // Test setup
-        let logctx = dev::test_setup_log("test_create_event_idempotent");
+        let logctx = dev::test_setup_log("test_create_alert_idempotent");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let datastore = db.datastore();
         let node_cx = SagaTestContext::new(SecId(Uuid::new_v4()));

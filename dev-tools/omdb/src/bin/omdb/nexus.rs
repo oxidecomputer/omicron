@@ -2451,9 +2451,9 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
             dispatched: usize,
         }
         let table_rows = dispatched.iter().map(
-            |&WebhookDispatched { event_id, subscribed, dispatched }| {
+            |&WebhookDispatched { alert_id, subscribed, dispatched }| {
                 DispatchedRow {
-                    event: event_id.into_untyped_uuid(),
+                    event: alert_id.into_untyped_uuid(),
                     subscribed,
                     dispatched,
                 }
@@ -2621,7 +2621,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
             let table_rows = failed_deliveries.into_iter().map(
                 |WebhookDeliveryFailure {
                      delivery_id,
-                     event_id,
+                     alert_id,
                      attempt,
                      result,
                      response_status,
@@ -2630,7 +2630,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
                     // Turn these into untyped `Uuid`s so that the Display impl
                     // doesn't include the UUID kind in the table.
                     delivery: delivery_id.into_untyped_uuid(),
-                    event: event_id.into_untyped_uuid(),
+                    event: alert_id.into_untyped_uuid(),
                     attempt,
                     result,
                     status: response_status,

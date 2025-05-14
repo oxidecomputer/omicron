@@ -41,7 +41,7 @@ pub struct WebhookDelivery {
 
     /// ID of the event dispatched to this receiver (foreign key into
     /// `webhook_event`).
-    pub event_id: DbTypedUuid<AlertKind>,
+    pub alert_id: DbTypedUuid<AlertKind>,
 
     /// ID of the receiver to which this event is dispatched (foreign key into
     /// `webhook_rx`).
@@ -69,13 +69,13 @@ pub struct WebhookDelivery {
 
 impl WebhookDelivery {
     pub fn new(
-        event_id: &AlertUuid,
+        alert_id: &AlertUuid,
         rx_id: &AlertReceiverUuid,
         triggered_by: AlertDeliveryTrigger,
     ) -> Self {
         Self {
             id: WebhookDeliveryUuid::new_v4().into(),
-            event_id: (*event_id).into(),
+            alert_id: (*alert_id).into(),
             rx_id: (*rx_id).into(),
             triggered_by,
             attempts: SqlU8::new(0),
@@ -97,7 +97,7 @@ impl WebhookDelivery {
             // There's a singleton entry in the `webhook_event` table for
             // probes, so that we can reference a real event ID but need not
             // create a bunch of duplicate empty events every time a probe is sent.
-            event_id: AlertUuid::from_untyped_uuid(Alert::PROBE_ALERT_ID)
+            alert_id: AlertUuid::from_untyped_uuid(Alert::PROBE_ALERT_ID)
                 .into(),
             rx_id: (*rx_id).into(),
             triggered_by: AlertDeliveryTrigger::Probe,
@@ -112,14 +112,14 @@ impl WebhookDelivery {
 
     pub fn to_api_delivery(
         &self,
-        event_class: AlertClass,
+        alert_class: AlertClass,
         attempts: &[WebhookDeliveryAttempt],
     ) -> views::WebhookDelivery {
         let mut view = views::WebhookDelivery {
             id: self.id.into_untyped_uuid(),
             webhook_id: self.rx_id.into(),
-            event_class: event_class.as_str().to_owned(),
-            event_id: self.event_id.into(),
+            alert_class: alert_class.as_str().to_owned(),
+            alert_id: self.alert_id.into(),
             state: self.state.into(),
             trigger: self.triggered_by.into(),
             attempts: attempts

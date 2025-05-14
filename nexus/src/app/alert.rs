@@ -32,7 +32,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::WebhookDeliveryUuid;
 
 impl Nexus {
-    /// Publish a new webhook event, with the provided `id`, `event_class`, and
+    /// Publish a new alert, with the provided `id`, `alert_class`, and
     /// JSON data payload.
     ///
     /// If this method returns `Ok`, the event has been durably recorded in
@@ -41,42 +41,42 @@ impl Nexus {
     /// event to receivers.  However, if (for whatever reason) this Nexus fails
     /// to do that, the event remains durably in the database to be dispatched
     /// and delivered by someone else.
-    pub async fn webhook_event_publish(
+    pub async fn alert_publish(
         &self,
         opctx: &OpContext,
         id: AlertUuid,
-        event_class: AlertClass,
+        alert_class: AlertClass,
         event: serde_json::Value,
     ) -> Result<Alert, Error> {
-        let event = self
+        let alert = self
             .datastore()
-            .webhook_event_create(opctx, id, event_class, event)
+            .alert_create(opctx, id, alert_class, event)
             .await?;
         slog::debug!(
             &opctx.log,
-            "enqueued webhook event";
-            "event_id" => ?id,
-            "event_class" => %event.event_class,
-            "time_created" => ?event.identity.time_created,
+            "published alert";
+            "alert_id" => ?id,
+            "alert_class" => %alert.alert_class,
+            "time_created" => ?alert.identity.time_created,
         );
 
-        // Once the event has been inserted, activate the dispatcher task to
+        // Once the alert has been inserted, activate the dispatcher task to
         // ensure its propagated to receivers.
         self.background_tasks.task_alert_dispatcher.activate();
 
-        Ok(event)
+        Ok(alert)
     }
 
     //
     // Lookups
     //
 
-    pub fn webhook_receiver_lookup<'a>(
+    pub fn alert_receiver_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        webhook_selector: params::AlertReceiverSelector,
+        rx_selector: params::AlertReceiverSelector,
     ) -> LookupResult<lookup::AlertReceiver<'a>> {
-        match webhook_selector.receiver {
+        match rx_selector.receiver {
             NameOrId::Id(id) => {
                 let webhook = LookupPath::new(opctx, &self.db_datastore)
                     .alert_receiver_id(AlertReceiverUuid::from_untyped_uuid(
@@ -92,20 +92,20 @@ impl Nexus {
         }
     }
 
-    pub fn webhook_event_lookup<'a>(
+    pub fn alert_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        params::AlertSelector { alert_id: event_id }: params::AlertSelector,
+        params::AlertSelector { alert_id }: params::AlertSelector,
     ) -> LookupResult<lookup::Alert<'a>> {
         let event = LookupPath::new(opctx, &self.db_datastore)
-            .webhook_event_id(AlertUuid::from_untyped_uuid(event_id));
+            .alert_id(AlertUuid::from_untyped_uuid(alert_id));
         Ok(event)
     }
 
     //
-    // Event class API
+    // Alert class API
     //
-    pub async fn webhook_event_class_list(
+    pub async fn alert_class_list(
         &self,
         opctx: &OpContext,
         filter: params::AlertClassFilter,
@@ -114,11 +114,11 @@ impl Nexus {
         opctx
             .authorize(authz::Action::ListChildren, &authz::ALERT_CLASS_LIST)
             .await?;
-        Self::actually_list_event_classes(filter, pagparams)
+        Self::actually_list_alert_classes(filter, pagparams)
     }
 
     // This is factored out to avoid having to make a whole Nexus to test it.
-    fn actually_list_event_classes(
+    fn actually_list_alert_classes(
         params::AlertClassFilter { filter }: params::AlertClassFilter,
         pagparams: DataPageParams<'_, params::AlertClassPage>,
     ) -> ListResultVec<views::AlertClass> {
@@ -135,7 +135,7 @@ impl Nexus {
                 // regex for a glob is correct.
                 Error::InternalError {
                     internal_message: format!(
-                        "valid event class globs ({sub:?}) should always \
+                        "valid alert class globs ({sub:?}) should always \
                          produce a valid regex, and yet: {e:?}"
                     ),
                 }
@@ -192,16 +192,16 @@ impl Nexus {
     // Receiver configuration API methods
     //
 
-    pub async fn webhook_receiver_list(
+    pub async fn alert_receiver_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<WebhookReceiverConfig> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        self.datastore().webhook_rx_list(opctx, pagparams).await
+        self.datastore().alert_rx_list(opctx, pagparams).await
     }
 
-    pub async fn webhook_receiver_config_fetch(
+    pub async fn alert_receiver_config_fetch(
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
@@ -216,7 +216,7 @@ impl Nexus {
     // Receiver subscription API methods
     //
 
-    pub async fn webhook_receiver_subscription_add(
+    pub async fn alert_receiver_subscription_add(
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
@@ -233,7 +233,7 @@ impl Nexus {
         Ok(views::AlertSubscriptionCreated { subscription })
     }
 
-    pub async fn webhook_receiver_subscription_remove(
+    pub async fn alert_receiver_subscription_remove(
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
@@ -249,7 +249,7 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn webhook_receiver_event_resend(
+    pub async fn alert_receiver_resend(
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
@@ -260,13 +260,13 @@ impl Nexus {
         let datastore = self.datastore();
 
         let is_subscribed = datastore
-            .webhook_rx_is_subscribed_to_event(opctx, &authz_rx, &authz_event)
+            .alert_rx_is_subscribed_to_alert(opctx, &authz_rx, &authz_event)
             .await?;
         if !is_subscribed {
             return Err(Error::invalid_request(format!(
-                "cannot resend event: receiver is not subscribed to the '{}' \
-                 event class",
-                event.event_class,
+                "cannot resend alert: receiver is not subscribed to the '{}' \
+                 alert class",
+                event.alert_class,
             )));
         }
 
@@ -282,10 +282,10 @@ impl Nexus {
         {
             slog::error!(
                 &opctx.log,
-                "failed to create new delivery to resend webhook event";
+                "failed to create new delivery to resend webhook alert";
                 "rx_id" => ?authz_rx.id(),
-                "event_id" => ?authz_event.id(),
-                "event_class" => %event.event_class,
+                "alert_id" => ?authz_event.id(),
+                "alert_class" => %event.alert_class,
                 "delivery_id" => ?delivery_id,
                 "error" => %e,
             );
@@ -296,8 +296,8 @@ impl Nexus {
             &opctx.log,
             "resending webhook event";
             "rx_id" => ?authz_rx.id(),
-            "event_id" => ?authz_event.id(),
-            "event_class" => %event.event_class,
+            "alert_id" => ?authz_event.id(),
+            "alert_class" => %event.alert_class,
             "delivery_id" => ?delivery_id,
         );
 
@@ -313,7 +313,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     #[test]
-    fn test_event_class_list() {
+    fn test_alert_class_list() {
         #[track_caller]
         fn list(
             filter: Option<&str>,
@@ -326,7 +326,7 @@ mod tests {
             let marker = dbg!(last_seen).map(|last_seen| {
                 params::AlertClassPage { last_seen: last_seen.to_string() }
             });
-            let result = Nexus::actually_list_event_classes(
+            let result = Nexus::actually_list_alert_classes(
                 filter,
                 DataPageParams {
                     marker: marker.as_ref(),

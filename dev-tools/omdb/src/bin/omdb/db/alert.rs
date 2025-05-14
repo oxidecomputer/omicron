@@ -258,7 +258,7 @@ async fn cmd_db_webhook_rx_list(
         ..first_page(fetch_opts.fetch_limit)
     };
     let rxs = datastore
-        .webhook_rx_list(opctx, &PaginatedBy::Id(pagparams))
+        .alert_rx_list(opctx, &PaginatedBy::Id(pagparams))
         .await
         .with_context(ctx)?;
 
@@ -432,14 +432,14 @@ async fn cmd_db_webhook_rx_info(
     let exact = subscription_dsl::alert_subscription
         .filter(subscription_dsl::rx_id.eq(id.into_untyped_uuid()))
         .filter(subscription_dsl::glob.is_null())
-        .select(subscription_dsl::event_class)
+        .select(subscription_dsl::alert_class)
         .load_async::<AlertClass>(&*conn)
         .await;
     match exact {
         Ok(exact) => {
             println!("    {EXACT:>WIDTH$}: {}", exact.len());
-            for event_class in exact {
-                println!("    - {event_class}");
+            for alert_class in exact {
+                println!("    - {alert_class}");
             }
         }
         Err(e) => {
@@ -476,14 +476,14 @@ async fn cmd_db_webhook_rx_info(
                 let exact = subscription_dsl::alert_subscription
                     .filter(subscription_dsl::rx_id.eq(id.into_untyped_uuid()))
                     .filter(subscription_dsl::glob.eq(glob))
-                    .select(subscription_dsl::event_class)
+                    .select(subscription_dsl::alert_class)
                     .load_async::<AlertClass>(&*conn)
                     .await;
                 match exact {
                     Ok(exact) => {
                         println!("    {GLOB_EXACT:>WIDTH$}: {}", exact.len());
-                        for event_class in exact {
-                            println!("      - {event_class}")
+                        for alert_class in exact {
+                            println!("      - {alert_class}")
                         }
                     }
                     Err(e) => eprintln!(
@@ -553,7 +553,7 @@ async fn cmd_db_webhook_delivery_list(
     }
 
     if let Some(id) = event {
-        query = query.filter(delivery_dsl::event_id.eq(id.into_untyped_uuid()));
+        query = query.filter(delivery_dsl::alert_id.eq(id.into_untyped_uuid()));
     }
 
     let ctx = || "listing webhook deliveries";
@@ -571,7 +571,7 @@ async fn cmd_db_webhook_delivery_list(
     struct WithEventId<T: Tabled> {
         #[tabled(inline)]
         inner: T,
-        event_id: Uuid,
+        alert_id: Uuid,
     }
 
     impl<'d, T> From<&'d WebhookDelivery> for WithEventId<T>
@@ -579,7 +579,7 @@ async fn cmd_db_webhook_delivery_list(
         T: From<&'d WebhookDelivery> + Tabled,
     {
         fn from(d: &'d WebhookDelivery) -> Self {
-            Self { event_id: d.event_id.into_untyped_uuid(), inner: T::from(d) }
+            Self { alert_id: d.alert_id.into_untyped_uuid(), inner: T::from(d) }
         }
     }
 
@@ -639,7 +639,7 @@ impl From<&'_ WebhookDelivery> for DeliveryRow {
             // event and receiver UUIDs are toggled on and off based on
             // whether or not we are filtering by receiver and event, so
             // ignore them here.
-            event_id: _,
+            alert_id: _,
             rx_id: _,
             attempts,
             state,
@@ -747,7 +747,7 @@ async fn cmd_db_webhook_delivery_info(
 
     let WebhookDelivery {
         id,
-        event_id,
+        alert_id,
         rx_id,
         triggered_by,
         attempts,
@@ -759,7 +759,7 @@ async fn cmd_db_webhook_delivery_info(
     } = delivery;
     println!("\n{:=<80}", "== DELIVERY ");
     println!("    {ID:>WIDTH$}: {id}");
-    println!("    {EVENT_ID:>WIDTH$}: {event_id}");
+    println!("    {EVENT_ID:>WIDTH$}: {alert_id}");
     println!("    {RECEIVER_ID:>WIDTH$}: {rx_id}");
     println!("    {STATE:>WIDTH$}: {state}");
     println!("    {TRIGGER:>WIDTH$}: {triggered_by}");
@@ -945,7 +945,7 @@ async fn cmd_db_alert_list(
         fn from(event: &'_ Alert) -> Self {
             Self {
                 id: event.identity.id.into_untyped_uuid(),
-                class: event.event_class,
+                class: event.alert_class,
                 time_created: event.identity.time_created,
                 time_dispatched: event.time_dispatched,
                 dispatched: event.num_dispatched,
@@ -1009,7 +1009,7 @@ async fn cmd_db_alert_info(
     let Alert {
         identity: db::model::AlertIdentity { id, time_created, time_modified },
         time_dispatched,
-        event_class,
+        alert_class,
         event,
         num_dispatched,
     } = event;
@@ -1029,7 +1029,7 @@ async fn cmd_db_alert_info(
 
     println!("\n{:=<80}", "== ALERT ");
     println!("    {ID:>WIDTH$}: {id:?}");
-    println!("    {CLASS:>WIDTH$}: {event_class}");
+    println!("    {CLASS:>WIDTH$}: {alert_class}");
     println!("    {TIME_CREATED:>WIDTH$}: {time_created}");
     println!("    {TIME_MODIFIED:>WIDTH$}: {time_modified}");
     println!();

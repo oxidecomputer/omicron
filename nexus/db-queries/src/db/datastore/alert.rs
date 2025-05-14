@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! [`DataStore`] methods for webhook events and event delivery dispatching.
+//! [`DataStore`] methods for alerts and alert delivery dispatching.
 
 use super::DataStore;
 use crate::context::OpContext;
@@ -21,11 +21,11 @@ use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::{AlertUuid, GenericUuid};
 
 impl DataStore {
-    pub async fn webhook_event_create(
+    pub async fn alert_create(
         &self,
         opctx: &OpContext,
         id: AlertUuid,
-        event_class: AlertClass,
+        alert_class: AlertClass,
         event: serde_json::Value,
     ) -> CreateResult<Alert> {
         let conn = self.pool_connection_authorized(&opctx).await?;
@@ -33,7 +33,7 @@ impl DataStore {
             .values(Alert {
                 identity: AlertIdentity::new(id),
                 time_dispatched: None,
-                event_class,
+                alert_class,
                 event,
                 num_dispatched: 0,
             })
@@ -43,7 +43,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn webhook_event_select_next_for_dispatch(
+    pub async fn alert_select_next_for_dispatch(
         &self,
         opctx: &OpContext,
     ) -> Result<Option<Alert>, Error> {
@@ -58,30 +58,28 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn webhook_event_mark_dispatched(
+    pub async fn alert_mark_dispatched(
         &self,
         opctx: &OpContext,
-        event_id: &AlertUuid,
+        alert_id: &AlertUuid,
         subscribed: usize,
     ) -> UpdateResult<usize> {
         let subscribed = i64::try_from(subscribed).map_err(|_| {
-            // that is way too many webhook receivers!
-            Error::internal_error(
-                "webhook event subscribed count exceeds i64::MAX",
-            )
+            // that is way too many alert receivers!
+            Error::internal_error("alert subscribed count exceeds i64::MAX")
         })?;
         let conn = self.pool_connection_authorized(&opctx).await?;
         diesel::update(alert_dsl::alert)
-            .filter(alert_dsl::id.eq(event_id.into_untyped_uuid()))
+            .filter(alert_dsl::id.eq(alert_id.into_untyped_uuid()))
             .filter(
-                // Update the event record if one of the following is true:
+                // Update the alert record if one of the following is true:
                 // - The `time_dispatched`` field has not already been set, or
                 // - `time_dispatched` IS set, but `num_dispatched` is less than
                 //   the number of deliveries we believe has been dispatched.
                 //   This may be the case if a webhook receiver which is
-                //   subscribed to this event was added concurrently with
-                //   another Nexus' dispatching the event, and we dispatched the
-                //   event to that receiver but the other Nexus did not. In that
+                //   subscribed to this alert was added concurrently with
+                //   another Nexus' dispatching the alert, and we dispatched the
+                //   alert to that receiver but the other Nexus did not. In that
                 //   case, we would like to update the record to indicate the
                 //   correct number of subscribers.
                 alert_dsl::time_dispatched

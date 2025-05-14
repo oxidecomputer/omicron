@@ -1180,10 +1180,10 @@ pub struct WebhookDelivery {
     pub webhook_id: AlertReceiverUuid,
 
     /// The event class.
-    pub event_class: String,
+    pub alert_class: String,
 
     /// The UUID of the event.
-    pub event_id: AlertUuid,
+    pub alert_id: AlertUuid,
 
     /// The state of this delivery.
     pub state: AlertDeliveryState,

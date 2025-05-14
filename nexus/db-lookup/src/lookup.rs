@@ -526,7 +526,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type [`Alert`], identified by its UUID.
-    pub fn webhook_event_id<'b>(self, id: AlertUuid) -> Alert<'b>
+    pub fn alert_id<'b>(self, id: AlertUuid) -> Alert<'b>
     where
         'a: 'b,
     {

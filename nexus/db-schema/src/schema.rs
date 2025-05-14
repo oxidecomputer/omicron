@@ -2228,9 +2228,9 @@ table! {
 }
 
 table! {
-    alert_subscription (rx_id, event_class) {
+    alert_subscription (rx_id, alert_class) {
         rx_id -> Uuid,
-        event_class -> crate::enums::AlertClassEnum,
+        alert_class -> crate::enums::AlertClassEnum,
         glob -> Nullable<Text>,
         time_created -> Timestamptz,
     }
@@ -2262,7 +2262,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        event_class -> crate::enums::AlertClassEnum,
+        alert_class -> crate::enums::AlertClassEnum,
         event -> Jsonb,
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
@@ -2272,7 +2272,7 @@ table! {
 table! {
     webhook_delivery (id) {
         id -> Uuid,
-        event_id -> Uuid,
+        alert_id -> Uuid,
         rx_id -> Uuid,
         triggered_by -> crate::enums::AlertDeliveryTriggerEnum,
         attempts -> Int2,
@@ -2288,7 +2288,7 @@ allow_tables_to_appear_in_same_query!(alert_receiver, webhook_delivery);
 joinable!(webhook_delivery -> alert_receiver (rx_id));
 allow_tables_to_appear_in_same_query!(webhook_delivery, alert);
 allow_tables_to_appear_in_same_query!(webhook_delivery_attempt, alert);
-joinable!(webhook_delivery -> alert (event_id));
+joinable!(webhook_delivery -> alert (alert_id));
 
 table! {
     webhook_delivery_attempt (id) {

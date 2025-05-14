@@ -7822,11 +7822,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 direction: PaginationOrder::Ascending,
                 marker,
             };
-            let event_classes = nexus
-                .webhook_event_class_list(&opctx, filter, pag_params)
-                .await?;
+            let alert_classes =
+                nexus.alert_class_list(&opctx, filter, pag_params).await?;
             Ok(HttpResponseOk(ResultsPage::new(
-                event_classes,
+                alert_classes,
                 &EmptyScanParams {},
                 |class: &views::AlertClass, _| class.name.clone(),
             )?))
@@ -7856,7 +7855,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let paginated_by = name_or_id_pagination(&pagparams, scan_params)?;
 
             let rxs = nexus
-                .webhook_receiver_list(&opctx, &paginated_by)
+                .alert_receiver_list(&opctx, &paginated_by)
                 .await?
                 .into_iter()
                 .map(|webhook| {
@@ -7890,9 +7889,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let webhook_selector = path_params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
-            let webhook =
-                nexus.webhook_receiver_config_fetch(&opctx, rx).await?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
+            let webhook = nexus.alert_receiver_config_fetch(&opctx, rx).await?;
             Ok(HttpResponseOk(
                 views::WebhookReceiver::try_from(webhook)?.into(),
             ))
@@ -7940,7 +7938,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let webhook_selector = path_params.into_inner();
             let params = params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             nexus.webhook_receiver_update(&opctx, rx, params).await?;
 
             Ok(HttpResponseUpdatedNoContent())
@@ -7964,7 +7962,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
             let webhook_selector = path_params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             nexus.webhook_receiver_delete(&opctx, rx).await?;
 
             Ok(HttpResponseDeleted())
@@ -7991,10 +7989,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let webhook_selector = path_params.into_inner();
             let subscription = params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
 
             let subscription = nexus
-                .webhook_receiver_subscription_add(&opctx, rx, subscription)
+                .alert_receiver_subscription_add(&opctx, rx, subscription)
                 .await?;
 
             Ok(HttpResponseCreated(subscription))
@@ -8019,10 +8017,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let params::AlertSubscriptionSelector { receiver, subscription } =
                 path_params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, receiver)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, receiver)?;
 
             nexus
-                .webhook_receiver_subscription_remove(&opctx, rx, subscription)
+                .alert_receiver_subscription_remove(&opctx, rx, subscription)
                 .await?;
 
             Ok(HttpResponseDeleted())
@@ -8048,7 +8046,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let webhook_selector = path_params.into_inner();
             let probe_params = query_params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let result =
                 nexus.webhook_receiver_probe(&opctx, rx, probe_params).await?;
             Ok(HttpResponseOk(result))
@@ -8072,7 +8070,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
             let webhook_selector = query_params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let secrets = nexus
                 .webhook_receiver_secrets_list(&opctx, rx)
                 .await?
@@ -8103,7 +8101,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let params::WebhookSecretCreate { secret } = params.into_inner();
             let webhook_selector = query_params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let secret =
                 nexus.webhook_receiver_secret_add(&opctx, rx, secret).await?;
             Ok(HttpResponseCreated(secret))
@@ -8159,7 +8157,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let filter = filter.into_inner();
             let query = query.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let deliveries = nexus
                 .webhook_receiver_delivery_list(&opctx, rx, filter, &pag_params)
                 .await?;
@@ -8191,10 +8189,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let event_selector = path_params.into_inner();
             let webhook_selector = receiver.into_inner();
-            let event = nexus.webhook_event_lookup(&opctx, event_selector)?;
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let event = nexus.alert_lookup(&opctx, event_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let delivery_id =
-                nexus.webhook_receiver_event_resend(&opctx, rx, event).await?;
+                nexus.alert_receiver_resend(&opctx, rx, event).await?;
 
             Ok(HttpResponseCreated(views::AlertDeliveryId {
                 delivery_id: delivery_id.into_untyped_uuid(),

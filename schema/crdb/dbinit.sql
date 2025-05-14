@@ -5232,7 +5232,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert_subscription (
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
     -- An alert class to which the receiver is subscribed.
-    event_class omicron.public.alert_class NOT NULL,
+    alert_class omicron.public.alert_class NOT NULL,
     -- If this subscription is a concrete instantiation of a glob pattern, the
     -- value of the glob that created it (and, a foreign key into
     -- `webhook_rx_event_glob`). If the receiver is subscribed to this exact
@@ -5245,14 +5245,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert_subscription (
 
     time_created TIMESTAMPTZ NOT NULL,
 
-    PRIMARY KEY (rx_id, event_class)
+    PRIMARY KEY (rx_id, alert_class)
 );
 
 -- Look up all receivers subscribed to an alert class. This is used by
 -- the dispatcher to determine who is interested in a particular event.
 CREATE INDEX IF NOT EXISTS lookup_alert_rxs_for_class
 ON omicron.public.alert_subscription (
-    event_class
+    alert_class
 );
 
 -- Look up all exact event class subscriptions for a receiver.
@@ -5275,7 +5275,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     -- The class of event that this is.
-    event_class omicron.public.alert_class NOT NULL,
+    alert_class omicron.public.alert_class NOT NULL,
     -- Actual event data. The structure of this depends on the event class.
     event JSONB NOT NULL,
 
@@ -5298,7 +5298,7 @@ INSERT INTO omicron.public.alert (
     id,
     time_created,
     time_modified,
-    event_class,
+    alert_class,
     event,
     time_dispatched,
     num_dispatched
@@ -5353,7 +5353,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- UUID of this delivery.
     id UUID PRIMARY KEY,
     --- UUID of the event (foreign key into `omicron.public.webhook_event`).
-    event_id UUID NOT NULL,
+    alert_id UUID NOT NULL,
     -- UUID of the webhook receiver (foreign key into
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
@@ -5392,7 +5392,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
 -- re-delivery to be triggered multiple times.
 CREATE UNIQUE INDEX IF NOT EXISTS one_webhook_event_dispatch_per_rx
 ON omicron.public.webhook_delivery (
-    event_id, rx_id
+    alert_id, rx_id
 )
 WHERE
     triggered_by = 'event';
@@ -5400,13 +5400,13 @@ WHERE
 -- Index for looking up all webhook messages dispatched to a receiver ID
 CREATE INDEX IF NOT EXISTS lookup_webhook_delivery_dispatched_to_rx
 ON omicron.public.webhook_delivery (
-    rx_id, event_id
+    rx_id, alert_id
 );
 
 -- Index for looking up all delivery attempts for an event
 CREATE INDEX IF NOT EXISTS lookup_webhook_deliveries_for_event
 ON omicron.public.webhook_delivery (
-    event_id
+    alert_id
 );
 
 -- Index for looking up all currently in-flight webhook messages, and ordering

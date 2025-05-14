@@ -370,7 +370,7 @@ impl DataStore {
         Ok(updated.found)
     }
 
-    pub async fn webhook_rx_list(
+    pub async fn alert_rx_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -427,7 +427,7 @@ impl DataStore {
     // Subscriptions
     //
 
-    pub async fn webhook_rx_is_subscribed_to_event(
+    pub async fn alert_rx_is_subscribed_to_alert(
         &self,
         opctx: &OpContext,
         authz_rx: &authz::AlertReceiver,
@@ -455,30 +455,28 @@ impl DataStore {
             for glob in batch {
                 slog::debug!(
                     opctx.log,
-                    "reprocessing webhook glob subscription to checking if \
+                    "reprocessing alert glob subscription to check if \
                      receiver is subscribed to event";
                     "rx_id" => ?rx_id,
                     "glob" => ?glob.glob.glob,
                     "prior_version" => ?glob.schema_version,
                     "current_version" => %SCHEMA_VERSION,
                 );
-                self.webhook_glob_reprocess(opctx, &glob).await.map_err(
-                    |e| {
-                        e.internal_context(format!(
-                            "failed to reprocess glob {glob:?}"
-                        ))
-                    },
-                )?;
+                self.alert_glob_reprocess(opctx, &glob).await.map_err(|e| {
+                    e.internal_context(format!(
+                        "failed to reprocess glob {glob:?}"
+                    ))
+                })?;
             }
         }
 
-        let event_class = alert_dsl::alert
+        let alert_class = alert_dsl::alert
             .filter(alert_dsl::id.eq(authz_event.id().into_untyped_uuid()))
-            .select(alert_dsl::event_class)
+            .select(alert_dsl::alert_class)
             .single_value();
         subscription_dsl::alert_subscription
             .filter(subscription_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
-            .filter(subscription_dsl::event_class.nullable().eq(event_class))
+            .filter(subscription_dsl::alert_class.nullable().eq(alert_class))
             .select(subscription_dsl::rx_id)
             .first_async::<Uuid>(&*conn)
             .await
@@ -538,7 +536,7 @@ impl DataStore {
                 "unexpected database error: {error:#}"
             )),
         };
-        const LOG_MSG: &str = "unsubscribed webhook receiver";
+        const LOG_MSG: &str = "unsubscribed alert receiver";
         match subscription {
             AlertSubscriptionKind::Glob(ref glob) => {
                 // Deleting a glob subscription is performed in a transaction in
@@ -577,7 +575,7 @@ impl DataStore {
             AlertSubscriptionKind::Exact(class) => {
                 diesel::delete(subscription_dsl::alert_subscription)
                     .filter(subscription_dsl::rx_id.eq(rx_id))
-                    .filter(subscription_dsl::event_class.eq(class))
+                    .filter(subscription_dsl::alert_class.eq(class))
                     .execute_async(&*conn)
                     .await
                     .map_err(error_handler)?;
@@ -585,7 +583,7 @@ impl DataStore {
                     &opctx.log,
                     "{LOG_MSG}";
                     "rx_id" => %rx_id,
-                    "subscription_event_class" => %class,
+                    "subscription_alert_class" => %class,
                 );
             }
         }
@@ -607,7 +605,7 @@ impl DataStore {
         let exact = subscription_dsl::alert_subscription
             .filter(subscription_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
             .filter(subscription_dsl::glob.is_null())
-            .select(subscription_dsl::event_class)
+            .select(subscription_dsl::alert_class)
             .load_async::<AlertClass>(conn)
             .await
             .map_err(|e| {
@@ -661,10 +659,10 @@ impl DataStore {
                     "subscription" => ?result,
                 );
             }
-            AlertSubscriptionKind::Exact(event_class) => {
+            AlertSubscriptionKind::Exact(alert_class) => {
                 let subscription = AlertRxSubscription {
                     rx_id: rx_id.into(),
-                    event_class,
+                    alert_class,
                     glob: None,
                     time_created: chrono::Utc::now(),
                 };
@@ -719,7 +717,7 @@ impl DataStore {
             Ok(r) => r,
             Err(error) => {
                 const MSG: &str =
-                    "webhook glob subscription regex was not a valid regex";
+                    "alert glob subscription regex was not a valid regex";
                 slog::error!(
                     &opctx.log,
                     "{MSG}";
@@ -738,21 +736,21 @@ impl DataStore {
                 if regex.is_match(class.as_str()) {
                     slog::debug!(
                         &opctx.log,
-                        "webhook glob matches event class";
+                        "alert glob matches event class";
                         "rx_id" => ?glob.rx_id,
                         "glob" => ?glob.glob.glob,
                         "regex" => ?regex,
-                        "event_class" => %class,
+                        "alert_class" => %class,
                     );
                     Some(AlertRxSubscription::for_glob(&glob, *class))
                 } else {
                     slog::trace!(
                         &opctx.log,
-                        "webhook glob does not match event class";
+                        "alert glob does not match event class";
                         "rx_id" => ?glob.rx_id,
                         "glob" => ?glob.glob.glob,
                         "regex" => ?regex,
-                        "event_class" => %class,
+                        "alert_class" => %class,
                     );
                     None
                 }
@@ -778,24 +776,24 @@ impl DataStore {
     }
 
     /// List all webhook receivers whose event class subscription globs match
-    /// the provided `event_class`.
+    /// the provided `alert_class`.
     pub async fn webhook_rx_list_subscribed_to_event(
         &self,
         opctx: &OpContext,
-        event_class: AlertClass,
+        alert_class: AlertClass,
     ) -> Result<Vec<(AlertReceiver, AlertRxSubscription)>, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        Self::rx_list_subscribed_query(event_class)
+        Self::rx_list_subscribed_query(alert_class)
             .load_async::<(AlertReceiver, AlertRxSubscription)>(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     fn rx_list_subscribed_query(
-        event_class: AlertClass,
+        alert_class: AlertClass,
     ) -> impl RunnableQuery<(AlertReceiver, AlertRxSubscription)> {
         subscription_dsl::alert_subscription
-            .filter(subscription_dsl::event_class.eq(event_class))
+            .filter(subscription_dsl::alert_class.eq(alert_class))
             .order_by(subscription_dsl::rx_id.asc())
             .inner_join(
                 rx_dsl::alert_receiver
@@ -812,7 +810,7 @@ impl DataStore {
     // Glob reprocessing
     //
 
-    /// List webhook glob subscriptions for which new exact subscriptions have
+    /// List alert glob subscriptions for which new exact subscriptions have
     /// to be generated.
     ///
     /// This includes glob subscriptions that were just created and have no
@@ -820,9 +818,9 @@ impl DataStore {
     /// schema version.
     ///
     /// Such subscriptions will need to be reprocessed (by the
-    /// [`DataStore::webhook_glob_reprocess`] function), as event classes
+    /// [`DataStore::alert_glob_reprocess`] function), as event classes
     /// matching those globs may have been added in a later schema version.
-    pub async fn webhook_glob_list_reprocessable(
+    pub async fn alert_glob_list_reprocessable(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, (Uuid, String)>,
@@ -921,7 +919,7 @@ impl DataStore {
     /// dispatcher must ensure that all glob subscriptions are up-to-date before
     /// dispatching events, as a receiver with outdated globs may have a glob
     /// matching a new event class but no corresponding exact subscription yet.
-    pub async fn webhook_glob_reprocess(
+    pub async fn alert_glob_reprocess(
         &self,
         opctx: &OpContext,
         glob: &AlertRxGlob,
@@ -1037,7 +1035,7 @@ impl DataStore {
             } => {
                 slog::debug!(
                     opctx.log,
-                    "reprocessed outdated webhook glob";
+                    "reprocessed outdated alert glob subscription";
                     "rx_id" => ?glob.rx_id,
                     "glob" => ?glob.glob.glob,
                     "prev_version" => ?prev_version,
@@ -1049,7 +1047,8 @@ impl DataStore {
             AlertGlobStatus::AlreadyReprocessed => {
                 slog::trace!(
                     opctx.log,
-                    "outdated webhook glob was either already reprocessed or deleted";
+                    "outdated alert glob was either already reprocessed or\
+                     deleted";
                     "rx_id" => ?glob.rx_id,
                     "glob" => ?glob.glob.glob,
                     "prev_version" => ?glob.schema_version,
@@ -1205,26 +1204,22 @@ mod test {
     async fn create_event(
         datastore: &DataStore,
         opctx: &OpContext,
-        event_class: AlertClass,
+        alert_class: AlertClass,
     ) -> (authz::Alert, crate::db::model::Alert) {
         let id = AlertUuid::new_v4();
         datastore
-            .webhook_event_create(opctx, id, event_class, serde_json::json!({}))
+            .alert_create(opctx, id, alert_class, serde_json::json!({}))
             .await
             .expect("cant create ye event");
-        LookupPath::new(opctx, datastore)
-            .webhook_event_id(id)
-            .fetch()
-            .await
-            .expect(
+        LookupPath::new(opctx, datastore).alert_id(id).fetch().await.expect(
             "cant get ye event (i just created it, so this is extra weird?)",
         )
     }
 
     #[tokio::test]
-    async fn test_event_class_globs() {
+    async fn test_alert_class_globs() {
         // Test setup
-        let logctx = dev::test_setup_log("test_event_class_globs");
+        let logctx = dev::test_setup_log("test_alert_class_globs");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let mut all_rxs: Vec<WebhookReceiverConfig> = Vec::new();
@@ -1305,7 +1300,7 @@ mod test {
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
             let batch = datastore
-                .webhook_glob_list_reprocessable(opctx, &p.current_pagparams())
+                .alert_glob_list_reprocessable(opctx, &p.current_pagparams())
                 .await
                 .unwrap();
             paginator = p.found_batch(&batch, &|glob| {
@@ -1313,7 +1308,7 @@ mod test {
             });
             for glob in batch {
                 datastore
-                    .webhook_glob_reprocess(opctx, dbg!(&glob))
+                    .alert_glob_reprocess(opctx, dbg!(&glob))
                     .await
                     .unwrap();
             }
@@ -1323,17 +1318,17 @@ mod test {
             datastore: &DataStore,
             opctx: &OpContext,
             all_rxs: &Vec<WebhookReceiverConfig>,
-            event_class: AlertClass,
+            alert_class: AlertClass,
             matches: &[&WebhookReceiverConfig],
         ) {
             let subscribed = datastore
-                .webhook_rx_list_subscribed_to_event(opctx, event_class)
+                .webhook_rx_list_subscribed_to_event(opctx, alert_class)
                 .await
                 .unwrap()
                 .into_iter()
                 .map(|(rx, subscription)| {
                     eprintln!(
-                        "receiver is subscribed to event {event_class}:\n\t\
+                        "receiver is subscribed to event {alert_class}:\n\t\
                             rx: {} ({})\n\tsubscription: {subscription:?}",
                         rx.identity.name, rx.identity.id,
                     );
@@ -1344,7 +1339,7 @@ mod test {
             for WebhookReceiverConfig { rx, subscriptions, .. } in matches {
                 assert!(
                     subscribed.contains(&rx.identity),
-                    "expected {rx:?} to be subscribed to {event_class}\n\
+                    "expected {rx:?} to be subscribed to {alert_class}\n\
                      subscriptions: {subscriptions:?}"
                 );
             }
@@ -1359,7 +1354,7 @@ mod test {
             for WebhookReceiverConfig { rx, subscriptions, .. } in not_matches {
                 assert!(
                     !subscribed.contains(&rx.identity),
-                    "expected {rx:?} to not be subscribed to {event_class}\n\
+                    "expected {rx:?} to not be subscribed to {alert_class}\n\
                      subscriptions: {subscriptions:?}"
                 );
             }
@@ -1417,8 +1412,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn explain_event_class_glob() {
-        let logctx = dev::test_setup_log("explain_event_class_glob");
+    async fn explain_alert_class_glob() {
+        let logctx = dev::test_setup_log("explain_alert_class_glob");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
@@ -1462,21 +1457,17 @@ mod test {
             create_event(datastore, opctx, AlertClass::TestQuuxBar).await;
 
         let is_subscribed_foo = datastore
-            .webhook_rx_is_subscribed_to_event(opctx, &authz_rx, &authz_foo)
+            .alert_rx_is_subscribed_to_alert(opctx, &authz_rx, &authz_foo)
             .await;
         assert_eq!(is_subscribed_foo, Ok(false));
 
         let is_subscribed_foo_bar = datastore
-            .webhook_rx_is_subscribed_to_event(opctx, &authz_rx, &authz_foo_bar)
+            .alert_rx_is_subscribed_to_alert(opctx, &authz_rx, &authz_foo_bar)
             .await;
         assert_eq!(is_subscribed_foo_bar, Ok(true));
 
         let is_subscribed_quux_bar = datastore
-            .webhook_rx_is_subscribed_to_event(
-                opctx,
-                &authz_rx,
-                &authz_quux_bar,
-            )
+            .alert_rx_is_subscribed_to_alert(opctx, &authz_rx, &authz_quux_bar)
             .await;
         assert_eq!(is_subscribed_quux_bar, Ok(true));
 
