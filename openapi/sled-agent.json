@@ -3826,6 +3826,24 @@
               "type": {
                 "type": "string",
                 "enum": [
+                  "internal_disk_control_plane_request"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
                   "zpool_uuid_mismatch"
                 ]
               },
@@ -5494,6 +5512,14 @@
           "generation": {
             "$ref": "#/components/schemas/Generation"
           },
+          "remove_mupdate_override": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              }
+            ]
+          },
           "zones": {
             "$ref": "#/components/schemas/IdMapOmicronZoneConfig"
           }
@@ -7082,6 +7108,10 @@
         "format": "uuid"
       },
       "TypedUuidForInstanceKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForMupdateOverrideKind": {
         "type": "string",
         "format": "uuid"
       },

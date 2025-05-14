@@ -33,7 +33,7 @@ use crate::bootstrap::early_networking::{
 use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
-use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
+use crate::params::{DendriteAsic, OmicronZoneTypeExt};
 use crate::profile::*;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
@@ -102,7 +102,7 @@ use sled_agent_types::{
     sled::SWITCH_ZONE_BASEBOARD_FILE, time_sync::TimeSync,
     zone_bundle::ZoneBundleCause,
 };
-use sled_agent_zone_images::ZoneImageSourceResolver;
+use sled_agent_zone_images::{ZoneImageSourceResolver, ZoneImageZpools};
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
@@ -929,6 +929,7 @@ impl ServiceManager {
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
+        zone_image_resolver: ZoneImageSourceResolver,
     ) -> Self {
         Self::new_inner(
             log,
@@ -940,6 +941,7 @@ impl ServiceManager {
             switch_zone_maghemite_links,
             storage,
             zone_bundler,
+            zone_image_resolver,
             RealSystemApi::new(),
         )
     }
@@ -955,6 +957,7 @@ impl ServiceManager {
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
+        zone_image_resolver: ZoneImageSourceResolver,
         system_api: Box<dyn SystemApi>,
     ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
@@ -990,7 +993,7 @@ impl ServiceManager {
                     .switch_zone_bootstrap_ip,
                 storage,
                 zone_bundler,
-                zone_image_resolver: ZoneImageSourceResolver::new(),
+                zone_image_resolver,
                 ledger_directory_override: OnceLock::new(),
                 system_api,
             }),
@@ -1725,10 +1728,17 @@ impl ServiceManager {
             ZoneArgs::Switch(_) => &OmicronZoneImageSource::InstallDataset,
         };
         let all_disks = self.inner.storage.get_latest_disks().await;
-        let file_source = self
-            .inner
-            .zone_image_resolver
-            .file_source_for(image_source, &all_disks);
+        let zpools = ZoneImageZpools {
+            root: &all_disks.mount_config().root,
+            all_m2_zpools: all_disks.all_m2_zpools(),
+        };
+        let boot_zpool =
+            all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
+        let file_source = self.inner.zone_image_resolver.file_source_for(
+            image_source,
+            &zpools,
+            boot_zpool.as_ref(),
+        );
 
         let zone_type_str = match &request {
             ZoneArgs::Omicron(zone_config) => {
@@ -1741,7 +1751,7 @@ impl ServiceManager {
         let mut zone_builder = match self.inner.system_api.fake_install_dir() {
             None => ZoneBuilderFactory::new().builder(),
             Some(dir) => ZoneBuilderFactory::fake(
-                Some(&dir.as_str().to_string()),
+                Some(&dir.as_str()),
                 illumos_utils::fakes::zone::Zones::new(),
             )
             .builder(),
@@ -5141,6 +5151,7 @@ mod illumos_tests {
 
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_zone_images::ZoneImageZpools;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::{
         net::{Ipv6Addr, SocketAddrV6},
@@ -5342,6 +5353,7 @@ mod illumos_tests {
         log: slog::Logger,
         storage_test_harness: StorageManagerTestHarness,
         zone_bundler: ZoneBundler,
+        zone_image_resolver: ZoneImageSourceResolver,
         test_config: &'a TestConfig,
     }
 
@@ -5354,10 +5366,21 @@ mod illumos_tests {
                 Default::default(),
             );
 
+            let mut storage_manager = storage_test_harness.handle().clone();
+            let all_disks = storage_manager.get_latest_disks().await;
+            let (_, boot_zpool) = storage_manager.wait_for_boot_disk().await;
+            let zpools = ZoneImageZpools {
+                root: &all_disks.mount_config().root,
+                all_m2_zpools: all_disks.all_m2_zpools(),
+            };
+            let zone_image_resolver =
+                ZoneImageSourceResolver::new(&log, &zpools, &boot_zpool);
+
             LedgerTestHelper {
                 log,
                 storage_test_harness,
                 zone_bundler,
+                zone_image_resolver,
                 test_config,
             }
         }
@@ -5392,6 +5415,7 @@ mod illumos_tests {
                 vec![],
                 self.storage_test_harness.handle().clone(),
                 self.zone_bundler.clone(),
+                self.zone_image_resolver.clone(),
                 system,
             );
             self.test_config.override_paths(&mgr);

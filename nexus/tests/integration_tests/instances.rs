@@ -37,6 +37,7 @@ use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils::wait_for_producer;
 use nexus_types::external_api::params::SshKeyCreate;
 use nexus_types::external_api::shared::IpKind;
@@ -1515,22 +1516,12 @@ async fn test_instance_failed_by_stop_request_does_not_reincarnate(
     )
     .await;
 
-    // Wait for the instance to transition to Failed.
-    dbg!(
-        instance_wait_for_state(client, instance_id, InstanceState::Failed)
-            .await
-    );
-
-    // Activate the reincarnation task.
-    dbg!(
-        nexus_test_utils::background::activate_background_task(
-            &cptestctx.internal_client,
-            "instance_reincarnation",
-        )
-        .await
-    );
-
-    // This time, it should come back.
+    // Because the instance can be restarted, the discovery of its failure above
+    // will result in the reincarnation background task being activated. Don't
+    // bother checking for Failed here because it's possible that task could
+    // have restarted the instance before we poll it (issue #8119 has two cases
+    // of just this!). Instead, we'll just wait for the final Starting state
+    // that reincarnation should leave the instance in.
     dbg!(
         instance_wait_for_state(client, instance_id, InstanceState::Starting)
             .await
@@ -6603,7 +6594,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
