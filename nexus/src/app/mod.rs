@@ -53,7 +53,7 @@ use uuid::Uuid;
 // by resource.
 mod address_lot;
 mod affinity;
-mod alerts;
+mod alert;
 mod allow_list;
 pub(crate) mod background;
 mod bfd;
@@ -100,6 +100,7 @@ mod volume;
 mod vpc;
 mod vpc_router;
 mod vpc_subnet;
+mod webhook;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
