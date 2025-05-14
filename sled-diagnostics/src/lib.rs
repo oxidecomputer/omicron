@@ -34,21 +34,12 @@ use queries::*;
 /// Max number of commands to run in parallel
 const MAX_PARALLELISM: usize = 50;
 
-trait ParallelCommandExecution {
-    type Output;
-
-    /// Add a command to the set of commands to be executed.
-    fn add_command<F>(&mut self, command: F)
-    where
-        F: std::future::Future<Output = Self::Output> + Send + 'static;
-}
-
 struct MultipleCommands<T> {
     semaphore: Arc<Semaphore>,
     set: JoinSet<T>,
 }
 
-impl<T: 'static> MultipleCommands<T> {
+impl<T: 'static + Send> MultipleCommands<T> {
     fn new() -> MultipleCommands<T> {
         let semaphore = Arc::new(Semaphore::new(MAX_PARALLELISM));
         let set = JoinSet::new();
@@ -56,21 +47,9 @@ impl<T: 'static> MultipleCommands<T> {
         Self { semaphore, set }
     }
 
-    /// Wait for all commands to execute and return their output.
-    async fn join_all(self) -> Vec<T> {
-        self.set.join_all().await
-    }
-}
-
-impl<T> ParallelCommandExecution for MultipleCommands<T>
-where
-    T: Send + 'static,
-{
-    type Output = T;
-
     fn add_command<F>(&mut self, command: F)
     where
-        F: std::future::Future<Output = Self::Output> + Send + 'static,
+        F: std::future::Future<Output = T> + Send + 'static,
     {
         let semaphore = Arc::clone(&self.semaphore);
         let _abort_handle = self.set.spawn(async move {
@@ -79,6 +58,11 @@ where
                 semaphore.acquire_owned().await.expect("semaphore acquire");
             command.await
         });
+    }
+
+    /// Wait for all commands to execute and return their output.
+    async fn join_all(self) -> Vec<T> {
+        self.set.join_all().await
     }
 }
 
