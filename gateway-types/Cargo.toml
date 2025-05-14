@@ -8,6 +8,8 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+# TODO-K: Remove when I fix the RotSlot types
+derive_more.workspace = true
 gateway-messages.workspace = true
 # Avoid depending on gateway-sp-comms! It is a pretty heavy dependency and
 # would only be used for From impls anyway. We put those impls in

@@ -49,6 +49,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use strum::Display;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
@@ -1342,7 +1343,15 @@ impl slog::KV for PendingMgsUpdateDetails {
 
 /// Describes the version that we expect to find in some firmware slot
 #[derive(
-    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+    Clone,
+    Debug,
+    Display,
+    Eq,
+    PartialEq,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    Diffable,
 )]
 #[serde(tag = "kind", content = "version", rename_all = "snake_case")]
 pub enum ExpectedVersion {

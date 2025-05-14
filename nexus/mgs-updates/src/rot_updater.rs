@@ -10,16 +10,22 @@ use super::UpdateProgress;
 use super::common_sp_update::SpComponentUpdater;
 use super::common_sp_update::deliver_update;
 use crate::SpComponentUpdateHelper;
+use crate::common_sp_update::FoundVersion;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
+use crate::common_sp_update::error_means_caboose_is_invalid;
+use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
 use gateway_client::types::RotSlot;
+use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
+use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdateDetails;
 use slog::Logger;
-use slog::info;
+use slog::{debug, info};
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -203,23 +209,224 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
         &'a self,
-        _log: &'a slog::Logger,
-        _mgs_clients: &'a mut MgsClients,
-        _update: &'a PendingMgsUpdate,
+        log: &'a slog::Logger,
+        mgs_clients: &'a mut MgsClients,
+        update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<PrecheckStatus, PrecheckError>> {
-        // TODO-K: fill in the precheck
-        todo!()
+        async move {
+            // Verify that the device is the one we think it is.
+            let state = mgs_clients
+            .try_all_serially(log, move |mgs_client| async move {
+                mgs_client.sp_get(update.sp_type, update.slot_id).await
+            })
+            .await?
+            .into_inner();
+            debug!(log, "found SP state"; "state" => ?state);
+            if state.model != update.baseboard_id.part_number
+                || state.serial_number != update.baseboard_id.serial_number
+            {
+                return Err(PrecheckError::WrongDevice {
+                    sp_type: update.sp_type,
+                    slot_id: update.slot_id,
+                    expected_part: update.baseboard_id.part_number.clone(),
+                    expected_serial: update.baseboard_id.serial_number.clone(),
+                    found_part: state.model,
+                    found_serial: state.serial_number,
+                });
+            }
+
+            let PendingMgsUpdateDetails::Rot {
+                expected_slot_a_version,
+                expected_slot_b_version,
+                expected_active_slot,
+                expected_persistent_boot_preference,
+                ..
+                // TODO-K: Do I need to do any checks with these fields?
+                // expected_pending_persistent_boot_preference,
+                // expected_transient_boot_preference,
+            } = &update.details
+            else {
+                unreachable!(
+                    "pending MGS update details within ReconfiguratorRotUpdater \
+                    will always be for the RoT"
+                );
+            };
+
+            // Fetch the caboose from the currently active slot.
+            let caboose = mgs_clients
+            .try_all_serially(log, move |mgs_client| async move {
+                mgs_client
+                    .sp_component_caboose_get(
+                        update.sp_type,
+                        update.slot_id,
+                        &SpComponent::ROT.to_string(),
+                        expected_active_slot.to_u16(),
+                    )
+                    .await
+            })
+            .await?
+            .into_inner();
+            debug!(log, "found active slot caboose"; "caboose" => ?caboose);
+
+            // If the version in the currently active slot matches the one we're
+            // trying to set, then there's nothing to do.
+            if caboose.version == update.artifact_version.as_str() {
+                return Ok(PrecheckStatus::UpdateComplete);
+            }
+
+            // Otherwise, if the version in the currently active slot does not
+            // match what we expect to find, bail out.  It may be that somebody
+            // else has come along and completed a subsequent update and we
+            // don't want to roll that back.  (If for some reason we *do* want
+            // to do this update, the planner will have to notice that what's
+            // here is wrong and update the blueprint.)
+            let (expected_active_slot_version, expected_inactive_slot_version) = match expected_active_slot {
+                // TODO-K: clean up types, this looks awful
+                gateway_types::rot::RotSlot::A => (expected_slot_a_version, expected_slot_b_version),
+                gateway_types::rot::RotSlot::B => (expected_slot_b_version, expected_slot_a_version)
+            };
+            if caboose.version != expected_active_slot_version.to_string() {
+                match expected_active_slot_version {
+                    ExpectedVersion::Version(v) => {
+                        return Err(PrecheckError::WrongActiveVersion {
+                            expected: v.clone(),
+                            found: caboose.version,
+                        });
+                    },
+                    ExpectedVersion::NoValidVersion => {
+                        unreachable!("the active slot will always have an expected version");
+                    }
+                }
+            }
+
+            // For the same reason, check that the version in the inactive slot
+            // matches what we expect to find.
+            // TODO It's important for us to detect the condition that a caboose
+            // is invalid because this can happen when devices are programmed
+            // with a bad image.  Unfortunately, MGS currently reports this as a
+            // 503.  Besides being annoying for us to look for, this causes
+            // `try_all_serially()` to try the other MGS.  That's pointless
+            // here, but not a big deal.
+            let found_inactive_caboose_result = mgs_clients
+                .try_all_serially(log, move |mgs_client| async move {
+                    mgs_client
+                        .sp_component_caboose_get(
+                            update.sp_type,
+                            update.slot_id,
+                            &SpComponent::ROT.to_string(),
+                            expected_active_slot.toggled().to_u16(),
+                        )
+                        .await
+                })
+                .await;
+            let found_version = match found_inactive_caboose_result {
+                Ok(version) => {
+                    FoundVersion::Version(version.into_inner().version)
+                }
+                Err(error) => {
+                    if error_means_caboose_is_invalid(&error) {
+                        FoundVersion::MissingVersion
+                    } else {
+                        return Err(PrecheckError::from(error));
+                    }
+                }
+            };
+            match (&expected_inactive_slot_version, &found_version) {
+                // expected garbage, found garbage
+                (
+                    ExpectedVersion::NoValidVersion,
+                    FoundVersion::MissingVersion,
+                ) => (),
+                // expected a specific version and found it
+                (
+                    ExpectedVersion::Version(artifact_version),
+                    FoundVersion::Version(found_version),
+                ) if artifact_version.to_string() == *found_version => (),
+                // anything else is a mismatch
+                (ExpectedVersion::NoValidVersion, FoundVersion::Version(_))
+                | (ExpectedVersion::Version(_), FoundVersion::MissingVersion)
+                | (ExpectedVersion::Version(_), FoundVersion::Version(_)) => {
+                    return Err(PrecheckError::WrongInactiveVersion {
+                        expected: expected_inactive_slot_version.clone(),
+                        found: found_version,
+                    });
+                }
+            };
+
+            // TODO-K: I am making a lot of decisions based on information from boot info.
+            // This only reflects what was true on boot but may not be the real state of the
+            // RoT. Should I even be using these fields?
+            let (RotState::V2 {
+                active,
+                pending_persistent_boot_preference,
+                // TODO-K: Do I need to do any chacks with this field?
+                // persistent_boot_preference,
+                transient_boot_preference,
+                ..
+            }
+            | RotState::V3 {
+                active,
+                pending_persistent_boot_preference,
+                // TODO-K: Do I need to do any chacks with this field?
+                // persistent_boot_preference,
+                transient_boot_preference,
+                ..
+            }) = &state.rot
+            else {
+                panic!("TODO a proper CommunicationFailed error");
+            };
+
+            // If expected_persistent_boot_preference does not match active slot
+            // this could mean a botched update. That's ok, we can continue, but we should log
+            // this as info.
+            // TODO-K: fix theseRotSlot types, so I don't use this gross `.to_string`
+            if expected_persistent_boot_preference.to_string() != active.to_string() {
+                info!(log, "expected_persistent_boot_preference does not match active slot. \
+                This could mean a previous broken update attempt.");
+            };
+
+            // If we use transient boot, the persistent preference is not going to match the active slot.
+            // That means, either one of the partitions had a bad signature check or I used transient boot.
+            // We don't have a way to tell this appart yet.
+            // TODO-K: Should I log this or leave for when transient boot preference is implemented?
+
+            // TODO-K: If pending_persistent_boot_preference or transient_boot_preference is/are some,
+            // then we need to wait, an update is happening.
+            if transient_boot_preference.is_some() || pending_persistent_boot_preference.is_some() {
+                panic!("TODO a proper error that there is a change happening. Wait until this has finished");
+            }
+
+            // Check if the active slot is the one we think it is. This could mean an update is happening.
+            if expected_active_slot.to_string() != active.to_string() {
+                panic!("TODO: a proper error")
+            };
+
+            Ok(PrecheckStatus::ReadyForUpdate)
+        }.boxed()
     }
 
     /// Attempts once to perform any post-update actions (e.g., reset the
     /// device)
     fn post_update<'a>(
         &'a self,
-        _log: &'a slog::Logger,
-        _mgs_clients: &'a mut MgsClients,
-        _update: &'a PendingMgsUpdate,
+        log: &'a slog::Logger,
+        mgs_clients: &'a mut MgsClients,
+        update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
-        // TODO-K: fill in the post_update
-        todo!()
+        mgs_clients
+            .try_all_serially(log, move |mgs_client| async move {
+                debug!(log, "attempting to reset device");
+                mgs_client
+                    .sp_component_reset(
+                        update.sp_type,
+                        update.slot_id,
+                        &SpComponent::ROT.to_string(),
+                    )
+                    .await?;
+                Ok(())
+            })
+            .boxed()
+
+        // TODO-K: Any other checks?
     }
 }
