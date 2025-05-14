@@ -2465,7 +2465,7 @@ pub struct SwitchPort {
 #[derive(
     ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
 )]
-pub struct SwitchPortSettings {
+pub struct SwitchPortSettingsIdentity {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
@@ -2474,9 +2474,9 @@ pub struct SwitchPortSettings {
 /// convenience data structure for getting a complete view of a particular
 /// port's settings.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettingsView {
-    /// The primary switch port settings handle.
-    pub settings: SwitchPortSettings,
+pub struct SwitchPortSettings {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
 
     /// Switch port settings included from other switch port settings groups.
     pub groups: Vec<SwitchPortSettingsGroups>,

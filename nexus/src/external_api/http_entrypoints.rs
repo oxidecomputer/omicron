@@ -80,7 +80,7 @@ use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettings;
-use omicron_common::api::external::SwitchPortSettingsView;
+use omicron_common::api::external::SwitchPortSettingsIdentity;
 use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
@@ -3589,7 +3589,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<ApiContext>,
         new_settings: TypedBody<params::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<SwitchPortSettingsView>, HttpError> {
+    ) -> Result<HttpResponseCreated<SwitchPortSettings>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -3599,7 +3599,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let result =
                 nexus.switch_port_settings_post(&opctx, params).await?;
 
-            let settings: SwitchPortSettingsView = result.into();
+            let settings: SwitchPortSettings = result.into();
             Ok(HttpResponseCreated(settings))
         };
         apictx
@@ -3634,8 +3634,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<
             PaginatedByNameOrId<params::SwitchPortSettingsSelector>,
         >,
-    ) -> Result<HttpResponseOk<ResultsPage<SwitchPortSettings>>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<SwitchPortSettingsIdentity>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -3668,7 +3670,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettingsView>, HttpError> {
+    ) -> Result<HttpResponseOk<SwitchPortSettings>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

@@ -20,7 +20,7 @@ use nexus_types::external_api::params::{
 use nexus_types::external_api::views::Rack;
 use omicron_common::api::external::{
     self, AddressLotKind, BgpPeer, IdentityMetadataCreateParams, LinkFec,
-    LinkSpeed, NameOrId, SwitchPort, SwitchPortSettingsView,
+    LinkSpeed, NameOrId, SwitchPort, SwitchPortSettings,
 };
 use omicron_common::api::external::{ImportExportPolicy, Name};
 
@@ -163,7 +163,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         }],
     });
 
-    let created: SwitchPortSettingsView = NexusRequest::objects_post(
+    let created: SwitchPortSettings = NexusRequest::objects_post(
         client,
         "/v1/system/networking/switch-port-settings",
         &settings,
@@ -208,7 +208,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(addr0.address, "203.0.113.10/24".parse().unwrap());
 
     // Get the port settings back
-    let roundtrip: SwitchPortSettingsView = NexusRequest::object_get(
+    let roundtrip: SwitchPortSettings = NexusRequest::object_get(
         client,
         "/v1/system/networking/switch-port-settings/portofino",
     )
@@ -265,7 +265,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Create same port settings again. Should not see conflict.
-    let _created: SwitchPortSettingsView = NexusRequest::objects_post(
+    let _created: SwitchPortSettings = NexusRequest::objects_post(
         client,
         "/v1/system/networking/switch-port-settings",
         &settings,
@@ -301,7 +301,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             vlan_id: None,
         }],
     });
-    let _created: SwitchPortSettingsView = NexusRequest::objects_post(
+    let _created: SwitchPortSettings = NexusRequest::objects_post(
         client,
         "/v1/system/networking/switch-port-settings",
         &settings,

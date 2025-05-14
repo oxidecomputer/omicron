@@ -286,9 +286,9 @@ impl SwitchPortSettings {
     }
 }
 
-impl Into<external::SwitchPortSettings> for SwitchPortSettings {
-    fn into(self) -> external::SwitchPortSettings {
-        external::SwitchPortSettings { identity: self.identity() }
+impl Into<external::SwitchPortSettingsIdentity> for SwitchPortSettings {
+    fn into(self) -> external::SwitchPortSettingsIdentity {
+        external::SwitchPortSettingsIdentity { identity: self.identity() }
     }
 }
 

@@ -9389,7 +9389,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsResultsPage"
+                  "$ref": "#/components/schemas/SwitchPortSettingsIdentityResultsPage"
                 }
               }
             }
@@ -9427,7 +9427,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsView"
+                  "$ref": "#/components/schemas/SwitchPortSettings"
                 }
               }
             }
@@ -9493,7 +9493,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsView"
+                  "$ref": "#/components/schemas/SwitchPortSettings"
                 }
               }
             }
@@ -23711,17 +23711,52 @@
         ]
       },
       "SwitchPortSettings": {
-        "description": "A switch port settings identity whose id may be used to view additional details.",
+        "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
         "type": "object",
         "properties": {
+          "addresses": {
+            "description": "Layer 3 IP address settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortAddressView"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peer settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeer"
+            }
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
+          },
+          "groups": {
+            "description": "Switch port settings included from other switch port settings groups.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortSettingsGroups"
+            }
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
             "format": "uuid"
+          },
+          "interfaces": {
+            "description": "Layer 3 interface settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchInterfaceConfig"
+            }
+          },
+          "links": {
+            "description": "Layer 2 link settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortLinkConfig"
+            }
           },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
@@ -23730,6 +23765,21 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
+          },
+          "port": {
+            "description": "Layer 1 physical port settings.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchPortConfig"
+              }
+            ]
+          },
+          "routes": {
+            "description": "IP route settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortRouteConfig"
+            }
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -23740,14 +23790,29 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "vlan_interfaces": {
+            "description": "Vlan interface settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchVlanInterfaceConfig"
+            }
           }
         },
         "required": [
+          "addresses",
+          "bgp_peers",
           "description",
+          "groups",
           "id",
+          "interfaces",
+          "links",
           "name",
+          "port",
+          "routes",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "vlan_interfaces"
         ]
       },
       "SwitchPortSettingsCreate": {
@@ -23837,7 +23902,47 @@
           "port_settings_id"
         ]
       },
-      "SwitchPortSettingsResultsPage": {
+      "SwitchPortSettingsIdentity": {
+        "description": "A switch port settings identity whose id may be used to view additional details.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SwitchPortSettingsIdentityResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -23845,7 +23950,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SwitchPortSettings"
+              "$ref": "#/components/schemas/SwitchPortSettingsIdentity"
             }
           },
           "next_page": {
@@ -23856,88 +23961,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "SwitchPortSettingsView": {
-        "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "description": "Layer 3 IP address settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortAddressView"
-            }
-          },
-          "bgp_peers": {
-            "description": "BGP peer settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BgpPeer"
-            }
-          },
-          "groups": {
-            "description": "Switch port settings included from other switch port settings groups.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortSettingsGroups"
-            }
-          },
-          "interfaces": {
-            "description": "Layer 3 interface settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchInterfaceConfig"
-            }
-          },
-          "links": {
-            "description": "Layer 2 link settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortLinkConfig"
-            }
-          },
-          "port": {
-            "description": "Layer 1 physical port settings.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchPortConfig"
-              }
-            ]
-          },
-          "routes": {
-            "description": "IP route settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortRouteConfig"
-            }
-          },
-          "settings": {
-            "description": "The primary switch port settings handle.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchPortSettings"
-              }
-            ]
-          },
-          "vlan_interfaces": {
-            "description": "Vlan interface settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchVlanInterfaceConfig"
-            }
-          }
-        },
-        "required": [
-          "addresses",
-          "bgp_peers",
-          "groups",
-          "interfaces",
-          "links",
-          "port",
-          "routes",
-          "settings",
-          "vlan_interfaces"
         ]
       },
       "SwitchResultsPage": {
