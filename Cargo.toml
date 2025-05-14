@@ -503,7 +503,7 @@ maplit = "1.0.2"
 newtype_derive = "0.1.6"
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "872aae7d76493f2a4f59711b24dde55523536b40" }
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "872aae7d76493f2a4f59711b24dde55523536b40" }
-multimap = "0.10.0"
+multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
 nexus-client = { path = "clients/nexus-client" }
