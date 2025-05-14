@@ -16,7 +16,6 @@ use super::cte_utils::{
     BoxableTable, BoxableUpdateStatement, BoxedQuery, ExprSqlType, FilterBy,
     QueryFromClause, QuerySqlType, TableDefaultWhereClause,
 };
-use super::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
@@ -28,6 +27,7 @@ use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::Table;
 use diesel::result::Error as DieselError;
 use diesel::sql_types::{BigInt, Nullable, SingleValue};
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::DatastoreAttachTargetConfig;
 use std::fmt::Debug;
 
@@ -582,6 +582,7 @@ mod test {
     use diesel::SelectableHelper;
     use diesel::expression_methods::ExpressionMethods;
     use diesel::pg::Pg;
+    use nexus_db_lookup::DataStoreConnection;
     use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
     use omicron_test_utils::dev;
     use uuid::Uuid;
@@ -609,9 +610,7 @@ mod test {
         }
     }
 
-    async fn setup_db(
-        pool: &crate::db::Pool,
-    ) -> crate::db::datastore::DataStoreConnection {
+    async fn setup_db(pool: &crate::db::Pool) -> DataStoreConnection {
         let connection = pool.claim().await.unwrap();
         (*connection)
             .batch_execute_async(

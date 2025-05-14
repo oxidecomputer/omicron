@@ -20,6 +20,7 @@ use gateway_types::{
     ignition::{IgnitionCommand, SpIgnitionInfo},
     rot::{RotCfpa, RotCfpaSlot, RotCmpa, RotState},
     sensor::SpSensorReading,
+    task_dump::TaskDump,
     update::{
         HostPhase2Progress, HostPhase2RecoveryImageId, InstallinatorImageId,
         SpUpdateStatus,
@@ -313,6 +314,26 @@ pub trait GatewayApi {
         params: TypedBody<GetRotBootInfoParams>,
     ) -> Result<HttpResponseOk<RotState>, HttpError>;
 
+    /// Get the number of task dumps present on an SP
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/task-dump",
+    }]
+    async fn sp_task_dump_count(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSp>,
+    ) -> Result<HttpResponseOk<u32>, HttpError>;
+
+    /// Read a single task dump from an SP
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/task-dump/{task_dump_index}",
+    }]
+    async fn sp_task_dump_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpTaskDumpIndex>,
+    ) -> Result<HttpResponseOk<TaskDump>, HttpError>;
+
     /// List SPs via Ignition
     ///
     /// Retreive information for all SPs via the Ignition controller. This is
@@ -475,6 +496,21 @@ pub trait GatewayApi {
     async fn sp_all_ids(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SpIdentifier>>, HttpError>;
+
+    /// Request ereports from the target service processor.
+    ///
+    /// Query parameters provide the ENAs of the initial ereport in the returned
+    /// tranche, the SP's restart ID that the control plane believes is current,
+    /// and the (optional) last committed ENA.
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/ereports"
+    }]
+    async fn sp_ereports_ingest(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSp>,
+        query: Query<ereport_types::EreportQuery>,
+    ) -> Result<HttpResponseOk<ereport_types::Ereports>, HttpError>;
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -504,6 +540,16 @@ pub struct PathSpComponent {
     /// ID for the component of the SP; this is the internal identifier used by
     /// the SP itself to identify its components.
     pub component: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PathSpTaskDumpIndex {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+    /// The index of the task dump to be read.
+    pub task_dump_index: u32,
 }
 
 #[derive(Deserialize, JsonSchema)]

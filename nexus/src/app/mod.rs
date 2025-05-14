@@ -15,6 +15,7 @@ use crate::populate::populate_start;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns_types::names::ServiceName;
+use nexus_background_task_interface::BackgroundTasks;
 use nexus_config::NexusConfig;
 use nexus_config::RegionAllocationStrategy;
 use nexus_config::Tunables;
@@ -68,6 +69,7 @@ mod iam;
 mod image;
 mod instance;
 mod instance_network;
+mod instance_platform;
 mod internet_gateway;
 mod ip_pool;
 mod lldp;
@@ -97,6 +99,7 @@ mod volume;
 mod vpc;
 mod vpc_router;
 mod vpc_subnet;
+mod webhook;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
@@ -108,6 +111,7 @@ pub(crate) mod sagas;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
+use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use sagas::demo::CompletingDemoSagas;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
@@ -185,6 +189,13 @@ pub struct Nexus {
     /// Client to the timeseries database.
     timeseries_client: oximeter_db::Client,
 
+    /// `reqwest` client used for webhook delivery requests.
+    ///
+    /// This lives on the Nexus struct as we would like to use the same client
+    /// pool for the webhook deliverator background task and the webhook probe
+    /// API.
+    webhook_delivery_client: reqwest::Client,
+
     /// Contents of the trusted root role for the TUF repository.
     #[allow(dead_code)]
     updates_config: Option<UpdatesConfig>,
@@ -225,7 +236,10 @@ pub struct Nexus {
     background_tasks_driver: OnceLock<background::Driver>,
 
     /// Handles to various specific tasks
-    background_tasks: background::BackgroundTasks,
+    background_tasks: BackgroundTasks,
+
+    /// Internal state related to background tasks
+    background_tasks_internal: background::BackgroundTasksInternal,
 
     /// Default Crucible region allocation strategy
     default_region_allocation_strategy: RegionAllocationStrategy,
@@ -238,9 +252,7 @@ pub struct Nexus {
     tuf_artifact_replication_tx: mpsc::Sender<ArtifactsWithPlan>,
 
     /// reports status of pending MGS-managed updates
-    // This will be used in the future to expose driver state via the internal
-    // API.
-    _mgs_update_status_rx: watch::Receiver<nexus_mgs_updates::DriverStatus>,
+    mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
 }
 
 impl Nexus {
@@ -369,8 +381,11 @@ impl Nexus {
             Arc::clone(&db_datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
 
-        let (background_tasks_initializer, background_tasks) =
-            background::BackgroundTasksInitializer::new();
+        let (
+            background_tasks_initializer,
+            background_tasks,
+            background_tasks_internal,
+        ) = background::BackgroundTasksInitializer::new();
 
         let external_resolver = {
             if config.deployment.external_dns_servers.is_empty() {
@@ -379,6 +394,19 @@ impl Nexus {
             Arc::new(external_dns::Resolver::new(
                 &config.deployment.external_dns_servers,
             ))
+        };
+
+        let webhook_delivery_client = {
+            // The webhook delivery HTTP client will send requests to endpoints
+            // external to the rack, so apply the configuration for external
+            // HTTP clients.
+            let builder = external_http_client_builder(
+                &config.deployment.external_http_clients,
+                &external_resolver,
+            );
+            webhook::delivery_client(builder).map_err(|e| {
+                format!("failed to build webhook delivery client: {e}")
+            })?
         };
 
         let mut mgs_resolver =
@@ -398,7 +426,7 @@ impl Nexus {
             mgs_resolver.monitor(),
             DEFAULT_RETRY_TIMEOUT,
         );
-        let _mgs_update_status_rx = mgs_update_driver.status_rx();
+        let mgs_update_status_rx = mgs_update_driver.status_rx();
         let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
         let nexus = Nexus {
@@ -415,6 +443,7 @@ impl Nexus {
             populate_status,
             reqwest_client,
             timeseries_client,
+            webhook_delivery_client,
             updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
             opctx_alloc: OpContext::for_background(
@@ -441,6 +470,7 @@ impl Nexus {
                 .clone(),
             background_tasks_driver: OnceLock::new(),
             background_tasks,
+            background_tasks_internal,
             default_region_allocation_strategy: config
                 .pkg
                 .default_region_allocation_strategy
@@ -449,7 +479,7 @@ impl Nexus {
                 CompletingDemoSagas::new(),
             )),
             tuf_artifact_replication_tx,
-            _mgs_update_status_rx,
+            mgs_update_status_rx,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -496,6 +526,9 @@ impl Nexus {
                     resolver,
                     saga_starter: task_nexus.sagas.clone(),
                     producer_registry: task_registry,
+                    webhook_delivery_client: task_nexus
+                        .webhook_delivery_client
+                        .clone(),
 
                     saga_recovery: SagaRecoveryHelpers {
                         recovery_opctx: saga_recovery_opctx,
@@ -560,7 +593,7 @@ impl Nexus {
         // Wait for the background task to complete at least once.  We don't
         // care about its value.  To do this, we need our own copy of the
         // channel.
-        let mut rx = self.background_tasks.external_endpoints.clone();
+        let mut rx = self.background_tasks_internal.external_endpoints.clone();
         let _ = rx.wait_for(|s| s.is_some()).await;
         if !tls_enabled {
             return None;
@@ -570,7 +603,7 @@ impl Nexus {
             .with_no_client_auth()
             .with_cert_resolver(Arc::new(NexusCertResolver::new(
                 self.log.new(o!("component" => "NexusCertResolver")),
-                self.background_tasks.external_endpoints.clone(),
+                self.background_tasks_internal.external_endpoints.clone(),
             )));
         rustls_cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Some(rustls_cfg)
@@ -819,9 +852,9 @@ impl Nexus {
     /// underneath Organizations:
     ///
     /// ```
+    /// use nexus_db_lookup::LookupPath;
     /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
-    /// use nexus_db_queries::db::lookup::LookupPath;
     /// use nexus_db_queries::db::model::Name;
     /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
@@ -849,9 +882,9 @@ impl Nexus {
     /// example stub for the "get" endpoint for that same resource:
     ///
     /// ```
+    /// use nexus_db_lookup::LookupPath;
     /// use nexus_db_queries::authz;
     /// use nexus_db_queries::context::OpContext;
-    /// use nexus_db_queries::db::lookup::LookupPath;
     /// use nexus_db_queries::db::model::Name;
     /// use nexus_db_queries::db::DataStore;
     /// use omicron_nexus::app::Nexus;
@@ -1000,6 +1033,18 @@ impl Nexus {
                 return Err(Error::internal_error(&format!("{err}")));
             }
         }
+    }
+
+    pub(crate) async fn mgs_updates(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<MgsUpdateDriverStatus, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        // Borrowing from a watch receiver locks the channel until the borrow is
+        // dropped.  Return a cloned copy so that the caller doesn't have to
+        // think about this internal detail.
+        Ok(self.mgs_update_status_rx.borrow().clone())
     }
 }
 
@@ -1166,4 +1211,29 @@ async fn map_switch_zone_addrs(
         "mappings" => #?switch_zone_addrs
     );
     Ok(switch_zone_addrs)
+}
+
+/// Begin configuring an external HTTP client, returning a
+/// `reqwest::ClientBuilder`.
+pub(crate) fn external_http_client_builder(
+    config: &nexus_config::ExternalHttpClientConfig,
+    resolver: &Arc<external_dns::Resolver>,
+) -> reqwest::ClientBuilder {
+    let mut builder = reqwest::ClientBuilder::new();
+
+    builder = builder.dns_resolver(resolver.clone());
+
+    // If we are configured to only bind external TCP connections on a specific interface, do so.
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "illumos",
+    ))]
+    {
+        if let Some(ref interface) = config.interface {
+            builder = builder.interface(interface);
+        }
+    }
+
+    builder
 }

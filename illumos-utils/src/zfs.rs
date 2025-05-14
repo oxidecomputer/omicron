@@ -58,9 +58,9 @@ pub enum DestroyDatasetErrorVariant {
 
 /// Error returned by [`Zfs::destroy_dataset`].
 #[derive(thiserror::Error, Debug)]
-#[error("Could not destroy dataset {name}: {err}")]
+#[error("Could not destroy dataset {name}")]
 pub struct DestroyDatasetError {
-    name: String,
+    pub name: String,
     #[source]
     pub err: DestroyDatasetErrorVariant,
 }
@@ -282,7 +282,7 @@ pub struct SizeDetails {
     pub compression: CompressionAlgorithm,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DatasetProperties {
     /// The Uuid of the dataset
     pub id: Option<DatasetUuid>,
@@ -1222,8 +1222,8 @@ impl Zfs {
         snap_name: &'a str,
         properties: &'a [(&'a str, &'a str)],
     ) -> Result<(), CreateSnapshotError> {
-        let mut command = std::process::Command::new(ZFS);
-        let mut cmd = command.arg("snapshot");
+        let mut command = std::process::Command::new(PFEXEC);
+        let mut cmd = command.args([ZFS, "snapshot"]);
         for (name, value) in properties.iter() {
             cmd = cmd.arg("-o").arg(&format!("{name}={value}"));
         }
@@ -1240,9 +1240,9 @@ impl Zfs {
         filesystem: &str,
         snap_name: &str,
     ) -> Result<(), DestroySnapshotError> {
-        let mut command = std::process::Command::new(ZFS);
+        let mut command = std::process::Command::new(PFEXEC);
         let path = format!("{filesystem}@{snap_name}");
-        let cmd = command.args(&["destroy", &path]);
+        let cmd = command.args(&[ZFS, "destroy", &path]);
         execute(cmd).map(|_| ()).map_err(|err| DestroySnapshotError {
             filesystem: filesystem.to_string(),
             snap_name: snap_name.to_string(),
@@ -1315,7 +1315,18 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Return the full path to the snapshot directory within the filesystem.
+    ///
+    /// NB: Be careful when calling this method as it may return a `Utf8PathBuf`
+    /// that does not actually map to a real filesystem path. On helios systems
+    /// `rpool/ROOT/<BE>` for example will will return
+    /// "legacy/.zfs/snapshot/<SNAP_NAME>" because the mountpoint of the dataset
+    /// is a "legacy" mount. Additionally a fileystem with no mountpoint will
+    /// have a zfs mountpoint property of "-".
     pub fn full_path(&self) -> Result<Utf8PathBuf, GetValueError> {
+        // TODO (omicron#8023):
+        // When a mountpoint is returned as "legacy" we could go fish around in
+        // "/etc/mnttab". That would probably mean making this function return a
+        // result of an option.
         let mountpoint = Zfs::get_value(&self.filesystem, "mountpoint")?;
         Ok(Utf8PathBuf::from(mountpoint)
             .join(format!(".zfs/snapshot/{}", self.snap_name)))

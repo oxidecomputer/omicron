@@ -6,18 +6,20 @@
 
 use super::blueprint_display::{
     BpClickhouseServersTableSchema, BpDatasetsTableSchema, BpDiffState,
-    BpGeneration, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
-    BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
-    constants::*, linear_table_modified, linear_table_unchanged,
+    BpGeneration, BpOmicronZonesTableSchema, BpPendingMgsUpdates,
+    BpPhysicalDisksTableSchema, BpTable, BpTableColumn, BpTableData,
+    BpTableRow, KvList, KvPair, constants::*, linear_table_modified,
+    linear_table_unchanged,
 };
 use super::{
     BlueprintDatasetConfigDiff, BlueprintDatasetDisposition, BlueprintDiff,
     BlueprintMetadata, BlueprintPhysicalDiskConfig,
     BlueprintPhysicalDiskConfigDiff, BlueprintZoneConfigDiff,
     BlueprintZoneImageSource, ClickhouseClusterConfig,
-    CockroachDbPreserveDowngrade, unwrap_or_none, zone_sort_key,
+    CockroachDbPreserveDowngrade, PendingMgsUpdatesDiff, unwrap_or_none,
+    zone_sort_key,
 };
-use daft::Diffable;
+use daft::{Diffable, Leaf};
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::{CompressionAlgorithm, DatasetName};
@@ -549,7 +551,7 @@ impl ModifiedZone {
                 zone: BlueprintZoneConfig {
                     disposition: *diff.disposition.after,
                     id: *diff.id.after,
-                    filesystem_pool: diff.filesystem_pool.after.clone(),
+                    filesystem_pool: *diff.filesystem_pool.after,
                     zone_type: diff.zone_type.after.clone(),
                     image_source: diff.image_source.after.clone(),
                 },
@@ -1041,7 +1043,7 @@ impl ModifiedDataset {
                 dataset: BlueprintDatasetConfig {
                     disposition: *disposition.after,
                     id: *id.after,
-                    pool: pool.after.clone(),
+                    pool: *pool.after,
                     kind: kind.after.clone(),
                     address: address.after.copied(),
                     quota: quota.after.copied(),
@@ -1072,9 +1074,8 @@ impl BpDiffDatasetsModified {
                 Err(error) => errors.push(error),
             }
         }
-        datasets.sort_unstable_by_key(|d| {
-            (d.dataset.kind.clone(), d.dataset.pool.clone())
-        });
+        datasets
+            .sort_unstable_by_key(|d| (d.dataset.kind.clone(), d.dataset.pool));
         (BpDiffDatasetsModified { datasets }, BpDiffDatasetErrors { errors })
     }
 }
@@ -1094,7 +1095,7 @@ impl BpTableData for BpDiffDatasetsModified {
                 vec![
                     BpTableColumn::value(
                         DatasetName::new(
-                            dataset.dataset.pool.clone(),
+                            dataset.dataset.pool,
                             dataset.dataset.kind.clone(),
                         )
                         .full_name(),
@@ -1185,7 +1186,7 @@ impl BpDiffDatasets {
 /// there is only a single known blueprint with no before or after collection or
 /// bluerpint to compare to.
 pub struct ClickhouseClusterConfigDiffTablesForSingleBlueprint {
-    pub metadata: KvListWithHeading,
+    pub metadata: KvList,
     pub keepers: BpTable,
     pub servers: BpTable,
 }
@@ -1219,7 +1220,7 @@ impl ClickhouseClusterConfigDiffTablesForSingleBlueprint {
         .collect();
 
         let metadata =
-            KvListWithHeading::new(CLICKHOUSE_CLUSTER_CONFIG_HEADING, rows);
+            KvList::new(Some(CLICKHOUSE_CLUSTER_CONFIG_HEADING), rows);
 
         let keepers = BpTable::new(
             BpClickhouseKeepersTableSchema {},
@@ -1258,7 +1259,7 @@ impl From<ClickhouseClusterConfigDiffTablesForSingleBlueprint>
 /// `ClickhouseClusterConfig` tables or a `ClickhouseClusterConfig` table and
 /// its inventory representation.
 pub struct ClickhouseClusterConfigDiffTables {
-    pub metadata: KvListWithHeading,
+    pub metadata: KvList,
     pub keepers: BpTable,
     pub servers: Option<BpTable>,
 }
@@ -1288,8 +1289,8 @@ impl ClickhouseClusterConfigDiffTables {
                 ),
             )
         };
-        let metadata = KvListWithHeading::new(
-            CLICKHOUSE_CLUSTER_CONFIG_HEADING,
+        let metadata = KvList::new(
+            Some(CLICKHOUSE_CLUSTER_CONFIG_HEADING),
             vec![
                 KvPair::new(
                     BpDiffState::Added,
@@ -1433,8 +1434,8 @@ impl ClickhouseClusterConfigDiffTables {
             };
         }
 
-        let metadata = KvListWithHeading::new(
-            CLICKHOUSE_CLUSTER_CONFIG_HEADING,
+        let metadata = KvList::new(
+            Some(CLICKHOUSE_CLUSTER_CONFIG_HEADING),
             vec![
                 diff_row!(generation, GENERATION),
                 diff_row!(max_used_server_id, CLICKHOUSE_MAX_USED_SERVER_ID),
@@ -1522,8 +1523,8 @@ impl ClickhouseClusterConfigDiffTables {
         before: &clickhouse_admin_types::ClickhouseKeeperClusterMembership,
     ) -> Self {
         // There's only so much information in a collection. Show what we can.
-        let metadata = KvListWithHeading::new(
-            CLICKHOUSE_CLUSTER_CONFIG_HEADING,
+        let metadata = KvList::new(
+            Some(CLICKHOUSE_CLUSTER_CONFIG_HEADING),
             vec![KvPair::new(
                 BpDiffState::Removed,
                 CLICKHOUSE_HIGHEST_SEEN_KEEPER_LEADER_COMMITTED_LOG_INDEX,
@@ -1577,6 +1578,101 @@ impl ClickhouseClusterConfigDiffTables {
     }
 }
 
+/// Differences in pending MGS updates
+#[derive(Debug)]
+pub struct BpDiffPendingMgsUpdates<'a> {
+    pub diff: &'a PendingMgsUpdatesDiff<'a>,
+}
+
+impl<'a> BpDiffPendingMgsUpdates<'a> {
+    /// Convert from our diff summary to our display compatibility layer
+    pub fn from_diff_summary(
+        summary: &'a BlueprintDiffSummary<'a>,
+    ) -> BpDiffPendingMgsUpdates<'a> {
+        BpDiffPendingMgsUpdates { diff: &summary.diff.pending_mgs_updates }
+    }
+
+    /// Return a [`BpTable`] describing the values here.
+    ///
+    /// As elsewhere, we print rows in order of:
+    ///
+    /// 1. Unchanged
+    /// 2. Removed
+    /// 3. Modified
+    /// 4. Added
+    pub fn to_bp_table(&self) -> Option<BpTable> {
+        let mut rows = vec![];
+        let mut has_changed = false;
+        let map = &self.diff.by_baseboard;
+        for update in map.unchanged_values() {
+            rows.push(BpTableRow::from_strings(
+                BpDiffState::Unchanged,
+                update.to_bp_table_values(),
+            ))
+        }
+        for (_, update) in &map.removed {
+            has_changed = true;
+            rows.push(BpTableRow::from_strings(
+                BpDiffState::Removed,
+                update.to_bp_table_values(),
+            ));
+        }
+        for update in map.modified_values() {
+            has_changed = true;
+            let u1 = &update.before;
+            let u2 = &update.after;
+
+            let sp_type = BpTableColumn::new(&u1.sp_type, &u2.sp_type);
+            let slot_id = BpTableColumn::new(&u1.slot_id, &u2.slot_id);
+            let part_number = BpTableColumn::new(
+                &u1.baseboard_id.part_number,
+                &u2.baseboard_id.part_number,
+            );
+            let serial_number = BpTableColumn::new(
+                &u1.baseboard_id.serial_number,
+                &u2.baseboard_id.serial_number,
+            );
+            let artifact_hash =
+                BpTableColumn::new(&u1.artifact_hash, &u2.artifact_hash);
+            let artifact_version =
+                BpTableColumn::new(&u1.artifact_version, &u2.artifact_version);
+            let details = if u1.details != u2.details {
+                BpTableColumn::diff(
+                    format!("{:?}", &u1.details),
+                    format!("{:?}", &u2.details),
+                )
+            } else {
+                BpTableColumn::value(format!("{:?}", &u1.details))
+            };
+            rows.push(BpTableRow::new(
+                BpDiffState::Modified,
+                vec![
+                    sp_type,
+                    slot_id,
+                    part_number,
+                    serial_number,
+                    artifact_hash,
+                    artifact_version,
+                    details,
+                ],
+            ));
+        }
+        for (_, update) in &map.added {
+            has_changed = true;
+            rows.push(BpTableRow::from_strings(
+                BpDiffState::Added,
+                update.to_bp_table_values(),
+            ))
+        }
+
+        if !has_changed {
+            None
+        } else {
+            Some(BpTable::new(BpPendingMgsUpdates {}, None, rows))
+        }
+    }
+}
+
 /// Wrapper to allow a [`BlueprintDiff`] to be displayed.
 ///
 /// Returned by [`BlueprintDiffSummary::display()`].
@@ -1591,6 +1687,7 @@ pub struct BlueprintDiffDisplay<'diff> {
     zones: BpDiffZones,
     disks: BpDiffPhysicalDisks<'diff>,
     datasets: BpDiffDatasets,
+    pending_mgs_updates: BpDiffPendingMgsUpdates<'diff>,
 }
 
 impl<'diff> BlueprintDiffDisplay<'diff> {
@@ -1601,12 +1698,22 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         let zones = BpDiffZones::from_diff_summary(summary);
         let disks = BpDiffPhysicalDisks::from_diff_summary(summary);
         let datasets = BpDiffDatasets::from_diff_summary(summary);
-        Self { summary, before_meta, after_meta, zones, disks, datasets }
+        let pending_mgs_updates =
+            BpDiffPendingMgsUpdates::from_diff_summary(summary);
+        Self {
+            summary,
+            before_meta,
+            after_meta,
+            zones,
+            disks,
+            datasets,
+            pending_mgs_updates,
+        }
     }
 
     pub fn make_metadata_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvListWithHeading> {
+    ) -> impl IntoIterator<Item = KvList> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
                 diff_row!($member, $label, std::convert::identity)
@@ -1635,8 +1742,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         }
 
         [
-            KvListWithHeading::new(
-                COCKROACHDB_HEADING,
+            KvList::new(
+                Some(COCKROACHDB_HEADING),
                 vec![
                     diff_row!(
                         cockroachdb_fingerprint,
@@ -1650,8 +1757,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
                     ),
                 ],
             ),
-            KvListWithHeading::new(
-                METADATA_HEADING,
+            KvList::new(
+                Some(METADATA_HEADING),
                 vec![
                     diff_row!(internal_dns_version, INTERNAL_DNS_VERSION),
                     diff_row!(external_dns_version, EXTERNAL_DNS_VERSION),
@@ -1662,7 +1769,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
 
     pub fn make_oximeter_read_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvListWithHeading> {
+    ) -> impl IntoIterator<Item = KvList> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
                 diff_row!($member, $label, std::convert::identity)
@@ -1692,8 +1799,8 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
             };
         }
 
-        [KvListWithHeading::new(
-            OXIMETER_HEADING,
+        [KvList::new(
+            Some(OXIMETER_HEADING),
             vec![
                 diff_row!(oximeter_read_version, GENERATION),
                 diff_row!(oximeter_read_mode, OXIMETER_READ_FROM),
@@ -1793,9 +1900,17 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in unchanged_iter {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}, config generation {}):\n",
+                    "  sled {sled_id} ({}, config generation {}):",
                     sled.state, sled.sled_agent_generation
                 )?;
+
+                let mut rows = Vec::new();
+                if let Some(id) = sled.remove_mupdate_override {
+                    rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
+                }
+                let list = KvList::new_unchanged(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1806,9 +1921,21 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in &summary.diff.sleds.removed {
                 writeln!(
                     f,
-                    "  sled {sled_id} (was {}, config generation {}):\n",
+                    "  sled {sled_id} (was {}, config generation {}):",
                     sled.state, sled.sled_agent_generation
                 )?;
+
+                let mut rows = Vec::new();
+                if let Some(id) = sled.remove_mupdate_override {
+                    rows.push(KvPair::new(
+                        BpDiffState::Removed,
+                        WOULD_HAVE_REMOVED_MUPDATE_OVERRIDE,
+                        id.to_string(),
+                    ));
+                }
+                let list = KvList::new(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1838,8 +1965,25 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
                 writeln!(
                     f,
                     "  sled {sled_id} \
-                       ({state}, config generation {generation}):\n"
+                       ({state}, config generation {generation}):"
                 )?;
+
+                let mut rows = Vec::new();
+                // If either before or after is set for remove_mupdate_override, display it.
+                if sled.before.remove_mupdate_override.is_some()
+                    || sled.after.remove_mupdate_override.is_some()
+                {
+                    rows.push(KvPair::new_option_leaf(
+                        WILL_REMOVE_MUPDATE_OVERRIDE,
+                        Leaf {
+                            before: sled.before.remove_mupdate_override,
+                            after: sled.after.remove_mupdate_override,
+                        },
+                    ));
+                }
+                let list = KvList::new(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1850,9 +1994,21 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in &summary.diff.sleds.added {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}, config generation {}):\n",
+                    "  sled {sled_id} ({}, config generation {}):",
                     sled.state, sled.sled_agent_generation
                 )?;
+
+                let mut rows = Vec::new();
+                if let Some(id) = sled.remove_mupdate_override {
+                    rows.push(KvPair::new(
+                        BpDiffState::Added,
+                        WILL_REMOVE_MUPDATE_OVERRIDE,
+                        id.to_string(),
+                    ));
+                }
+                let list = KvList::new(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1917,6 +2073,12 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             if let Some(servers) = &tables.servers {
                 writeln!(f, "{}", servers)?;
             }
+        }
+
+        // Write out a summary of pending MGS updates.
+        if let Some(table) = self.pending_mgs_updates.to_bp_table() {
+            writeln!(f, " PENDING MGS UPDATES:\n")?;
+            writeln!(f, "{}", table)?;
         }
 
         Ok(())

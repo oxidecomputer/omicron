@@ -508,6 +508,12 @@ impl RunningZone {
         Ok(running_zone)
     }
 
+    /// Create a fake running zone for use in tests.
+    #[cfg(feature = "testing")]
+    pub fn fake_boot(zone_id: i32, zone: InstalledZone) -> Self {
+        RunningZone { id: Some(zone_id), inner: zone }
+    }
+
     pub async fn ensure_address(
         &self,
         addrtype: AddressRequest,
@@ -1002,7 +1008,7 @@ impl ZoneBuilderFactory {
 
     /// For use in unit tests that don't require actual zone creation to occur.
     pub fn fake(
-        temp_dir: Option<&String>,
+        temp_dir: Option<&str>,
         zones_api: Arc<dyn crate::zone::Api>,
     ) -> Self {
         let temp_dir = match temp_dir {
@@ -1044,6 +1050,9 @@ pub struct ZoneBuilder<'a> {
     /// The directories that will be searched for the image tarball for the
     /// provided zone type ([`Self::with_zone_type`]).
     zone_image_paths: Option<&'a [Utf8PathBuf]>,
+    /// The file name of the zone image to search for in [`Self::zone_image_paths`].
+    /// If unset, defaults to `{zone_type}.tar.gz`.
+    zone_image_file_name: Option<&'a str>,
     /// The name of the type of zone being created (e.g. "propolis-server")
     zone_type: Option<&'a str>,
     /// Unique ID of the instance of the zone being created. (optional)
@@ -1107,6 +1116,17 @@ impl<'a> ZoneBuilder<'a> {
         image_paths: &'a [Utf8PathBuf],
     ) -> Self {
         self.zone_image_paths = Some(image_paths);
+        self
+    }
+
+    /// The file name of the zone image to search for in the zone image
+    /// paths ([`Self::with_zone_image_paths`]). If unset, defaults to
+    /// `{zone_type}.tar.gz`.
+    pub fn with_zone_image_file_name(
+        mut self,
+        image_file_name: &'a str,
+    ) -> Self {
+        self.zone_image_file_name = Some(image_file_name);
         self
     }
 
@@ -1227,6 +1247,7 @@ impl<'a> ZoneBuilder<'a> {
             underlay_vnic_allocator: Some(underlay_vnic_allocator),
             zone_root_path: Some(mut zone_root_path),
             zone_image_paths: Some(zone_image_paths),
+            zone_image_file_name,
             zone_type: Some(zone_type),
             unique_name,
             datasets: Some(datasets),
@@ -1255,15 +1276,18 @@ impl<'a> ZoneBuilder<'a> {
             InstalledZone::get_zone_name(zone_type, unique_name);
 
         // Looks for the image within `zone_image_path`, in order.
-        let image = format!("{}.tar.gz", zone_type);
+        let image_file_name = match zone_image_file_name {
+            Some(image) => image,
+            None => &format!("{}.tar.gz", zone_type),
+        };
         let zone_image_path = zone_image_paths
             .iter()
             .find_map(|image_path| {
-                let path = image_path.join(&image);
+                let path = image_path.join(image_file_name);
                 if path.exists() { Some(path) } else { None }
             })
             .ok_or_else(|| InstallZoneError::ImageNotFound {
-                image: image.to_string(),
+                image: image_file_name.to_string(),
                 paths: zone_image_paths
                     .iter()
                     .map(|p| p.to_path_buf())

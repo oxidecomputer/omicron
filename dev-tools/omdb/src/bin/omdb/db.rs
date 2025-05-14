@@ -22,6 +22,7 @@ use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
+use crate::helpers::display_option_blank;
 use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -56,6 +57,9 @@ use ipnetwork::IpNetwork;
 use itertools::Itertools;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_errors::OptionalError;
+use nexus_db_lookup::DataStoreConnection;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -66,6 +70,7 @@ use nexus_db_model::ExternalIp;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Image;
 use nexus_db_model::Instance;
+use nexus_db_model::InstanceIntendedState;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvPhysicalDisk;
@@ -106,20 +111,17 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CrucibleTargets;
-use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeCookedResult;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
-use nexus_db_queries::transaction_retry::OptionalError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -167,8 +169,11 @@ use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 use uuid::Uuid;
+use webhook::WebhookArgs;
+use webhook::cmd_db_webhook;
 
 mod saga;
+mod webhook;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
@@ -382,6 +387,8 @@ enum DbCommands {
     Vmms(VmmListArgs),
     /// Print information about the oximeter collector.
     Oximeter(OximeterArgs),
+    /// Print information about webhooks
+    Webhook(WebhookArgs),
     /// Commands for querying and interacting with pools
     Zpool(ZpoolArgs),
 }
@@ -1459,6 +1466,8 @@ impl DbArgs {
                     DbCommands::Oximeter(OximeterArgs {
                         command: OximeterCommands::ListProducers
                     }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
+
+                    DbCommands::Webhook(args) => cmd_db_webhook(&opctx, &datastore, &fetch_opts, &args).await,
                     DbCommands::Zpool(ZpoolArgs {
                         command: ZpoolCommands::List(args)
                     }) => cmd_db_zpool_list(&opctx, &datastore, &args).await,
@@ -1686,7 +1695,7 @@ struct CrucibleDatasetRow {
     size_left: Option<i128>,
 }
 
-fn option_impl_display<T: std::fmt::Display>(t: &Option<T>) -> String {
+pub fn option_impl_display<T: std::fmt::Display>(t: &Option<T>) -> String {
     match t {
         Some(v) => format!("{v}"),
         None => String::from("n/a"),
@@ -4343,6 +4352,7 @@ async fn cmd_db_instance_info(
     const BOOT_DISK: &'static str = "boot disk";
     const AUTO_RESTART: &'static str = "auto-restart";
     const STATE: &'static str = "nexus state";
+    const INTENDED_STATE: &'static str = "intended state";
     const LAST_MODIFIED: &'static str = "last modified at";
     const LAST_UPDATED: &'static str = "last updated at";
     const LAST_AUTO_RESTART: &'static str = "  last reincarnated at";
@@ -4368,6 +4378,7 @@ async fn cmd_db_instance_info(
         AUTO_RESTART,
         STATE,
         API_STATE,
+        INTENDED_STATE,
         LAST_UPDATED,
         LAST_MODIFIED,
         LAST_AUTO_RESTART,
@@ -4427,6 +4438,7 @@ async fn cmd_db_instance_info(
         "{} {API_STATE:>WIDTH$}: {effective_state:?}",
         if effective_state == InstanceState::Failed { "/!\\" } else { "(i)" }
     );
+    println!("    {INTENDED_STATE:>WIDTH$}: {}", instance.intended_state);
     println!(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
         r#gen.0
@@ -4434,9 +4446,7 @@ async fn cmd_db_instance_info(
 
     // Reincarnation status
     let InstanceKarmicStatus { needs_reincarnation, can_reincarnate } =
-        instance
-            .auto_restart
-            .status(&instance.runtime_state, active_vmm.as_ref());
+        instance.auto_restart_status(active_vmm.as_ref());
     println!(
         "{} {NEEDS_REINCARNATION:>WIDTH$}: {needs_reincarnation}",
         if needs_reincarnation { "(i)" } else { "   " }
@@ -4782,6 +4792,7 @@ struct VmmStateRow {
 struct CustomerInstanceRow {
     id: String,
     state: String,
+    intent: InstanceIntendedState,
     propolis_id: MaybePropolisId,
     sled_id: MaybeSledId,
     host_serial: String,
@@ -4859,6 +4870,7 @@ async fn cmd_db_instances(
             id: i.instance().id().to_string(),
             name: i.instance().name().to_string(),
             state: i.effective_state().to_string(),
+            intent: i.instance().intended_state,
             propolis_id: (&i).into(),
             sled_id: (&i).into(),
             host_serial,
@@ -6755,6 +6767,8 @@ async fn cmd_db_inventory_cabooses(
         git_commit: String,
         name: String,
         version: String,
+        #[tabled(display_with = "option_impl_display")]
+        sign: Option<String>,
     }
 
     use nexus_db_schema::schema::sw_caboose::dsl;
@@ -6773,6 +6787,7 @@ async fn cmd_db_inventory_cabooses(
         name: caboose.name,
         version: caboose.version,
         git_commit: caboose.git_commit,
+        sign: caboose.sign,
     });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
@@ -7121,6 +7136,8 @@ async fn inv_collection_print_devices(
             name: &'a str,
             version: &'a str,
             git_commit: &'a str,
+            #[tabled(display_with = "option_impl_display")]
+            sign: &'a Option<String>,
         }
 
         println!("    cabooses:");
@@ -7134,6 +7151,7 @@ async fn inv_collection_print_devices(
                 name: &found_caboose.caboose.name,
                 version: &found_caboose.caboose.version,
                 git_commit: &found_caboose.caboose.git_commit,
+                sign: &found_caboose.caboose.sign,
             })
             .collect();
         let table = tabled::Table::new(caboose_rows)
@@ -8023,11 +8041,6 @@ async fn cmd_db_oximeter_list_producers(
     println!("{}", table);
 
     Ok(())
-}
-
-// Display an empty cell for an Option<T> if it's None.
-fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
-    opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
 }
 
 // Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using

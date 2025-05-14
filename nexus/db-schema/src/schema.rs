@@ -431,6 +431,7 @@ table! {
         migration_id -> Nullable<Uuid>,
         state -> crate::enums::InstanceStateEnum,
         time_last_auto_restarted -> Nullable<Timestamptz>,
+        intended_state -> crate::enums::InstanceIntendedStateEnum,
         updater_id -> Nullable<Uuid>,
         updater_gen-> Int8,
     }
@@ -1475,6 +1476,7 @@ table! {
         git_commit -> Text,
         name -> Text,
         version -> Text,
+        sign -> Nullable<Text>,
     }
 }
 
@@ -1737,6 +1739,7 @@ table! {
 
         sled_state -> crate::enums::SledStateEnum,
         sled_agent_generation -> Int8,
+        remove_mupdate_override -> Nullable<Uuid>,
     }
 }
 
@@ -2200,3 +2203,111 @@ table! {
         region_snapshot_snapshot_id -> Nullable<Uuid>,
     }
 }
+
+table! {
+    webhook_receiver (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        secret_gen -> Int8,
+        subscription_gen -> Int8,
+        endpoint -> Text,
+    }
+}
+
+table! {
+    webhook_secret (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rx_id -> Uuid,
+        secret -> Text,
+    }
+}
+
+table! {
+    webhook_rx_subscription (rx_id, event_class) {
+        rx_id -> Uuid,
+        event_class -> crate::enums::WebhookEventClassEnum,
+        glob -> Nullable<Text>,
+        time_created -> Timestamptz,
+    }
+}
+
+table! {
+    webhook_rx_event_glob (rx_id, glob) {
+        rx_id -> Uuid,
+        glob -> Text,
+        regex -> Text,
+        time_created -> Timestamptz,
+        schema_version -> Nullable<Text>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    webhook_receiver,
+    webhook_secret,
+    webhook_rx_subscription,
+    webhook_rx_event_glob,
+    webhook_event,
+);
+joinable!(webhook_rx_subscription -> webhook_receiver (rx_id));
+joinable!(webhook_secret -> webhook_receiver (rx_id));
+joinable!(webhook_rx_event_glob -> webhook_receiver (rx_id));
+
+table! {
+    webhook_event (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        event_class -> crate::enums::WebhookEventClassEnum,
+        event -> Jsonb,
+        time_dispatched -> Nullable<Timestamptz>,
+        num_dispatched -> Int8,
+    }
+}
+
+table! {
+    webhook_delivery (id) {
+        id -> Uuid,
+        event_id -> Uuid,
+        rx_id -> Uuid,
+        triggered_by -> crate::enums::WebhookDeliveryTriggerEnum,
+        attempts -> Int2,
+        time_created -> Timestamptz,
+        time_completed -> Nullable<Timestamptz>,
+        state -> crate::enums::WebhookDeliveryStateEnum,
+        deliverator_id -> Nullable<Uuid>,
+        time_leased -> Nullable<Timestamptz>,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(webhook_receiver, webhook_delivery);
+joinable!(webhook_delivery -> webhook_receiver (rx_id));
+allow_tables_to_appear_in_same_query!(webhook_delivery, webhook_event);
+allow_tables_to_appear_in_same_query!(webhook_delivery_attempt, webhook_event);
+joinable!(webhook_delivery -> webhook_event (event_id));
+
+table! {
+    webhook_delivery_attempt (id) {
+        id -> Uuid,
+        delivery_id -> Uuid,
+        attempt -> Int2,
+        rx_id -> Uuid,
+        result -> crate::enums::WebhookDeliveryAttemptResultEnum,
+        response_status -> Nullable<Int4>,
+        response_duration -> Nullable<Interval>,
+        time_created -> Timestamptz,
+        deliverator_id -> Uuid,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    webhook_delivery,
+    webhook_delivery_attempt
+);
+joinable!(webhook_delivery_attempt -> webhook_delivery (delivery_id));

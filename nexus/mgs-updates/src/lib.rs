@@ -19,13 +19,14 @@ mod host_phase1_updater;
 mod mgs_clients;
 mod rot_updater;
 mod sp_updater;
+#[cfg(test)]
+mod test_util;
 
 pub use artifacts::ArtifactCache;
 pub use artifacts::ArtifactCacheError;
 pub use common_sp_update::SpComponentUpdateError;
 pub use common_sp_update::SpComponentUpdateHelper;
 pub use common_sp_update::SpComponentUpdater;
-pub use driver::DriverStatus;
 pub use driver::MgsUpdateDriver;
 pub use driver_update::DEFAULT_RETRY_TIMEOUT;
 pub use host_phase1_updater::HostPhase1Updater;

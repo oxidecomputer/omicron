@@ -35,7 +35,6 @@ use nexus_config::NexusConfig;
 use nexus_db_queries::db::pub_test_utils::crdb;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
@@ -70,8 +69,6 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
-use omicron_common::disk::DatasetsConfig;
-use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
@@ -892,7 +889,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         datasets.insert(BlueprintDatasetConfig {
                             disposition: BlueprintDatasetDisposition::InService,
                             id,
-                            pool: zpool.clone(),
+                            pool: *zpool,
                             kind: DatasetKind::TransientZone {
                                 name: illumos_utils::zone::zone_name(
                                     zone.zone_type.kind().zone_prefix(),
@@ -936,6 +933,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         disks,
                         datasets,
                         zones,
+                        remove_mupdate_override: None,
                     },
                 );
             }
@@ -1089,19 +1087,18 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         client
             .omicron_config_put(&OmicronSledConfig {
+                generation: Generation::new().next(),
                 // Sending no disks or datasets is probably wrong, but there are
                 // a lot of inconsistencies with this in nexus-test.
-                disks_config: OmicronPhysicalDisksConfig::default(),
-                datasets_config: DatasetsConfig::default(),
-                zones_config: OmicronZonesConfig {
-                    zones: self
-                        .blueprint_zones
-                        .clone()
-                        .into_iter()
-                        .map(From::from)
-                        .collect(),
-                    generation: Generation::new().next(),
-                },
+                disks: IdMap::default(),
+                datasets: IdMap::default(),
+                zones: self
+                    .blueprint_zones
+                    .clone()
+                    .into_iter()
+                    .map(From::from)
+                    .collect(),
+                remove_mupdate_override: None,
             })
             .await
             .expect("Failed to configure sled agent with our zones");
@@ -1135,13 +1132,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
             client
                 .omicron_config_put(&OmicronSledConfig {
+                    generation: Generation::new().next(),
                     // As above, sending no disks or datasets is probably wrong
-                    disks_config: OmicronPhysicalDisksConfig::default(),
-                    datasets_config: DatasetsConfig::default(),
-                    zones_config: OmicronZonesConfig {
-                        zones: vec![],
-                        generation: Generation::new().next(),
-                    },
+                    disks: IdMap::default(),
+                    datasets: IdMap::default(),
+                    zones: IdMap::default(),
+                    remove_mupdate_override: None,
                 })
                 .await
                 .expect("Failed to configure sled agent with our zones");

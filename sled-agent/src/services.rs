@@ -25,6 +25,7 @@
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //!   or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
+use crate::artifact_store::ArtifactStore;
 use crate::bootstrap::BootstrapNetworking;
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
@@ -32,9 +33,8 @@ use crate::bootstrap::early_networking::{
 use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
-use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
+use crate::params::{DendriteAsic, OmicronZoneTypeExt};
 use crate::profile::*;
-use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -68,10 +68,10 @@ use internal_dns_types::names::DNS_ZONE;
 use itertools::Itertools;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
+    OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType,
+    OmicronZonesConfig, ZoneKind,
 };
 use omicron_common::address::AZ_PREFIX;
-use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MGS_PORT;
@@ -99,16 +99,16 @@ use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use rand::prelude::SliceRandom;
 use sled_agent_types::{
-    sled::SWITCH_ZONE_BASEBOARD_FILE,
-    time_sync::TimeSync,
-    zone_bundle::{ZoneBundleCause, ZoneBundleMetadata},
+    sled::SWITCH_ZONE_BASEBOARD_FILE, time_sync::TimeSync,
+    zone_bundle::ZoneBundleCause,
 };
+use sled_agent_zone_images::{ZoneImageSourceResolver, ZoneImageZpools};
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
-use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
+use sled_storage::dataset::{CONFIG_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -122,13 +122,12 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio::sync::{MutexGuard, oneshot};
 use tokio::task::JoinHandle;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use illumos_utils::zone::Zones;
 
 const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
-
-const COCKROACH: &str = "/opt/oxide/cockroachdb/bin/cockroach";
 
 // These are all the same binary. They just reside at different paths.
 const CLICKHOUSE_SERVER_BINARY: &str =
@@ -312,6 +311,18 @@ pub enum Error {
 
     #[error("Unexpected zone config: zone {zone_id} is running on ramdisk ?!")]
     ZoneIsRunningOnRamdisk { zone_id: OmicronZoneUuid },
+
+    #[error(
+        "Couldn't find requested zone image ({hash}) for \
+        {zone_kind:?} {id} in artifact store: {err}"
+    )]
+    ZoneArtifactNotFound {
+        hash: ArtifactHash,
+        zone_kind: &'static str,
+        id: OmicronZoneUuid,
+        #[source]
+        err: crate::artifact_store::Error,
+    },
 }
 
 impl Error {
@@ -767,8 +778,8 @@ pub struct ServiceManagerInner {
     switch_zone_bootstrap_address: Ipv6Addr,
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
+    zone_image_resolver: ZoneImageSourceResolver,
     ledger_directory_override: OnceLock<Utf8PathBuf>,
-    image_directory_override: OnceLock<Utf8PathBuf>,
     system_api: Box<dyn SystemApi>,
 }
 
@@ -918,6 +929,7 @@ impl ServiceManager {
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
+        zone_image_resolver: ZoneImageSourceResolver,
     ) -> Self {
         Self::new_inner(
             log,
@@ -929,6 +941,7 @@ impl ServiceManager {
             switch_zone_maghemite_links,
             storage,
             zone_bundler,
+            zone_image_resolver,
             RealSystemApi::new(),
         )
     }
@@ -944,6 +957,7 @@ impl ServiceManager {
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
+        zone_image_resolver: ZoneImageSourceResolver,
         system_api: Box<dyn SystemApi>,
     ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
@@ -979,8 +993,8 @@ impl ServiceManager {
                     .switch_zone_bootstrap_ip,
                 storage,
                 zone_bundler,
+                zone_image_resolver,
                 ledger_directory_override: OnceLock::new(),
-                image_directory_override: OnceLock::new(),
                 system_api,
             }),
         }
@@ -993,7 +1007,7 @@ impl ServiceManager {
 
     #[cfg(all(test, target_os = "illumos"))]
     fn override_image_directory(&self, path: Utf8PathBuf) {
-        self.inner.image_directory_override.set(path).unwrap();
+        self.inner.zone_image_resolver.override_image_directory(path);
     }
 
     pub(crate) fn ddm_reconciler(&self) -> &DdmReconciler {
@@ -1164,13 +1178,19 @@ impl ServiceManager {
         if let SwitchZoneState::Running { zone, .. } =
             &*self.inner.switch_zone.lock().await
         {
-            if !metrics_queue.track_zone_links(zone).await {
-                error!(
-                    self.inner.log,
-                    "Failed to track one or more data links in \
-                    the switch zone, some metrics will not \
-                    be produced."
-                );
+            match metrics_queue.track_zone_links(zone) {
+                Ok(_) => {
+                    debug!(self.inner.log, "Stopped tracking zone datalinks")
+                }
+                Err(errors) => {
+                    error!(
+                        self.inner.log,
+                        "Failed to track one or more data links in \
+                        the switch zone, some metrics will not \
+                        be produced.";
+                        "errors" => ?errors,
+                    );
+                }
             }
         }
 
@@ -1697,22 +1717,28 @@ impl ServiceManager {
             .map(|d| zone::Device { name: d.to_string() })
             .collect();
 
-        // Look for the image in the ramdisk first
-        let mut zone_image_paths = vec![Utf8PathBuf::from("/opt/oxide")];
-        // Inject an image path if requested by a test.
-        if let Some(path) = self.inner.image_directory_override.get() {
-            zone_image_paths.push(path.clone());
+        // TODO: `InstallDataset` should be renamed to something more accurate
+        // when all the major changes here have landed. Some zones are
+        // distributed from the host OS image and are never placed in the
+        // install dataset; that enum variant more accurately reflects that we
+        // are falling back to searching `/opt/oxide` in addition to the install
+        // datasets.
+        let image_source = match &request {
+            ZoneArgs::Omicron(zone_config) => &zone_config.zone.image_source,
+            ZoneArgs::Switch(_) => &OmicronZoneImageSource::InstallDataset,
         };
-
-        // If the boot disk exists, look for the image in the "install" dataset
-        // there too.
         let all_disks = self.inner.storage.get_latest_disks().await;
-        if let Some((_, boot_zpool)) = all_disks.boot_disk() {
-            zone_image_paths.push(boot_zpool.dataset_mountpoint(
-                &all_disks.mount_config().root,
-                INSTALL_DATASET,
-            ));
-        }
+        let zpools = ZoneImageZpools {
+            root: &all_disks.mount_config().root,
+            all_m2_zpools: all_disks.all_m2_zpools(),
+        };
+        let boot_zpool =
+            all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
+        let file_source = self.inner.zone_image_resolver.file_source_for(
+            image_source,
+            &zpools,
+            boot_zpool.as_ref(),
+        );
 
         let zone_type_str = match &request {
             ZoneArgs::Omicron(zone_config) => {
@@ -1725,7 +1751,7 @@ impl ServiceManager {
         let mut zone_builder = match self.inner.system_api.fake_install_dir() {
             None => ZoneBuilderFactory::new().builder(),
             Some(dir) => ZoneBuilderFactory::fake(
-                Some(&dir.as_str().to_string()),
+                Some(&dir.as_str()),
                 illumos_utils::fakes::zone::Zones::new(),
             )
             .builder(),
@@ -1736,11 +1762,14 @@ impl ServiceManager {
         if let Some(vnic) = bootstrap_vnic {
             zone_builder = zone_builder.with_bootstrap_vnic(vnic);
         }
+        if let Some(file_name) = &file_source.file_name {
+            zone_builder = zone_builder.with_zone_image_file_name(file_name);
+        }
         let installed_zone = zone_builder
             .with_log(self.inner.log.clone())
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
             .with_zone_root_path(zone_root_path)
-            .with_zone_image_paths(zone_image_paths.as_slice())
+            .with_zone_image_paths(file_source.search_paths.as_slice())
             .with_zone_type(zone_type_str)
             .with_datasets(datasets.as_slice())
             .with_filesystems(&filesystems)
@@ -2116,11 +2145,9 @@ impl ServiceManager {
                     &[*address.ip()],
                 )?;
 
-                let dataset_name = DatasetName::new(
-                    dataset.pool_name.clone(),
-                    DatasetKind::Crucible,
-                )
-                .full_name();
+                let dataset_name =
+                    DatasetName::new(dataset.pool_name, DatasetKind::Crucible)
+                        .full_name();
                 let uuid = &Uuid::new_v4().to_string();
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("dataset", "astring", &dataset_name)
@@ -2596,6 +2623,7 @@ impl ServiceManager {
                         )
                     })?;
                 let opte_ip = port.ip();
+                let opte_iface_name = port.name();
 
                 // Nexus takes a separate config file for parameters
                 // which cannot be known at packaging time.
@@ -2628,6 +2656,12 @@ impl ServiceManager {
                     },
                     database: nexus_config::Database::FromDns,
                     external_dns_servers: external_dns_servers.clone(),
+                    // TCP connections bound by HTTP clients of external services
+                    // should always be bound on our OPTE interface.
+                    external_http_clients:
+                        nexus_config::ExternalHttpClientConfig {
+                            interface: Some(opte_iface_name.to_string()),
+                        },
                 };
 
                 // Copy the partial config file to the expected
@@ -3420,13 +3454,17 @@ impl ServiceManager {
         // but before we've either run RSS or unlocked the rack. In both those
         // cases, we have a `StartSledAgentRequest`, and so a metrics queue.
         if let Some(queue) = self.maybe_metrics_queue() {
-            if !queue.track_zone_links(&running_zone).await {
-                error!(
-                    self.inner.log,
-                    "Failed to track one or more links in the zone, \
-                    some metrics will not be produced";
-                    "zone_name" => running_zone.name(),
-                );
+            match queue.track_zone_links(&running_zone) {
+                Ok(_) => debug!(self.inner.log, "Tracking zone datalinks"),
+                Err(errors) => {
+                    error!(
+                        self.inner.log,
+                        "Failed to track one or more links in the zone, \
+                        some metrics will not be produced";
+                        "zone_name" => running_zone.name(),
+                        "errors" => ?errors,
+                    );
+                }
             }
         }
         Ok(running_zone)
@@ -3546,33 +3584,6 @@ impl ServiceManager {
         Ok(StartZonesResult { new_zones, errors })
     }
 
-    /// Create a zone bundle for the provided zone.
-    pub async fn create_zone_bundle(
-        &self,
-        name: &str,
-    ) -> Result<ZoneBundleMetadata, BundleError> {
-        // Search for the named zone.
-        if let SwitchZoneState::Running { zone, .. } =
-            &*self.inner.switch_zone.lock().await
-        {
-            if zone.name() == name {
-                return self
-                    .inner
-                    .zone_bundler
-                    .create(zone, ZoneBundleCause::ExplicitRequest)
-                    .await;
-            }
-        }
-        if let Some(zone) = self.inner.zones.lock().await.get(name) {
-            return self
-                .inner
-                .zone_bundler
-                .create(&zone.runtime, ZoneBundleCause::ExplicitRequest)
-                .await;
-        }
-        Err(BundleError::NoSuchZone { name: name.to_string() })
-    }
-
     /// Returns the current Omicron zone configuration
     pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
         let log = &self.inner.log;
@@ -3608,6 +3619,26 @@ impl ServiceManager {
         let log = &self.inner.log;
 
         let mut existing_zones = self.inner.zones.lock().await;
+
+        // Ensure that any zone images from the artifact store are present.
+        for zone in &request.zones {
+            if let Some(hash) = zone.image_source.artifact_hash() {
+                if let Err(err) = ArtifactStore::get_from_storage(
+                    &self.inner.storage,
+                    &self.inner.log,
+                    hash,
+                )
+                .await
+                {
+                    return Err(Error::ZoneArtifactNotFound {
+                        hash,
+                        zone_kind: zone.zone_type.kind().report_str(),
+                        id: zone.id,
+                        err,
+                    });
+                }
+            }
+        }
 
         // Read the existing set of services from the ledger.
         let zone_ledger_paths = self.all_omicron_zone_ledgers().await;
@@ -3789,7 +3820,19 @@ impl ServiceManager {
         // Ensure that the sled agent's metrics task is not tracking the zone's
         // VNICs or OPTE ports.
         if let Some(queue) = self.maybe_metrics_queue() {
-            queue.untrack_zone_links(&zone.runtime).await;
+            match queue.untrack_zone_links(&zone.runtime) {
+                Ok(_) => debug!(
+                    log,
+                    "stopped tracking zone datalinks";
+                    "zone_name" => &expected_zone_name,
+                ),
+                Err(errors) => error!(
+                    log,
+                    "failed to stop tracking zone datalinks";
+                    "errors" => ?errors,
+                    "zone_name" => &expected_zone_name
+                ),
+            }
         }
         debug!(
             log,
@@ -3976,16 +4019,15 @@ impl ServiceManager {
         let filesystem_pool = match (&zone.filesystem_pool, zone.dataset_name())
         {
             // If a pool was explicitly requested, use it.
-            (Some(pool), _) => pool.clone(),
+            (Some(pool), _) => *pool,
             // NOTE: The following cases are for backwards compatibility.
             //
             // If no pool was selected, prefer to use the same pool as the
             // durable dataset. Otherwise, pick one randomly.
-            (None, Some(dataset)) => dataset.pool().clone(),
-            (None, None) => all_u2_pools
+            (None, Some(dataset)) => *dataset.pool(),
+            (None, None) => *all_u2_pools
                 .choose(&mut rand::thread_rng())
-                .ok_or_else(|| Error::U2NotFound)?
-                .clone(),
+                .ok_or_else(|| Error::U2NotFound)?,
         };
 
         if !all_u2_pools.contains(&filesystem_pool) {
@@ -4003,73 +4045,6 @@ impl ServiceManager {
             .dataset_mountpoint(&mount_config.root, ZONE_DATASET);
         let pool = ZpoolOrRamdisk::Zpool(filesystem_pool);
         Ok(PathInPool { pool, path })
-    }
-
-    pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
-        let log = &self.inner.log;
-        let dataset_zones = self.inner.zones.lock().await;
-        for zone in dataset_zones.values() {
-            // TODO: We could probably store the ZoneKind in the running zone to
-            // make this "comparison to existing zones by name" mechanism a bit
-            // safer.
-            if zone.name().contains(ZoneKind::CockroachDb.zone_prefix()) {
-                let address = Zones::get_address(
-                    Some(zone.name()),
-                    &zone.runtime.control_interface(),
-                )?
-                .ip();
-                let host = &format!("[{address}]:{COCKROACH_PORT}");
-                info!(
-                    log,
-                    "Initializing CRDB Cluster - sending request to {host}"
-                );
-                if let Err(err) = zone.runtime.run_cmd(&[
-                    COCKROACH,
-                    "init",
-                    "--insecure",
-                    "--host",
-                    host,
-                ]) {
-                    if !err
-                        .to_string()
-                        .contains("cluster has already been initialized")
-                    {
-                        return Err(Error::CockroachInit { err });
-                    }
-                };
-                info!(log, "Formatting CRDB");
-                zone.runtime
-                    .run_cmd(&[
-                        COCKROACH,
-                        "sql",
-                        "--insecure",
-                        "--host",
-                        host,
-                        "--file",
-                        "/opt/oxide/cockroachdb/sql/dbwipe.sql",
-                    ])
-                    .map_err(|err| Error::CockroachInit { err })?;
-                zone.runtime
-                    .run_cmd(&[
-                        COCKROACH,
-                        "sql",
-                        "--insecure",
-                        "--host",
-                        host,
-                        "--file",
-                        "/opt/oxide/cockroachdb/sql/dbinit.sql",
-                    ])
-                    .map_err(|err| Error::CockroachInit { err })?;
-                info!(log, "Formatting CRDB - Completed");
-
-                // In the single-sled case, if there are multiple CRDB nodes on
-                // a single device, we'd still only want to send the
-                // initialization requests to a single dataset.
-                return Ok(());
-            }
-        }
-
-        Ok(())
     }
 
     /// Adjust the system boot time to the latest boot time of all zones.
@@ -4202,13 +4177,21 @@ impl ServiceManager {
             // We expect to have a metrics queue by this point, so
             // we can safely send a message on it to say the sled has
             // been synchronized.
+            //
+            // We may want to retry or ensure this notification happens. See
+            // https://github.com/oxidecomputer/omicron/issues/8022.
             let queue = self.metrics_queue();
-            if !queue.notify_time_synced_sled(self.sled_id()).await {
-                error!(
+            match queue.notify_time_synced_sled(self.sled_id()) {
+                Ok(_) => debug!(
                     self.inner.log,
-                    "Failed to notify metrics queue of sled \
-                     time synchronization, metrics may not be produced."
-                );
+                    "Notified metrics task that time is now synced",
+                ),
+                Err(e) => error!(
+                    self.inner.log,
+                    "Failed to notify metrics task that \
+                     time is now synced, metrics may not be produced.";
+                     "error" => InlineErrorChain::new(&e),
+                ),
             }
         } else {
             debug!(self.inner.log, "Time was already synchronized");
@@ -4907,7 +4890,17 @@ impl ServiceManager {
                 if let Some(queue) =
                     self.inner.sled_info.get().map(|sa| &sa.metrics_queue)
                 {
-                    queue.untrack_zone_links(zone).await;
+                    match queue.untrack_zone_links(zone) {
+                        Ok(_) => debug!(
+                            log,
+                            "stopped tracking switch zone datalinks"
+                        ),
+                        Err(errors) => error!(
+                            log,
+                            "failed to stop tracking switch zone datalinks";
+                            "errors" => ?errors,
+                        ),
+                    }
                 }
 
                 let _ = zone.stop().await;
@@ -5056,7 +5049,7 @@ fn reconcile_running_zones_with_new_request_impl<'a>(
                 // match the new request; if they now match, that's the only
                 // field that's different.
                 let mut existing = existing_zone.clone();
-                existing.filesystem_pool = Some(new_filesystem_pool.clone());
+                existing.filesystem_pool = Some(*new_filesystem_pool);
                 existing == zone
             };
 
@@ -5111,8 +5104,8 @@ fn reconcile_running_zones_with_new_request_impl<'a>(
                     );
                     return Err(Error::InvalidFilesystemPoolZoneConfig {
                         zone_id: zone.id,
-                        expected_pool: runtime_zpool.clone(),
-                        got_pool: new_filesystem_pool.clone(),
+                        expected_pool: *runtime_zpool,
+                        got_pool: *new_filesystem_pool,
                     });
                 }
             }
@@ -5158,6 +5151,7 @@ mod illumos_tests {
 
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_zone_images::ZoneImageZpools;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::{
         net::{Ipv6Addr, SocketAddrV6},
@@ -5288,7 +5282,13 @@ mod illumos_tests {
         // deleted.
         let queue = mgr.metrics_queue();
         for zone in mgr.inner.zones.lock().await.values() {
-            queue.untrack_zone_links(&zone.runtime).await;
+            if let Err(e) = queue.untrack_zone_links(&zone.runtime) {
+                error!(
+                    mgr.inner.log,
+                    "failed to stop tracking zone datalinks";
+                    "errors" => ?e,
+                );
+            }
         }
 
         // Explicitly drop the service manager
@@ -5353,6 +5353,7 @@ mod illumos_tests {
         log: slog::Logger,
         storage_test_harness: StorageManagerTestHarness,
         zone_bundler: ZoneBundler,
+        zone_image_resolver: ZoneImageSourceResolver,
         test_config: &'a TestConfig,
     }
 
@@ -5365,10 +5366,21 @@ mod illumos_tests {
                 Default::default(),
             );
 
+            let mut storage_manager = storage_test_harness.handle().clone();
+            let all_disks = storage_manager.get_latest_disks().await;
+            let (_, boot_zpool) = storage_manager.wait_for_boot_disk().await;
+            let zpools = ZoneImageZpools {
+                root: &all_disks.mount_config().root,
+                all_m2_zpools: all_disks.all_m2_zpools(),
+            };
+            let zone_image_resolver =
+                ZoneImageSourceResolver::new(&log, &zpools, &boot_zpool);
+
             LedgerTestHelper {
                 log,
                 storage_test_harness,
                 zone_bundler,
+                zone_image_resolver,
                 test_config,
             }
         }
@@ -5403,6 +5415,7 @@ mod illumos_tests {
                 vec![],
                 self.storage_test_harness.handle().clone(),
                 self.zone_bundler.clone(),
+                self.zone_image_resolver.clone(),
                 system,
             );
             self.test_config.override_paths(&mgr);
@@ -5927,10 +5940,10 @@ mod illumos_tests {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::ZpoolUuid;
-
-    use super::*;
+    use sled_agent_types::zone_bundle::ZoneBundleMetadata;
 
     #[test]
     fn test_bootstrap_addr_to_techport_prefixes() {
@@ -5991,15 +6004,15 @@ mod test {
             let mut existing = vec![
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0]),
                 ),
                 (
                     make_omicron_zone_config(Some(&some_zpools[1])),
-                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1]),
                 ),
                 (
                     make_omicron_zone_config(Some(&some_zpools[2])),
-                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2]),
                 ),
             ];
             let new_request = OmicronZonesConfig {
@@ -6026,15 +6039,15 @@ mod test {
             let mut existing = vec![
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2]),
                 ),
             ];
             let new_request = OmicronZonesConfig {
@@ -6044,7 +6057,7 @@ mod test {
                     .enumerate()
                     .map(|(i, (zone, _))| {
                         let mut zone = zone.clone();
-                        zone.filesystem_pool = Some(some_zpools[i].clone());
+                        zone.filesystem_pool = Some(some_zpools[i]);
                         zone
                     })
                     .collect(),
@@ -6071,15 +6084,15 @@ mod test {
             let mut existing = vec![
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2]),
                 ),
             ];
             let new_request = OmicronZonesConfig {
@@ -6089,7 +6102,7 @@ mod test {
                     .enumerate()
                     .map(|(i, (zone, _))| {
                         let mut zone = zone.clone();
-                        zone.filesystem_pool = Some(some_zpools[i].clone());
+                        zone.filesystem_pool = Some(some_zpools[i]);
                         if i == 2 {
                             zone.zone_type = OmicronZoneType::Oximeter {
                                 address: "[::1]:10000".parse().unwrap(),
@@ -6128,15 +6141,15 @@ mod test {
             let mut existing = vec![
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2]),
                 ),
             ];
             let existing_orig =
@@ -6149,9 +6162,9 @@ mod test {
                     .map(|(i, (zone, _))| {
                         let mut zone = zone.clone();
                         if i < 2 {
-                            zone.filesystem_pool = Some(some_zpools[i].clone());
+                            zone.filesystem_pool = Some(some_zpools[i]);
                         } else {
-                            zone.filesystem_pool = Some(some_zpools[4].clone());
+                            zone.filesystem_pool = Some(some_zpools[4]);
                         }
                         zone
                     })
@@ -6194,15 +6207,15 @@ mod test {
             let mut existing = vec![
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[0].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[0]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[1].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[1]),
                 ),
                 (
                     make_omicron_zone_config(None),
-                    ZpoolOrRamdisk::Zpool(some_zpools[2].clone()),
+                    ZpoolOrRamdisk::Zpool(some_zpools[2]),
                 ),
             ];
             let new_request = OmicronZonesConfig {
@@ -6210,7 +6223,7 @@ mod test {
                 zones: vec![
                     {
                         let mut z = existing[0].0.clone();
-                        z.filesystem_pool = Some(some_zpools[0].clone());
+                        z.filesystem_pool = Some(some_zpools[0]);
                         z
                     },
                     make_omicron_zone_config(None),

@@ -6,7 +6,6 @@
 
 use anyhow::Context;
 use anyhow::anyhow;
-use chrono::SecondsFormat;
 use clap::Args;
 use clap::ColorChoice;
 use clap::Parser;
@@ -16,12 +15,12 @@ use gateway_client::types::SpIgnition;
 use gateway_client::types::SpType;
 use internal_dns_types::names::ServiceName;
 use nexus_mgs_updates::ArtifactCache;
-use nexus_mgs_updates::DriverStatus;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_repl_utils::run_repl_on_stdin;
 use qorb::resolver::Resolver;
@@ -34,10 +33,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
-use tufaceous_artifact::ArtifactHashId;
-use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
-use tufaceous_artifact::KnownArtifactKind;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -171,7 +167,7 @@ impl ReconfiguratorSpUpdater {
 
 struct UpdaterState {
     requests_tx: watch::Sender<PendingMgsUpdates>,
-    status_rx: watch::Receiver<DriverStatus>,
+    status_rx: watch::Receiver<MgsUpdateDriverStatus>,
     inventory: Inventory,
 }
 
@@ -309,7 +305,7 @@ fn cmd_config(
             update.sp_type,
             update.slot_id,
         )?;
-        writeln!(&mut s, "        artifact hash: {}", update.artifact_hash_id,)?;
+        writeln!(&mut s, "        artifact hash: {}", update.artifact_hash)?;
         writeln!(
             &mut s,
             "        user-provided artifact version: {}",
@@ -326,6 +322,28 @@ fn cmd_config(
                     expected_active_version, expected_inactive_version,
                 )?;
             }
+            PendingMgsUpdateDetails::Rot {
+                expected_slot_a_version,
+                expected_slot_b_version,
+                expected_active_slot,
+                expected_persistent_boot_preference,
+                expected_pending_persistent_boot_preference,
+                expected_transient_boot_preference,
+            } => {
+                writeln!(
+                    &mut s,
+                    "        preconditions: expected_slot_a_version {:?}
+                                            expected_slot_b_version {:?}
+                                            expected active_slot {:?}
+                                            expected persistent_boot_preference {:?}
+                                            expected pending_persistent_boot_preference {:?}
+                                            expected transient_boot_preference {:?}",
+                    expected_slot_a_version, expected_slot_b_version,
+                    expected_active_slot, expected_persistent_boot_preference,
+                    expected_pending_persistent_boot_preference,
+                    expected_transient_boot_preference,
+                )?;
+            }
         }
 
         writeln!(&mut s)?;
@@ -338,63 +356,7 @@ fn cmd_status(
     updater_state: &mut UpdaterState,
 ) -> anyhow::Result<Option<String>> {
     let status = updater_state.status_rx.borrow();
-
-    let mut s = String::new();
-    writeln!(&mut s, "recent completed attempts:")?;
-    for r in &status.recent {
-        // Ignore units smaller than a millisecond.
-        let elapsed = Duration::from_millis(
-            u64::try_from(r.elapsed.as_millis())
-                .context("elapsed time too large")?,
-        );
-        writeln!(
-            &mut s,
-            "    {} to {} (took {}): serial {}",
-            r.time_started.to_rfc3339_opts(SecondsFormat::Millis, true),
-            r.time_done.to_rfc3339_opts(SecondsFormat::Millis, true),
-            humantime::format_duration(elapsed),
-            r.request.baseboard_id.serial_number,
-        )?;
-        writeln!(&mut s, "        attempt#: {}", r.nattempts_done)?;
-        writeln!(&mut s, "        version:  {}", r.request.artifact_version)?;
-        writeln!(
-            &mut s,
-            "        hash:     {}",
-            r.request.artifact_hash_id.hash
-        )?;
-        writeln!(&mut s, "        result:   {:?}", r.result)?;
-    }
-
-    writeln!(&mut s, "\ncurrently in progress:")?;
-    for (baseboard_id, status) in &status.in_progress {
-        // Ignore units smaller than a millisecond.
-        let elapsed = Duration::from_millis(
-            u64::try_from(status.instant_started.elapsed().as_millis())
-                .context("total runtime was too large")?,
-        );
-        writeln!(
-            &mut s,
-            "    {}: serial {}: {:?} (attempt {}, running {})",
-            status.time_started.to_rfc3339_opts(SecondsFormat::Millis, true),
-            baseboard_id.serial_number,
-            status.status,
-            status.nattempts_done + 1,
-            humantime::format_duration(elapsed),
-        )?;
-    }
-
-    writeln!(&mut s, "\nwaiting for retry:")?;
-    for (baseboard_id, wait_info) in &status.waiting {
-        writeln!(
-            &mut s,
-            "    serial {}: will try again at {} (attempt {})",
-            baseboard_id.serial_number,
-            wait_info.next_attempt_time,
-            wait_info.nattempts_done + 1,
-        )?;
-    }
-
-    Ok(Some(s))
+    Ok(Some(status.detailed_display().to_string()))
 }
 
 #[derive(Debug, Args)]
@@ -424,14 +386,6 @@ fn cmd_set(
 ) -> anyhow::Result<Option<String>> {
     let serial = &args.serial;
     let info = updater_state.inventory.info_for_serial(serial)?;
-    let known_artifact_kind = match (&args.component, info.sp_type) {
-        (Component::Sp { .. }, SpType::Sled) => KnownArtifactKind::GimletSp,
-        (Component::Sp { .. }, SpType::Power) => KnownArtifactKind::PscSp,
-        (Component::Sp { .. }, SpType::Switch) => KnownArtifactKind::SwitchSp,
-    };
-    let artifact_kind = ArtifactKind::from_known(known_artifact_kind);
-    let artifact_hash_id =
-        ArtifactHashId { kind: artifact_kind, hash: args.artifact_hash };
     let request = PendingMgsUpdate {
         baseboard_id: info.baseboard_id.clone(),
         sp_type: info.sp_type,
@@ -445,7 +399,7 @@ fn cmd_set(
                 expected_inactive_version,
             },
         },
-        artifact_hash_id,
+        artifact_hash: args.artifact_hash,
         artifact_version: ArtifactVersion::new(args.version)
             .context("parsing artifact version")?,
     };

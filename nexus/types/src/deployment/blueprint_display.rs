@@ -4,6 +4,7 @@
 
 //! Types helpful for rendering blueprints.
 
+use daft::Leaf;
 use omicron_common::api::external::Generation;
 use std::fmt;
 
@@ -18,6 +19,10 @@ pub mod constants {
     pub(super) const SUB_LAST: &str = "└─";
 
     pub const ARROW: &str = "->";
+    pub const WILL_REMOVE_MUPDATE_OVERRIDE: &str =
+        "will remove mupdate override";
+    pub const WOULD_HAVE_REMOVED_MUPDATE_OVERRIDE: &str =
+        "would have removed mupdate override";
     pub const COCKROACHDB_HEADING: &str = "COCKROACHDB SETTINGS";
     pub const COCKROACHDB_FINGERPRINT: &str = "state fingerprint";
     pub const COCKROACHDB_PRESERVE_DOWNGRADE: &str =
@@ -47,6 +52,7 @@ pub mod constants {
     pub const GENERATION: &str = "generation";
 }
 use constants::*;
+use std::fmt::Display;
 
 /// The state of a sled or resource (e.g. zone or physical disk) in this
 /// blueprint, with regards to the parent blueprint
@@ -131,11 +137,14 @@ pub enum BpTableColumn {
 }
 
 impl BpTableColumn {
-    pub fn new(before: String, after: String) -> BpTableColumn {
+    pub fn new<T: Display + Eq>(before: T, after: T) -> BpTableColumn {
         if before != after {
-            BpTableColumn::Diff { before, after }
+            BpTableColumn::Diff {
+                before: before.to_string(),
+                after: after.to_string(),
+            }
         } else {
-            BpTableColumn::Value(before)
+            BpTableColumn::Value(before.to_string())
         }
     }
 
@@ -406,7 +415,7 @@ impl BpTableSchema for BpClickhouseServersTableSchema {
 pub struct BpPendingMgsUpdates {}
 impl BpTableSchema for BpPendingMgsUpdates {
     fn table_name(&self) -> &'static str {
-        "Pending MGS-managed updates"
+        "Pending MGS-managed updates (all baseboards)"
     }
 
     fn column_names(&self) -> &'static [&'static str] {
@@ -415,8 +424,9 @@ impl BpTableSchema for BpPendingMgsUpdates {
             "slot",
             "part_number",
             "serial_number",
-            "artifact_kind",
             "artifact_hash",
+            "artifact_version",
+            "details",
         ]
     }
 }
@@ -448,27 +458,58 @@ impl KvPair {
     ) -> KvPair {
         KvPair { state, key: key.into(), val: val.into() }
     }
+
+    /// Create a new `KvPair` with option semantics, tracking unchanged and
+    /// modified entries.
+    pub fn new_option_leaf<K: Into<String>, V: fmt::Display + Eq>(
+        key: K,
+        leaf: Leaf<Option<V>>,
+    ) -> KvPair {
+        match (leaf.before, leaf.after) {
+            (None, None) => {
+                KvPair::new_unchanged(key, linear_table_unchanged(&NONE_PARENS))
+            }
+            (None, Some(after)) => KvPair::new(
+                BpDiffState::Added,
+                key,
+                linear_table_modified(&NONE_PARENS, &after),
+            ),
+            (Some(before), None) => KvPair::new(
+                BpDiffState::Removed,
+                key,
+                linear_table_modified(&before, &NONE_PARENS),
+            ),
+            (Some(before), Some(after)) if before == after => {
+                KvPair::new_unchanged(key, linear_table_unchanged(&after))
+            }
+            (Some(before), Some(after)) => KvPair::new(
+                BpDiffState::Modified,
+                key,
+                linear_table_modified(&before, &after),
+            ),
+        }
+    }
 }
 
-// A top-to-bottom list of KV pairs with a heading
+// A top-to-bottom list of KV pairs, with or without a heading
 #[derive(Debug)]
-pub struct KvListWithHeading {
-    heading: &'static str,
+pub struct KvList {
+    heading: Option<&'static str>,
     kv: Vec<KvPair>,
 }
 
-impl KvListWithHeading {
+impl KvList {
     pub fn new_unchanged<S1: Into<String>, S2: Into<String>>(
-        heading: &'static str,
+        heading: Option<&'static str>,
         kv: Vec<(S1, S2)>,
-    ) -> KvListWithHeading {
+    ) -> KvList {
         let kv =
             kv.into_iter().map(|(k, v)| KvPair::new_unchanged(k, v)).collect();
-        KvListWithHeading { heading, kv }
+        KvList { heading, kv }
     }
 
-    pub fn new(heading: &'static str, kv: Vec<KvPair>) -> KvListWithHeading {
-        KvListWithHeading { heading, kv }
+    pub fn new(heading: Option<&'static str>, kv: Vec<KvPair>) -> KvList {
+        KvList { heading, kv }
     }
 
     /// Compute the max width of the keys for alignment purposes
@@ -477,10 +518,12 @@ impl KvListWithHeading {
     }
 }
 
-impl fmt::Display for KvListWithHeading {
+impl fmt::Display for KvList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Write the heading
-        writeln!(f, " {}:", self.heading)?;
+        if let Some(heading) = self.heading {
+            writeln!(f, " {}:", heading)?;
+        }
 
         // Write the rows
         let key_width = self.max_key_width() + 1;

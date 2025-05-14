@@ -7,23 +7,6 @@ use omicron_common::disk::{DatasetKind, DatasetName};
 pub use sled_hardware::DendriteAsic;
 use std::net::SocketAddrV6;
 
-/// Extension trait for `OmicronZoneConfig`.
-///
-/// This lives here because it is pretty specific to sled-agent, and also
-/// requires extra dependencies that nexus-sled-agent-shared doesn't have.
-pub(crate) trait OmicronZoneConfigExt {
-    fn zone_name(&self) -> String;
-}
-
-impl OmicronZoneConfigExt for OmicronZoneConfig {
-    fn zone_name(&self) -> String {
-        illumos_utils::running_zone::InstalledZone::get_zone_name(
-            self.zone_type.kind().zone_prefix(),
-            Some(self.id),
-        )
-    }
-}
-
 /// Extension trait for `OmicronZoneType` and `OmicronZoneConfig`.
 ///
 /// This lives here because it requires extra dependencies that
@@ -70,10 +53,7 @@ pub(crate) trait OmicronZoneTypeExt {
             }
         }?;
 
-        Some((
-            DatasetName::new(dataset.pool_name.clone(), dataset_kind),
-            *address,
-        ))
+        Some((DatasetName::new(dataset.pool_name, dataset_kind), *address))
     }
 }
 

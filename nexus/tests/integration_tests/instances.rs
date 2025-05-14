@@ -12,10 +12,10 @@ use http::StatusCode;
 use http::method::Method;
 use itertools::Itertools;
 use nexus_auth::authz::Action;
+use nexus_db_lookup::LookupPath;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -657,7 +657,7 @@ async fn test_instance_start_creates_networking_state(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance.identity.id)
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
@@ -807,7 +807,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
             cptestctx.logctx.log.new(o!()),
             datastore.clone(),
         );
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance.identity.id)
             .lookup_for(nexus_db_queries::authz::Action::Read)
             .await
@@ -947,7 +947,7 @@ async fn test_instance_migrate_v2p_and_routes(
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
     // Ensure that all of the V2P information is correct.
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
@@ -1000,7 +1000,7 @@ async fn test_instance_migrate_v2p_and_routes(
             cptestctx.logctx.log.new(o!()),
             datastore.clone(),
         );
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance.identity.id)
             .lookup_for(nexus_db_queries::authz::Action::Read)
             .await
@@ -1072,7 +1072,7 @@ async fn test_instance_migrate_v2p_and_routes(
 
 // Verifies that if a request to reboot or stop an instance fails because of a
 // 404 error from sled agent, then the instance moves to the Failed state, and
-// can be restarted once it has transitioned to that state..
+// can be restarted once it has transitioned to that state.
 #[nexus_test]
 async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_restarted(
     cptestctx: &ControlPlaneTestContext,
@@ -1423,6 +1423,110 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
     );
 }
 
+// Verifies that if an instance transitions to `Failed` due to a failed request
+// to stop it, it will not automatically restart, even if it is configured to
+// restart it automatically on failure.
+#[nexus_test]
+async fn test_instance_failed_by_stop_request_does_not_reincarnate(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let client = &cptestctx.external_client;
+    let instance_name = "resurgam";
+    let instance_url = get_instance_url(instance_name);
+    let instance_id = dbg!(
+        make_forgotten_instance(
+            &cptestctx,
+            instance_name,
+            InstanceAutoRestartPolicy::BestEffort,
+        )
+        .await
+    );
+
+    // Attempting to stop the forgotten instance will result in a 404
+    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
+    expect_instance_stop_fail(
+        client,
+        instance_name,
+        http::StatusCode::SERVICE_UNAVAILABLE,
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    dbg!(
+        instance_wait_for_state(client, instance_id, InstanceState::Failed)
+            .await
+    );
+
+    // Activate the reincarnation task.
+    dbg!(
+        nexus_test_utils::background::activate_background_task(
+            &cptestctx.internal_client,
+            "instance_reincarnation",
+        )
+        .await
+    );
+
+    // Unfortunately there isn't really a great way to assert "no start saga has
+    // been started", so we'll do the somewhat jankier thing of waiting a bit
+    // and making sure that the instance doesn't transition to Starting.
+    for secs in 0..30 {
+        let state = instance_get(client, &instance_url).await;
+        assert_eq!(
+            state.runtime.run_state,
+            InstanceState::Failed,
+            "instance transitioned out of Failed (to {}) after {secs} \
+             seconds! state: {:#?}",
+            state.runtime.run_state,
+            state
+        );
+        assert_eq!(state.runtime.time_last_auto_restarted, None);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    // Okay, now let's try restarting the instance, failing it, and then
+    // asserting it *does* reincarnate.
+    dbg!(expect_instance_start_ok(client, instance_name).await);
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    // Forcibly unregister the instance from the sled-agent without telling
+    // Nexus. It will now behave as though it has forgotten the instance and
+    // return a 404 error with the "NO_SUCH_INSTANCE" error code
+    let vmm_id = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance must be on a sled")
+        .propolis_id;
+    let sled_agent = cptestctx.first_sled_agent();
+    sled_agent
+        .instance_unregister(vmm_id)
+        .await
+        .expect("instance_unregister must succeed");
+
+    // Attempting to reboot the instance will fail.
+    expect_instance_reboot_fail(
+        client,
+        instance_name,
+        http::StatusCode::SERVICE_UNAVAILABLE,
+    )
+    .await;
+
+    // Because the instance can be restarted, the discovery of its failure above
+    // will result in the reincarnation background task being activated. Don't
+    // bother checking for Failed here because it's possible that task could
+    // have restarted the instance before we poll it (issue #8119 has two cases
+    // of just this!). Instead, we'll just wait for the final Starting state
+    // that reincarnation should leave the instance in.
+    dbg!(
+        instance_wait_for_state(client, instance_id, InstanceState::Starting)
+            .await
+    );
+}
+
 #[nexus_test]
 async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors(
     cptestctx: &ControlPlaneTestContext,
@@ -1579,6 +1683,22 @@ async fn expect_instance_reboot_fail(
         .execute()
         .await
         .expect("expected instance reboot to fail");
+}
+
+async fn expect_instance_stop_fail(
+    client: &ClientTestContext,
+    instance_name: &str,
+    status: http::StatusCode,
+) {
+    let url = get_instance_url(format!("{instance_name}/stop").as_str());
+    let builder = RequestBuilder::new(client, Method::POST, &url)
+        .body(None as Option<&serde_json::Value>)
+        .expect_status(Some(status));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("expected instance stop to fail");
 }
 
 async fn expect_instance_reboot_ok(
@@ -1797,7 +1917,7 @@ async fn test_instance_metrics_with_migration(
             cptestctx.logctx.log.new(o!()),
             datastore.clone(),
         );
-        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_instance) = LookupPath::new(&opctx, datastore)
             .instance_id(instance.identity.id)
             .lookup_for(nexus_db_queries::authz::Action::Read)
             .await
@@ -5922,7 +6042,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let datastore = nexus.datastore();
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
-    let (.., db_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., db_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance.identity.id)
         .fetch()
         .await
@@ -6637,7 +6757,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance.identity.id)
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
@@ -6811,7 +6931,7 @@ pub async fn instance_wait_for_vmm_registration(
     let datastore = cptestctx.server.server_context().nexus.datastore();
     let log = &cptestctx.logctx.log;
     let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await

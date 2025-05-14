@@ -42,6 +42,7 @@ define_enums! {
     IdentityTypeEnum => "identity_type",
     InstanceAutoRestartPolicyEnum => "instance_auto_restart",
     InstanceStateEnum => "instance_state_v2",
+    InstanceIntendedStateEnum => "instance_intended_state",
     IpAttachStateEnum => "ip_attach_state",
     IpKindEnum => "ip_kind",
     IpPoolResourceTypeEnum => "ip_pool_resource_type",
@@ -84,5 +85,9 @@ define_enums! {
     VpcFirewallRuleProtocolEnum => "vpc_firewall_rule_protocol",
     VpcFirewallRuleStatusEnum => "vpc_firewall_rule_status",
     VpcRouterKindEnum => "vpc_router_kind",
+    WebhookEventClassEnum => "webhook_event_class",
+    WebhookDeliveryAttemptResultEnum => "webhook_delivery_attempt_result",
+    WebhookDeliveryTriggerEnum => "webhook_delivery_trigger",
+    WebhookDeliveryStateEnum => "webhook_delivery_state",
     ZoneTypeEnum => "zone_type",
 }

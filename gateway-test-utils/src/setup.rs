@@ -14,6 +14,9 @@ use omicron_gateway::SwitchPortConfig;
 pub use omicron_gateway::metrics::MetricsConfig;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
+use qorb::resolver::AllBackends;
+use qorb::resolver::Resolver;
+use qorb::resolvers::fixed::FixedResolver;
 use slog::o;
 use sp_sim::SimRack;
 use sp_sim::SimulatedSp;
@@ -23,6 +26,7 @@ use std::future;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::time::Duration;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 // TODO this exact value is copy/pasted from `nexus/test-utils` - should we
@@ -35,10 +39,24 @@ pub struct GatewayTestContext {
     pub simrack: SimRack,
     pub logctx: LogContext,
     pub gateway_id: Uuid,
+    resolver: FixedResolver,
+    resolver_backends: watch::Receiver<AllBackends>,
 }
 
 impl GatewayTestContext {
-    pub async fn teardown(self) {
+    pub fn client(&self) -> gateway_client::Client {
+        gateway_client::Client::new(
+            &self.client.url("/").to_string(),
+            self.logctx.log.new(slog::o!("component" => "MgsClient")),
+        )
+    }
+
+    pub fn mgs_backends(&self) -> watch::Receiver<AllBackends> {
+        self.resolver_backends.clone()
+    }
+
+    pub async fn teardown(mut self) {
+        self.resolver.terminate().await;
         self.server.close().await.unwrap();
         self.logctx.cleanup_successful();
     }
@@ -131,16 +149,22 @@ pub async fn test_setup_with_config(
         // assume that matches whether we end up as `switch0` or `switch1`
         let target_sp =
             port_description.location.get(&expected_location).unwrap();
-        let sp_addr = match target_sp.typ {
+        let (sp_addr, sp_ereport_addr) = match target_sp.typ {
             SpType::Switch => {
-                simrack.sidecars[target_sp.slot].local_addr(sp_port)
+                let switch = &simrack.sidecars[target_sp.slot];
+                (switch.local_addr(sp_port), switch.local_ereport_addr(sp_port))
             }
-            SpType::Sled => simrack.gimlets[target_sp.slot].local_addr(sp_port),
+            SpType::Sled => {
+                let sled = &simrack.gimlets[target_sp.slot];
+                (sled.local_addr(sp_port), sled.local_ereport_addr(sp_port))
+            }
             SpType::Power => todo!(),
         };
         match &mut port_description.config {
-            SwitchPortConfig::Simulated { addr, .. } => {
+            SwitchPortConfig::Simulated { addr, ereport_addr, .. } => {
                 *addr = sp_addr.unwrap();
+                *ereport_addr =
+                    sp_ereport_addr.expect("no ereport addr configured");
             }
             SwitchPortConfig::SwitchZoneInterface { .. } => {
                 panic!("test config using `switch-zone-interface` config")
@@ -209,13 +233,25 @@ pub async fn test_setup_with_config(
     // Make sure it discovered the location we expect
     assert_eq!(mgmt_switch.local_switch().unwrap(), local_switch.unwrap());
 
+    let server_addr = server
+        .dropshot_server_for_address(localhost_port_0)
+        .unwrap()
+        .local_addr();
     let client = ClientTestContext::new(
-        server
-            .dropshot_server_for_address(localhost_port_0)
-            .unwrap()
-            .local_addr(),
+        server_addr,
         log.new(o!("component" => "client test context")),
     );
 
-    GatewayTestContext { client, server, simrack, logctx, gateway_id }
+    let mut resolver = FixedResolver::new(std::iter::once(server_addr));
+    let resolver_backends = resolver.monitor();
+
+    GatewayTestContext {
+        client,
+        server,
+        simrack,
+        logctx,
+        gateway_id,
+        resolver,
+        resolver_backends,
+    }
 }

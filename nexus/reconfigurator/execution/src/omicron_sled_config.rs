@@ -145,6 +145,7 @@ fn parse_config_result(
 mod tests {
     use super::*;
     use id_map::IdMap;
+    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintDatasetConfig;
@@ -163,7 +164,9 @@ mod tests {
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::CompressionAlgorithm;
+    use omicron_common::disk::DatasetsConfig;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::disk::OmicronPhysicalDisksConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -189,6 +192,8 @@ mod tests {
             _ => panic!("Unexpected address type for sled agent (wanted IPv6)"),
         };
         let sim_sled_agent = &cptestctx.sled_agents[0].sled_agent();
+        let sim_sled_agent_config_generation =
+            sim_sled_agent.omicron_zones_list().generation;
 
         let sleds_by_id = BTreeMap::from([(
             sim_sled_agent.id,
@@ -253,7 +258,7 @@ mod tests {
         datasets.insert(BlueprintDatasetConfig {
             disposition: BlueprintDatasetDisposition::InService,
             id: dataset_id,
-            pool: dataset_pool.clone(),
+            pool: dataset_pool,
             kind: DatasetKind::Crucible,
             address: None,
             quota: None,
@@ -281,7 +286,7 @@ mod tests {
         zones.insert(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: dataset_pool.clone(),
+            filesystem_pool: dataset_pool,
             zone_type: BlueprintZoneType::Oximeter(
                 blueprint_zone_type::Oximeter {
                     address: "[::1]:0".parse().unwrap(),
@@ -295,7 +300,7 @@ mod tests {
                 ready_for_cleanup: false,
             },
             id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: dataset_pool.clone(),
+            filesystem_pool: dataset_pool,
             zone_type: BlueprintZoneType::Oximeter(
                 blueprint_zone_type::Oximeter {
                     address: "[::1]:0".parse().unwrap(),
@@ -306,10 +311,11 @@ mod tests {
 
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
-            sled_agent_generation: Generation::new().next(),
+            sled_agent_generation: sim_sled_agent_config_generation.next(),
             disks,
             datasets,
             zones,
+            remove_mupdate_override: None,
         };
         let sled_configs =
             [(sim_sled_agent.id, sled_config.clone())].into_iter().collect();
@@ -328,9 +334,31 @@ mod tests {
 
         let in_service_config =
             sled_config.clone().into_in_service_sled_config();
-        assert_eq!(observed_disks, in_service_config.disks_config);
-        assert_eq!(observed_datasets, in_service_config.datasets_config);
-        assert_eq!(observed_zones, in_service_config.zones_config);
+        assert_eq!(
+            observed_disks,
+            OmicronPhysicalDisksConfig {
+                generation: in_service_config.generation,
+                disks: in_service_config.disks.into_iter().collect(),
+            }
+        );
+        assert_eq!(
+            observed_datasets,
+            DatasetsConfig {
+                generation: in_service_config.generation,
+                datasets: in_service_config
+                    .datasets
+                    .into_iter()
+                    .map(|d| (d.id, d))
+                    .collect(),
+            }
+        );
+        assert_eq!(
+            observed_zones,
+            OmicronZonesConfig {
+                generation: in_service_config.generation,
+                zones: in_service_config.zones.into_iter().collect(),
+            }
+        );
 
         // We expect to see each single in-service item we supplied as input.
         assert_eq!(observed_disks.disks.len(), 1);

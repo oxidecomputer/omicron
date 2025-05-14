@@ -12,6 +12,7 @@ use diesel::{
     BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
 };
 use futures::future::BoxFuture;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::InstanceState;
 use nexus_db_queries::{
     authz,
@@ -19,7 +20,6 @@ use nexus_db_queries::{
     db::{
         DataStore,
         datastore::{InstanceAndActiveVmm, InstanceGestalt},
-        lookup::LookupPath,
     },
 };
 use nexus_types::identity::Resource;
@@ -299,7 +299,7 @@ pub(crate) async fn instance_wait_for_state(
 ) -> InstanceAndActiveVmm {
     let opctx = test_opctx(&cptestctx);
     let datastore = cptestctx.server.server_context().nexus.datastore();
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+    let (.., authz_instance) = LookupPath::new(&opctx, datastore)
         .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Read)
         .await

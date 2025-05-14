@@ -1219,10 +1219,11 @@ async fn rsrss_update_request_record(
 pub(crate) mod test {
     use crate::{
         app::RegionAllocationStrategy, app::db::DataStore,
-        app::db::lookup::LookupPath, app::saga::create_saga_dag,
+        app::saga::create_saga_dag,
         app::sagas::region_snapshot_replacement_start::*,
         app::sagas::test_helpers::test_opctx,
     };
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::RegionSnapshotReplacement;
     use nexus_db_model::RegionSnapshotReplacementState;
@@ -1258,8 +1259,8 @@ pub(crate) mod test {
 
         assert_eq!(region_allocations(&datastore).await, 0);
 
-        let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+        let disk_test =
+            DiskTestBuilder::new(cptestctx).with_zpool_count(4).build().await;
 
         assert_eq!(region_allocations(&datastore).await, 0);
 
@@ -1274,7 +1275,7 @@ pub(crate) mod test {
         assert_eq!(region_allocations(&datastore).await, 3);
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk_id)
             .fetch()
             .await
@@ -1288,7 +1289,7 @@ pub(crate) mod test {
         assert_eq!(region_allocations(&datastore).await, 6);
 
         let snapshot_id = snapshot.identity.id;
-        let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot_id)
             .fetch()
             .await
@@ -1499,20 +1500,18 @@ pub(crate) mod test {
         let mut non_destroyed_regions_from_agent = vec![];
 
         for zpool in test.zpools() {
-            for dataset in &zpool.datasets {
-                let crucible_dataset =
-                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
-                for region in crucible_dataset.list() {
-                    match region.state {
-                        crucible_agent_client::types::State::Tombstoned
-                        | crucible_agent_client::types::State::Destroyed => {
-                            // ok
-                        }
+            let dataset = zpool.crucible_dataset();
+            let crucible_dataset =
+                sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+            for region in crucible_dataset.list() {
+                match region.state {
+                    crucible_agent_client::types::State::Tombstoned
+                    | crucible_agent_client::types::State::Destroyed => {
+                        // ok
+                    }
 
-                        _ => {
-                            non_destroyed_regions_from_agent
-                                .push(region.clone());
-                        }
+                    _ => {
+                        non_destroyed_regions_from_agent.push(region.clone());
                     }
                 }
             }
@@ -1856,13 +1855,13 @@ pub(crate) mod test {
             create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
 
         // Before expunging any physical disk, save some DB models
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk.identity.id)
             .fetch()
             .await
             .unwrap();
 
-        let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot.identity.id)
             .fetch()
             .await
@@ -2014,13 +2013,13 @@ pub(crate) mod test {
             create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
 
         // Before expunging any physical disk, save some DB models
-        let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        let (.., db_disk) = LookupPath::new(&opctx, datastore)
             .disk_id(disk.identity.id)
             .fetch()
             .await
             .unwrap();
 
-        let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot.identity.id)
             .fetch()
             .await

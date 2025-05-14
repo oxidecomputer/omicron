@@ -41,6 +41,7 @@ use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
@@ -60,6 +61,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -84,7 +86,8 @@ use thiserror::Error;
 
 use super::ClickhouseZonesThatShouldBeRunning;
 use super::clickhouse::ClickhouseAllocator;
-use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::inventory::BaseboardId;
+use std::sync::Arc;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
@@ -405,6 +408,7 @@ pub struct BlueprintBuilder<'a> {
     creator: String,
     operations: Vec<Operation>,
     comments: Vec<String>,
+    pending_mgs_updates: PendingMgsUpdates,
 
     // Random number generator for new UUIDs
     rng: PlannerRng,
@@ -447,6 +451,7 @@ impl<'a> BlueprintBuilder<'a> {
                     disks: IdMap::default(),
                     datasets: IdMap::default(),
                     zones: IdMap::default(),
+                    remove_mupdate_override: None,
                 };
                 (sled_id, config)
             })
@@ -535,6 +540,7 @@ impl<'a> BlueprintBuilder<'a> {
             sled_editors,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
+            pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -699,10 +705,7 @@ impl<'a> BlueprintBuilder<'a> {
         Blueprint {
             id: blueprint_id,
             sleds,
-            pending_mgs_updates: self
-                .parent_blueprint
-                .pending_mgs_updates
-                .clone(),
+            pending_mgs_updates: self.pending_mgs_updates,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.input.internal_dns_version(),
             external_dns_version: self.input.external_dns_version(),
@@ -1152,7 +1155,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zpool = self.sled_select_zpool(sled_id, ZoneKind::InternalDns)?;
         let zone_type =
             BlueprintZoneType::InternalDns(blueprint_zone_type::InternalDns {
-                dataset: OmicronZoneDataset { pool_name: zpool.clone() },
+                dataset: OmicronZoneDataset { pool_name: zpool },
                 dns_address: SocketAddrV6::new(address, DNS_PORT, 0, 0),
                 http_address: SocketAddrV6::new(address, DNS_HTTP_PORT, 0, 0),
                 gz_address: dns_subnet.gz_address(),
@@ -1205,7 +1208,7 @@ impl<'a> BlueprintBuilder<'a> {
             self.sled_select_zpool(sled_id, ZoneKind::ExternalDns)?;
         let zone_type =
             BlueprintZoneType::ExternalDns(blueprint_zone_type::ExternalDns {
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
                 http_address,
                 dns_address,
                 nic,
@@ -1307,7 +1310,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type =
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;
 
@@ -1481,7 +1484,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type =
             BlueprintZoneType::CockroachDb(blueprint_zone_type::CockroachDb {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;
 
@@ -1508,7 +1511,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type =
             BlueprintZoneType::Clickhouse(blueprint_zone_type::Clickhouse {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             });
 
         let zone = BlueprintZoneConfig {
@@ -1534,7 +1537,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type = BlueprintZoneType::ClickhouseServer(
             blueprint_zone_type::ClickhouseServer {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             },
         );
         let filesystem_pool = pool_name;
@@ -1562,7 +1565,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone_type = BlueprintZoneType::ClickhouseKeeper(
             blueprint_zone_type::ClickhouseKeeper {
                 address,
-                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                dataset: OmicronZoneDataset { pool_name },
             },
         );
         let filesystem_pool = pool_name;
@@ -1743,6 +1746,22 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
+    /// Set the `remove_mupdate_override` field of the given sled.
+    pub fn sled_set_remove_mupdate_override(
+        &mut self,
+        sled_id: SledUuid,
+        remove_mupdate_override: Option<MupdateOverrideUuid>,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to set sled state for unknown sled {sled_id}"
+            ))
+        })?;
+        editor
+            .set_remove_mupdate_override(remove_mupdate_override)
+            .map_err(|err| Error::SledEditError { sled_id, err })
+    }
+
     fn sled_add_zone(
         &mut self,
         sled_id: SledUuid,
@@ -1873,6 +1892,54 @@ impl<'a> BlueprintBuilder<'a> {
         addr: IpAddr,
     ) -> Result<(), Error> {
         Ok(self.resource_allocator()?.inject_untracked_external_dns_ip(addr)?)
+    }
+
+    pub fn pending_mgs_update_insert(
+        &mut self,
+        update: nexus_types::deployment::PendingMgsUpdate,
+    ) {
+        self.pending_mgs_updates.insert(update);
+    }
+
+    pub fn pending_mgs_update_delete(
+        &mut self,
+        baseboard_id: &Arc<BaseboardId>,
+    ) {
+        self.pending_mgs_updates.remove(baseboard_id);
+    }
+
+    /// Debug method to remove a sled from a blueprint entirely.
+    ///
+    /// Bypasses all expungement checks. Do not use in production.
+    pub fn debug_sled_remove(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<(), Error> {
+        if self.sled_editors.remove(&sled_id).is_none() {
+            return Err(Error::Planner(anyhow!(
+                "for sled {sled_id}, error looking up resources"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Debug method to force a sled agent generation number to be bumped, even
+    /// if there are no changes to the sled.
+    ///
+    /// Do not use in production. Instead, update the logic that decides if the
+    /// generation number should be bumped.
+    pub fn debug_sled_force_generation_bump(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to force generation bump for unknown sled {sled_id}"
+            ))
+        })?;
+        editor
+            .debug_force_generation_bump()
+            .map_err(|err| Error::SledEditError { sled_id, err })
     }
 }
 
@@ -2207,7 +2274,7 @@ pub mod test {
                     {
                         let ip = address.ip();
                         assert!(new_sled_resources.subnet.net().contains(*ip));
-                        Some(dataset.pool_name.clone())
+                        Some(dataset.pool_name)
                     } else {
                         None
                     }

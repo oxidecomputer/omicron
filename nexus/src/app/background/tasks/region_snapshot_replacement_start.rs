@@ -310,6 +310,7 @@ mod test {
     use crate::app::MIN_DISK_SIZE_BYTES;
     use crate::app::background::init::test::NoopStartSaga;
     use chrono::Utc;
+    use nexus_db_lookup::LookupPath;
     use nexus_db_model::BlockSize;
     use nexus_db_model::Generation;
     use nexus_db_model::PhysicalDiskPolicy;
@@ -321,7 +322,6 @@ mod test {
     use nexus_db_model::SnapshotState;
     use nexus_db_model::VolumeResourceUsage;
     use nexus_db_queries::authz;
-    use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external;
@@ -451,25 +451,24 @@ mod test {
             BTreeMap::default();
 
         for zpool in disk_test.zpools() {
-            for dataset in &zpool.datasets {
-                dataset_to_zpool
-                    .insert(zpool.id.to_string(), dataset.id.to_string());
+            let dataset = zpool.crucible_dataset();
+            dataset_to_zpool
+                .insert(zpool.id.to_string(), dataset.id.to_string());
 
-                datastore
-                    .region_snapshot_create(RegionSnapshot::new(
-                        dataset.id,
-                        region_id,
-                        snapshot_id,
-                        String::from("[fd00:1122:3344::101]:12345"),
-                    ))
-                    .await
-                    .unwrap();
-            }
+            datastore
+                .region_snapshot_create(RegionSnapshot::new(
+                    dataset.id,
+                    region_id,
+                    snapshot_id,
+                    String::from("[fd00:1122:3344::101]:12345"),
+                ))
+                .await
+                .unwrap();
         }
 
         // Create the fake snapshot
 
-        let (.., authz_project) = LookupPath::new(&opctx, &datastore)
+        let (.., authz_project) = LookupPath::new(&opctx, datastore)
             .project_id(project_id)
             .lookup_for(authz::Action::CreateChild)
             .await
@@ -631,7 +630,8 @@ mod test {
 
         let disk_test = DiskTest::new(cptestctx).await;
 
-        let dataset_id = disk_test.zpools().next().unwrap().datasets[0].id;
+        let dataset_id =
+            disk_test.zpools().next().unwrap().crucible_dataset().id;
 
         // Add a region snapshot replacement request for a fake region snapshot
 

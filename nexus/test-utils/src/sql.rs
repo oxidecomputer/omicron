@@ -99,6 +99,12 @@ impl From<IpAddr> for AnySqlType {
     }
 }
 
+impl From<serde_json::Value> for AnySqlType {
+    fn from(value: serde_json::Value) -> Self {
+        Self::Json(value)
+    }
+}
+
 impl AnySqlType {
     pub fn as_str(&self) -> &str {
         match self {

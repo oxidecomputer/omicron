@@ -99,16 +99,14 @@ use nexus_types::deployment::{
     BlueprintSledConfig, OximeterReadMode, PendingMgsUpdates,
 };
 use nexus_types::external_api::views::SledState;
-use omicron_common::address::get_sled_address;
+use omicron_common::address::{COCKROACH_ADMIN_PORT, get_sled_address};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
-use omicron_common::disk::{
-    DatasetKind, DatasetsConfig, OmicronPhysicalDisksConfig,
-};
+use omicron_common::disk::DatasetKind;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::BlueprintUuid;
@@ -372,9 +370,10 @@ impl ServiceInner {
             info!(
                 log,
                 "attempting to set sled's config";
-                "disks" => ?sled_config.disks_config,
-                "datasets" => ?sled_config.datasets_config,
-                "zones" => ?sled_config.zones_config,
+                "generation" => %sled_config.generation,
+                "disks" => ?sled_config.disks,
+                "datasets" => ?sled_config.datasets,
+                "zones" => ?sled_config.zones,
             );
             let result = client.omicron_config_put(&sled_config).await;
             let error = match result {
@@ -464,12 +463,8 @@ impl ServiceInner {
                         log,
                         "ignoring attempt to initialize config because \
                         the server seems to be newer";
-                        "attempted_disks_generation" =>
-                            i64::from(&sled_config.disks_config.generation),
-                        "attempted_datasets_generation" =>
-                            i64::from(&sled_config.datasets_config.generation),
-                        "attempted_zones_generation" =>
-                            i64::from(&sled_config.zones_config.generation),
+                        "attempted_generation" =>
+                            i64::from(&sled_config.generation),
                         "req_id" => &response.request_id,
                         "server_message" => &response.message,
                     );
@@ -535,25 +530,18 @@ impl ServiceInner {
                     })?
                     .clone();
 
-                // TODO OmicronSledConfig should have a single generation; for
-                // now we reuse our zone generation for all three subfields.
-                // Tracked by
-                // https://github.com/oxidecomputer/omicron/issues/7774
-                let generation = zones_config.generation;
                 let sled_config = OmicronSledConfig {
-                    disks_config: OmicronPhysicalDisksConfig {
-                        generation,
-                        disks: config
-                            .disks
-                            .iter()
-                            .map(|c| c.clone().into())
-                            .collect(),
-                    },
-                    datasets_config: DatasetsConfig {
-                        generation,
-                        datasets: config.datasets.clone(),
-                    },
-                    zones_config,
+                    // We bump the zone generation as we step through phases of
+                    // RSS; use that as the overall sled config generation.
+                    generation: zones_config.generation,
+                    disks: config
+                        .disks
+                        .iter()
+                        .map(|c| c.clone().into())
+                        .collect(),
+                    datasets: config.datasets.values().cloned().collect(),
+                    zones: zones_config.zones.iter().cloned().collect(),
+                    remove_mupdate_override: None,
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
@@ -1058,20 +1046,19 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         // Now that datasets and zones have started for CockroachDB,
         // perform one-time initialization of the cluster.
-        let sled_address = service_plan
+        let crdb_admin_address = service_plan
             .services
-            .iter()
-            .find_map(|(sled_address, sled_config)| {
-                if sled_config.zones.iter().any(|zone_config| {
-                    matches!(
-                        &zone_config.zone_type,
-                        BlueprintZoneType::CockroachDb(_)
-                    )
-                }) {
-                    Some(sled_address)
-                } else {
-                    None
+            .values()
+            .flat_map(|sled_config| sled_config.zones.iter())
+            .find_map(|zone_config| match &zone_config.zone_type {
+                BlueprintZoneType::CockroachDb(cockroach_db) => {
+                    // The admin address is always the same IP but a different
+                    // port from cockroach itself. Patch that up here.
+                    let mut admin_addr = cockroach_db.address;
+                    admin_addr.set_port(COCKROACH_ADMIN_PORT);
+                    Some(admin_addr)
                 }
+                _ => None,
             })
             .expect("Should not create service plans without CockroachDb");
         let dur = std::time::Duration::from_secs(60);
@@ -1079,21 +1066,25 @@ impl ServiceInner {
             .connect_timeout(dur)
             .build()
             .map_err(SetupServiceError::HttpClient)?;
-        let client = SledAgentClient::new_with_client(
-            &format!("http://{}", sled_address),
+        let client = cockroach_admin_client::Client::new_with_client(
+            &format!("http://{crdb_admin_address}"),
             client,
-            self.log.new(o!("SledAgentClient" => sled_address.to_string())),
+            self.log.new(
+                o!("CockroachAdminClient" => crdb_admin_address.to_string()),
+            ),
         );
         let initialize_db = || async {
-            client.cockroachdb_init().await.map_err(BackoffError::transient)?;
-            Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
+            use cockroach_admin_client::Error as ClientError;
+            use cockroach_admin_client::types::Error as TypesError;
+            client.cluster_init().await.map_err(BackoffError::transient)?;
+            Ok::<(), BackoffError<ClientError<TypesError>>>(())
         };
         let log_failure = |error, delay| {
             warn!(
                 self.log,
                 "Failed to initialize CockroachDB";
-                "error" => #%error,
-                "retry_after" => ?delay
+                "retry_after" => ?delay,
+                InlineErrorChain::new(&error),
             );
         };
         retry_notify(
@@ -1508,7 +1499,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             datasets.insert(BlueprintDatasetConfig {
                 disposition: BlueprintDatasetDisposition::InService,
                 id: d.id,
-                pool: d.name.pool().clone(),
+                pool: *d.name.pool(),
                 kind: d.name.kind().clone(),
                 address,
                 compression: d.inner.compression,
@@ -1535,6 +1526,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 disks: sled_config.disks.clone(),
                 datasets,
                 zones: sled_config.zones.iter().cloned().collect(),
+                remove_mupdate_override: None,
             },
         );
     }

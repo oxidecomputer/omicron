@@ -46,6 +46,7 @@ pub use gateway_messages::SpComponent;
 // calls into Nexus, the current scheme is okay.)
 progenitor::generate_api!(
     spec = "../../openapi/gateway.json",
+    interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -65,6 +66,7 @@ progenitor::generate_api!(
         RotImageError = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
         RotSlot = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
+        SpComponentCaboose = { derives = [PartialEq, Eq] },
         SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },
         SpIgnition = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpIgnitionSystemType = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },

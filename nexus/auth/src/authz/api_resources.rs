@@ -5,7 +5,7 @@
 //! Authz types for resources in the API hierarchy
 //!
 //! The general pattern in Nexus for working with an object is to look it up
-//! (see `nexus_db_queries::db::lookup::LookupPath`) and get back a so-called
+//! (see `nexus_db_lookup::LookupPath`) and get back a so-called
 //! `authz` type.  This type uniquely identifies the resource regardless of
 //! any other changes (e.g., name change or moving it to a different parent
 //! collection). The various datastore functions that modify API resources
@@ -711,6 +711,47 @@ impl AuthorizedResource for TargetReleaseConfig {
     }
 }
 
+/// Synthetic resource used for modeling access to the list of webhook event
+/// classes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WebhookEventClassList;
+pub const WEBHOOK_EVENT_CLASS_LIST: WebhookEventClassList =
+    WebhookEventClassList {};
+
+impl oso::PolarClass for WebhookEventClassList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        // Roles are not directly attached to EventClassList
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_| FLEET)
+    }
+}
+
+impl AuthorizedResource for WebhookEventClassList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 // Main resource hierarchy: Projects and their resources
 
 authz_resource! {
@@ -1100,4 +1141,28 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "WebhookEvent",
+    parent = "Fleet",
+    primary_key = { uuid_kind = WebhookEventKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "WebhookReceiver",
+    parent = "Fleet",
+    primary_key = { uuid_kind = WebhookReceiverKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "WebhookSecret",
+    parent = "WebhookReceiver",
+    primary_key = { uuid_kind = WebhookSecretKind },
+    roles_allowed = false,
+    polar_snippet = Custom,
 }

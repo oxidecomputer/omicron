@@ -5,20 +5,28 @@
 //! Drive one or more in-progress MGS-managed updates
 
 use crate::ArtifactCache;
+use crate::SpComponentUpdateHelper;
 use crate::driver_update::ApplyUpdateError;
+use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
-use crate::driver_update::UpdateCompletedHow;
 use crate::driver_update::apply_update;
+use crate::rot_updater::ReconfiguratorRotUpdater;
 use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
-use gateway_client::SpComponent;
 use id_map::IdMap;
 use id_map::IdMappable;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::internal_api::views::CompletedAttempt;
+use nexus_types::internal_api::views::InProgressUpdateStatus;
+use nexus_types::internal_api::views::MgsUpdateDriverStatus;
+use nexus_types::internal_api::views::UpdateAttemptStatus;
+use nexus_types::internal_api::views::UpdateCompletedHow;
+use nexus_types::internal_api::views::WaitingStatus;
 use nexus_types::inventory::BaseboardId;
+use omicron_uuid_kinds::SpUpdateUuid;
 use qorb::resolver::AllBackends;
 use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
@@ -31,7 +39,6 @@ use tokio::sync::watch;
 use tokio_stream::StreamExt;
 use tokio_util::time::DelayQueue;
 use tokio_util::time::delay_queue;
-use uuid::Uuid;
 
 /// How many recent completions to keep track of (for debugging)
 const N_RECENT_COMPLETIONS: usize = 16;
@@ -84,7 +91,7 @@ pub struct MgsUpdateDriver {
 
     // outputs
     /// status of updates we're working on or recently finished
-    status_tx: watch::Sender<DriverStatus>,
+    status_tx: watch::Sender<MgsUpdateDriverStatus>,
 
     // internal state tracking
     /// holds the futures that are each performing one update attempt
@@ -107,7 +114,7 @@ impl MgsUpdateDriver {
         mgs_rx: watch::Receiver<AllBackends>,
         retry_timeout: Duration,
     ) -> MgsUpdateDriver {
-        let (status_tx, _) = watch::channel(DriverStatus {
+        let (status_tx, _) = watch::channel(MgsUpdateDriverStatus {
             recent: VecDeque::with_capacity(N_RECENT_COMPLETIONS),
             in_progress: BTreeMap::new(),
             waiting: BTreeMap::new(),
@@ -129,7 +136,7 @@ impl MgsUpdateDriver {
 
     /// Returns a `watch::Receiver` that you can use to inspect the state of
     /// in-progress, waiting, and recently completed update attempts.
-    pub fn status_rx(&self) -> watch::Receiver<DriverStatus> {
+    pub fn status_rx(&self) -> watch::Receiver<MgsUpdateDriverStatus> {
         self.status_tx.subscribe()
     }
 
@@ -290,29 +297,30 @@ impl MgsUpdateDriver {
         let baseboard_id = &request.baseboard_id;
         assert!(!self.in_progress.contains_key(baseboard_id));
 
-        let update_id = Uuid::new_v4();
+        let update_id = SpUpdateUuid::new_v4();
         let log = self.log.new(o!(
             request.clone(),
             "update_id" => update_id.to_string()
         ));
         info!(&log, "begin update attempt for baseboard");
 
-        let (sp_update, updater) = match &request.details {
+        let (sp_update, updater): (
+            _,
+            Box<dyn SpComponentUpdateHelper + Send + Sync>,
+        ) = match &request.details {
             nexus_types::deployment::PendingMgsUpdateDetails::Sp { .. } => {
-                let sp_update = SpComponentUpdate {
-                    log: log.clone(),
-                    component: SpComponent::SP_ITSELF,
-                    target_sp_type: request.sp_type,
-                    target_sp_slot: request.slot_id,
-                    // The SP has two firmware slots, but they're aren't
-                    // individually labeled. We always request an update to slot
-                    // 0, which (confusingly in this context) means "the
-                    // inactive slot".
-                    firmware_slot: 0,
-                    update_id,
-                };
+                let sp_update =
+                    SpComponentUpdate::from_request(&log, &request, update_id);
 
                 (sp_update, Box::new(ReconfiguratorSpUpdater {}))
+            }
+            nexus_types::deployment::PendingMgsUpdateDetails::Rot {
+                ..
+            } => {
+                let sp_update =
+                    SpComponentUpdate::from_request(&log, &request, update_id);
+
+                (sp_update, Box::new(ReconfiguratorRotUpdater {}))
             }
         };
 
@@ -333,17 +341,16 @@ impl MgsUpdateDriver {
                 baseboard_id.clone(),
                 InProgressUpdateStatus {
                     time_started: in_progress.time_started,
-                    instant_started: in_progress.instant_started,
                     status: UpdateAttemptStatus::NotStarted,
                     nattempts_done,
                 },
             );
         });
 
-        let status_updater = UpdateAttemptStatusUpdater {
-            tx: self.status_tx.clone(),
-            baseboard_id: baseboard_id.clone(),
-        };
+        let status_updater = UpdateAttemptStatusUpdater::new(
+            self.status_tx.clone(),
+            baseboard_id.clone(),
+        );
         let artifacts = self.artifacts.clone();
         let mgs_rx = self.mgs_rx.clone();
         let future = async move {
@@ -354,6 +361,7 @@ impl MgsUpdateDriver {
                 mgs_rx,
                 &request,
                 status_updater,
+                PROGRESS_TIMEOUT,
             )
             .await;
             UpdateAttemptResult { baseboard_id: request.baseboard_id, result }
@@ -540,13 +548,20 @@ impl IdMappable for WaitingAttempt {
 }
 
 /// Interface used by update attempts to update just their part of the overall
-/// `DriverStatus`
+/// `MgsUpdateDriverStatus`
 pub(crate) struct UpdateAttemptStatusUpdater {
-    tx: watch::Sender<DriverStatus>,
+    tx: watch::Sender<MgsUpdateDriverStatus>,
     baseboard_id: Arc<BaseboardId>,
 }
 
 impl UpdateAttemptStatusUpdater {
+    pub(crate) fn new(
+        tx: watch::Sender<MgsUpdateDriverStatus>,
+        baseboard_id: Arc<BaseboardId>,
+    ) -> Self {
+        UpdateAttemptStatusUpdater { tx, baseboard_id }
+    }
+
     pub(crate) fn update(&self, new_status: UpdateAttemptStatus) {
         self.tx.send_modify(|driver_status| {
             // unwrap(): this UpdateAttemptStatusUpdater's lifetime is bound by
@@ -558,55 +573,4 @@ impl UpdateAttemptStatusUpdater {
             my_status.status = new_status;
         });
     }
-}
-
-// Externally-visible status
-
-/// Status of ongoing update attempts, recently completed attempts, and update
-/// requests that are waiting for retry.
-#[derive(Debug)]
-pub struct DriverStatus {
-    pub recent: VecDeque<CompletedAttempt>,
-    pub in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdateStatus>,
-    pub waiting: BTreeMap<Arc<BaseboardId>, WaitingStatus>,
-}
-
-/// externally-exposed status for a completed attempt
-#[derive(Debug)]
-pub struct CompletedAttempt {
-    pub time_started: chrono::DateTime<chrono::Utc>,
-    pub time_done: chrono::DateTime<chrono::Utc>,
-    pub elapsed: Duration,
-    pub request: PendingMgsUpdate,
-    pub result: Result<UpdateCompletedHow, String>,
-    pub nattempts_done: u32,
-}
-
-/// externally-exposed status for each in-progress update
-#[derive(Debug)]
-pub struct InProgressUpdateStatus {
-    pub time_started: chrono::DateTime<chrono::Utc>,
-    pub instant_started: std::time::Instant,
-    pub status: UpdateAttemptStatus,
-    pub nattempts_done: u32,
-}
-
-/// status of a single update attempt
-#[derive(Clone, Debug)]
-pub enum UpdateAttemptStatus {
-    NotStarted,
-    FetchingArtifact,
-    Precheck,
-    Updating,
-    UpdateWaiting,
-    PostUpdate,
-    PostUpdateWait,
-    Done,
-}
-
-/// externally-exposed status for waiting updates
-#[derive(Debug)]
-pub struct WaitingStatus {
-    pub next_attempt_time: chrono::DateTime<chrono::Utc>,
-    pub nattempts_done: u32,
 }
