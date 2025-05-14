@@ -106,6 +106,9 @@ impl OmicronZones {
         zone_facilities: &U,
         log: &Logger,
     ) -> Result<(), NonZeroUsize> {
+        // Filter desired zones down to just those that we need to stop. See
+        // [`ZoneState`] for more discussion of why we're willing (or unwilling)
+        // to stop zones in various current states.
         let mut zones_to_shut_down = self
             .zones
             .iter()
@@ -207,7 +210,9 @@ impl OmicronZones {
         all_u2_pools: &CurrentlyManagedZpools,
         log: &Logger,
     ) {
-        // Filter desired zones down to just those that we need to start
+        // Filter desired zones down to just those that we need to start. See
+        // [`ZoneState`] for more discussion of why we're willing (or unwilling)
+        // to start zones in various current states.
         let mut zones_to_start = desired_zones
             .iter()
             .filter(|zone| {
@@ -595,15 +600,60 @@ fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
     format!("internaldns{gz_address_index}")
 }
 
+/// State of a zone.
+///
+/// The only way to have any `ZoneState` is for a zone to have been in an
+/// `OmicronSledConfig` that was passed to
+/// [`OmicronZones::start_zones_if_needed()`] at some point.
+/// `start_zones_if_needed()` and `shut_down_zones_if_needed()` act on these
+/// states as documented below on each variant.
 #[derive(Debug)]
 enum ZoneState {
-    PartiallyShutDown { state: PartiallyShutDownState, err: ZoneShutdownError },
-    // We keep the running zone in an `Arc` so we can "move" it into some
-    // `PartiallyShutDownState` variants via cloning. (We can't truly move
-    // ownership of it out a `&mut ZoneState` without some kind of
-    // shenanigans like keep an `Option<ZoneState>` or temporarily replacing the
-    // state with some sentinel value. Using an `Arc` is one workaround.)
+    /// A zone that is currently running.
+    ///
+    /// `shut_down_zones_if_needed()` will attempt to shut down a zone in this
+    /// state if either:
+    ///
+    /// 1. The zone is no longer present in the current `OmicronSledConfig`
+    /// 2. The zone is still present but its properties have changed. (In the
+    ///    future we probably want to be able to reconfigure some zone
+    ///    properties on the fly; for now, however, any property change requires
+    ///    us to shut down the zone and restart it.)
+    ///
+    /// `start_zones_if_needed()` will skip zones in this state.
+    ///
+    /// We keep the running zone in an `Arc` so we can "move" it into some
+    /// [`PartiallyShutDownState`] variants via [`Arc::clone()`]. (We can't
+    /// truly move ownership of it out a `&mut ZoneState` without some kind of
+    /// shenanigans like keep an `Option<ZoneState>` or temporarily replacing
+    /// the state with some sentinel value. Using an `Arc` is one workaround.)
     Running(Arc<RunningZone>),
+
+    /// A zone that we tried to shut down but failed at some point during the
+    /// shutdown process (tracked by `state`).
+    ///
+    /// `shut_down_zones_if_needed()` will always try to resume shutting down a
+    /// zone in this state, picking up from the step that failed.
+    ///
+    /// `start_zones_if_needed()` will skip zones in this state.
+    PartiallyShutDown { state: PartiallyShutDownState, err: ZoneShutdownError },
+
+    /// A zone that we tried to start but failed at some point during the start
+    /// process. (We currently delegate "the start process" back to sled-agent,
+    /// so have no specific tracking for this yet.)
+    ///
+    /// `shut_down_zones_if_needed()` will always try to shut down a zone in
+    /// this state. (As noted above, once we track the start process more
+    /// carefully this may not make sense. But for now we assume any kind of
+    /// partially-started zone might need to be shutdown.)
+    ///
+    /// `start_zones_if_needed()` will try to start a zone in this state if it's
+    /// still present in the current `OmicronSledConfig`. However, in practice
+    /// it's currently not possible for `start_zones_if_needed()` to see a zone
+    /// in this state: the reconciler always calls `shut_down_zones_if_needed()`
+    /// first, which will attempt to shut down any zone in this state,
+    /// transitioning it to either `PartiallyShutDown` (if shutdown failed) or
+    /// removed entirely (if shutdown succeeded).
     FailedToStart(ZoneStartError),
 }
 
