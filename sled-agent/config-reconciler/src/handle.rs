@@ -66,6 +66,8 @@ pub enum InventoryError {
     LedgerContentsNotAvailable,
     #[error("could not contact dataset task")]
     DatasetTaskError(#[from] DatasetTaskError),
+    #[error("could not list dataset properties")]
+    ListDatasetProperties(#[source] anyhow::Error),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -372,7 +374,7 @@ impl ConfigReconcilerHandle {
         let datasets = self
             .dataset_task
             .inventory(zpools.iter().map(|&(name, _)| name).collect())
-            .await?;
+            .await??;
 
         let (reconciler_status, last_reconciliation) =
             self.reconciler_result_rx.borrow().to_inventory();

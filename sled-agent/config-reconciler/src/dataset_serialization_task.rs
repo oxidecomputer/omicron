@@ -11,6 +11,7 @@
 //! using oneshot channels to send responses".
 
 use crate::CurrentlyManagedZpoolsReceiver;
+use crate::InventoryError;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::StreamExt;
@@ -35,6 +36,7 @@ use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetUuid;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::CRYPT_DATASET;
 use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::NestedDatasetConfig;
@@ -305,9 +307,11 @@ impl DatasetTaskHandle {
 
     pub async fn inventory(
         &self,
-        _zpools: BTreeSet<ZpoolName>,
-    ) -> Result<Vec<InventoryDataset>, DatasetTaskError> {
-        unimplemented!()
+        zpools: BTreeSet<ZpoolName>,
+    ) -> Result<Result<Vec<InventoryDataset>, InventoryError>, DatasetTaskError>
+    {
+        self.try_send_request(|tx| DatasetTaskRequest::Inventory { zpools, tx })
+            .await
     }
 
     pub async fn datasets_ensure(
@@ -418,6 +422,9 @@ impl DatasetTask {
     ) {
         // In all cases, we don't care if the receiver is gone.
         match request {
+            DatasetTaskRequest::Inventory { zpools, tx } => {
+                _ = tx.0.send(self.inventory(zpools, zfs).await);
+            }
             DatasetTaskRequest::DatasetsEnsure { datasets, tx } => {
                 self.datasets_ensure(datasets, zfs).await;
                 _ = tx.0.send(self.datasets.clone());
@@ -437,6 +444,38 @@ impl DatasetTask {
                 );
             }
         }
+    }
+
+    async fn inventory<T: ZfsImpl>(
+        &mut self,
+        zpools: BTreeSet<ZpoolName>,
+        zfs: &T,
+    ) -> Result<Vec<InventoryDataset>, InventoryError> {
+        let datasets_of_interest = zpools
+            .iter()
+            .flat_map(|zpool| {
+                [
+                    // We care about the zpool itself, and all direct children.
+                    zpool.to_string(),
+                    // Likewise, we care about the encrypted dataset, and all
+                    // direct children.
+                    format!("{zpool}/{CRYPT_DATASET}"),
+                    // The zone dataset gives us additional context on "what
+                    // zones have datasets provisioned".
+                    format!("{zpool}/{ZONE_DATASET}"),
+                ]
+            })
+            .collect::<Vec<_>>();
+
+        let props = zfs
+            .get_dataset_properties(
+                &datasets_of_interest,
+                WhichDatasets::SelfAndChildren,
+            )
+            .await
+            .map_err(InventoryError::ListDatasetProperties)?;
+
+        Ok(props.into_iter().map(From::from).collect())
     }
 
     async fn datasets_ensure<T: ZfsImpl>(
@@ -967,6 +1006,12 @@ impl DatasetTask {
 
 #[derive(Debug)]
 enum DatasetTaskRequest {
+    Inventory {
+        zpools: BTreeSet<ZpoolName>,
+        tx: DebugIgnore<
+            oneshot::Sender<Result<Vec<InventoryDataset>, InventoryError>>,
+        >,
+    },
     DatasetsEnsure {
         datasets: IdMap<DatasetConfig>,
         tx: DebugIgnore<oneshot::Sender<DatasetEnsureResult>>,
