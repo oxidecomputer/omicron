@@ -180,6 +180,22 @@ pub enum RotSlot {
     B,
 }
 
+impl RotSlot {
+    pub fn to_u16(&self) -> u16 {
+        match self {
+            RotSlot::A => 0,
+            RotSlot::B => 1,
+        }
+    }
+
+    pub fn toggled(&self) -> Self {
+        match self {
+            RotSlot::A => RotSlot::B,
+            RotSlot::B => RotSlot::A,
+        }
+    }
+}
+
 impl From<gateway_messages::RotSlotId> for RotSlot {
     fn from(slot: gateway_messages::RotSlotId) -> Self {
         match slot {
