@@ -7597,6 +7597,7 @@ dependencies = [
  "rand 0.8.5",
  "rust-argon2",
  "schemars",
+ "secrecy 0.10.3",
  "serde",
  "serde_with",
  "thiserror 1.0.69",

@@ -36,6 +36,7 @@ use nexus_test_utils::resource_helpers::object_get_error;
 use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::IpPoolCreate;
@@ -1183,7 +1184,7 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"user".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await;
 
