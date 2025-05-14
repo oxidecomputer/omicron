@@ -50,6 +50,7 @@ use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::dataset_serialization_task::NestedDatasetMountError;
 use crate::dump_setup_task;
 use crate::internal_disks::InternalDisksReceiver;
+use crate::ledger::CurrentSledConfig;
 use crate::ledger::LedgerTaskHandle;
 use crate::raw_disks;
 use crate::raw_disks::RawDisksReceiver;
@@ -58,6 +59,12 @@ use crate::reconciler_task;
 use crate::reconciler_task::CurrentlyManagedZpools;
 use crate::reconciler_task::CurrentlyManagedZpoolsReceiver;
 use crate::reconciler_task::ReconcilerResult;
+
+#[derive(Debug, thiserror::Error)]
+pub enum InventoryError {
+    #[error("ledger contents not yet available")]
+    LedgerContentsNotAvailable,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum TimeSyncConfig {
@@ -333,17 +340,39 @@ impl ConfigReconcilerHandle {
     }
 
     /// Collect inventory fields relevant to config reconciliation.
-    pub fn inventory(&self) -> ReconcilerInventory {
+    pub fn inventory(&self) -> Result<ReconcilerInventory, InventoryError> {
+        let ledgered_sled_config = match self
+            .ledger_task
+            .get()
+            .map(LedgerTaskHandle::current_config)
+        {
+            // If we haven't yet spawned the ledger task, or we have but
+            // it's still waiting on disks, we don't know whether we have a
+            // ledgered sled config. It's not reasonable to report `None` in
+            // this case (since `None` means "we don't have a config"), so
+            // bail out.
+            //
+            // This shouldn't happen in practice: sled-agent should both wait
+            // for the boot disk and spawn the reconciler task before starting
+            // the dropshot server that allows Nexus to collect inventory.
+            None | Some(CurrentSledConfig::WaitingForInternalDisks) => {
+                return Err(InventoryError::LedgerContentsNotAvailable);
+            }
+            Some(CurrentSledConfig::WaitingForInitialConfig) => None,
+            Some(CurrentSledConfig::Ledgered(config)) => Some(config),
+        };
+
         let (reconciler_status, last_reconciliation) =
             self.reconciler_result_rx.borrow().to_inventory();
-        ReconcilerInventory {
+
+        Ok(ReconcilerInventory {
             disks: Vec::new(),
             zpools: Vec::new(),
             datasets: Vec::new(),
-            ledgered_sled_config: None,
+            ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
-        }
+        })
     }
 }
 
