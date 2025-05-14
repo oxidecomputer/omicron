@@ -10176,6 +10176,7 @@ dependencies = [
  "indent_write",
  "internal-dns-types",
  "itertools 0.14.0",
+ "newtype-uuid",
  "nexus-inventory",
  "nexus-reconfigurator-blippy",
  "nexus-reconfigurator-planning",

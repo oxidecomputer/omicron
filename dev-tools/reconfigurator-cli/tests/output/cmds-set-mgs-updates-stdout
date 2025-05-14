@@ -2745,13 +2745,15 @@ edit contents of a blueprint directly
 Usage: blueprint-edit [OPTIONS] <BLUEPRINT_ID> <COMMAND>
 
 Commands:
-  add-nexus         add a Nexus instance to a particular sled
-  add-cockroach     add a CockroachDB instance to a particular sled
-  set-zone-image    set the image source for a zone
-  expunge-zone      expunge a zone
-  set-sp-update     configure an SP update
-  delete-sp-update  delete a configured SP update
-  help              Print this message or the help of the given subcommand(s)
+  add-nexus                    add a Nexus instance to a particular sled
+  add-cockroach                add a CockroachDB instance to a particular sled
+  set-zone-image               set the image source for a zone
+  set-remove-mupdate-override  set the remove_mupdate_override field for a sled
+  expunge-zone                 expunge a zone
+  set-sp-update                configure an SP update
+  delete-sp-update             delete a configured SP update
+  debug                        debug commands that bypass normal checks
+  help                         Print this message or the help of the given subcommand(s)
 
 Arguments:
   <BLUEPRINT_ID>  id of the blueprint to edit, "latest", or "target"

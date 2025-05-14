@@ -25,9 +25,11 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use scalar::ScalarEditor;
 use std::iter;
 use std::mem;
 use std::net::Ipv6Addr;
@@ -35,6 +37,7 @@ use underlay_ip_allocator::SledUnderlayIpAllocator;
 
 mod datasets;
 mod disks;
+mod scalar;
 mod underlay_ip_allocator;
 mod zones;
 
@@ -350,6 +353,18 @@ impl SledEditor {
         self.as_active_mut()?.set_zone_image_source(zone_id, image_source)
     }
 
+    /// Sets remove-mupdate-override configuration for this sled.
+    ///
+    /// Currently only used in test code.
+    pub fn set_remove_mupdate_override(
+        &mut self,
+        remove_mupdate_override: Option<MupdateOverrideUuid>,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?
+            .set_remove_mupdate_override(remove_mupdate_override);
+        Ok(())
+    }
+
     /// Backwards compatibility / test helper: If we're given a blueprint that
     /// has zones but wasn't created via `SledEditor`, it might not have
     /// datasets for all its zones. This method backfills them.
@@ -358,6 +373,16 @@ impl SledEditor {
         rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
         self.as_active_mut()?.ensure_datasets_for_running_zones(rng)
+    }
+
+    /// Debug method to force a sled agent generation number to be bumped, even
+    /// if there are no changes to the sled.
+    ///
+    /// Do not use in production. Instead, update the logic that decides if the
+    /// generation number should be bumped.
+    pub fn debug_force_generation_bump(&mut self) -> Result<(), SledEditError> {
+        self.as_active_mut()?.debug_force_generation_bump();
+        Ok(())
     }
 }
 
@@ -368,6 +393,8 @@ struct ActiveSledEditor {
     zones: ZonesEditor,
     disks: DisksEditor,
     datasets: DatasetsEditor,
+    remove_mupdate_override: ScalarEditor<Option<MupdateOverrideUuid>>,
+    debug_force_generation_bump: bool,
 }
 
 #[derive(Debug)]
@@ -399,6 +426,10 @@ impl ActiveSledEditor {
             zones,
             disks: DisksEditor::new(config.sled_agent_generation, config.disks),
             datasets: DatasetsEditor::new(config.datasets)?,
+            remove_mupdate_override: ScalarEditor::new(
+                config.remove_mupdate_override,
+            ),
+            debug_force_generation_bump: false,
         })
     }
 
@@ -416,6 +447,8 @@ impl ActiveSledEditor {
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(),
+            remove_mupdate_override: ScalarEditor::new(None),
+            debug_force_generation_bump: false,
         }
     }
 
@@ -423,12 +456,16 @@ impl ActiveSledEditor {
         let (disks, disks_counts) = self.disks.finalize();
         let (datasets, datasets_counts) = self.datasets.finalize();
         let (zones, zones_counts) = self.zones.finalize();
+        let remove_mupdate_override_is_modified =
+            self.remove_mupdate_override.is_modified();
         let mut sled_agent_generation = self.incoming_sled_agent_generation;
 
         // Bump the generation if we made any changes of concern to sled-agent.
-        if disks_counts.has_nonzero_counts()
+        if self.debug_force_generation_bump
+            || disks_counts.has_nonzero_counts()
             || datasets_counts.has_nonzero_counts()
             || zones_counts.has_nonzero_counts()
+            || remove_mupdate_override_is_modified
         {
             sled_agent_generation = sled_agent_generation.next();
         }
@@ -440,6 +477,9 @@ impl ActiveSledEditor {
                 disks,
                 datasets,
                 zones,
+                remove_mupdate_override: self
+                    .remove_mupdate_override
+                    .finalize(),
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,
@@ -644,6 +684,23 @@ impl ActiveSledEditor {
                 .ensure_in_service(&mut self.datasets, rng);
         }
         Ok(())
+    }
+
+    /// Set remove-mupdate-override configuration for this sled.
+    pub fn set_remove_mupdate_override(
+        &mut self,
+        remove_mupdate_override: Option<MupdateOverrideUuid>,
+    ) {
+        self.remove_mupdate_override.set_value(remove_mupdate_override);
+    }
+
+    /// Debug method to force a sled agent generation number to be bumped, even
+    /// if there are no changes to the sled.
+    ///
+    /// Do not use in production. Instead, update the logic that decides if the
+    /// generation number should be bumped.
+    pub fn debug_force_generation_bump(&mut self) {
+        self.debug_force_generation_bump = true;
     }
 }
 
