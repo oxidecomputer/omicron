@@ -188,8 +188,8 @@ impl SvcLogs {
     /// scattered across several different directories -- and we care more
     /// about filename than which directory they are in.
     pub fn sort_by_file_name(&mut self) {
-        self.archived.par_sort_unstable_by(LogFile::file_name_cmp);
-        self.extra.par_sort_unstable_by(LogFile::file_name_cmp);
+        self.archived.sort_unstable_by(LogFile::file_name_cmp);
+        self.extra.sort_unstable_by(LogFile::file_name_cmp);
     }
 }
 
