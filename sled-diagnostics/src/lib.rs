@@ -74,11 +74,10 @@ where
     {
         let semaphore = Arc::clone(&self.semaphore);
         let _abort_handle = self.set.spawn(async move {
-            let permit =
+            // Hold onto the permit until the command finishes executing
+            let _permit =
                 semaphore.acquire_owned().await.expect("semaphore acquire");
-            let res = command.await;
-            drop(permit);
-            res
+            command.await
         });
     }
 }
