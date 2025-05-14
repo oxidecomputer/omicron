@@ -557,46 +557,48 @@ impl Zones {
     ///
     /// This address may be optionally within a zone `zone`.
     /// If `None` is supplied, the address is queried from the Global Zone.
-    #[allow(clippy::needless_lifetimes)]
-    pub async fn ensure_address<'a>(
-        zone: Option<&'a str>,
+    pub async fn ensure_address(
+        zone: Option<&str>,
         addrobj: &AddrObject,
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
-        #[allow(clippy::redundant_closure_call)]
-        async |zone, addrobj, addrtype| -> Result<IpNetwork, anyhow::Error> {
-            match Self::get_address_impl(zone, addrobj).await {
-                Ok(addr) => {
-                    if let AddressRequest::Static(expected_addr) = addrtype {
-                        // If the address is static, we need to validate that it
-                        // matches the value we asked for.
-                        if addr != expected_addr {
-                            // If the address doesn't match, try removing the old
-                            // value before using the new one.
-                            Self::delete_address(zone, addrobj)
-                                .await
-                                .map_err(|e| anyhow!(e))?;
-                            return Self::create_address(
-                                zone, addrobj, addrtype,
-                            )
+        Self::ensure_address_inner(zone, addrobj, addrtype).await.map_err(
+            |err| EnsureAddressError {
+                zone: zone.unwrap_or("global").to_string(),
+                request: addrtype,
+                name: addrobj.clone(),
+                err,
+            },
+        )
+    }
+
+    async fn ensure_address_inner(
+        zone: Option<&str>,
+        addrobj: &AddrObject,
+        addrtype: AddressRequest,
+    ) -> anyhow::Result<IpNetwork> {
+        match Self::get_address_impl(zone, addrobj).await {
+            Ok(addr) => {
+                if let AddressRequest::Static(expected_addr) = addrtype {
+                    // If the address is static, we need to validate that it
+                    // matches the value we asked for.
+                    if addr != expected_addr {
+                        // If the address doesn't match, try removing the old
+                        // value before using the new one.
+                        Self::delete_address(zone, addrobj)
+                            .await
+                            .map_err(|e| anyhow!(e))?;
+                        return Self::create_address(zone, addrobj, addrtype)
                             .await
                             .map_err(|e| anyhow!(e));
-                        }
                     }
-                    Ok(addr)
                 }
-                Err(_) => Self::create_address(zone, addrobj, addrtype)
-                    .await
-                    .map_err(|e| anyhow!(e)),
+                Ok(addr)
             }
-        }(zone, addrobj, addrtype)
-        .await
-        .map_err(|err| EnsureAddressError {
-            zone: zone.unwrap_or("global").to_string(),
-            request: addrtype,
-            name: addrobj.clone(),
-            err,
-        })
+            Err(_) => Self::create_address(zone, addrobj, addrtype)
+                .await
+                .map_err(|e| anyhow!(e)),
+        }
     }
 
     /// Gets the IP address of an interface.

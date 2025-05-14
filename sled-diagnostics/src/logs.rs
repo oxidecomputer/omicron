@@ -190,7 +190,6 @@ impl DiagnosticsSnapshot {
 
     async fn destroy(&mut self) -> Result<(), LogError> {
         if !self.destroyed {
-            self.destroyed = true;
             Zfs::destroy_snapshot(
                 &self.snapshot.filesystem,
                 &self.snapshot.snap_name,
@@ -211,6 +210,7 @@ impl DiagnosticsSnapshot {
                     "error" => ?e,
                 );
             })?;
+            self.destroyed = true;
         }
         Ok(())
     }
