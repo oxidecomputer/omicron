@@ -6570,6 +6570,7 @@ dependencies = [
 name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "daft",
  "id-map",
  "illumos-utils",
