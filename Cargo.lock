@@ -11628,6 +11628,7 @@ dependencies = [
  "fs-err 3.1.0",
  "futures",
  "illumos-utils",
+ "itertools 0.14.0",
  "libc",
  "omicron-common",
  "omicron-test-utils",
