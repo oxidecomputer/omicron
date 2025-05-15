@@ -1582,7 +1582,6 @@ table! {
         usable_hardware_threads -> Int8,
         usable_physical_ram -> Int8,
         reservoir_size -> Int8,
-        omicron_physical_disks_generation -> Int8,
     }
 }
 

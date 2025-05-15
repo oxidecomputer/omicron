@@ -1657,8 +1657,8 @@ mod test {
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use nexus_sled_agent_shared::inventory::{
-        Baseboard, Inventory, InventoryDisk, OmicronZoneType,
-        OmicronZonesConfig, SledRole,
+        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
+        OmicronZoneType, SledRole,
     };
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
@@ -1685,10 +1685,6 @@ mod test {
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 reservoir_size: ByteCount::from_gibibytes_u32(0),
-                omicron_zones: OmicronZonesConfig {
-                    generation: Generation::new(),
-                    zones: vec![],
-                },
                 disks: (0..u2_count)
                     .map(|i| InventoryDisk {
                         identity: DiskIdentity {
@@ -1707,7 +1703,9 @@ mod test {
                     .collect(),
                 zpools: vec![],
                 datasets: vec![],
-                omicron_physical_disks_generation: Generation::new(),
+                ledgered_sled_config: None,
+                reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
+                last_reconciliation: None,
             },
             true,
         )

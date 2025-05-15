@@ -8,7 +8,7 @@ use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
-    ByteCount, Generation, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
+    ByteCount, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
     impl_enum_type, ipv6,
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -27,8 +27,7 @@ use nexus_db_schema::schema::{
     inv_collection, inv_collection_error, inv_dataset, inv_nvme_disk_firmware,
     inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
     inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
-    inv_sled_agent, inv_sled_omicron_zones, inv_zpool, sw_caboose,
-    sw_root_of_trust_page,
+    inv_sled_agent, inv_zpool, sw_caboose, sw_root_of_trust_page,
 };
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneDataset, OmicronZoneImageSource,
@@ -793,7 +792,6 @@ pub struct InvSledAgent {
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
-    pub omicron_physical_disks_generation: Generation,
 }
 
 impl InvSledAgent {
@@ -837,9 +835,6 @@ impl InvSledAgent {
                     sled_agent.usable_physical_ram,
                 ),
                 reservoir_size: ByteCount::from(sled_agent.reservoir_size),
-                omicron_physical_disks_generation: Generation::from(
-                    sled_agent.omicron_physical_disks_generation,
-                ),
             })
         }
     }
@@ -1164,6 +1159,7 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
     }
 }
 
+/*
 /// Information about a sled's Omicron zones, part of
 /// [`nexus_types::inventory::SledAgent`].
 ///
@@ -1193,6 +1189,7 @@ impl InvSledOmicronZones {
         }
     }
 }
+*/
 
 impl_enum_type!(
     ZoneTypeEnum:

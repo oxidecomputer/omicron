@@ -149,12 +149,6 @@ impl CollectionBuilder {
 
     /// Assemble a complete `Collection` representation
     pub fn build(mut self) -> Collection {
-        // This is not strictly necessary.  But for testing, it's helpful for
-        // things to be in sorted order.
-        for v in self.sleds.values_mut() {
-            v.omicron_zones.zones.sort_by(|a, b| a.id.cmp(&b.id));
-        }
-
         Collection {
             id: self.rng.id_rng.next(),
             errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
@@ -531,7 +525,6 @@ impl CollectionBuilder {
             reservoir_size: inventory.reservoir_size,
             time_collected,
             sled_id,
-            omicron_zones: inventory.omicron_zones,
             disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
             zpools: inventory
                 .zpools
@@ -543,8 +536,9 @@ impl CollectionBuilder {
                 .into_iter()
                 .map(|d| d.into())
                 .collect(),
-            omicron_physical_disks_generation: inventory
-                .omicron_physical_disks_generation,
+            ledgered_sled_config: inventory.ledgered_sled_config,
+            reconciler_status: inventory.reconciler_status,
+            last_reconciliation: inventory.last_reconciliation,
         };
 
         if let Some(previous) = self.sleds.get(&sled_id) {

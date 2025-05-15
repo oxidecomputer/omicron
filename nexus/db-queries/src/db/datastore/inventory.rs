@@ -37,14 +37,11 @@ use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvDataset;
 use nexus_db_model::InvNvmeDiskFirmware;
-use nexus_db_model::InvOmicronZone;
-use nexus_db_model::InvOmicronZoneNic;
 use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::InvSledAgent;
-use nexus_db_model::InvSledOmicronZones;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
@@ -61,7 +58,7 @@ use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
 use nexus_db_schema::enums::SledRoleEnum;
 use nexus_db_schema::enums::SpTypeEnum;
-use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PhysicalDiskFirmware;
@@ -162,6 +159,7 @@ impl DataStore {
             }
         }
 
+        /*
         // Pull Omicron zone-related metadata out of all sled agents.
         //
         // TODO: InvSledOmicronZones is a vestigial table kept for backwards
@@ -187,6 +185,7 @@ impl DataStore {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
+            */
 
         // Pull disks out of all sled agents
         let disks: Vec<_> = collection
@@ -240,6 +239,7 @@ impl DataStore {
             })
             .collect::<Result<Vec<_>, Error>>()?;
 
+        /*
         let omicron_zone_nics = collection
             .sled_agents
             .values()
@@ -252,6 +252,7 @@ impl DataStore {
                 })
             })
             .collect::<Result<Vec<InvOmicronZoneNic>, _>>()?;
+            */
 
         let mut inv_clickhouse_keeper_memberships = Vec::new();
         for membership in &collection.clickhouse_keeper_cluster_membership {
@@ -897,10 +898,6 @@ impl DataStore {
                                 sled_agent.reservoir_size,
                             )
                             .into_sql::<diesel::sql_types::Int8>(),
-                            nexus_db_model::Generation(
-                                sled_agent.omicron_physical_disks_generation,
-                            )
-                            .into_sql::<diesel::sql_types::Int8>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -926,7 +923,6 @@ impl DataStore {
                                 sa_dsl::usable_hardware_threads,
                                 sa_dsl::usable_physical_ram,
                                 sa_dsl::reservoir_size,
-                                sa_dsl::omicron_physical_disks_generation,
                             ))
                             .execute_async(&conn)
                             .await?;
@@ -946,7 +942,6 @@ impl DataStore {
                         _usable_hardware_threads,
                         _usable_physical_ram,
                         _reservoir_size,
-                        _omicron_physical_disks_generation,
                     ) = sa_dsl::inv_sled_agent::all_columns();
                 }
 
@@ -962,6 +957,7 @@ impl DataStore {
                     .await?;
             }
 
+            /*
             // Insert all the Omicron zones that we found.
             {
                 use nexus_db_schema::schema::inv_sled_omicron_zones::dsl as sled_zones;
@@ -987,6 +983,7 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?;
             }
+            */
 
             // Insert the clickhouse keeper memberships we've received
             {
@@ -2122,6 +2119,7 @@ impl DataStore {
             );
         }
 
+        /*
         // Now read the Omicron zones.
         //
         // In the first pass, we'll load the "inv_sled_omicron_zones" records.
@@ -2267,6 +2265,13 @@ impl DataStore {
             map.zones.push(zone);
         }
 
+        bail_unless!(
+            omicron_zone_nics.is_empty(),
+            "found extra Omicron zone NICs: {:?}",
+            omicron_zone_nics.keys()
+        );
+        */
+
         // Now load the clickhouse keeper cluster memberships
         let clickhouse_keeper_cluster_membership = {
             use nexus_db_schema::schema::inv_clickhouse_keeper_membership::dsl;
@@ -2298,12 +2303,6 @@ impl DataStore {
             memberships
         };
 
-        bail_unless!(
-            omicron_zone_nics.is_empty(),
-            "found extra Omicron zone NICs: {:?}",
-            omicron_zone_nics.keys()
-        );
-
         // Finally, build up the sled-agent map using the sled agent and
         // omicron zone rows. A for loop is easier to understand than into_iter
         // + filter_map + return Result + collect.
@@ -2321,6 +2320,7 @@ impl DataStore {
                 })
                 .transpose()?;
 
+            /*
             // Look up the Omicron zones.
             //
             // Older versions of Nexus fetched the Omicron zones in a separate
@@ -2349,6 +2349,7 @@ impl DataStore {
                 );
                 continue;
             };
+            */
 
             let sled_agent = nexus_types::inventory::SledAgent {
                 time_collected: s.time_collected,
@@ -2365,7 +2366,6 @@ impl DataStore {
                 usable_hardware_threads: u32::from(s.usable_hardware_threads),
                 usable_physical_ram: s.usable_physical_ram.into(),
                 reservoir_size: s.reservoir_size.into(),
-                omicron_zones,
                 // For disks, zpools, and datasets, the map for a sled ID is
                 // only populated if there is at least one disk/zpool/dataset
                 // for that sled. The `unwrap_or_default` calls cover the case
@@ -2382,9 +2382,10 @@ impl DataStore {
                     .get(sled_id.as_untyped_uuid())
                     .map(|datasets| datasets.to_vec())
                     .unwrap_or_default(),
-                omicron_physical_disks_generation: s
-                    .omicron_physical_disks_generation
-                    .into(),
+                // TODO-john This is all wrong!
+                ledgered_sled_config: None,
+                reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
+                last_reconciliation: None,
             };
             sled_agents.insert(sled_id, sled_agent);
         }
