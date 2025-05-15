@@ -224,7 +224,7 @@ impl<'a> LookupPath<'a> {
         )
     }
 
-    /// Select a resource of type DeviceAccessToken, identified by its `token`
+    /// Select a resource of type DeviceAccessToken, identified by its `id`
     pub fn device_access_token_id(
         self,
         id: TypedUuid<AccessTokenKind>,
