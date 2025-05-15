@@ -1,16 +1,16 @@
 SELECT
   DISTINCT
-  webhook_event.id,
-  webhook_event.time_created,
-  webhook_event.time_modified,
-  webhook_event.time_dispatched,
-  webhook_event.alert_class,
-  webhook_event.event,
-  webhook_event.num_dispatched
+  alert.id,
+  alert.time_created,
+  alert.time_modified,
+  alert.time_dispatched,
+  alert.event_class,
+  alert.event,
+  alert.num_dispatched
 FROM
-  webhook_event INNER JOIN webhook_delivery AS delivery ON delivery.alert_id = webhook_event.id
+  alert INNER JOIN webhook_delivery AS delivery ON delivery.event_id = alert.id
 WHERE
-  (webhook_event.alert_class != $1 AND delivery.rx_id = $2)
+  (alert.event_class != $1 AND delivery.rx_id = $2)
   AND NOT
       (
         EXISTS(
@@ -19,7 +19,7 @@ WHERE
           FROM
             webhook_delivery AS also_delivey
           WHERE
-            (also_delivey.alert_id = webhook_event.id AND also_delivey.state != $3)
+            (also_delivey.event_id = alert.id AND also_delivey.state != $3)
             AND also_delivey.triggered_by != $4
         )
       )
