@@ -2,7 +2,7 @@ EXECUTING COMMAND: omdb ["db", "disks", "list"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID SIZE STATE NAME ATTACHED_TO
+ID SIZE STATE NAME ATTACHED_TO 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -12,9 +12,9 @@ EXECUTING COMMAND: omdb ["db", "dns", "show"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-GROUP    ZONE                         ver UPDATED              REASON
-internal control-plane.oxide.internal 1   <REDACTED_TIMESTAMP> rack setup
-external oxide-dev.test               2   <REDACTED_TIMESTAMP> create silo: "test-suite-silo"
+GROUP    ZONE                         ver UPDATED              REASON                         
+internal control-plane.oxide.internal 1   <REDACTED_TIMESTAMP> rack setup                     
+external oxide-dev.test               2   <REDACTED_TIMESTAMP> create silo: "test-suite-silo" 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -52,7 +52,7 @@ EXECUTING COMMAND: omdb ["db", "instances"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID STATE INTENT PROPOLIS_ID SLED_ID HOST_SERIAL NAME
+ID STATE INTENT PROPOLIS_ID SLED_ID HOST_SERIAL NAME 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -62,9 +62,9 @@ EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL        IP           ROLE      POLICY      STATE   ID
- sim-039be560  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>...........
- sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>...........
+ SERIAL        IP           ROLE      POLICY      STATE   ID                                   
+ sim-039be560  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -75,9 +75,9 @@ EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL        IP           ROLE      POLICY      STATE   ID
- sim-039be560  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>...........
- sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>...........
+ SERIAL        IP           ROLE      POLICY      STATE   ID                                   
+ sim-039be560  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -89,59 +89,59 @@ termination: Exited(0)
 stdout:
 ALL CONFIGURED SPs
 
-    TYPE   SLOT
-    Sled   0
-    Sled   1
-    Switch 0
-    Switch 1
+    TYPE   SLOT 
+    Sled   0    
+    Sled   1    
+    Switch 0    
+    Switch 1    
 
 SPs FOUND THROUGH IGNITION
 
-    TYPE   SLOT SYSTEM_TYPE
-    Sled   0    Gimlet
-    Sled   1    Gimlet
-    Switch 0    Sidecar
-    Switch 1    Sidecar
+    TYPE   SLOT SYSTEM_TYPE 
+    Sled   0    Gimlet      
+    Sled   1    Gimlet      
+    Switch 0    Sidecar     
+    Switch 1    Sidecar     
 
 SERVICE PROCESSOR STATES
 
-    TYPE   SLOT MODEL            SERIAL      REV HUBRIS           PWR ROT_ACTIVE
-    Sled   0    i86pc            SimGimlet00 0   0000000000000000 A2  slot A
-    Sled   1    i86pc            SimGimlet01 0   0000000000000000 A2  slot A
-    Switch 0    FAKE_SIM_SIDECAR SimSidecar0 0   0000000000000000 A2  slot A
-    Switch 1    FAKE_SIM_SIDECAR SimSidecar1 0   0000000000000000 A2  slot A
+    TYPE   SLOT MODEL            SERIAL      REV HUBRIS           PWR ROT_ACTIVE 
+    Sled   0    i86pc            SimGimlet00 0   0000000000000000 A2  slot A     
+    Sled   1    i86pc            SimGimlet01 0   0000000000000000 A2  slot A     
+    Switch 0    FAKE_SIM_SIDECAR SimSidecar0 0   0000000000000000 A2  slot A     
+    Switch 1    FAKE_SIM_SIDECAR SimSidecar1 0   0000000000000000 A2  slot A     
 
 SP DETAILS: type "Sled" slot 0
 
     ROOT OF TRUST
 
-        NAME                               VALUE
-        active slot                        slot A
-        persistent boot preference         slot A
-        pending persistent boot preference -
-        transient boot preference          -
-        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
-        Slot A status                      VALID
-        Slot B status                      VALID
-        Stage0 status                      VALID
-        stage0next status                  VALID
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
 
     COMPONENTS
 
-        NAME         DESCRIPTION                              DEVICE          PRESENCE SERIAL
-        sp3-host-cpu FAKE host cpu                            sp3-host-cpu    Present  None
-        dev-0        FAKE temperature sensor                  fake-tmp-sensor Failed   None
-        dev-1        FAKE temperature sensor                  tmp117          Present  None
-        dev-2        FAKE Southeast temperature sensor        tmp117          Present  None
-        dev-6        FAKE U.2 Sharkfin A VPD                  at24csw080      Present  None
-        dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970         Present  None
-        dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc        Present  None
-        dev-39       FAKE T6 temperature sensor               tmp451          Present  None
-        dev-46       CPU temperature sensor                   sbtsi           Present  None
-        dev-53       FAKE Fan controller                      max31790        Present  None
+        NAME         DESCRIPTION                              DEVICE          PRESENCE SERIAL 
+        sp3-host-cpu FAKE host cpu                            sp3-host-cpu    Present  None   
+        dev-0        FAKE temperature sensor                  fake-tmp-sensor Failed   None   
+        dev-1        FAKE temperature sensor                  tmp117          Present  None   
+        dev-2        FAKE Southeast temperature sensor        tmp117          Present  None   
+        dev-6        FAKE U.2 Sharkfin A VPD                  at24csw080      Present  None   
+        dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970         Present  None   
+        dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc        Present  None   
+        dev-39       FAKE T6 temperature sensor               tmp451          Present  None   
+        dev-46       CPU temperature sensor                   sbtsi           Present  None   
+        dev-53       FAKE Fan controller                      max31790        Present  None   
 
     CABOOSES: none found
 
@@ -149,33 +149,33 @@ SP DETAILS: type "Sled" slot 1
 
     ROOT OF TRUST
 
-        NAME                               VALUE
-        active slot                        slot A
-        persistent boot preference         slot A
-        pending persistent boot preference -
-        transient boot preference          -
-        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
-        Slot A status                      VALID
-        Slot B status                      VALID
-        Stage0 status                      VALID
-        stage0next status                  VALID
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
 
     COMPONENTS
 
-        NAME         DESCRIPTION                              DEVICE       PRESENCE SERIAL
-        sp3-host-cpu FAKE host cpu                            sp3-host-cpu Present  None
-        dev-0        FAKE temperature sensor                  tmp117       Present  None
-        dev-1        FAKE temperature sensor                  tmp117       Present  None
-        dev-2        FAKE Southeast temperature sensor        tmp117       Present  None
-        dev-6        FAKE U.2 Sharkfin A VPD                  at24csw080   Present  None
-        dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970      Present  None
-        dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc     Present  None
-        dev-39       FAKE T6 temperature sensor               tmp451       Present  None
-        dev-46       CPU temperature sensor                   sbtsi        Present  None
-        dev-53       FAKE Fan controller                      max31790     Present  None
+        NAME         DESCRIPTION                              DEVICE       PRESENCE SERIAL 
+        sp3-host-cpu FAKE host cpu                            sp3-host-cpu Present  None   
+        dev-0        FAKE temperature sensor                  tmp117       Present  None   
+        dev-1        FAKE temperature sensor                  tmp117       Present  None   
+        dev-2        FAKE Southeast temperature sensor        tmp117       Present  None   
+        dev-6        FAKE U.2 Sharkfin A VPD                  at24csw080   Present  None   
+        dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970      Present  None   
+        dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc     Present  None   
+        dev-39       FAKE T6 temperature sensor               tmp451       Present  None   
+        dev-46       CPU temperature sensor                   sbtsi        Present  None   
+        dev-53       FAKE Fan controller                      max31790     Present  None   
 
     CABOOSES: none found
 
@@ -183,25 +183,25 @@ SP DETAILS: type "Switch" slot 0
 
     ROOT OF TRUST
 
-        NAME                               VALUE
-        active slot                        slot A
-        persistent boot preference         slot A
-        pending persistent boot preference -
-        transient boot preference          -
-        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
-        Slot A status                      VALID
-        Slot B status                      VALID
-        Stage0 status                      VALID
-        stage0next status                  VALID
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
 
     COMPONENTS
 
-        NAME  DESCRIPTION               DEVICE          PRESENCE SERIAL
-        dev-0 FAKE temperature sensor 1 fake-tmp-sensor Present  None
-        dev-1 FAKE temperature sensor 2 fake-tmp-sensor Failed   None
+        NAME  DESCRIPTION               DEVICE          PRESENCE SERIAL 
+        dev-0 FAKE temperature sensor 1 fake-tmp-sensor Present  None   
+        dev-1 FAKE temperature sensor 2 fake-tmp-sensor Failed   None   
 
     CABOOSES: none found
 
@@ -209,19 +209,19 @@ SP DETAILS: type "Switch" slot 1
 
     ROOT OF TRUST
 
-        NAME                               VALUE
-        active slot                        slot A
-        persistent boot preference         slot A
-        pending persistent boot preference -
-        transient boot preference          -
-        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
-        Slot A status                      VALID
-        Slot B status                      VALID
-        Stage0 status                      VALID
-        stage0next status                  VALID
+        NAME                               VALUE                                                            
+        active slot                        slot A                                                           
+        persistent boot preference         slot A                                                           
+        pending persistent boot preference -                                                                
+        transient boot preference          -                                                                
+        slot A FWID                        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 
+        slot B FWID                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 
+        Stage0 FWID                        cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+        Stage0Next FWID                    dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd 
+        Slot A status                      VALID                                                            
+        Slot B status                      VALID                                                            
+        Stage0 status                      VALID                                                            
+        stage0next status                  VALID                                                            
 
     COMPONENTS: none found
 
@@ -236,6 +236,10 @@ stdout:
 task: "abandoned_vmm_reaper"
     deletes sled reservations for VMMs that have been abandoned by their
     instances
+
+
+task: "alert_dispatcher"
+    dispatches queued alerts to receivers
 
 
 task: "bfd_manager"
@@ -403,10 +407,6 @@ task: "webhook_deliverator"
     sends webhook delivery requests
 
 
-task: "alert_dispatcher"
-    dispatches queued webhook events to receivers
-
-
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -429,8 +429,8 @@ task: "dns_servers_internal"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
-      DNS_SERVER_ADDR
-      [::1]:REDACTED_PORT
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
 
 task: "dns_propagation_internal"
   configured period: every <REDACTED_DURATION>m
@@ -439,8 +439,8 @@ task: "dns_propagation_internal"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
-      DNS_SERVER_ADDR LAST_RESULT
-      [::1]:REDACTED_PORT     success
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
 
 
 task: "dns_config_external"
@@ -457,8 +457,8 @@ task: "dns_servers_external"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
-      DNS_SERVER_ADDR
-      [::1]:REDACTED_PORT
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
 
 task: "dns_propagation_external"
   configured period: every <REDACTED_DURATION>m
@@ -467,8 +467,8 @@ task: "dns_propagation_external"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
-      DNS_SERVER_ADDR LAST_RESULT
-      [::1]:REDACTED_PORT     success
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
 
 
 task: "nat_v4_garbage_collector"
@@ -501,6 +501,14 @@ task: "abandoned_vmm_reaper"
       VMM records deleted:                     0
       VMMs already deleted by another Nexus:   0
     sled resource reservations deleted:        0
+
+task: "alert_dispatcher"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    events dispatched:                            0
+    events with no receivers subscribed:          0
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
@@ -537,9 +545,9 @@ task: "external_endpoints"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     external API endpoints: 2 ('*' below marks default)
 
-          SILO_ID                              DNS_NAME
-          ..........<REDACTED_UUID>........... default-silo.sys.oxide-dev.test
-        * ..........<REDACTED_UUID>........... test-suite-silo.sys.oxide-dev.test
+          SILO_ID                              DNS_NAME                           
+          ..........<REDACTED_UUID>........... default-silo.sys.oxide-dev.test    
+        * ..........<REDACTED_UUID>........... test-suite-silo.sys.oxide-dev.test 
 
     warnings: 2
         warning: silo ..........<REDACTED_UUID>........... with DNS name "default-silo.sys.oxide-dev.test" has no usable certificates
@@ -794,14 +802,6 @@ task: "webhook_deliverator"
     internal delivery errors:             0
     already delivered by another Nexus:   0
     in progress by another Nexus:         0
-
-task: "alert_dispatcher"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    events dispatched:                            0
-    events with no receivers subscribed:          0
 
 ---------------------------------------------
 stderr:
@@ -876,8 +876,8 @@ task: "dns_servers_internal"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
-      DNS_SERVER_ADDR
-      [::1]:REDACTED_PORT
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
 
 task: "dns_propagation_internal"
   configured period: every <REDACTED_DURATION>m
@@ -886,8 +886,8 @@ task: "dns_propagation_internal"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
-      DNS_SERVER_ADDR LAST_RESULT
-      [::1]:REDACTED_PORT     success
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
 
 
 ---------------------------------------------
@@ -912,8 +912,8 @@ task: "dns_servers_external"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
-      DNS_SERVER_ADDR
-      [::1]:REDACTED_PORT
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
 
 task: "dns_propagation_external"
   configured period: every <REDACTED_DURATION>m
@@ -922,8 +922,8 @@ task: "dns_propagation_external"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
-      DNS_SERVER_ADDR LAST_RESULT
-      [::1]:REDACTED_PORT     success
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
 
 
 ---------------------------------------------
@@ -948,8 +948,8 @@ task: "dns_servers_internal"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
-      DNS_SERVER_ADDR
-      [::1]:REDACTED_PORT
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
 
 task: "dns_propagation_internal"
   configured period: every <REDACTED_DURATION>m
@@ -958,8 +958,8 @@ task: "dns_propagation_internal"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
-      DNS_SERVER_ADDR LAST_RESULT
-      [::1]:REDACTED_PORT     success
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
 
 
 task: "dns_config_external"
@@ -976,8 +976,8 @@ task: "dns_servers_external"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
-      DNS_SERVER_ADDR
-      [::1]:REDACTED_PORT
+      DNS_SERVER_ADDR 
+      [::1]:REDACTED_PORT     
 
 task: "dns_propagation_external"
   configured period: every <REDACTED_DURATION>m
@@ -986,8 +986,8 @@ task: "dns_propagation_external"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
-      DNS_SERVER_ADDR LAST_RESULT
-      [::1]:REDACTED_PORT     success
+      DNS_SERVER_ADDR LAST_RESULT 
+      [::1]:REDACTED_PORT     success     
 
 
 task: "nat_v4_garbage_collector"
@@ -1020,6 +1020,14 @@ task: "abandoned_vmm_reaper"
       VMM records deleted:                     0
       VMMs already deleted by another Nexus:   0
     sled resource reservations deleted:        0
+
+task: "alert_dispatcher"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    events dispatched:                            0
+    events with no receivers subscribed:          0
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1056,9 +1064,9 @@ task: "external_endpoints"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     external API endpoints: 2 ('*' below marks default)
 
-          SILO_ID                              DNS_NAME
-          ..........<REDACTED_UUID>........... default-silo.sys.oxide-dev.test
-        * ..........<REDACTED_UUID>........... test-suite-silo.sys.oxide-dev.test
+          SILO_ID                              DNS_NAME                           
+          ..........<REDACTED_UUID>........... default-silo.sys.oxide-dev.test    
+        * ..........<REDACTED_UUID>........... test-suite-silo.sys.oxide-dev.test 
 
     warnings: 2
         warning: silo ..........<REDACTED_UUID>........... with DNS name "default-silo.sys.oxide-dev.test" has no usable certificates
@@ -1314,14 +1322,6 @@ task: "webhook_deliverator"
     already delivered by another Nexus:   0
     in progress by another Nexus:         0
 
-task: "alert_dispatcher"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    events dispatched:                            0
-    events with no receivers subscribed:          0
-
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -1330,7 +1330,7 @@ EXECUTING COMMAND: omdb ["nexus", "sagas", "list"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-SAGA_ID STATE
+SAGA_ID STATE 
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -1352,8 +1352,8 @@ EXECUTING COMMAND: omdb ["nexus", "sagas", "list"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-SAGA_ID                              STATE
-..........<REDACTED_UUID>........... running
+SAGA_ID                              STATE   
+..........<REDACTED_UUID>........... running 
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -1374,8 +1374,8 @@ EXECUTING COMMAND: omdb ["nexus", "blueprints", "list"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-T ENA ID                                   PARENT TIME_CREATED
-* no  ......<REDACTED_BLUEPRINT_ID>....... <none> <REDACTED_TIMESTAMP>
+T ENA ID                                   PARENT TIME_CREATED             
+* no  ......<REDACTED_BLUEPRINT_ID>....... <none> <REDACTED_TIMESTAMP> 
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -1393,16 +1393,16 @@ parent:    <none>
     -----------------------------------------------------------------
     vendor        model              serial               disposition
     -----------------------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-10   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-11   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-12   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-13   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-14   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-15   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-16   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-17   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-18   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-19   in service
+    nexus-tests   nexus-test-model   nexus-test-disk-10   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-11   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-12   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-13   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-14   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-15   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-16   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-17   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-18   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-19   in service 
 
 
     datasets:
@@ -1424,39 +1424,39 @@ parent:    <none>
     ----------------------------------------------------------------
     vendor        model              serial              disposition
     ----------------------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-0   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-1   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-2   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-3   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-4   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-5   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-6   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-7   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-8   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-9   in service
+    nexus-tests   nexus-test-model   nexus-test-disk-0   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-1   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-2   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-3   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-4   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-5   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-6   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-7   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-8   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-9   in service 
 
 
     datasets:
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
     omicron zones:
     ---------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP
+    zone type         zone id                                image source      disposition   underlay IP     
     ---------------------------------------------------------------------------------------------------------
-    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1
-    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1
-    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1
-    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1
-    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1
+    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
 
 
@@ -1494,16 +1494,16 @@ parent:    <none>
     -----------------------------------------------------------------
     vendor        model              serial               disposition
     -----------------------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-10   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-11   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-12   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-13   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-14   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-15   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-16   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-17   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-18   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-19   in service
+    nexus-tests   nexus-test-model   nexus-test-disk-10   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-11   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-12   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-13   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-14   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-15   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-16   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-17   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-18   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-19   in service 
 
 
     datasets:
@@ -1525,39 +1525,39 @@ parent:    <none>
     ----------------------------------------------------------------
     vendor        model              serial              disposition
     ----------------------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-0   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-1   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-2   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-3   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-4   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-5   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-6   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-7   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-8   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-9   in service
+    nexus-tests   nexus-test-model   nexus-test-disk-0   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-1   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-2   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-3   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-4   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-5   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-6   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-7   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-8   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-9   in service 
 
 
     datasets:
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
     omicron zones:
     ---------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP
+    zone type         zone id                                image source      disposition   underlay IP     
     ---------------------------------------------------------------------------------------------------------
-    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1
-    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1
-    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1
-    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1
-    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1
+    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
 
 
@@ -1597,16 +1597,16 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
     -----------------------------------------------------------------
     vendor        model              serial               disposition
     -----------------------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-10   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-11   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-12   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-13   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-14   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-15   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-16   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-17   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-18   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-19   in service
+    nexus-tests   nexus-test-model   nexus-test-disk-10   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-11   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-12   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-13   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-14   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-15   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-16   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-17   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-18   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-19   in service 
 
 
   sled ..........<REDACTED_UUID>........... (active, config generation 2):
@@ -1615,39 +1615,39 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
     ----------------------------------------------------------------
     vendor        model              serial              disposition
     ----------------------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-0   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-1   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-2   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-3   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-4   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-5   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-6   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-7   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-8   in service
-    nexus-tests   nexus-test-model   nexus-test-disk-9   in service
+    nexus-tests   nexus-test-model   nexus-test-disk-0   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-1   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-2   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-3   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-4   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-5   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-6   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-7   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-8   in service 
+    nexus-tests   nexus-test-model   nexus-test-disk-9   in service 
 
 
     datasets:
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
     omicron zones:
     ---------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP
+    zone type         zone id                                image source      disposition   underlay IP     
     ---------------------------------------------------------------------------------------------------------
-    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1
-    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1
-    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1
-    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1
-    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1
+    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
 
 
