@@ -1694,7 +1694,7 @@ struct CrucibleDatasetRow {
     size_left: Option<i128>,
 }
 
-fn option_impl_display<T: std::fmt::Display>(t: &Option<T>) -> String {
+pub fn option_impl_display<T: std::fmt::Display>(t: &Option<T>) -> String {
     match t {
         Some(v) => format!("{v}"),
         None => String::from("n/a"),
@@ -6766,6 +6766,8 @@ async fn cmd_db_inventory_cabooses(
         git_commit: String,
         name: String,
         version: String,
+        #[tabled(display_with = "option_impl_display")]
+        sign: Option<String>,
     }
 
     use nexus_db_schema::schema::sw_caboose::dsl;
@@ -6784,6 +6786,7 @@ async fn cmd_db_inventory_cabooses(
         name: caboose.name,
         version: caboose.version,
         git_commit: caboose.git_commit,
+        sign: caboose.sign,
     });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
@@ -7132,6 +7135,8 @@ async fn inv_collection_print_devices(
             name: &'a str,
             version: &'a str,
             git_commit: &'a str,
+            #[tabled(display_with = "option_impl_display")]
+            sign: &'a Option<String>,
         }
 
         println!("    cabooses:");
@@ -7145,6 +7150,7 @@ async fn inv_collection_print_devices(
                 name: &found_caboose.caboose.name,
                 version: &found_caboose.caboose.version,
                 git_commit: &found_caboose.caboose.git_commit,
+                sign: &found_caboose.caboose.sign,
             })
             .collect();
         let table = tabled::Table::new(caboose_rows)

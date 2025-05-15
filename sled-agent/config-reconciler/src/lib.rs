@@ -50,7 +50,7 @@
 #![allow(dead_code)]
 
 mod dataset_serialization_task;
-mod external_disks;
+mod disks_common;
 mod handle;
 mod internal_disks;
 mod ledger;

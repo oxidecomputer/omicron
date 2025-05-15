@@ -21,6 +21,7 @@ use omicron_common::{
     },
     zpool_name::ZpoolName,
 };
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
 use schemars::JsonSchema;
@@ -139,6 +140,7 @@ pub struct OmicronSledConfig {
     pub disks: IdMap<OmicronPhysicalDiskConfig>,
     pub datasets: IdMap<DatasetConfig>,
     pub zones: IdMap<OmicronZoneConfig>,
+    pub remove_mupdate_override: Option<MupdateOverrideUuid>,
 }
 
 impl Ledgerable for OmicronSledConfig {

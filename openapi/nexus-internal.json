@@ -2631,6 +2631,14 @@
           "disks": {
             "$ref": "#/components/schemas/IdMapBlueprintPhysicalDiskConfig"
           },
+          "remove_mupdate_override": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              }
+            ]
+          },
           "sled_agent_generation": {
             "description": "Generation number used when this type is converted into an `OmicronSledConfig` for use by sled-agent.\n\nThis field is explicitly named `sled_agent_generation` to indicate that it is only required to cover information that changes what Reconfigurator sends to sled agent. For example, changing the sled `state` from `Active` to `Decommissioned` would not require a bump to `sled_agent_generation`, because a `Decommissioned` sled will never be sent an `OmicronSledConfig`.",
             "allOf": [
@@ -5377,6 +5385,75 @@
               "expected_active_version",
               "expected_inactive_version"
             ]
+          },
+          {
+            "description": "the RoT is being updated",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "rot"
+                ]
+              },
+              "expected_active_slot": {
+                "description": "the slot of the currently running image",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "expected_pending_persistent_boot_preference": {
+                "nullable": true,
+                "description": "the persistent boot preference written into the CFPA scratch page that will become the persistent boot preference in the authoritative CFPA page upon reboot, unless CFPA update of the authoritative page fails for some reason.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "expected_persistent_boot_preference": {
+                "description": "the persistent boot preference written into the current authoritative CFPA page (ping or pong)",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "expected_slot_a_version": {
+                "description": "expected contents of \"A\" slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExpectedVersion"
+                  }
+                ]
+              },
+              "expected_slot_b_version": {
+                "description": "expected contents of \"B\" slot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExpectedVersion"
+                  }
+                ]
+              },
+              "expected_transient_boot_preference": {
+                "nullable": true,
+                "description": "override persistent preference selection for a single boot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "expected_active_slot",
+              "expected_persistent_boot_preference",
+              "expected_slot_a_version",
+              "expected_slot_b_version"
+            ]
           }
         ]
       },
@@ -6011,6 +6088,38 @@
           "repairs",
           "session_id",
           "time"
+        ]
+      },
+      "RotSlot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "a"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "b"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
         ]
       },
       "RouteConfig": {
@@ -6744,6 +6853,10 @@
         "format": "uuid"
       },
       "TypedUuidForExternalIpKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForMupdateOverrideKind": {
         "type": "string",
         "format": "uuid"
       },

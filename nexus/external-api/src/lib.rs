@@ -498,7 +498,7 @@ pub trait NexusExternalApi {
     async fn saml_identity_provider_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ProviderPath>,
-        query_params: Query<params::SiloSelector>,
+        query_params: Query<params::OptionalSiloSelector>,
     ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError>;
 
     // TODO: no DELETE for identity providers?
@@ -3723,7 +3723,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
-    ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError>;
+    ) -> Result<HttpResponseCreated<views::WebhookSecret>, HttpError>;
 
     /// Remove secret from webhook receiver
     #[endpoint {

@@ -238,21 +238,21 @@ impl Nexus {
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
         secret: String,
-    ) -> Result<views::WebhookSecretId, Error> {
+    ) -> Result<views::WebhookSecret, Error> {
         let (authz_rx,) = rx.lookup_for(authz::Action::CreateChild).await?;
         let secret = WebhookSecret::new(authz_rx.id(), secret);
-        let WebhookSecret { identity, .. } = self
+        let secret = self
             .datastore()
             .webhook_rx_secret_create(opctx, &authz_rx, secret)
             .await?;
-        let secret_id = identity.id;
         slog::info!(
             &opctx.log,
             "added secret to webhook receiver";
             "rx_id" => ?authz_rx.id(),
-            "secret_id" => ?secret_id,
+            "secret_id" => ?secret.identity.id,
+            "time_created"=> %secret.identity.time_created,
         );
-        Ok(views::WebhookSecretId { id: secret_id.into_untyped_uuid() })
+        Ok(secret.into())
     }
 
     pub async fn webhook_receiver_secret_delete(

@@ -193,10 +193,10 @@ async fn secret_add(
     ctx: &ControlPlaneTestContext,
     webhook_id: AlertReceiverUuid,
     params: &params::WebhookSecretCreate,
-) -> views::WebhookSecretId {
+) -> views::WebhookSecret {
     resource_helpers::object_create::<
         params::WebhookSecretCreate,
-        views::WebhookSecretId,
+        views::WebhookSecret,
     >(
         &ctx.external_client,
         &format!("{SECRETS_BASE_PATH}/?receiver={webhook_id}"),
