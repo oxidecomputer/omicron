@@ -13,6 +13,7 @@ cfg-if.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
 futures.workspace = true
 illumos-utils.workspace = true
+itertools.workspace = true
 libc.workspace = true
 omicron-workspace-hack.workspace = true
 once_cell.workspace = true

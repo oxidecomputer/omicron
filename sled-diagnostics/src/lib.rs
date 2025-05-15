@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use itertools::Itertools;
 use slog::Logger;
 
 #[macro_use]
@@ -33,6 +34,9 @@ use queries::*;
 
 /// Max number of commands to run in parallel
 const MAX_PARALLELISM: usize = 50;
+
+/// Max number of pids to operate on when running ptool commands
+const PID_CHUNK_SIZE: usize = 15;
 
 struct MultipleCommands<T> {
     semaphore: Arc<Semaphore>,
@@ -119,9 +123,9 @@ pub async fn pargs_oxide_processes(
     };
 
     let mut commands = MultipleCommands::new();
-    for pid in pids {
+    for pid_chunk in &pids.into_iter().chunks(PID_CHUNK_SIZE) {
         commands.add_command(execute_command_with_timeout(
-            pargs_process(pid),
+            pargs_processes(pid_chunk),
             DEFAULT_TIMEOUT,
         ));
     }
@@ -140,9 +144,9 @@ pub async fn pstack_oxide_processes(
     };
 
     let mut commands = MultipleCommands::new();
-    for pid in pids {
+    for pid_chunk in &pids.into_iter().chunks(PID_CHUNK_SIZE) {
         commands.add_command(execute_command_with_timeout(
-            pstack_process(pid),
+            pstack_processes(pid_chunk),
             DEFAULT_TIMEOUT,
         ));
     }
@@ -161,9 +165,9 @@ pub async fn pfiles_oxide_processes(
     };
 
     let mut commands = MultipleCommands::new();
-    for pid in pids {
+    for pid_chunk in &pids.into_iter().chunks(PID_CHUNK_SIZE) {
         commands.add_command(execute_command_with_timeout(
-            pfiles_process(pid),
+            pfiles_processes(pid_chunk),
             DEFAULT_TIMEOUT,
         ));
     }

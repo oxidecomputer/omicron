@@ -248,21 +248,21 @@ pub fn nvmeadm_list() -> Command {
     cmd
 }
 
-pub fn pargs_process(pid: i32) -> Command {
+pub fn pargs_processes(pids: impl Iterator<Item = i32>) -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
-    cmd.env_clear().arg(PARGS).arg("-ae").arg(pid.to_string());
+    cmd.env_clear().arg(PARGS).arg("-ae").args(pids.map(|p| p.to_string()));
     cmd
 }
 
-pub fn pstack_process(pid: i32) -> Command {
+pub fn pstack_processes(pids: impl Iterator<Item = i32>) -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
-    cmd.env_clear().arg(PSTACK).arg(pid.to_string());
+    cmd.env_clear().arg(PSTACK).args(pids.map(|p| p.to_string()));
     cmd
 }
 
-pub fn pfiles_process(pid: i32) -> Command {
+pub fn pfiles_processes(pids: impl Iterator<Item = i32>) -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
-    cmd.env_clear().arg(PFILES).arg(pid.to_string());
+    cmd.env_clear().arg(PFILES).args(pids.map(|p| p.to_string()));
     cmd
 }
 
