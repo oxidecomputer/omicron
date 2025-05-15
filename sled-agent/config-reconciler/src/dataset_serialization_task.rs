@@ -90,7 +90,12 @@ pub enum DatasetEnsureError {
 impl DatasetEnsureError {
     fn is_retryable(&self) -> bool {
         match self {
-            // Errors that we don't know for sure _aren't_ retryable.
+            // These errors might be retryable; there are probably cases where
+            // they won't be, but we need more context than we have available
+            // from just the error to know for sure. For now, assume they are
+            // retryable - that may mean we churn on something doomed, but
+            // that's better than failing to retry something we should have
+            // retried.
             DatasetEnsureError::ZpoolNotFound(_)
             | DatasetEnsureError::EnsureFailed { .. } => true,
 
