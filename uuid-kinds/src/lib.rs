@@ -52,7 +52,7 @@ macro_rules! impl_typed_uuid_kind {
 
 impl_typed_uuid_kind! {
     AffinityGroup => "affinity_group",
-    Alert => "webhook_event",
+    Alert => "alert",
     AlertReceiver => "alert_receiver",
     AntiAffinityGroup => "anti_affinity_group",
     Blueprint => "blueprint",
