@@ -603,7 +603,7 @@ resource WebhookSecret {
 }
 
 has_relation(rx: AlertReceiver, "parent_alert_receiver", secret: WebhookSecret)
-	if secret.webhook_receiver = rx;
+	if secret.alert_receiver = rx;
 
 resource AlertClassList {
 	permissions = [ "list_children" ];
