@@ -788,11 +788,12 @@ impl ControlPlaneZoneWriteContext<'_> {
 
 /// Computes the zone hash IDs.
 ///
-/// Hash computation is done in parallel on blocking tasks. If a task panics
-/// (should not happen in normal use), a `JoinError` is returned.
+/// Hash computation is done in parallel on blocking tasks. If the runtime shuts
+/// down causing a task abort, or a task panics (should not happen in normal
+/// use), a `JoinError` is returned.
 async fn compute_zone_hashes(
     images: &ControlPlaneZoneImages,
-) -> IdMap<MupdateOverrideZone> {
+) -> Result<IdMap<MupdateOverrideZone>, JoinError> {
     let mut tasks = JoinSet::new();
     for (file_name, data) in &images.zones {
         let file_name = file_name.clone();
