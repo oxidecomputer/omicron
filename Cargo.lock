@@ -3620,7 +3620,6 @@ dependencies = [
 name = "gateway-types"
 version = "0.1.0"
 dependencies = [
- "derive_more",
  "gateway-messages",
  "hex",
  "ipcc",
@@ -6311,7 +6310,6 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
- "gateway-types",
  "hubtools",
  "id-map",
  "internal-dns-resolver",

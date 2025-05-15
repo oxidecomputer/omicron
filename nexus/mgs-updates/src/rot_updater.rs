@@ -282,18 +282,18 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                 RotSlot::A => (expected_slot_a_version, expected_slot_b_version),
                 RotSlot::B => (expected_slot_b_version, expected_slot_a_version)
             };
+
+            let expected_active_slot_version = match expected_active_slot_version {
+                ExpectedVersion::Version(v) => v,
+                ExpectedVersion::NoValidVersion => unreachable!(
+                    "the active slot will always have an expected version"
+                ),
+            };
             if caboose.version != expected_active_slot_version.to_string() {
-                match expected_active_slot_version {
-                    ExpectedVersion::Version(v) => {
-                        return Err(PrecheckError::WrongActiveVersion {
-                            expected: v.clone(),
-                            found: caboose.version,
-                        });
-                    },
-                    ExpectedVersion::NoValidVersion => {
-                        unreachable!("the active slot will always have an expected version");
-                    }
-                }
+                return Err(PrecheckError::WrongActiveVersion {
+                    expected: expected_active_slot_version.clone(),
+                    found: caboose.version,
+                });
             }
 
             // For the same reason, check that the version in the inactive slot

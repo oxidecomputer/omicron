@@ -4,8 +4,6 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-// TODO-K: Remove when I fix the RotSlot types
-use derive_more::Display;
 
 #[derive(
     Debug,
@@ -167,7 +165,6 @@ impl From<gateway_messages::RotBootInfo> for RotState {
 
 #[derive(
     Debug,
-    Display,
     Clone,
     PartialEq,
     Eq,
