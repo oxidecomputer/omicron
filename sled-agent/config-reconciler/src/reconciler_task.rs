@@ -6,13 +6,13 @@
 
 use chrono::DateTime;
 use chrono::Utc;
-use illumos_utils::dladm::EtherstubVnic;
-use illumos_utils::running_zone::RunCommandError;
 use illumos_utils::zpool::PathInPool;
 use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use sled_agent_types::time_sync::TimeSync;
+use sled_storage::config::MountConfig;
+use sled_storage::disk::Disk;
 use slog::Logger;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -23,29 +23,40 @@ use crate::ledger::CurrentSledConfig;
 use crate::sled_agent_facilities::SledAgentFacilities;
 
 mod external_disks;
+mod zones;
+
+use self::external_disks::ExternalDisks;
 
 pub use self::external_disks::CurrentlyManagedZpools;
 pub use self::external_disks::CurrentlyManagedZpoolsReceiver;
+pub use self::zones::TimeSyncError;
+pub use self::zones::TimeSyncStatus;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn<T: SledAgentFacilities>(
+    mount_config: Arc<MountConfig>,
     key_requester: StorageKeyRequester,
     time_sync_config: TimeSyncConfig,
-    underlay_vnic: EtherstubVnic,
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+    external_disks_tx: watch::Sender<HashSet<Disk>>,
     sled_agent_facilities: T,
     log: Logger,
 ) {
+    let external_disks = ExternalDisks::new(
+        mount_config,
+        currently_managed_zpools_tx,
+        external_disks_tx,
+    );
+
     tokio::spawn(
         ReconcilerTask {
             key_requester,
             time_sync_config,
-            underlay_vnic,
             current_config_rx,
             reconciler_result_tx,
-            currently_managed_zpools_tx,
+            external_disks,
             sled_agent_facilities,
             log,
         }
@@ -113,28 +124,6 @@ pub enum ReconcilerTaskStatus {
     },
 }
 
-#[derive(Debug, Clone)]
-pub enum TimeSyncStatus {
-    NotYetChecked,
-    ConfiguredToSkip,
-    FailedToGetSyncStatus(Arc<TimeSyncError>),
-    TimeSync(TimeSync),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum TimeSyncError {
-    #[error("no running NTP zone")]
-    NoRunningNtpZone,
-    #[error("multiple running NTP zones - this should never happen!")]
-    MultipleRunningNtpZones,
-    #[error("failed to execute chronyc within NTP zone")]
-    ExecuteChronyc(#[source] RunCommandError),
-    #[error(
-        "failed to parse chronyc tracking output: {reason} (stdout: {stdout:?})"
-    )]
-    FailedToParse { reason: &'static str, stdout: String },
-}
-
 #[derive(Debug)]
 struct LatestReconcilerTaskResultInner {
     sled_config: OmicronSledConfig,
@@ -144,16 +133,11 @@ struct LatestReconcilerTaskResultInner {
 struct ReconcilerTask<T> {
     key_requester: StorageKeyRequester,
     time_sync_config: TimeSyncConfig,
-    underlay_vnic: EtherstubVnic,
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
-    currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+    external_disks: ExternalDisks,
     sled_agent_facilities: T,
     log: Logger,
-    // TODO where do we want to do dump setup? Needs both internal and external
-    // disks. Maybe this task, or maybe a task just for dump setup?
-    // Invokes dumpadm(8) and savecore(8) when new disks are encountered
-    // dump_setup: DumpSetup,
 }
 
 impl<T: SledAgentFacilities> ReconcilerTask<T> {

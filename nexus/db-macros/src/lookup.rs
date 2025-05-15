@@ -75,7 +75,7 @@ impl InputPrimaryKeyColumn {
                 ));
             }
             (Some(rust_type), None) => {
-                PrimaryKeyType::Standard(rust_type.into_inner())
+                PrimaryKeyType::Standard(Box::new(rust_type.into_inner()))
             }
             (None, Some(uuid_kind)) => {
                 PrimaryKeyType::new_typed_uuid(&uuid_kind)

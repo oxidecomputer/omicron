@@ -149,16 +149,22 @@ pub async fn test_setup_with_config(
         // assume that matches whether we end up as `switch0` or `switch1`
         let target_sp =
             port_description.location.get(&expected_location).unwrap();
-        let sp_addr = match target_sp.typ {
+        let (sp_addr, sp_ereport_addr) = match target_sp.typ {
             SpType::Switch => {
-                simrack.sidecars[target_sp.slot].local_addr(sp_port)
+                let switch = &simrack.sidecars[target_sp.slot];
+                (switch.local_addr(sp_port), switch.local_ereport_addr(sp_port))
             }
-            SpType::Sled => simrack.gimlets[target_sp.slot].local_addr(sp_port),
+            SpType::Sled => {
+                let sled = &simrack.gimlets[target_sp.slot];
+                (sled.local_addr(sp_port), sled.local_ereport_addr(sp_port))
+            }
             SpType::Power => todo!(),
         };
         match &mut port_description.config {
-            SwitchPortConfig::Simulated { addr, .. } => {
+            SwitchPortConfig::Simulated { addr, ereport_addr, .. } => {
                 *addr = sp_addr.unwrap();
+                *ereport_addr =
+                    sp_ereport_addr.expect("no ereport addr configured");
             }
             SwitchPortConfig::SwitchZoneInterface { .. } => {
                 panic!("test config using `switch-zone-interface` config")

@@ -57,6 +57,7 @@ sp_port_2 = ["switch1"]
 kind = "simulated"
 fake-interface = "fake-switch0"
 addr = "[::1]:33300"
+ereport-addr = "[::1]:44400"
 ignition-target = 1
 location = { switch0 = ["switch", 0], switch1 = ["switch", 1] }
 
@@ -64,6 +65,7 @@ location = { switch0 = ["switch", 0], switch1 = ["switch", 1] }
 kind = "simulated"
 fake-interface = "fake-sled0"
 addr = "[::1]:33310"
+ereport-addr = "[::1]:44410"
 ignition-target = 2
 location = { switch0 = ["sled", 0], switch1 = ["sled", 0] }
 
@@ -71,6 +73,7 @@ location = { switch0 = ["sled", 0], switch1 = ["sled", 0] }
 kind = "simulated"
 fake-interface = "fake-sled1"
 addr = "[::1]:33320"
+ereport-addr = "[::1]:44420"
 ignition-target = 3
 location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
 
