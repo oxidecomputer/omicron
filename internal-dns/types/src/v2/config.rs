@@ -13,6 +13,8 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct DnsConfigParams {
     pub generation: Generation,
+    /// See [`DnsConfig`]'s `serial` field for how this is different from `generation`
+    pub serial: u32,
     pub time_created: chrono::DateTime<chrono::Utc>,
     pub zones: Vec<DnsConfigZone>,
 }
@@ -38,6 +40,12 @@ impl DnsConfigParams {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DnsConfig {
     pub generation: Generation,
+    /// A serial number for this DNS configuration, as should be used in SOA
+    /// records describing the configuration's zones. This is a property of the
+    /// overall DNS configuration for convenience: Nexus versions DNS
+    /// configurations at this granularity, and we expect Nexus will derive
+    /// serial numbers from that version.
+    pub serial: u32,
     pub time_created: chrono::DateTime<chrono::Utc>,
     pub time_applied: chrono::DateTime<chrono::Utc>,
     pub zones: Vec<DnsConfigZone>,
@@ -51,7 +59,7 @@ impl TryFrom<DnsConfig> for v1::config::DnsConfig {
     type Error = TranslationError;
 
     fn try_from(v2: DnsConfig) -> Result<Self, Self::Error> {
-        let DnsConfig { generation, time_created, time_applied, zones } = v2;
+        let DnsConfig { generation, serial: _, time_created, time_applied, zones } = v2;
 
         Ok(v1::config::DnsConfig {
             generation,

@@ -518,10 +518,15 @@ impl SimSystemBuilderInner {
         self.system
             .collections
             .insert(example.collection.id, Arc::new(example.collection));
+        let generation_to_serial = |generation| {
+            generation.as_u64().try_into::<u32>()
+                .expect("generation fits into a u32")
+        };
         self.system.internal_dns.insert(
             blueprint.internal_dns_version,
             Arc::new(DnsConfigParams {
                 generation: blueprint.internal_dns_version,
+                serial: generation_to_serial(blueprint.internal_dns_version),
                 // TODO: probably want to make time controllable by the caller.
                 time_created: Utc::now(),
                 zones: vec![internal_dns],
@@ -531,6 +536,7 @@ impl SimSystemBuilderInner {
             blueprint.external_dns_version,
             Arc::new(DnsConfigParams {
                 generation: blueprint.external_dns_version,
+                serial: generation_to_serial(blueprint.external_dns_version),
                 // TODO: probably want to make time controllable by the caller.
                 time_created: Utc::now(),
                 zones: vec![external_dns],

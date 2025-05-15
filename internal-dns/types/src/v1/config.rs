@@ -35,18 +35,28 @@ impl DnsConfigParams {
     }
 }
 
-impl Into<v2::config::DnsConfigParams> for DnsConfigParams {
-    fn into(self) -> v2::config::DnsConfigParams {
+pub enum TranslationError {
+    GenerationTooLarge,
+}
+
+impl TryInto<v2::config::DnsConfigParams> for DnsConfigParams {
+    type Error = TranslationError;
+
+    fn try_into(self) -> Result<v2::config::DnsConfigParams, Self::Error> {
+        let serial: u32 = self.generation.as_u64().try_into()
+            .map_err(|_| TranslationError::GenerationTooLarge)?;
+
         let mut converted_zones: Vec<v2::config::DnsConfigZone> = Vec::new();
         for zone in self.zones.into_iter() {
             converted_zones.push(zone.into());
         }
 
-        v2::config::DnsConfigParams {
+        Ok(v2::config::DnsConfigParams {
             generation: self.generation,
+            serial,
             time_created: self.time_created,
             zones: converted_zones,
-        }
+        })
     }
 }
 

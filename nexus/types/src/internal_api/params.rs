@@ -195,7 +195,6 @@ pub type DnsConfigParams = internal_dns_types::config::DnsConfigParams;
 pub type DnsConfigZone = internal_dns_types::config::DnsConfigZone;
 pub type DnsRecord = internal_dns_types::config::DnsRecord;
 pub type Srv = internal_dns_types::config::Srv;
-pub type Soa = internal_dns_types::config::Soa;
 
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]

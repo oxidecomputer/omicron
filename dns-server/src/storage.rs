@@ -135,6 +135,7 @@ pub struct Store {
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct CurrentConfig {
     generation: Generation,
+    serial: u32,
     zones: Vec<String>,
     time_created: chrono::DateTime<chrono::Utc>,
     time_applied: chrono::DateTime<chrono::Utc>,
@@ -199,6 +200,7 @@ impl Store {
             let now = chrono::Utc::now();
             let initial_config_bytes = serde_json::to_vec(&CurrentConfig {
                 generation: Generation::from_u32(0),
+                serial: 0,
                 zones: vec![],
                 time_created: now,
                 time_applied: now,
@@ -298,6 +300,7 @@ impl Store {
 
         Ok(DnsConfig {
             generation: config.generation,
+            serial: config.serial,
             time_created: config.time_created,
             time_applied: config.time_applied,
             zones,
@@ -517,6 +520,7 @@ impl Store {
 
         let new_config = CurrentConfig {
             generation,
+            serial: config.serial,
             zones: config.zones.iter().map(|z| z.zone_name.clone()).collect(),
             time_created: config.time_created,
             time_applied: chrono::Utc::now(),
@@ -1024,6 +1028,7 @@ mod test {
         let update1 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(1),
+            serial: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([
@@ -1067,6 +1072,7 @@ mod test {
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(2),
+            serial: 2,
             zones: vec![
                 DnsConfigZone {
                     zone_name: "zone1.internal".to_string(),
@@ -1108,6 +1114,7 @@ mod test {
         let update8 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(8),
+            serial: 8,
             zones: vec![DnsConfigZone {
                 zone_name: "zone8.internal".to_string(),
                 records: HashMap::from([(
@@ -1188,6 +1195,7 @@ mod test {
         let update9 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(9),
+            serial: 9,
             zones: vec![DnsConfigZone {
                 zone_name: "zone8.internal".to_string(),
                 records: HashMap::from([(
@@ -1224,6 +1232,7 @@ mod test {
         let update1 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(1),
+            serial: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([(
@@ -1252,6 +1261,7 @@ mod test {
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(2),
+            serial: 2,
             zones: vec![DnsConfigZone {
                 zone_name: "zone2.internal".to_string(),
                 records: HashMap::from([(
@@ -1354,6 +1364,7 @@ mod test {
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(1),
+            serial: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([(
@@ -1414,6 +1425,7 @@ mod test {
         let update = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(1),
+            serial: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([
@@ -1445,6 +1457,7 @@ mod test {
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(2),
+            serial: 2,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([(
@@ -1472,6 +1485,7 @@ mod test {
         let update3 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(3),
+            serial: 3,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([

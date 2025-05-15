@@ -657,6 +657,7 @@ async fn dns_records_create(
         other_zones.into_iter().chain(std::iter::once(new_zone)).collect();
     let after = DnsConfigParams {
         generation: before.generation.next(),
+        serial: before.serial + 1,
         zones,
         time_created: chrono::Utc::now(),
     };

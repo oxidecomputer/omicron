@@ -215,10 +215,14 @@ pub(crate) async fn deploy_dns_one(
         DnsGroup::Internal => blueprint.internal_dns_version,
         DnsGroup::External => blueprint.external_dns_version,
     };
+    let new_dns_generation = blueprint_generation.next();
     let dns_config_blueprint = DnsConfigParams {
         zones: vec![dns_zone_blueprint],
         time_created: chrono::Utc::now(),
-        generation: blueprint_generation.next(),
+        serial: new_dns_generation.as_u64().try_into().map_err(|_| {
+            Error::internal_error(&format!("DNS config would wrap the DNS serial number: {}", new_dns_generation.as_u64()))
+        })?,
+        generation: new_dns_generation,
     };
 
     info!(
@@ -392,6 +396,7 @@ mod test {
     fn dns_config_empty() -> DnsConfigParams {
         DnsConfigParams {
             generation: Generation::new(),
+            serial: 0,
             time_created: chrono::Utc::now(),
             zones: vec![DnsConfigZone {
                 zone_name: String::from("internal"),
@@ -1105,8 +1110,7 @@ mod test {
                     DnsRecord::A(v) => IpAddr::V4(*v),
                     DnsRecord::Aaaa(v) => IpAddr::V6(*v),
                     other @ DnsRecord::Srv(_)
-                    | other @ DnsRecord::Ns(_)
-                    | other @ DnsRecord::Soa(_) => {
+                    | other @ DnsRecord::Ns(_) => {
                         panic!("unexpected DNS record for silo: {other:?}")
                     }
                 })

@@ -310,6 +310,7 @@ async fn dns_records_create(
         other_zones.into_iter().chain(std::iter::once(new_zone)).collect();
     let after = DnsConfigParams {
         generation: before.generation.next(),
+        serial: before.serial.checked_add(1).expect("can increment serial"),
         zones,
         time_created: chrono::Utc::now(),
     };

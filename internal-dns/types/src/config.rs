@@ -625,8 +625,10 @@ impl DnsConfigBuilder {
     /// point
     pub fn build_full_config_for_initial_generation(self) -> DnsConfigParams {
         let zone = self.build_zone();
+        let generation = Generation::new();
         DnsConfigParams {
-            generation: Generation::new(),
+            generation,
+            serial: generation.as_u64().try_into().expect("initial generation fits into u32"),
             time_created: chrono::Utc::now(),
             zones: vec![zone],
         }
