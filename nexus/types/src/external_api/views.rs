@@ -1155,7 +1155,7 @@ pub struct WebhookReceiverConfig {
     pub endpoint: Url,
     // A list containing the IDs of the secret keys used to sign payloads sent
     // to this receiver.
-    pub secrets: Vec<WebhookSecretId>,
+    pub secrets: Vec<WebhookSecret>,
 }
 
 /// A list of the IDs of secrets associated with a webhook receiver.

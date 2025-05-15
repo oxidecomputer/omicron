@@ -26123,7 +26123,7 @@
           "secrets": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/WebhookSecretId"
+              "$ref": "#/components/schemas/WebhookSecret"
             }
           }
         },
