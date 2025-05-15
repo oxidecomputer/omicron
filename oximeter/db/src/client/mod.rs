@@ -1008,8 +1008,8 @@ impl Client {
                         "sample" => ?sample,
                     );
                     Err(Error::SchemaMismatch {
-                        expected: existing_schema.clone(),
-                        actual: sample_schema,
+                        expected: Box::new(existing_schema.clone()),
+                        actual: Box::new(sample_schema),
                     })
                 }
             }

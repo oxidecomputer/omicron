@@ -33,7 +33,7 @@ use crate::bootstrap::early_networking::{
 use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
-use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
+use crate::params::{DendriteAsic, OmicronZoneTypeExt};
 use crate::profile::*;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
@@ -102,7 +102,7 @@ use sled_agent_types::{
     sled::SWITCH_ZONE_BASEBOARD_FILE, time_sync::TimeSync,
     zone_bundle::ZoneBundleCause,
 };
-use sled_agent_zone_images::ZoneImageSourceResolver;
+use sled_agent_zone_images::{ZoneImageSourceResolver, ZoneImageZpools};
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
@@ -725,7 +725,7 @@ enum SwitchZoneState {
         // The original request for the zone
         request: SwitchZoneConfig,
         // The currently running zone
-        zone: RunningZone,
+        zone: Box<RunningZone>,
     },
 }
 
@@ -1728,10 +1728,17 @@ impl ServiceManager {
             ZoneArgs::Switch(_) => &OmicronZoneImageSource::InstallDataset,
         };
         let all_disks = self.inner.storage.get_latest_disks().await;
-        let file_source = self
-            .inner
-            .zone_image_resolver
-            .file_source_for(image_source, &all_disks);
+        let zpools = ZoneImageZpools {
+            root: &all_disks.mount_config().root,
+            all_m2_zpools: all_disks.all_m2_zpools(),
+        };
+        let boot_zpool =
+            all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
+        let file_source = self.inner.zone_image_resolver.file_source_for(
+            image_source,
+            &zpools,
+            boot_zpool.as_ref(),
+        );
 
         let zone_type_str = match &request {
             ZoneArgs::Omicron(zone_config) => {
@@ -1744,7 +1751,7 @@ impl ServiceManager {
         let mut zone_builder = match self.inner.system_api.fake_install_dir() {
             None => ZoneBuilderFactory::new().builder(),
             Some(dir) => ZoneBuilderFactory::fake(
-                Some(&dir.as_str().to_string()),
+                Some(&dir.as_str()),
                 illumos_utils::fakes::zone::Zones::new(),
             )
             .builder(),
@@ -4931,8 +4938,10 @@ impl ServiceManager {
         let zone = self
             .initialize_zone(zone_args, zone_root_path, filesystems, data_links)
             .await?;
-        *sled_zone =
-            SwitchZoneState::Running { request: request.clone(), zone };
+        *sled_zone = SwitchZoneState::Running {
+            request: request.clone(),
+            zone: Box::new(zone),
+        };
         Ok(())
     }
 
