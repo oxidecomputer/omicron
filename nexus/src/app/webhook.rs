@@ -13,7 +13,18 @@
 //! For details on the internals of alert delivery, including webhooks, see the
 //! documenation in the [`alert` module][alerts].
 //!
-//! [alerts]: super::alerts
+//! Generic operations on all types of alert receivers, such as listing
+//! receivers and adding/removing subscriptions, are defined in the
+//! [`alert` module][alerts].  Operations relating to webhook-specific
+//! configurations or concepts, such as managing secrets, sending liveness
+//! probes, and creating and updating webhook receiver configuration, are
+//! defined here.  This module also defines [`ReceiverClient`], which
+//! implements the HTTP client for sending webhook requests to webhook
+//! receivers.  The client implementation is defined here, as it is used by
+//! both the API (for probe requests) and the `webhook_deliverator` background
+//! task, which performs the delivery of queued alerts.
+//!
+//! [alerts]: super::alert
 //! [RFD 538]: https://rfd.shared.oxide.computer/538
 
 use crate::Nexus;

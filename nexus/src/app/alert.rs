@@ -16,7 +16,7 @@
 //!   API are children of the [`AlertReceiver`] API resource.
 //!
 //!   Various mechanisms for delivering alerts are represented by "subtypes" of
-//!   alert receivers.  At present, [webhooks](crate::webhooks) are the only
+//!   alert receivers.  At present, [webhooks](super::webhook) are the only
 //!   such subtype.  Different subtypes of alert receivers are created and
 //!   modified by separate APIs for that particular type of receiver, as
 //!   different configuration options exist based on the receiver type.
@@ -29,7 +29,7 @@
 //!   calls the [`Nexus::alert_publish`] method to record a new event
 //!   and publish it to receivers.
 //!
-//!   Alerts are categorized into [event classes], as described in RFD
+//!   Alerts are categorized into [alert classes], as described in RFD
 //!   538.  Receivers *subscribe* to these classes, indicating that they wish to
 //!   when an event with a particular class occurs.
 //!
@@ -135,6 +135,7 @@
 //!
 //! [RFD 538]: https://rfd.shared.oxide.computer/538
 //! [alert classes]: https://rfd.shared.oxide.computer/rfd/538#_event_classes
+//! [`AlertReceiver`]: nexus_db_queries::db::model::AlertReceiver
 //!
 //! [^1]: Read _Snow Crash_, if you haven't already.
 //! [^2]: Presently, all alert receivers have the fleet.viewer role, so
