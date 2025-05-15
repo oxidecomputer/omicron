@@ -471,9 +471,9 @@ impl std::fmt::Display for AlertSubscription {
 
 #[cfg(test)]
 mod test {
+    use super::AlertSubscription;
     use super::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
     use super::Policy;
-    use super::AlertSubscription;
     use serde::Deserialize;
 
     #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
