@@ -725,7 +725,7 @@ enum SwitchZoneState {
         // The original request for the zone
         request: SwitchZoneConfig,
         // The currently running zone
-        zone: RunningZone,
+        zone: Box<RunningZone>,
     },
 }
 
@@ -4938,8 +4938,10 @@ impl ServiceManager {
         let zone = self
             .initialize_zone(zone_args, zone_root_path, filesystems, data_links)
             .await?;
-        *sled_zone =
-            SwitchZoneState::Running { request: request.clone(), zone };
+        *sled_zone = SwitchZoneState::Running {
+            request: request.clone(),
+            zone: Box::new(zone),
+        };
         Ok(())
     }
 

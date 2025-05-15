@@ -309,6 +309,9 @@ resolver = "3"
 [workspace.lints.clippy]
 # Clippy's style nits are useful, but not worth keeping in CI.
 style = { level = "allow", priority = -1 }
+# This lint would be useful to address over time, but has too many hits as of
+# 2025-05-15.
+result_large_err = "allow"
 # But continue to warn on anything in the "disallowed_" namespace.
 disallowed_macros = "warn"
 disallowed_methods = "warn"
