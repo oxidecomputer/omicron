@@ -16,6 +16,7 @@ use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::error_means_caboose_is_invalid;
 use futures::FutureExt;
 use futures::future::BoxFuture;
+use gateway_client::RotSlotExt;
 use gateway_client::SpComponent;
 use gateway_client::types::RotSlot;
 use gateway_client::types::RotState;
@@ -281,9 +282,8 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
             // to do this update, the planner will have to notice that what's
             // here is wrong and update the blueprint.)
             let (expected_active_slot_version, expected_inactive_slot_version) = match expected_active_slot {
-                // TODO-K: clean up types, this looks awful
-                gateway_types::rot::RotSlot::A => (expected_slot_a_version, expected_slot_b_version),
-                gateway_types::rot::RotSlot::B => (expected_slot_b_version, expected_slot_a_version)
+                RotSlot::A => (expected_slot_a_version, expected_slot_b_version),
+                RotSlot::B => (expected_slot_b_version, expected_slot_a_version)
             };
             if caboose.version != expected_active_slot_version.to_string() {
                 match expected_active_slot_version {

@@ -11,6 +11,7 @@ use crate::common_sp_update::SpComponentUpdateHelper;
 use crate::driver::UpdateAttemptStatusUpdater;
 use crate::mgs_clients::GatewayClientError;
 use crate::{ArtifactCache, ArtifactCacheError, MgsClients};
+use gateway_client::RotSlotExt;
 use gateway_client::SpComponent;
 use gateway_client::types::UpdateAbortBody;
 use gateway_client::types::{SpType, SpUpdateStatus};
