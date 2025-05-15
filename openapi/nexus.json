@@ -385,7 +385,7 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}": {
+    "/experimental/v1/system/support-bundles/{bundle_id}": {
       "get": {
         "tags": [
           "hidden"
@@ -395,7 +395,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -433,7 +433,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -455,7 +455,7 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/download": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/download": {
       "get": {
         "tags": [
           "hidden"
@@ -465,7 +465,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -494,7 +494,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -515,7 +515,7 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}": {
       "get": {
         "tags": [
           "hidden"
@@ -525,21 +525,21 @@
         "parameters": [
           {
             "in": "path",
-            "name": "file",
-            "description": "The file within the bundle to download",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -563,21 +563,21 @@
         "parameters": [
           {
             "in": "path",
-            "name": "file",
-            "description": "The file within the bundle to download",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -593,7 +593,7 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/index": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/index": {
       "get": {
         "tags": [
           "hidden"
@@ -603,7 +603,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {

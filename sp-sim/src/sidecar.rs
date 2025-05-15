@@ -870,14 +870,21 @@ impl SpHandler for Handler {
         &mut self,
         sender: Sender<Self::VLanId>,
         power_state: gateway_messages::PowerState,
-    ) -> Result<(), SpError> {
+    ) -> Result<gateway_messages::PowerStateTransition, SpError> {
+        // NOTE(eliza): This is *currently* accurate to real life sidecar
+        // behavior, as the sidecar sequencer does not treat `set_power_state`
+        // calls with the current power state idempotently, the way the compute
+        // sled sequencer does.
+        // See: https://github.com/oxidecomputer/hubris/blob/13808140c49fdf8f1ce462184395d3b28212c217/task/control-plane-agent/src/mgs_sidecar.rs#L838-L840
+        let transition = gateway_messages::PowerStateTransition::Changed;
         debug!(
             &self.log, "received set power state";
             "sender" => ?sender,
             "power_state" => ?power_state,
+            "transition" => ?transition,
         );
         self.power_state = power_state;
-        Ok(())
+        Ok(transition)
     }
 
     fn reset_component_prepare(
