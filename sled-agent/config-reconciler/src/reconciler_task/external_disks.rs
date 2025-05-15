@@ -27,6 +27,7 @@ use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -54,6 +55,14 @@ impl CurrentlyManagedZpools {
     /// Returns true if `zpool` is currently managed.
     pub fn contains(&self, zpool: &ZpoolName) -> bool {
         self.0.contains(zpool)
+    }
+
+    /// Within this crate, directly expose the set of zpools.
+    ///
+    /// We should remove this once we clean up zone starting; starting a zone
+    /// should already know where to place datasets.
+    pub(crate) fn into_vec(self) -> Vec<ZpoolName> {
+        self.0.into_iter().collect()
     }
 }
 
@@ -155,36 +164,59 @@ impl CurrentlyManagedZpoolsReceiver {
 pub(super) struct ExternalDisks {
     disks: IdMap<ExternalDiskState>,
     mount_config: Arc<MountConfig>,
+
+    // Output channel for the set of zpools we're managing. Used by sled-agent
+    // generally to decide when to _stop_ something (e.g., stopping instances
+    // that were running on a zpool that's no longer available).
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+
+    // Output channel for the raw disks we're managing. This is only consumed
+    // within this crate by `DumpSetupTask` (for managing dump devices).
+    external_disks_tx: watch::Sender<HashSet<Disk>>,
 }
 
 impl ExternalDisks {
     pub(super) fn new(
         mount_config: Arc<MountConfig>,
         currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+        external_disks_tx: watch::Sender<HashSet<Disk>>,
     ) -> Self {
         Self {
             disks: IdMap::default(),
             mount_config,
             currently_managed_zpools_tx,
+            external_disks_tx,
         }
     }
 
-    fn update_currently_managed_zpools(&self) {
-        let new_zpools = self
+    fn update_output_watch_channels(&self) {
+        let current_disks = self
             .disks
             .iter()
             .filter_map(|disk| match &disk.state {
-                DiskState::Managed(disk) => Some(*disk.zpool_name()),
+                DiskState::Managed(disk) => Some(disk.clone()),
                 DiskState::FailedToManage(_) => None,
             })
+            .collect::<HashSet<_>>();
+        let current_zpools = current_disks
+            .iter()
+            .map(|disk| *disk.zpool_name())
             .collect::<BTreeSet<_>>();
 
-        self.currently_managed_zpools_tx.send_if_modified(|zpools| {
-            if zpools.0 == new_zpools {
+        self.external_disks_tx.send_if_modified(|disks| {
+            if *disks == current_disks {
                 false
             } else {
-                *zpools = Arc::new(CurrentlyManagedZpools(new_zpools));
+                *disks = current_disks;
+                true
+            }
+        });
+
+        self.currently_managed_zpools_tx.send_if_modified(|zpools| {
+            if zpools.0 == current_zpools {
+                false
+            } else {
+                *zpools = Arc::new(CurrentlyManagedZpools(current_zpools));
                 true
             }
         });
@@ -245,7 +277,7 @@ impl ExternalDisks {
         // can save a bit of work by skipping it in the common case of "no disks
         // were removed".)
         if !disk_ids_to_remove.is_empty() || marked_disk_not_found {
-            self.update_currently_managed_zpools();
+            self.update_output_watch_channels();
         }
     }
 
@@ -332,7 +364,7 @@ impl ExternalDisks {
             self.disks.insert(disk_state);
         }
 
-        self.update_currently_managed_zpools();
+        self.update_output_watch_channels();
     }
 
     async fn try_ensure_disk_managed<T: DiskAdopter>(
@@ -654,9 +686,11 @@ mod tests {
         let logctx = dev::test_setup_log("internal_disks_are_rejected");
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
+        let (external_disks_tx, _rx) = watch::channel(HashSet::default());
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
+            external_disks_tx,
         );
 
         // There should be no disks to start.
@@ -764,9 +798,11 @@ mod tests {
         let logctx = dev::test_setup_log("fail_if_disk_not_present");
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
+        let (external_disks_tx, _rx) = watch::channel(HashSet::default());
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
+            external_disks_tx,
         );
 
         // There should be no disks to start.
@@ -849,9 +885,11 @@ mod tests {
         let logctx = dev::test_setup_log("firmware_updates_are_propagated");
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
+        let (external_disks_tx, _rx) = watch::channel(HashSet::default());
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
+            external_disks_tx,
         );
 
         // There should be no disks to start.
@@ -969,9 +1007,11 @@ mod tests {
         let logctx = dev::test_setup_log("remove_disks_not_in_config");
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
+        let (external_disks_tx, _rx) = watch::channel(HashSet::default());
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
+            external_disks_tx,
         );
 
         // There should be no disks to start.

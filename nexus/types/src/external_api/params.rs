@@ -94,7 +94,7 @@ path_param!(AddressLotPath, address_lot, "address lot");
 path_param!(ProbePath, probe, "probe");
 path_param!(CertificatePath, certificate, "certificate");
 
-id_path_param!(SupportBundlePath, support_bundle, "support bundle");
+id_path_param!(SupportBundlePath, bundle_id, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
@@ -483,7 +483,7 @@ pub struct SiloQuotasUpdate {
 }
 
 /// Create-time parameters for a `User`
-#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub struct UserCreate {
     /// username used to log in
     pub external_id: UserId,
@@ -492,14 +492,13 @@ pub struct UserCreate {
 }
 
 /// A password used for authenticating a local-only user
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize)]
 #[serde(try_from = "String")]
-#[serde(into = "String")]
 // We store both the raw String and omicron_passwords::Password forms of the
 // password.  That's because `omicron_passwords::Password` does not support
 // getting the String back out (by design), but we may need to do that in order
 // to impl Serialize.  See the `From<Password> for String` impl below.
-pub struct Password(String, omicron_passwords::Password);
+pub struct Password(omicron_passwords::Password);
 
 impl FromStr for Password {
     type Err = String;
@@ -517,16 +516,7 @@ impl TryFrom<String> for Password {
         // TODO-security If we want to apply password policy rules, this seems
         // like the place.  We presumably want to also document them in the
         // OpenAPI schema below.  See omicron#2307.
-        Ok(Password(value, inner))
-    }
-}
-
-// This "From" impl only exists to make it easier to derive `Serialize`.  That
-// in turn is only to make this easier to use from the test suite.  (There's no
-// other reason structs in this file should need to impl Serialize at all.)
-impl From<Password> for String {
-    fn from(password: Password) -> Self {
-        password.0
+        Ok(Password(inner))
     }
 }
 
@@ -568,12 +558,12 @@ impl JsonSchema for Password {
 
 impl AsRef<omicron_passwords::Password> for Password {
     fn as_ref(&self) -> &omicron_passwords::Password {
-        &self.1
+        &self.0
     }
 }
 
 /// Parameters for setting a user's password
-#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "mode", content = "value")]
 pub enum UserPassword {
@@ -584,7 +574,7 @@ pub enum UserPassword {
 }
 
 /// Credentials for local user login
-#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub struct UsernamePasswordCredentials {
     pub username: UserId,
     pub password: Password,

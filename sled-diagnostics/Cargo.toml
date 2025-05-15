@@ -30,4 +30,4 @@ zip = { workspace = true, features = ["zstd"] }
 omicron-common.workspace = true
 omicron-test-utils.workspace = true
 omicron-uuid-kinds.workspace = true
-sled-storage = { workspace = true, features = ["testing"] } 
+sled-storage = { workspace = true, features = ["testing"] }
