@@ -816,9 +816,24 @@ impl GatewayApi for GatewayImpl {
             let sp = apictx.mgmt_switch.sp(sp_id)?;
             let power_state = body.into_inner();
 
-            sp.set_power_state(power_state.into()).await.map_err(|err| {
-                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-            })?;
+            let transition = sp
+                .set_power_state(power_state.into())
+                .await
+                .map_err(|err| SpCommsError::SpCommunicationFailed {
+                    sp: sp_id,
+                    err,
+                })?;
+
+            // Log whether the power state actually changed, or if the SP was
+            // already in the desired state.
+            slog::debug!(
+                &rqctx.log,
+                "sp_power_state_set";
+                "type" => ?sp_id.typ,
+                "slot" => sp_id.slot,
+                "power_state" => ?power_state,
+                "transition" => ?transition,
+            );
 
             Ok(HttpResponseUpdatedNoContent {})
         };

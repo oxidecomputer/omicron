@@ -673,6 +673,14 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
 
+    #[endpoint {
+        method = GET,
+        path = "/support/health-check",
+    }]
+    async fn support_health_check(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
     /// This endpoint returns a list of known zones on a sled that have service
     /// logs that can be collected into a support bundle.
     #[endpoint {

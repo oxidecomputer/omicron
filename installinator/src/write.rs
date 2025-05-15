@@ -792,26 +792,20 @@ impl ControlPlaneZoneWriteContext<'_> {
 /// (should not happen in normal use), a `JoinError` is returned.
 async fn compute_zone_hashes(
     images: &ControlPlaneZoneImages,
-) -> Result<IdMap<MupdateOverrideZone>, JoinError> {
-    let mut tasks = images
-        .zones
-        .iter()
-        .map(|(file_name, data)| {
-            let file_name = file_name.clone();
-            // data is a Bytes so is cheap to clone.
-            let data: Bytes = data.clone();
-            // Compute hashes in parallel.
-            async move {
-                let mut hasher = Sha256::new();
-                hasher.update(data);
-                let hash = hasher.finalize();
-                MupdateOverrideZone {
-                    file_name,
-                    hash: ArtifactHash(hash.into()),
-                }
-            }
-        })
-        .collect::<JoinSet<_>>();
+) -> IdMap<MupdateOverrideZone> {
+    let mut tasks = JoinSet::new();
+    for (file_name, data) in &images.zones {
+        let file_name = file_name.clone();
+        // data is a Bytes so is cheap to clone.
+        let data: Bytes = data.clone();
+        // Compute hashes in parallel.
+        tasks.spawn_blocking(move || {
+            let mut hasher = Sha256::new();
+            hasher.update(data);
+            let hash = hasher.finalize();
+            MupdateOverrideZone { file_name, hash: ArtifactHash(hash.into()) }
+        });
+    }
 
     let mut output = IdMap::new();
     while let Some(res) = tasks.join_next().await {
