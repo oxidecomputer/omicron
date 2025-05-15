@@ -1,0 +1,2 @@
+ALTER INDEX IF EXISTS lookup_undispatched_webhook_events
+RENAME TO lookup_undispatched_alerts;

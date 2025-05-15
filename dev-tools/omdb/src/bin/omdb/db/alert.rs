@@ -432,7 +432,7 @@ async fn cmd_db_webhook_rx_info(
     let exact = subscription_dsl::alert_subscription
         .filter(subscription_dsl::rx_id.eq(id.into_untyped_uuid()))
         .filter(subscription_dsl::glob.is_null())
-        .select(subscription_dsl::alert_class)
+        .select(subscription_dsl::event_class)
         .load_async::<AlertClass>(&*conn)
         .await;
     match exact {
@@ -476,7 +476,7 @@ async fn cmd_db_webhook_rx_info(
                 let exact = subscription_dsl::alert_subscription
                     .filter(subscription_dsl::rx_id.eq(id.into_untyped_uuid()))
                     .filter(subscription_dsl::glob.eq(glob))
-                    .select(subscription_dsl::alert_class)
+                    .select(subscription_dsl::event_class)
                     .load_async::<AlertClass>(&*conn)
                     .await;
                 match exact {
@@ -553,7 +553,7 @@ async fn cmd_db_webhook_delivery_list(
     }
 
     if let Some(id) = event {
-        query = query.filter(delivery_dsl::alert_id.eq(id.into_untyped_uuid()));
+        query = query.filter(delivery_dsl::event_id.eq(id.into_untyped_uuid()));
     }
 
     let ctx = || "listing webhook deliveries";

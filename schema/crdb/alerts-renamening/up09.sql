@@ -1,0 +1,2 @@
+ALTER INDEX IF EXISTS lookup_webhook_rxs_for_event_class
+RENAME TO lookup_alert_rxs_for_class;

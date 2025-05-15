@@ -33,6 +33,7 @@ pub struct Alert {
     pub time_dispatched: Option<DateTime<Utc>>,
 
     /// The class of this event.
+    #[diesel(column_name = event_class)]
     pub alert_class: AlertClass,
 
     /// The event's data payload.

@@ -40,7 +40,8 @@ pub struct WebhookDelivery {
     pub id: DbTypedUuid<WebhookDeliveryKind>,
 
     /// ID of the event dispatched to this receiver (foreign key into
-    /// `webhook_event`).
+    /// `alert`).
+    #[diesel(column_name = event_id)]
     pub alert_id: DbTypedUuid<AlertKind>,
 
     /// ID of the receiver to which this event is dispatched (foreign key into
