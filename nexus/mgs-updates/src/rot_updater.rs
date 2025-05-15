@@ -242,9 +242,6 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                 expected_active_slot,
                 expected_persistent_boot_preference,
                 ..
-                // TODO-K: Do I need to do any checks with these fields?
-                // expected_pending_persistent_boot_preference,
-                // expected_transient_boot_preference,
             } = &update.details
             else {
                 unreachable!(
@@ -353,22 +350,15 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                 }
             };
 
-            // TODO-K: I am making a lot of decisions based on information from boot info.
-            // This only reflects what was true on boot but may not be the real state of the
-            // RoT. Should I even be using these fields?
             let (RotState::V2 {
                 active,
                 pending_persistent_boot_preference,
-                // TODO-K: Do I need to do any chacks with this field?
-                // persistent_boot_preference,
                 transient_boot_preference,
                 ..
             }
             | RotState::V3 {
                 active,
                 pending_persistent_boot_preference,
-                // TODO-K: Do I need to do any chacks with this field?
-                // persistent_boot_preference,
                 transient_boot_preference,
                 ..
             }) = &state.rot
@@ -376,30 +366,29 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                 panic!("TODO a proper CommunicationFailed error");
             };
 
-            // If expected_persistent_boot_preference does not match active slot
-            // this could mean a botched update. That's ok, we can continue, but we should log
-            // this as info.
-            // TODO-K: fix theseRotSlot types, so I don't use this gross `.to_string`
-            if expected_persistent_boot_preference.to_string() != active.to_string() {
+            // If the active slot does not match the expected active slot, there is
+            // likely another update happening. Bail out.
+            if expected_active_slot != active {
+                panic!("TODO a proper WrongActiveSlot error");
+            }
+
+            // If transient boot is being used, the persistent preference is not going to match 
+            // the active slot. At the moment, this mismatch can also mean one of the partitions
+            // had a bad signature check. We don't have a way to tell this appart yet.
+            // https://github.com/oxidecomputer/hubris/issues/2066
+            //
+            // For now, this discrepancy will mean a bad signature check. That's ok, we can continue.
+            // The logic here should change when transient boot preference is implemented.
+            if expected_persistent_boot_preference != active {
                 info!(log, "expected_persistent_boot_preference does not match active slot. \
                 This could mean a previous broken update attempt.");
             };
 
-            // If we use transient boot, the persistent preference is not going to match the active slot.
-            // That means, either one of the partitions had a bad signature check or I used transient boot.
-            // We don't have a way to tell this appart yet.
-            // TODO-K: Should I log this or leave for when transient boot preference is implemented?
-
-            // TODO-K: If pending_persistent_boot_preference or transient_boot_preference is/are some,
+            // If pending_persistent_boot_preference or transient_boot_preference is/are some,
             // then we need to wait, an update is happening.
             if transient_boot_preference.is_some() || pending_persistent_boot_preference.is_some() {
                 panic!("TODO a proper error that there is a change happening. Wait until this has finished");
             }
-
-            // Check if the active slot is the one we think it is. This could mean an update is happening.
-            if expected_active_slot.to_string() != active.to_string() {
-                panic!("TODO: a proper error")
-            };
 
             Ok(PrecheckStatus::ReadyForUpdate)
         }.boxed()
@@ -426,7 +415,5 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                 Ok(())
             })
             .boxed()
-
-        // TODO-K: Any other checks?
     }
 }
