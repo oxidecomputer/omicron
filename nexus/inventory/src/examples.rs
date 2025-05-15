@@ -14,10 +14,12 @@ use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
 use nexus_sled_agent_shared::inventory::Baseboard;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::inventory::BaseboardId;
@@ -25,7 +27,6 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskVariant;
 use omicron_uuid_kinds::SledUuid;
 use std::sync::Arc;
@@ -295,6 +296,31 @@ pub fn representative() -> Representative {
     let sled16: OmicronZonesConfig = serde_json::from_str(sled16_data).unwrap();
     let sled17: OmicronZonesConfig = serde_json::from_str(sled17_data).unwrap();
 
+    // Convert these to `OmicronSledConfig`s. For now we leave the disks and
+    // datasets blank. This is wrong but not (currently) a problem. If you
+    // landed here and it is a problem for you now, I apologize.
+    let sled14 = OmicronSledConfig {
+        generation: sled14.generation,
+        disks: Default::default(),
+        datasets: Default::default(),
+        zones: sled14.zones.into_iter().collect(),
+        remove_mupdate_override: None,
+    };
+    let sled16 = OmicronSledConfig {
+        generation: sled16.generation,
+        disks: Default::default(),
+        datasets: Default::default(),
+        zones: sled16.zones.into_iter().collect(),
+        remove_mupdate_override: None,
+    };
+    let sled17 = OmicronSledConfig {
+        generation: sled17.generation,
+        disks: Default::default(),
+        datasets: Default::default(),
+        zones: sled17.zones.into_iter().collect(),
+        remove_mupdate_override: None,
+    };
+
     // Report some sled agents.
     //
     // This first one will match "sled1_bb"'s baseboard information.
@@ -387,10 +413,10 @@ pub fn representative() -> Representative {
                     revision: 0,
                 },
                 SledRole::Gimlet,
-                sled14,
                 disks,
                 zpools,
                 datasets,
+                Some(sled14),
             ),
         )
         .unwrap();
@@ -415,10 +441,10 @@ pub fn representative() -> Representative {
                     revision: 0,
                 },
                 SledRole::Scrimlet,
-                sled16,
                 vec![],
                 vec![],
                 vec![],
+                Some(sled16),
             ),
         )
         .unwrap();
@@ -438,10 +464,10 @@ pub fn representative() -> Representative {
                     model: String::from("fellofftruck"),
                 },
                 SledRole::Gimlet,
-                sled17,
                 vec![],
                 vec![],
                 vec![],
+                Some(sled17),
             ),
         )
         .unwrap();
@@ -459,15 +485,12 @@ pub fn representative() -> Representative {
                 sled_agent_id_unknown,
                 Baseboard::Unknown,
                 SledRole::Gimlet,
-                // We only have omicron zones for three sleds so use empty zone
-                // info here.
-                OmicronZonesConfig {
-                    generation: Generation::new(),
-                    zones: Vec::new(),
-                },
                 vec![],
                 vec![],
                 vec![],
+                // We only have omicron zones for three sleds so report no sled
+                // config here.
+                None,
             ),
         )
         .unwrap();
@@ -556,10 +579,10 @@ pub fn sled_agent(
     sled_id: SledUuid,
     baseboard: Baseboard,
     sled_role: SledRole,
-    omicron_zones: OmicronZonesConfig,
     disks: Vec<InventoryDisk>,
     zpools: Vec<InventoryZpool>,
     datasets: Vec<InventoryDataset>,
+    ledgered_sled_config: Option<OmicronSledConfig>,
 ) -> Inventory {
     Inventory {
         baseboard,
@@ -569,10 +592,11 @@ pub fn sled_agent(
         sled_id,
         usable_hardware_threads: 10,
         usable_physical_ram: ByteCount::from(1024 * 1024),
-        omicron_zones,
         disks,
         zpools,
         datasets,
-        omicron_physical_disks_generation: Generation::new(),
+        ledgered_sled_config,
+        reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
+        last_reconciliation: None,
     }
 }

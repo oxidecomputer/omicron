@@ -2135,7 +2135,7 @@ mod tests {
         assert_eq!(blueprint1.sleds.len(), collection.sled_agents.len());
         assert_eq!(
             blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count(),
-            collection.all_omicron_zones().count()
+            collection.all_ledgered_omicron_zones().count()
         );
         // All zones should be in service.
         assert_all_zones_in_service(&blueprint1);

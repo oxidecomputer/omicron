@@ -122,6 +122,9 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -7330,25 +7333,98 @@ fn inv_collection_print_sleds(collection: &Collection) {
             println!("        reservation: {reservation:?}, quota: {quota:?}");
         }
 
-        println!(
-            "    zones generation: {} (count: {})",
-            sled.omicron_zones.generation,
-            sled.omicron_zones.zones.len(),
-        );
-
-        if sled.omicron_zones.zones.is_empty() {
-            continue;
+        if let Some(config) = &sled.ledgered_sled_config {
+            inv_collection_print_sled_config("LEDGERED", config);
+        } else {
+            println!("    no ledgered sled config");
         }
 
-        println!("    ZONES FOUND");
-        for z in &sled.omicron_zones.zones {
-            println!(
-                "      zone {} (type {})",
-                z.id,
-                z.zone_type.kind().report_str()
-            );
+        if let Some(last_reconciliation) = &sled.last_reconciliation {
+            if Some(&last_reconciliation.last_reconciled_config)
+                == sled.ledgered_sled_config.as_ref()
+            {
+                println!("    last reconciled config: matches ledgered config");
+            } else {
+                inv_collection_print_sled_config(
+                    "LAST RECONCILED CONFIG",
+                    &last_reconciliation.last_reconciled_config,
+                );
+                let disk_errs = collect_config_reconciler_errors(
+                    &last_reconciliation.external_disks,
+                );
+                let dataset_errs = collect_config_reconciler_errors(
+                    &last_reconciliation.datasets,
+                );
+                let zone_errs = collect_config_reconciler_errors(
+                    &last_reconciliation.zones,
+                );
+                for (label, errs) in [
+                    ("disk", disk_errs),
+                    ("dataset", dataset_errs),
+                    ("zone", zone_errs),
+                ] {
+                    if errs.is_empty() {
+                        println!("    all {label}s reconciled successfully");
+                    } else {
+                        println!(
+                            "    {} {label} reconciliation errors:",
+                            errs.len()
+                        );
+                        for err in errs {
+                            println!("      {err}");
+                        }
+                    }
+                }
+            }
+        }
+
+        print!("    reconciler task status: ");
+        match &sled.reconciler_status {
+            ConfigReconcilerInventoryStatus::NotYetRun => {
+                println!("not yet run");
+            }
+            ConfigReconcilerInventoryStatus::Running {
+                config,
+                started_at,
+                running_for,
+            } => {
+                println!("running for {running_for:?} (since {started_at})");
+                if Some(config) == sled.ledgered_sled_config.as_ref() {
+                    println!("    reconciling currently-ledgered config");
+                } else {
+                    inv_collection_print_sled_config(
+                        "RECONCILING CONFIG",
+                        config,
+                    );
+                }
+            }
+            ConfigReconcilerInventoryStatus::Idle { completed_at, ran_for } => {
+                println!(
+                    "idle (finished at {completed_at} \
+                     after running for {ran_for:?})"
+                );
+            }
         }
     }
+}
+
+fn collect_config_reconciler_errors<T: Ord + Display>(
+    results: &BTreeMap<T, ConfigReconcilerInventoryResult>,
+) -> Vec<String> {
+    results
+        .iter()
+        .filter_map(|(id, result)| match result {
+            ConfigReconcilerInventoryResult::Ok => None,
+            ConfigReconcilerInventoryResult::Err { message } => {
+                Some(format!("{id}: {message}"))
+            }
+        })
+        .collect()
+}
+
+fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
+    println!("\n{label} SLED CONFIG");
+    todo!("finish this method: {config:?}");
 }
 
 fn inv_collection_print_keeper_membership(collection: &Collection) {
