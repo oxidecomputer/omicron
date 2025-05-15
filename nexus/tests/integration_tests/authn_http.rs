@@ -391,10 +391,16 @@ impl session_cookie::SessionStore for WhoamiServerState {
         id: TypedUuid<ConsoleSessionKind>,
     ) -> Option<Self::SessionModel> {
         let mut sessions = self.sessions.lock().unwrap();
-        let session = sessions.iter().find(|s| s.id == id).unwrap().clone();
-        let new_session = FakeSession { time_last_used: Utc::now(), ..session };
-        (*sessions).push(new_session.clone());
-        Some(new_session)
+        if let Some(pos) = sessions.iter().position(|s| s.id == id) {
+            let new_session = FakeSession {
+                time_last_used: Utc::now(),
+                ..sessions[pos].clone()
+            };
+            sessions[pos] = new_session.clone();
+            Some(new_session)
+        } else {
+            None
+        }
     }
 
     async fn session_expire(
