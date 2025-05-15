@@ -350,26 +350,34 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                 }
             };
 
-            let (RotState::V2 {
-                active,
-                pending_persistent_boot_preference,
-                transient_boot_preference,
-                ..
-            }
-            | RotState::V3 {
-                active,
-                pending_persistent_boot_preference,
-                transient_boot_preference,
-                ..
-            }) = &state.rot
-            else {
-                panic!("TODO a proper CommunicationFailed error");
+            let (
+                active, pending_persistent_boot_preference, transient_boot_preference
+            ) = match &state.rot {
+                RotState::V2 {
+                    active,
+                    pending_persistent_boot_preference,
+                    transient_boot_preference,
+                    ..
+                }
+                | RotState::V3 {
+                    active,
+                    pending_persistent_boot_preference,
+                    transient_boot_preference,
+                    ..
+                } => (
+                    active, pending_persistent_boot_preference, transient_boot_preference
+                ),
+                RotState::CommunicationFailed { message } => {
+                    return Err(PrecheckError::RotCommunicationFailed { message: message.to_string() })
+                },
             };
 
             // If the active slot does not match the expected active slot, there is
             // likely another update happening. Bail out.
             if expected_active_slot != active {
-                panic!("TODO a proper WrongActiveSlot error");
+                return Err(PrecheckError::WrongActiveSlot {
+                    expected: *expected_active_slot, found: *active
+                })
             }
 
             // If transient boot is being used, the persistent preference is not going to match 
@@ -387,7 +395,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
             // If pending_persistent_boot_preference or transient_boot_preference is/are some,
             // then we need to wait, an update is happening.
             if transient_boot_preference.is_some() || pending_persistent_boot_preference.is_some() {
-                panic!("TODO a proper error that there is a change happening. Wait until this has finished");
+                return Err(PrecheckError::EphemeralRotBootPreferenceSet);
             }
 
             Ok(PrecheckStatus::ReadyForUpdate)
