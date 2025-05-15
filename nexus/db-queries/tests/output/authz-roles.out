@@ -1272,7 +1272,7 @@ resource: Alert id "31cb17da-4164-4cbf-b9a3-b3e4a687c08b"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: WebhookReceiver "webhooked-on-phonics"
+resource: AlertReceiver "webhooked-on-phonics"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
@@ -1310,3 +1310,4 @@ ACTIONS:
   MP = ModifyPolicy
   CC = CreateChild
    D = Delete
+
