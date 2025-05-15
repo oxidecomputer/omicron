@@ -1476,6 +1476,7 @@ table! {
         git_commit -> Text,
         name -> Text,
         version -> Text,
+        sign -> Nullable<Text>,
     }
 }
 
@@ -1738,6 +1739,7 @@ table! {
 
         sled_state -> crate::enums::SledStateEnum,
         sled_agent_generation -> Int8,
+        remove_mupdate_override -> Nullable<Uuid>,
     }
 }
 

@@ -35,6 +35,7 @@ pub enum SwitchPortConfig {
     Simulated {
         fake_interface: String,
         addr: SocketAddrV6,
+        ereport_addr: SocketAddrV6,
     },
 }
 
@@ -470,6 +471,7 @@ mod tests {
             config: SwitchPortConfig::Simulated {
                 fake_interface: "fake".to_string(),
                 addr: "[::1]:0".parse().unwrap(),
+                ereport_addr: "[::1]:0".parse().unwrap(),
             },
             ignition_target: 0,
             location: HashMap::from([
@@ -546,6 +548,7 @@ mod tests {
             config: SwitchPortConfig::Simulated {
                 fake_interface: "fake".to_string(),
                 addr: "[::1]:0".parse().unwrap(),
+                ereport_addr: "[::1]:0".parse().unwrap(),
             },
             ignition_target: 0,
             location: HashMap::from([

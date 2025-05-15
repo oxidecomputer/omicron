@@ -449,8 +449,8 @@ mod test {
         for c in &collection.cabooses {
             write!(
                 &mut s,
-                "    board {:?} name {:?} version {:?} git_commit {:?}\n",
-                c.board, c.name, c.version, c.git_commit,
+                "    board {:?} name {:?} version {:?} git_commit {:?} sign {:?}\n",
+                c.board, c.name, c.version, c.git_commit, c.sign,
             )
             .unwrap();
         }
@@ -606,6 +606,7 @@ mod test {
                 }]
                 .into_iter()
                 .collect(),
+                remove_mupdate_override: None,
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

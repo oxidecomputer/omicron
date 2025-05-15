@@ -6,44 +6,57 @@
 
 use chrono::DateTime;
 use chrono::Utc;
-use illumos_utils::dladm::EtherstubVnic;
-use illumos_utils::running_zone::RunCommandError;
 use illumos_utils::zpool::PathInPool;
-use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use sled_agent_types::time_sync::TimeSync;
+use sled_storage::config::MountConfig;
+use sled_storage::disk::Disk;
 use slog::Logger;
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
-use tokio::sync::watch::error::RecvError;
 
 use crate::TimeSyncConfig;
 use crate::ledger::CurrentSledConfig;
 use crate::sled_agent_facilities::SledAgentFacilities;
 
+mod external_disks;
+mod zones;
+
+use self::external_disks::ExternalDisks;
+
+pub use self::external_disks::CurrentlyManagedZpools;
+pub use self::external_disks::CurrentlyManagedZpoolsReceiver;
+pub use self::zones::TimeSyncError;
+pub use self::zones::TimeSyncStatus;
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn<T: SledAgentFacilities>(
+    mount_config: Arc<MountConfig>,
     key_requester: StorageKeyRequester,
     time_sync_config: TimeSyncConfig,
-    underlay_vnic: EtherstubVnic,
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+    external_disks_tx: watch::Sender<HashSet<Disk>>,
     sled_agent_facilities: T,
     log: Logger,
 ) {
+    let external_disks = ExternalDisks::new(
+        mount_config,
+        currently_managed_zpools_tx,
+        external_disks_tx,
+    );
+
     tokio::spawn(
         ReconcilerTask {
             key_requester,
             time_sync_config,
-            underlay_vnic,
             current_config_rx,
             reconciler_result_tx,
-            currently_managed_zpools_tx,
+            external_disks,
             sled_agent_facilities,
             log,
         }
@@ -111,136 +124,6 @@ pub enum ReconcilerTaskStatus {
     },
 }
 
-#[derive(Debug, Clone)]
-pub enum TimeSyncStatus {
-    NotYetChecked,
-    ConfiguredToSkip,
-    FailedToGetSyncStatus(Arc<TimeSyncError>),
-    TimeSync(TimeSync),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum TimeSyncError {
-    #[error("no running NTP zone")]
-    NoRunningNtpZone,
-    #[error("multiple running NTP zones - this should never happen!")]
-    MultipleRunningNtpZones,
-    #[error("failed to execute chronyc within NTP zone")]
-    ExecuteChronyc(#[source] RunCommandError),
-    #[error(
-        "failed to parse chronyc tracking output: {reason} (stdout: {stdout:?})"
-    )]
-    FailedToParse { reason: &'static str, stdout: String },
-}
-
-#[derive(Debug, Clone)]
-pub struct CurrentlyManagedZpoolsReceiver {
-    inner: CurrentlyManagedZpoolsReceiverInner,
-}
-
-#[derive(Debug, Clone)]
-enum CurrentlyManagedZpoolsReceiverInner {
-    Real(watch::Receiver<Arc<CurrentlyManagedZpools>>),
-    #[cfg(any(test, feature = "testing"))]
-    FakeDynamic(watch::Receiver<BTreeSet<ZpoolName>>),
-    #[cfg(any(test, feature = "testing"))]
-    FakeStatic(BTreeSet<ZpoolName>),
-}
-
-impl CurrentlyManagedZpoolsReceiver {
-    #[cfg(any(test, feature = "testing"))]
-    pub fn fake_dynamic(rx: watch::Receiver<BTreeSet<ZpoolName>>) -> Self {
-        Self { inner: CurrentlyManagedZpoolsReceiverInner::FakeDynamic(rx) }
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub fn fake_static(zpools: impl Iterator<Item = ZpoolName>) -> Self {
-        Self {
-            inner: CurrentlyManagedZpoolsReceiverInner::FakeStatic(
-                zpools.collect(),
-            ),
-        }
-    }
-
-    pub(crate) fn new(
-        rx: watch::Receiver<Arc<CurrentlyManagedZpools>>,
-    ) -> Self {
-        Self { inner: CurrentlyManagedZpoolsReceiverInner::Real(rx) }
-    }
-
-    pub fn current(&self) -> Arc<CurrentlyManagedZpools> {
-        match &self.inner {
-            CurrentlyManagedZpoolsReceiverInner::Real(rx) => {
-                Arc::clone(&*rx.borrow())
-            }
-            #[cfg(any(test, feature = "testing"))]
-            CurrentlyManagedZpoolsReceiverInner::FakeDynamic(rx) => {
-                Arc::new(CurrentlyManagedZpools(rx.borrow().clone()))
-            }
-            #[cfg(any(test, feature = "testing"))]
-            CurrentlyManagedZpoolsReceiverInner::FakeStatic(zpools) => {
-                Arc::new(CurrentlyManagedZpools(zpools.clone()))
-            }
-        }
-    }
-
-    pub fn current_and_update(&mut self) -> Arc<CurrentlyManagedZpools> {
-        match &mut self.inner {
-            CurrentlyManagedZpoolsReceiverInner::Real(rx) => {
-                Arc::clone(&*rx.borrow_and_update())
-            }
-            #[cfg(any(test, feature = "testing"))]
-            CurrentlyManagedZpoolsReceiverInner::FakeDynamic(rx) => {
-                Arc::new(CurrentlyManagedZpools(rx.borrow_and_update().clone()))
-            }
-            #[cfg(any(test, feature = "testing"))]
-            CurrentlyManagedZpoolsReceiverInner::FakeStatic(zpools) => {
-                Arc::new(CurrentlyManagedZpools(zpools.clone()))
-            }
-        }
-    }
-
-    /// Wait for changes in the underlying watch channel.
-    ///
-    /// Cancel-safe.
-    pub async fn changed(&mut self) -> Result<(), RecvError> {
-        match &mut self.inner {
-            CurrentlyManagedZpoolsReceiverInner::Real(rx) => rx.changed().await,
-            #[cfg(any(test, feature = "testing"))]
-            CurrentlyManagedZpoolsReceiverInner::FakeDynamic(rx) => {
-                rx.changed().await
-            }
-            #[cfg(any(test, feature = "testing"))]
-            CurrentlyManagedZpoolsReceiverInner::FakeStatic(_) => {
-                // Static set of zpools never changes
-                std::future::pending().await
-            }
-        }
-    }
-}
-
-/// Set of currently managed zpools.
-///
-/// This handle should only be used to decide to _stop_ using a zpool (e.g., if
-/// a previously-launched zone is on a zpool that is no longer managed). It does
-/// not expose a means to list or choose from the currently-managed pools;
-/// instead, consumers should choose mounted datasets.
-///
-/// This level of abstraction even for "when to stop using a zpool" is probably
-/// wrong: if we choose a dataset on which to place a zone's root, we should
-/// shut that zone down if the _dataset_ goes away, not the zpool. For now we
-/// live with "assume the dataset bases we choose stick around as long as their
-/// parent zpool does".
-#[derive(Default, Debug, Clone)]
-pub struct CurrentlyManagedZpools(BTreeSet<ZpoolName>);
-
-impl CurrentlyManagedZpools {
-    /// Returns true if `zpool` is currently managed.
-    pub fn contains(&self, zpool: &ZpoolName) -> bool {
-        self.0.contains(zpool)
-    }
-}
-
 #[derive(Debug)]
 struct LatestReconcilerTaskResultInner {
     sled_config: OmicronSledConfig,
@@ -250,10 +133,9 @@ struct LatestReconcilerTaskResultInner {
 struct ReconcilerTask<T> {
     key_requester: StorageKeyRequester,
     time_sync_config: TimeSyncConfig,
-    underlay_vnic: EtherstubVnic,
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
-    currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+    external_disks: ExternalDisks,
     sled_agent_facilities: T,
     log: Logger,
 }

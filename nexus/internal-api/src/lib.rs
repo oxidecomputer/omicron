@@ -555,7 +555,7 @@ pub trait NexusInternalApi {
     /// View a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
     }]
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
@@ -565,7 +565,7 @@ pub trait NexusInternalApi {
     /// Download the index of a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/index",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/index",
     }]
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
@@ -575,7 +575,7 @@ pub trait NexusInternalApi {
     /// Download the contents of a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
     }]
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
@@ -585,7 +585,7 @@ pub trait NexusInternalApi {
     /// Download a file within a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
     }]
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
@@ -595,7 +595,7 @@ pub trait NexusInternalApi {
     /// Download the metadata of a support bundle
     #[endpoint {
         method = HEAD,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
     }]
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
@@ -605,7 +605,7 @@ pub trait NexusInternalApi {
     /// Download the metadata of a file within the support bundle
     #[endpoint {
         method = HEAD,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
     }]
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
@@ -627,7 +627,7 @@ pub trait NexusInternalApi {
     /// collected, or to remove metadata for a support bundle that has failed.
     #[endpoint {
         method = DELETE,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
     }]
     async fn support_bundle_delete(
         rqctx: RequestContext<Self::Context>,

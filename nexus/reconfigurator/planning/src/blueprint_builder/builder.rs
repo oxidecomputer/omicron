@@ -61,6 +61,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -450,6 +451,7 @@ impl<'a> BlueprintBuilder<'a> {
                     disks: IdMap::default(),
                     datasets: IdMap::default(),
                     zones: IdMap::default(),
+                    remove_mupdate_override: None,
                 };
                 (sled_id, config)
             })
@@ -1744,6 +1746,22 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
+    /// Set the `remove_mupdate_override` field of the given sled.
+    pub fn sled_set_remove_mupdate_override(
+        &mut self,
+        sled_id: SledUuid,
+        remove_mupdate_override: Option<MupdateOverrideUuid>,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to set sled state for unknown sled {sled_id}"
+            ))
+        })?;
+        editor
+            .set_remove_mupdate_override(remove_mupdate_override)
+            .map_err(|err| Error::SledEditError { sled_id, err })
+    }
+
     fn sled_add_zone(
         &mut self,
         sled_id: SledUuid,
@@ -1888,6 +1906,40 @@ impl<'a> BlueprintBuilder<'a> {
         baseboard_id: &Arc<BaseboardId>,
     ) {
         self.pending_mgs_updates.remove(baseboard_id);
+    }
+
+    /// Debug method to remove a sled from a blueprint entirely.
+    ///
+    /// Bypasses all expungement checks. Do not use in production.
+    pub fn debug_sled_remove(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<(), Error> {
+        if self.sled_editors.remove(&sled_id).is_none() {
+            return Err(Error::Planner(anyhow!(
+                "for sled {sled_id}, error looking up resources"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Debug method to force a sled agent generation number to be bumped, even
+    /// if there are no changes to the sled.
+    ///
+    /// Do not use in production. Instead, update the logic that decides if the
+    /// generation number should be bumped.
+    pub fn debug_sled_force_generation_bump(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to force generation bump for unknown sled {sled_id}"
+            ))
+        })?;
+        editor
+            .debug_force_generation_bump()
+            .map_err(|err| Error::SledEditError { sled_id, err })
     }
 }
 
