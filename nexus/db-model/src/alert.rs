@@ -34,7 +34,7 @@ pub struct Alert {
 
     /// The class of this event.
     #[diesel(column_name = event_class)]
-    pub alert_class: AlertClass,
+    pub class: AlertClass,
 
     /// The event's data payload.
     pub event: serde_json::Value,

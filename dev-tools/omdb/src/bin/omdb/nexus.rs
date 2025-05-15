@@ -2391,9 +2391,9 @@ fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
 }
 
 fn print_task_alert_dispatcher(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::AlertDispatched;
     use nexus_types::internal_api::background::AlertDispatcherStatus;
     use nexus_types::internal_api::background::AlertGlobStatus;
-    use nexus_types::internal_api::background::WebhookDispatched;
 
     let AlertDispatcherStatus {
         globs_reprocessed,
@@ -2422,8 +2422,8 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
         }
     }
 
-    const DISPATCHED: &str = "events dispatched:";
-    const NO_RECEIVERS: &str = "events with no receivers subscribed:";
+    const DISPATCHED: &str = "alerts dispatched:";
+    const NO_RECEIVERS: &str = "alerts with no receivers subscribed:";
     const OUTDATED_GLOBS: &str = "outdated glob subscriptions:";
     const GLOBS_REPROCESSED: &str = "glob subscriptions reprocessed:";
     const ALREADY_REPROCESSED: &str =
@@ -2451,7 +2451,7 @@ fn print_task_alert_dispatcher(details: &serde_json::Value) {
             dispatched: usize,
         }
         let table_rows = dispatched.iter().map(
-            |&WebhookDispatched { alert_id, subscribed, dispatched }| {
+            |&AlertDispatched { alert_id, subscribed, dispatched }| {
                 DispatchedRow {
                     event: alert_id.into_untyped_uuid(),
                     subscribed,

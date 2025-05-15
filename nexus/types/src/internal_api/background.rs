@@ -462,10 +462,10 @@ pub struct AlertDispatcherStatus {
 
     pub glob_version: semver::Version,
 
-    /// The webhook events dispatched on this activation.
-    pub dispatched: Vec<WebhookDispatched>,
+    /// The alerts dispatched on this activation.
+    pub dispatched: Vec<AlertDispatched>,
 
-    /// Webhook events which did not have receivers.
+    /// Alerts  which did not have receivers.
     pub no_receivers: Vec<AlertUuid>,
 
     /// Any errors that occurred during activation.
@@ -485,7 +485,7 @@ pub enum AlertGlobStatus {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct WebhookDispatched {
+pub struct AlertDispatched {
     pub alert_id: AlertUuid,
     pub subscribed: usize,
     pub dispatched: usize,

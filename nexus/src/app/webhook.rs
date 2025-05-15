@@ -356,7 +356,7 @@ impl Nexus {
                         "rx_name" => %rx.name(),
                         "delivery_id" => ?delivery.id,
                         "alert_id" => ?event.id(),
-                        "alert_class" => %event.alert_class,
+                        "alert_class" => %event.class,
                     );
                     WebhookDelivery::new(
                         &event.id(),

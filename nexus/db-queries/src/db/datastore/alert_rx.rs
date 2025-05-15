@@ -659,10 +659,10 @@ impl DataStore {
                     "subscription" => ?result,
                 );
             }
-            AlertSubscriptionKind::Exact(alert_class) => {
+            AlertSubscriptionKind::Exact(class) => {
                 let subscription = AlertRxSubscription {
                     rx_id: rx_id.into(),
-                    alert_class,
+                    class,
                     glob: None,
                     time_created: chrono::Utc::now(),
                 };
@@ -777,7 +777,7 @@ impl DataStore {
 
     /// List all webhook receivers whose event class subscription globs match
     /// the provided `alert_class`.
-    pub async fn webhook_rx_list_subscribed_to_event(
+    pub async fn alert_rx_list_subscribed_to_event(
         &self,
         opctx: &OpContext,
         alert_class: AlertClass,
@@ -1314,7 +1314,7 @@ mod test {
             }
         }
 
-        async fn check_event(
+        async fn check_alert(
             datastore: &DataStore,
             opctx: &OpContext,
             all_rxs: &Vec<WebhookReceiverConfig>,
@@ -1322,7 +1322,7 @@ mod test {
             matches: &[&WebhookReceiverConfig],
         ) {
             let subscribed = datastore
-                .webhook_rx_list_subscribed_to_event(opctx, alert_class)
+                .alert_rx_list_subscribed_to_event(opctx, alert_class)
                 .await
                 .unwrap()
                 .into_iter()
@@ -1360,7 +1360,7 @@ mod test {
             }
         }
 
-        check_event(
+        check_alert(
             datastore,
             opctx,
             &all_rxs,
@@ -1368,7 +1368,7 @@ mod test {
             &[&test_star, &test_starstar],
         )
         .await;
-        check_event(
+        check_alert(
             datastore,
             opctx,
             &all_rxs,
@@ -1376,7 +1376,7 @@ mod test {
             &[&test_starstar, &test_foo_star],
         )
         .await;
-        check_event(
+        check_alert(
             datastore,
             opctx,
             &all_rxs,
@@ -1389,7 +1389,7 @@ mod test {
             ],
         )
         .await;
-        check_event(
+        check_alert(
             datastore,
             opctx,
             &all_rxs,
@@ -1397,7 +1397,7 @@ mod test {
             &[&test_starstar, &test_quux_star, &test_quux_starstar],
         )
         .await;
-        check_event(
+        check_alert(
             datastore,
             opctx,
             &all_rxs,

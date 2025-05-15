@@ -945,7 +945,7 @@ async fn cmd_db_alert_list(
         fn from(event: &'_ Alert) -> Self {
             Self {
                 id: event.identity.id.into_untyped_uuid(),
-                class: event.alert_class,
+                class: event.class,
                 time_created: event.identity.time_created,
                 time_dispatched: event.time_dispatched,
                 dispatched: event.num_dispatched,
@@ -1009,7 +1009,7 @@ async fn cmd_db_alert_info(
     let Alert {
         identity: db::model::AlertIdentity { id, time_created, time_modified },
         time_dispatched,
-        alert_class,
+        class,
         event,
         num_dispatched,
     } = event;
@@ -1029,7 +1029,7 @@ async fn cmd_db_alert_info(
 
     println!("\n{:=<80}", "== ALERT ");
     println!("    {ID:>WIDTH$}: {id:?}");
-    println!("    {CLASS:>WIDTH$}: {alert_class}");
+    println!("    {CLASS:>WIDTH$}: {class}");
     println!("    {TIME_CREATED:>WIDTH$}: {time_created}");
     println!("    {TIME_MODIFIED:>WIDTH$}: {time_modified}");
     println!();

@@ -507,8 +507,8 @@ task: "alert_dispatcher"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    events dispatched:                            0
-    events with no receivers subscribed:          0
+    alerts dispatched:                            0
+    alerts with no receivers subscribed:          0
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1026,8 +1026,8 @@ task: "alert_dispatcher"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    events dispatched:                            0
-    events with no receivers subscribed:          0
+    alerts dispatched:                            0
+    alerts with no receivers subscribed:          0
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s

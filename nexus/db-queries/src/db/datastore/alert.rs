@@ -25,7 +25,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         id: AlertUuid,
-        alert_class: AlertClass,
+        class: AlertClass,
         event: serde_json::Value,
     ) -> CreateResult<Alert> {
         let conn = self.pool_connection_authorized(&opctx).await?;
@@ -33,7 +33,7 @@ impl DataStore {
             .values(Alert {
                 identity: AlertIdentity::new(id),
                 time_dispatched: None,
-                alert_class,
+                class,
                 event,
                 num_dispatched: 0,
             })

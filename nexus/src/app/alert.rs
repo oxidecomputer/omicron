@@ -45,18 +45,16 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         id: AlertUuid,
-        alert_class: AlertClass,
+        class: AlertClass,
         event: serde_json::Value,
     ) -> Result<Alert, Error> {
-        let alert = self
-            .datastore()
-            .alert_create(opctx, id, alert_class, event)
-            .await?;
+        let alert =
+            self.datastore().alert_create(opctx, id, class, event).await?;
         slog::debug!(
             &opctx.log,
             "published alert";
             "alert_id" => ?id,
-            "alert_class" => %alert.alert_class,
+            "alert_class" => %alert.class,
             "time_created" => ?alert.identity.time_created,
         );
 
@@ -78,16 +76,16 @@ impl Nexus {
     ) -> LookupResult<lookup::AlertReceiver<'a>> {
         match rx_selector.receiver {
             NameOrId::Id(id) => {
-                let webhook = LookupPath::new(opctx, &self.db_datastore)
+                let rx = LookupPath::new(opctx, &self.db_datastore)
                     .alert_receiver_id(AlertReceiverUuid::from_untyped_uuid(
                         id,
                     ));
-                Ok(webhook)
+                Ok(rx)
             }
             NameOrId::Name(name) => {
-                let webhook = LookupPath::new(opctx, &self.db_datastore)
+                let rx = LookupPath::new(opctx, &self.db_datastore)
                     .alert_receiver_name_owned(name.into());
-                Ok(webhook)
+                Ok(rx)
             }
         }
     }
@@ -266,7 +264,7 @@ impl Nexus {
             return Err(Error::invalid_request(format!(
                 "cannot resend alert: receiver is not subscribed to the '{}' \
                  alert class",
-                event.alert_class,
+                event.class,
             )));
         }
 
@@ -285,7 +283,7 @@ impl Nexus {
                 "failed to create new delivery to resend webhook alert";
                 "rx_id" => ?authz_rx.id(),
                 "alert_id" => ?authz_event.id(),
-                "alert_class" => %event.alert_class,
+                "alert_class" => %event.class,
                 "delivery_id" => ?delivery_id,
                 "error" => %e,
             );
@@ -297,7 +295,7 @@ impl Nexus {
             "resending webhook event";
             "rx_id" => ?authz_rx.id(),
             "alert_id" => ?authz_event.id(),
-            "alert_class" => %event.alert_class,
+            "alert_class" => %event.class,
             "delivery_id" => ?delivery_id,
         );
 

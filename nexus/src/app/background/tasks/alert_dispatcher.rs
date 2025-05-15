@@ -35,7 +35,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::{
-    AlertDispatcherStatus, AlertGlobStatus, WebhookDispatched,
+    AlertDispatched, AlertDispatcherStatus, AlertGlobStatus,
 };
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
@@ -209,32 +209,32 @@ impl AlertDispatcher {
                 &opctx.log,
                 "dispatching webhook event...";
                 "alert_id" => ?event.id(),
-                "alert_class" => %event.alert_class,
+                "alert_class" => %event.class,
             );
 
             // Okay, we found an event that needs to be dispatched. Next, get
-            // list the webhook receivers subscribed to this event class and
+            // list the alert receivers subscribed to this event class and
             // create delivery records for them.
             let rxs = match self
                 .datastore
-                .webhook_rx_list_subscribed_to_event(&opctx, event.alert_class)
+                .alert_rx_list_subscribed_to_event(&opctx, event.class)
                 .await
             {
                 Ok(rxs) => rxs,
                 Err(error) => {
                     const MSG: &str =
-                        "failed to list webhook receivers subscribed to event";
+                        "failed to list alert receivers subscribed to event";
                     slog::error!(
                         &opctx.log,
                         "{MSG}";
                         "alert_id" => ?event.id(),
-                        "alert_class" => %event.alert_class,
+                        "alert_class" => %event.class,
                         "error" => &error,
                     );
                     status.errors.push(format!(
                         "{MSG} {} ({}): {error}",
                         event.id(),
-                        event.alert_class
+                        event.class
                     ));
                     // We weren't able to find receivers for this event, so
                     // *don't* mark it as dispatched --- it's someone else's
@@ -246,18 +246,18 @@ impl AlertDispatcher {
             let deliveries: Vec<WebhookDelivery> = rxs
                 .into_iter()
                 .map(|(rx, sub)| {
-                    // NOTE: In the future, if we add support for webhook receivers
+                    // NOTE: In the future, if we add support for alert receivers
                     // with roles other than 'fleet.viewer' (as described in
                     // https://rfd.shared.oxide.computer/rfd/538#rbac-filtering),
                     // this might be where we filter the actual dispatched payload
                     // based on the individual receiver's permissions.
                     slog::trace!(
                         &opctx.log,
-                        "webhook receiver is subscribed to event";
+                        "alert receiver is subscribed to event";
                         "rx_name" => %rx.name(),
                         "rx_id" => ?rx.id(),
                         "alert_id" => ?event.id(),
-                        "alert_class" => %event.alert_class,
+                        "alert_class" => %event.class,
                         "glob" => ?sub.glob,
                     );
                     WebhookDelivery::new(
@@ -281,7 +281,7 @@ impl AlertDispatcher {
                             &opctx.log,
                             "failed to insert webhook deliveries";
                             "alert_id" => ?event.id(),
-                            "alert_class" => %event.alert_class,
+                            "alert_class" => %event.class,
                             "error" => %error,
                             "num_subscribed" => ?subscribed,
                         );
@@ -289,14 +289,14 @@ impl AlertDispatcher {
                             "failed to insert {subscribed} webhook deliveries \
                              for event {} ({}): {error}",
                             event.id(),
-                            event.alert_class,
+                            event.class,
                         ));
                         // We weren't able to create deliveries for this event, so
                         // *don't* mark it as dispatched.
                         continue;
                     }
                 };
-                status.dispatched.push(WebhookDispatched {
+                status.dispatched.push(AlertDispatched {
                     alert_id: event.id(),
                     subscribed,
                     dispatched,
@@ -305,7 +305,7 @@ impl AlertDispatcher {
                     &opctx.log,
                     "dispatched webhook event";
                     "alert_id" => ?event.id(),
-                    "alert_class" => %event.alert_class,
+                    "alert_class" => %event.class,
                     "num_subscribed" => subscribed,
                     "num_dispatched" => dispatched,
                 );
@@ -315,7 +315,7 @@ impl AlertDispatcher {
                     &opctx.log,
                     "no webhook receivers subscribed to event";
                     "alert_id" => ?event.id(),
-                    "alert_class" => %event.alert_class,
+                    "alert_class" => %event.class,
                 );
                 status.no_receivers.push(event.id());
                 0
@@ -330,7 +330,7 @@ impl AlertDispatcher {
                     &opctx.log,
                     "failed to mark webhook event as dispatched";
                     "alert_id" => ?event.id(),
-                    "alert_class" => %event.alert_class,
+                    "alert_class" => %event.class,
                     "error" => %error,
                     "num_subscribed" => subscribed,
                 );
@@ -338,7 +338,7 @@ impl AlertDispatcher {
                     "failed to mark webhook event {} ({}) as dispatched: \
                      {error}",
                     event.id(),
-                    event.alert_class,
+                    event.class,
                 ));
             }
         }
@@ -491,9 +491,9 @@ mod test {
                     sub.glob.as_deref(),
                     Some(GLOB_PATTERN),
                     "found a subscription to {} that was not from our glob: {sub:?}",
-                    sub.alert_class,
+                    sub.class,
                 );
-                sub.alert_class
+                sub.class
             }).collect::<std::collections::HashSet<_>>();
         assert_eq!(subscriptions.len(), 2);
         assert!(
