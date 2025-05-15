@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// The full configuration of a webhook alert receiver, including the
-/// [`WebhookReceiver`] itself and its subscriptions and secrets.
+/// [`AlertReceiver`], its subscriptions, and secrets.
 #[derive(Clone, Debug)]
 pub struct WebhookReceiverConfig {
     pub rx: AlertReceiver,
@@ -110,7 +110,8 @@ impl DatastoreCollectionConfig<AlertRxGlob> for AlertReceiver {
     type CollectionIdColumn = alert_glob::dsl::rx_id;
 }
 
-/// Describes a set of updates for the [`WebhookReceiver`] model.
+/// Describes a set of updates for the [`alert_receiver`] table to update a
+/// webhook receiver configuration.
 #[derive(Clone, AsChangeset)]
 #[diesel(table_name = alert_receiver)]
 pub struct WebhookReceiverUpdate {

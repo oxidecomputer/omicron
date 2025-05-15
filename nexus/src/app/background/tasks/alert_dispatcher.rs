@@ -443,9 +443,9 @@ mod test {
         // OKAY GREAT NOW THAT WE DID ALL THAT STUFF let's see if it actually
         // works...
 
-        // N.B. that we are using the `DataStore::webhook_event_create` method
-        // rather than `Nexus::webhook_event_publish` (the expected entrypoint
-        // to publishing a webhook event) because `webhook_event_publish` also
+        // N.B. that we are using the `DataStore::alert_create` method
+        // rather than `Nexus::alert_publish` (the expected entrypoint
+        // to publishing a webhook event) because `alert_publish` also
         // activates the dispatcher task, and for this test, we would like to be
         // responsible for activating it.
         let alert_id = AlertUuid::new_v4();
