@@ -6,6 +6,8 @@ use crate::Responsiveness;
 use crate::SimulatedSp;
 use crate::config::GimletConfig;
 use crate::config::SpComponentConfig;
+use crate::ereport;
+use crate::ereport::EreportState;
 use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
 use crate::serial_number_padded;
@@ -28,6 +30,7 @@ use gateway_messages::DumpTask;
 use gateway_messages::Header;
 use gateway_messages::MgsRequest;
 use gateway_messages::MgsResponse;
+use gateway_messages::PowerStateTransition;
 use gateway_messages::RotBootInfo;
 use gateway_messages::RotRequest;
 use gateway_messages::RotResponse;
@@ -84,6 +87,7 @@ pub enum SimSpHandledRequest {
 
 pub struct Gimlet {
     local_addrs: Option<[SocketAddrV6; 2]>,
+    ereport_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
     commands: mpsc::UnboundedSender<Command>,
@@ -115,6 +119,14 @@ impl SimulatedSp for Gimlet {
             SpPort::Two => 1,
         };
         self.local_addrs.map(|addrs| addrs[i])
+    }
+
+    fn local_ereport_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
+        let i = match port {
+            SpPort::One => 0,
+            SpPort::Two => 1,
+        };
+        self.ereport_addrs.map(|addrs| addrs[i])
     }
 
     async fn set_responsiveness(&self, r: Responsiveness) {
@@ -169,6 +181,28 @@ impl SimulatedSp for Gimlet {
         }
         tx
     }
+
+    async fn ereport_restart(&self, restart: crate::config::EreportRestart) {
+        let (tx, rx) = oneshot::channel();
+        if self
+            .commands
+            .send(Command::Ereport(ereport::Command::Restart(restart, tx)))
+            .is_ok()
+        {
+            rx.await.unwrap();
+        }
+    }
+
+    async fn ereport_append(
+        &self,
+        ereport: crate::config::Ereport,
+    ) -> gateway_ereport_messages::Ena {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::Ereport(ereport::Command::Append(ereport, tx)))
+            .expect("simulated gimlet task has died");
+        rx.await.unwrap()
+    }
 }
 
 impl Gimlet {
@@ -189,6 +223,7 @@ impl Gimlet {
         let Some(network_config) = &gimlet.common.network_config else {
             return Ok(Self {
                 local_addrs: None,
+                ereport_addrs: None,
                 handler: None,
                 serial_console_addrs,
                 commands,
@@ -208,6 +243,77 @@ impl Gimlet {
         .await?;
 
         let servers = [servers.0, servers.1];
+
+        let ereport_log = log.new(slog::o!("component" => "ereport-sim"));
+        let (ereport_servers, ereport_addrs) =
+            match &gimlet.common.ereport_network_config {
+                Some(cfg) => {
+                    assert_eq!(cfg.len(), 2); // gimlet SP always has 2 ports
+
+                    let servers = future::try_join(
+                        UdpServer::new(&cfg[0], &ereport_log),
+                        UdpServer::new(&cfg[1], &ereport_log),
+                    )
+                    .await?;
+                    let addrs =
+                        [servers.0.local_addr(), servers.1.local_addr()];
+                    (Some([servers.0, servers.1]), Some(addrs))
+                }
+                None => (None, None),
+            };
+        let mut update_state = SimSpUpdate::new(
+            BaseboardKind::Gimlet,
+            gimlet.common.no_stage0_caboose,
+        );
+        let ereport_state = {
+            let mut cfg = gimlet.common.ereport_config.clone();
+            let mut buf = [0u8; 256];
+            let hubris_gitc = {
+                let len = update_state
+                    .get_component_caboose_value(
+                        SpComponent::SP_ITSELF,
+                        0,
+                        *b"GITC",
+                        &mut buf,
+                    )
+                    .expect(
+                        "update state should tell us the caboose git commit",
+                    );
+                std::str::from_utf8(&buf[..len])
+                    .expect("update state GITC should be valid UTF-8")
+                    .to_string()
+            };
+            let hubris_vers = {
+                let len = update_state
+                    .get_component_caboose_value(
+                        SpComponent::SP_ITSELF,
+                        0,
+                        *b"VERS",
+                        &mut buf,
+                    )
+                    .expect(
+                        "update state should tell us the caboose git commit",
+                    );
+                std::str::from_utf8(&buf[..len])
+                    .expect("update state GITC should be valid UTF-8")
+                    .to_string()
+            };
+
+            if cfg.restart.metadata.is_empty() {
+                let map = &mut cfg.restart.metadata;
+                map.insert(
+                    "chassis_model".to_string(),
+                    SIM_GIMLET_BOARD.into(),
+                );
+                map.insert(
+                    "chassis_serial".to_string(),
+                    gimlet.common.serial_number.clone().into(),
+                );
+                map.insert("hubris_archive_id".to_string(), hubris_gitc.into());
+                map.insert("hubris_version".to_string(), hubris_vers.into());
+            }
+            EreportState::new(cfg, ereport_log)
+        };
 
         for component_config in &gimlet.common.components {
             let id = component_config.id.as_str();
@@ -264,6 +370,8 @@ impl Gimlet {
         let local_addrs = [servers[0].local_addr(), servers[1].local_addr()];
         let (inner, handler, responses_sent_count) = UdpTask::new(
             servers,
+            ereport_servers,
+            ereport_state,
             gimlet.common.components.clone(),
             attached_mgs,
             gimlet.common.serial_number.clone(),
@@ -272,13 +380,14 @@ impl Gimlet {
             Arc::clone(&last_request_handled),
             log,
             gimlet.common.old_rot_state,
-            gimlet.common.no_stage0_caboose,
+            update_state,
         );
         inner_tasks
             .push(task::spawn(async move { inner.run().await.unwrap() }));
 
         Ok(Self {
             local_addrs: Some(local_addrs),
+            ereport_addrs,
             handler: Some(handler),
             serial_console_addrs,
             commands,
@@ -468,6 +577,7 @@ impl SerialConsoleTcpTask {
 enum Command {
     SetResponsiveness(Responsiveness, oneshot::Sender<Ack>),
     SetThrottler(Option<mpsc::UnboundedReceiver<usize>>, oneshot::Sender<Ack>),
+    Ereport(ereport::Command),
 }
 
 struct Ack;
@@ -475,6 +585,8 @@ struct Ack;
 struct UdpTask {
     udp0: UdpServer,
     udp1: UdpServer,
+    ereport_servers: Option<[UdpServer; 2]>,
+    ereport_state: EreportState,
     handler: Arc<TokioMutex<Handler>>,
     commands: mpsc::UnboundedReceiver<Command>,
     responses_sent_count: watch::Sender<usize>,
@@ -485,6 +597,8 @@ impl UdpTask {
     #[allow(clippy::too_many_arguments)]
     fn new(
         servers: [UdpServer; 2],
+        ereport_servers: Option<[UdpServer; 2]>,
+        ereport_state: EreportState,
         components: Vec<SpComponentConfig>,
         attached_mgs: AttachedMgsSerialConsole,
         serial_number: String,
@@ -493,7 +607,7 @@ impl UdpTask {
         last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
         log: Logger,
         old_rot_state: bool,
-        no_stage0_caboose: bool,
+        update_state: SimSpUpdate,
     ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
@@ -501,9 +615,9 @@ impl UdpTask {
             components,
             attached_mgs,
             incoming_serial_console,
-            log,
+            log.clone(),
             old_rot_state,
-            no_stage0_caboose,
+            update_state,
         )));
         let responses_sent_count = watch::Sender::new(0);
         let responses_sent_count_rx = responses_sent_count.subscribe();
@@ -511,6 +625,8 @@ impl UdpTask {
             Self {
                 udp0,
                 udp1,
+                ereport_servers,
+                ereport_state,
                 handler: Arc::clone(&handler),
                 commands,
                 responses_sent_count,
@@ -526,6 +642,7 @@ impl UdpTask {
         let mut responsiveness = Responsiveness::Responsive;
         let mut throttle_count = usize::MAX;
         let mut throttler: Option<mpsc::UnboundedReceiver<usize>> = None;
+
         loop {
             let incr_throttle_count: Pin<
                 Box<dyn Future<Output = Option<usize>> + Send>,
@@ -533,6 +650,10 @@ impl UdpTask {
                 Box::pin(throttler.recv())
             } else {
                 Box::pin(future::pending())
+            };
+            let (ereport0, ereport1) = match self.ereport_servers.as_mut() {
+                Some([e0, e1]) => (Some(e0), Some(e1)),
+                None => (None, None),
             };
             select! {
                 Some(n) = incr_throttle_count => {
@@ -578,6 +699,18 @@ impl UdpTask {
                     }
                 }
 
+                recv = ereport::recv_request(ereport0) => {
+                    let (req, addr, sock) = recv?;
+                    let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
+                    sock.send_to(rsp, addr).await?;
+                }
+
+                recv = ereport::recv_request(ereport1) => {
+                    let (req, addr, sock) = recv?;
+                    let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
+                    sock.send_to(rsp, addr).await?;
+                }
+
                 command = self.commands.recv() => {
                     // if sending half is gone, we're about to be killed anyway
                     let command = match command {
@@ -603,7 +736,8 @@ impl UdpTask {
                             }
                             tx.send(Ack)
                                 .map_err(|_| "receiving half died").unwrap();
-                        }
+                        },
+                        Command::Ereport(cmd) => self.ereport_state.handle_command(cmd),
                     }
                 }
             }
@@ -652,7 +786,7 @@ impl Handler {
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         log: Logger,
         old_rot_state: bool,
-        no_stage0_caboose: bool,
+        update_state: SimSpUpdate,
     ) -> Self {
         let mut leaked_component_device_strings =
             Vec::with_capacity(components.len());
@@ -681,10 +815,7 @@ impl Handler {
             incoming_serial_console,
             power_state: PowerState::A2,
             startup_options: StartupOptions::empty(),
-            update_state: SimSpUpdate::new(
-                BaseboardKind::Gimlet,
-                no_stage0_caboose,
-            ),
+            update_state,
             reset_pending: None,
             last_request_handled: None,
             should_fail_to_respond_signal: None,
@@ -1053,14 +1184,22 @@ impl SpHandler for Handler {
         &mut self,
         sender: Sender<Self::VLanId>,
         power_state: PowerState,
-    ) -> Result<(), SpError> {
+    ) -> Result<PowerStateTransition, SpError> {
+        let transition = if power_state != self.power_state {
+            PowerStateTransition::Changed
+        } else {
+            PowerStateTransition::Unchanged
+        };
+
         debug!(
             &self.log, "received set power state";
             "sender" => ?sender,
+            "prev_power_state" => ?self.power_state,
             "power_state" => ?power_state,
+            "transition" => ?transition,
         );
         self.power_state = power_state;
-        Ok(())
+        Ok(transition)
     }
 
     fn reset_component_prepare(

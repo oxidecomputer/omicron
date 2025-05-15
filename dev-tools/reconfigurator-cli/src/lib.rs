@@ -42,16 +42,16 @@ use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ReconfiguratorSimUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
+use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::fmt::Write;
+use std::fmt::{self, Write};
 use std::io::IsTerminal;
 use std::str::FromStr;
 use swrite::{SWrite, swriteln};
@@ -204,7 +204,9 @@ fn process_command(
     let cmd_result = match command {
         Commands::SledList => cmd_sled_list(sim),
         Commands::SledAdd(args) => cmd_sled_add(sim, args),
+        Commands::SledRemove(args) => cmd_sled_remove(sim, args),
         Commands::SledShow(args) => cmd_sled_show(sim, args),
+        Commands::SledSetPolicy(args) => cmd_sled_set_policy(sim, args),
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
         Commands::SiloRemove(args) => cmd_silo_remove(sim, args),
@@ -252,8 +254,12 @@ enum Commands {
     SledList,
     /// add a new sled
     SledAdd(SledAddArgs),
+    /// remove a sled from the system
+    SledRemove(SledRemoveArgs),
     /// show details about one sled
     SledShow(SledArgs),
+    /// set a sled's policy
+    SledSetPolicy(SledSetPolicyArgs),
 
     /// list silos
     SiloList,
@@ -308,6 +314,10 @@ enum Commands {
 struct SledAddArgs {
     /// id of the new sled
     sled_id: Option<SledUuid>,
+
+    /// number of disks or pools
+    #[clap(short = 'd', long, visible_alias = "npools", default_value_t = SledBuilder::DEFAULT_NPOOLS)]
+    ndisks: u8,
 }
 
 #[derive(Debug, Args)]
@@ -318,6 +328,53 @@ struct SledArgs {
     /// Filter to match sled ID against
     #[clap(short = 'F', long, value_enum, default_value_t = SledFilter::Commissioned)]
     filter: SledFilter,
+}
+
+#[derive(Debug, Args)]
+struct SledSetPolicyArgs {
+    /// id of the sled
+    sled_id: SledUuid,
+
+    /// The policy to set for the sled
+    #[clap(value_enum)]
+    policy: SledPolicyOpt,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum SledPolicyOpt {
+    InService,
+    NonProvisionable,
+    Expunged,
+}
+
+impl fmt::Display for SledPolicyOpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SledPolicyOpt::InService => write!(f, "in-service"),
+            SledPolicyOpt::NonProvisionable => write!(f, "non-provisionable"),
+            SledPolicyOpt::Expunged => write!(f, "expunged"),
+        }
+    }
+}
+
+impl From<SledPolicyOpt> for SledPolicy {
+    fn from(value: SledPolicyOpt) -> Self {
+        match value {
+            SledPolicyOpt::InService => SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            },
+            SledPolicyOpt::NonProvisionable => SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            },
+            SledPolicyOpt::Expunged => SledPolicy::Expunged,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct SledRemoveArgs {
+    /// id of the sled
+    sled_id: SledUuid,
 }
 
 #[derive(Debug, Args)]
@@ -374,6 +431,14 @@ enum BlueprintEditCommands {
         #[command(subcommand)]
         image_source: ImageSourceArgs,
     },
+    /// set the remove_mupdate_override field for a sled
+    SetRemoveMupdateOverride {
+        /// sled to set the field on
+        sled_id: SledUuid,
+
+        /// the UUID to set the field to, or "unset"
+        value: MupdateOverrideUuidOpt,
+    },
     /// expunge a zone
     ExpungeZone { zone_id: OmicronZoneUuid },
     /// configure an SP update
@@ -392,6 +457,34 @@ enum BlueprintEditCommands {
     DeleteSpUpdate {
         /// baseboard serial number whose update to delete
         serial: String,
+    },
+    /// debug commands that bypass normal checks
+    ///
+    /// These commands mutate the blueprint directly, bypassing higher-level
+    /// planner checks. They're meant for getting into weird states to test
+    /// against.
+    Debug {
+        #[command(subcommand)]
+        command: BlueprintEditDebugCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum BlueprintEditDebugCommands {
+    /// remove a sled from the blueprint
+    ///
+    /// This bypasses expungement and decommissioning checks, and simply drops
+    /// the sled from the blueprint.
+    RemoveSled {
+        /// the sled to remove
+        sled: SledUuid,
+    },
+
+    /// Bump a sled's generation number, even if nothing else about the sled has
+    /// changed.
+    ForceSledGenerationBump {
+        /// the sled to bump the sled-agent generation number of
+        sled: SledUuid,
     },
 }
 
@@ -426,6 +519,42 @@ impl From<BlueprintIdOpt> for BlueprintId {
             BlueprintIdOpt::Latest => BlueprintId::Latest,
             BlueprintIdOpt::Target => BlueprintId::Target,
             BlueprintIdOpt::Id(id) => BlueprintId::Id(id),
+        }
+    }
+}
+
+/// Clap field for an optional mupdate override UUID.
+///
+/// This structure is similar to `Option`, but is specified separately to:
+///
+/// 1. Disable clap's magic around `Option`.
+/// 2. Provide a custom parser.
+///
+/// There are other ways to do both 1 and 2 (e.g. specify the type as
+/// `std::option::Option`), but when combined they're uglier than this.
+#[derive(Clone, Copy, Debug)]
+enum MupdateOverrideUuidOpt {
+    Unset,
+    Set(MupdateOverrideUuid),
+}
+
+impl FromStr for MupdateOverrideUuidOpt {
+    type Err = newtype_uuid::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "unset" || s == "none" {
+            Ok(MupdateOverrideUuidOpt::Unset)
+        } else {
+            Ok(MupdateOverrideUuidOpt::Set(s.parse::<MupdateOverrideUuid>()?))
+        }
+    }
+}
+
+impl From<MupdateOverrideUuidOpt> for Option<MupdateOverrideUuid> {
+    fn from(value: MupdateOverrideUuidOpt) -> Self {
+        match value {
+            MupdateOverrideUuidOpt::Unset => None,
+            MupdateOverrideUuidOpt::Set(uuid) => Some(uuid),
         }
     }
 }
@@ -673,7 +802,7 @@ fn cmd_sled_add(
 ) -> anyhow::Result<Option<String>> {
     let mut state = sim.current_state().to_mut();
     let sled_id = add.sled_id.unwrap_or_else(|| state.rng_mut().next_sled_id());
-    let new_sled = SledBuilder::new().id(sled_id);
+    let new_sled = SledBuilder::new().id(sled_id).npools(add.ndisks);
     state.system_mut().description_mut().sled(new_sled)?;
     sim.commit_and_bump(
         format!("reconfigurator-cli sled-add: {sled_id}"),
@@ -681,6 +810,24 @@ fn cmd_sled_add(
     );
 
     Ok(Some(format!("added sled {}", sled_id)))
+}
+
+fn cmd_sled_remove(
+    sim: &mut ReconfiguratorSim,
+    args: SledRemoveArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut state = sim.current_state().to_mut();
+    let sled_id = args.sled_id;
+    state
+        .system_mut()
+        .description_mut()
+        .sled_remove(sled_id)
+        .context("failed to remove sled")?;
+    sim.commit_and_bump(
+        format!("reconfigurator-cli sled-remove: {sled_id}"),
+        state,
+    );
+    Ok(Some(format!("removed sled {} from system", sled_id)))
 }
 
 fn cmd_sled_show(
@@ -706,6 +853,25 @@ fn cmd_sled_show(
         swriteln!(s, "    {:?}", disk);
     }
     Ok(Some(s))
+}
+
+fn cmd_sled_set_policy(
+    sim: &mut ReconfiguratorSim,
+    args: SledSetPolicyArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut state = sim.current_state().to_mut();
+    state
+        .system_mut()
+        .description_mut()
+        .sled_set_policy(args.sled_id, args.policy.into())?;
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-set-policy: {} to {}",
+            args.sled_id, args.policy,
+        ),
+        state,
+    );
+    Ok(Some(format!("set sled {} policy to {}", args.sled_id, args.policy)))
 }
 
 fn cmd_inventory_list(
@@ -925,6 +1091,19 @@ fn cmd_blueprint_edit(
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
         }
+        BlueprintEditCommands::SetRemoveMupdateOverride { sled_id, value } => {
+            builder
+                .sled_set_remove_mupdate_override(sled_id, value.into())
+                .context("failed to set remove_mupdate_override")?;
+            match value {
+                MupdateOverrideUuidOpt::Unset => {
+                    "unset remove_mupdate_override".to_owned()
+                }
+                MupdateOverrideUuidOpt::Set(uuid) => {
+                    format!("set remove_mupdate_override to {uuid}")
+                }
+            }
+        }
         BlueprintEditCommands::SetZoneImage { zone_id, image_source } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;
             let source = BlueprintZoneImageSource::from(image_source);
@@ -997,6 +1176,19 @@ fn cmd_blueprint_edit(
                 })?;
             builder.pending_mgs_update_delete(baseboard_id);
             format!("deleted configured update for serial {serial}")
+        }
+        BlueprintEditCommands::Debug {
+            command: BlueprintEditDebugCommands::RemoveSled { sled },
+        } => {
+            builder.debug_sled_remove(sled)?;
+            format!("debug: removed sled {sled} from blueprint")
+        }
+        BlueprintEditCommands::Debug {
+            command:
+                BlueprintEditDebugCommands::ForceSledGenerationBump { sled },
+        } => {
+            builder.debug_sled_force_generation_bump(sled)?;
+            format!("debug: forced sled {sled} generation bump")
         }
     };
 

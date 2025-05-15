@@ -183,7 +183,7 @@ mod test {
                 user_code
                     .chars()
                     .filter(|x| *x != '-')
-                    .all(|x| { USER_CODE_ALPHABET.iter().any(|y| *y == x) })
+                    .all(|x| { USER_CODE_ALPHABET.contains(&x) })
             );
             assert!(!codes_seen.contains(&user_code));
             codes_seen.insert(user_code);

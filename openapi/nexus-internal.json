@@ -822,14 +822,14 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}": {
+    "/experimental/v1/system/support-bundles/{bundle_id}": {
       "get": {
         "summary": "View a support bundle",
         "operationId": "support_bundle_view",
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -864,7 +864,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -886,14 +886,14 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/download": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/download": {
       "get": {
         "summary": "Download the contents of a support bundle",
         "operationId": "support_bundle_download",
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -919,7 +919,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -940,11 +940,21 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}": {
       "get": {
         "summary": "Download a file within a support bundle",
         "operationId": "support_bundle_download_file",
         "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "in": "path",
             "name": "file",
@@ -952,16 +962,6 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "support_bundle",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
             }
           }
         ],
@@ -982,21 +982,21 @@
         "parameters": [
           {
             "in": "path",
-            "name": "file",
-            "description": "The file within the bundle to download",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -1012,14 +1012,14 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/index": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/index": {
       "get": {
         "summary": "Download the index of a support bundle",
         "operationId": "support_bundle_index",
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -2630,6 +2630,14 @@
           },
           "disks": {
             "$ref": "#/components/schemas/IdMapBlueprintPhysicalDiskConfig"
+          },
+          "remove_mupdate_override": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              }
+            ]
           },
           "sled_agent_generation": {
             "description": "Generation number used when this type is converted into an `OmicronSledConfig` for use by sled-agent.\n\nThis field is explicitly named `sled_agent_generation` to indicate that it is only required to cover information that changes what Reconfigurator sends to sled agent. For example, changing the sled `state` from `Active` to `Decommissioned` would not require a bump to `sled_agent_generation`, because a `Decommissioned` sled will never be sent an `OmicronSledConfig`.",
@@ -6637,7 +6645,7 @@
         ]
       },
       "SpType": {
-        "description": "SpType\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
+        "description": "`SpType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "sled",
@@ -6846,6 +6854,10 @@
         "format": "uuid"
       },
       "TypedUuidForExternalIpKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForMupdateOverrideKind": {
         "type": "string",
         "format": "uuid"
       },

@@ -33,7 +33,7 @@ use crate::bootstrap::early_networking::{
 use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
-use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
+use crate::params::{DendriteAsic, OmicronZoneTypeExt};
 use crate::profile::*;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
@@ -725,7 +725,7 @@ enum SwitchZoneState {
         // The original request for the zone
         request: SwitchZoneConfig,
         // The currently running zone
-        zone: RunningZone,
+        zone: Box<RunningZone>,
     },
 }
 
@@ -1751,7 +1751,7 @@ impl ServiceManager {
         let mut zone_builder = match self.inner.system_api.fake_install_dir() {
             None => ZoneBuilderFactory::new().builder(),
             Some(dir) => ZoneBuilderFactory::fake(
-                Some(&dir.as_str().to_string()),
+                Some(&dir.as_str()),
                 illumos_utils::fakes::zone::Zones::new(),
             )
             .builder(),
@@ -4938,8 +4938,10 @@ impl ServiceManager {
         let zone = self
             .initialize_zone(zone_args, zone_root_path, filesystems, data_links)
             .await?;
-        *sled_zone =
-            SwitchZoneState::Running { request: request.clone(), zone };
+        *sled_zone = SwitchZoneState::Running {
+            request: request.clone(),
+            zone: Box::new(zone),
+        };
         Ok(())
     }
 

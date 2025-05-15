@@ -3380,7 +3380,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.sw_caboose (
 );
 
 /*
- * We use a complete and a partial index to ensure uniqueness. 
+ * We use a complete and a partial index to ensure uniqueness.
  * This is necessary because the sign column is NULLable, but in SQL, NULL values
  * are considered distinct. That means that a single complete index on all of these
  * columns would allow duplicate rows where sign is NULL, which we don't want.
@@ -3951,6 +3951,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     sled_id UUID NOT NULL,
     sled_state omicron.public.sled_state NOT NULL,
     sled_agent_generation INT8 NOT NULL,
+    -- NULL means do not remove any overrides
+    remove_mupdate_override UUID,
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
@@ -5516,7 +5518,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '141.0.0', NULL)
+    (TRUE, NOW(), NOW(), '142.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

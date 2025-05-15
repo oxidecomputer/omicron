@@ -106,7 +106,7 @@ impl Runner {
                         }
 
                         Cmd::Reset => self.restart(),
-                        Cmd::GetState => Rpy::State(self.core.state.clone()),
+                        Cmd::GetState => Rpy::State(Box::new(self.core.state.clone())),
                         Cmd::Break{event} => {
                             self.breakpoints.insert(event);
                             Rpy::Ok

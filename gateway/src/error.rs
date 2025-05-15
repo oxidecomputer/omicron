@@ -12,6 +12,7 @@ pub use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::error::UpdateError;
 use slog_error_chain::InlineErrorChain;
 use slog_error_chain::SlogInlineError;
+use std::error::Error;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -48,6 +49,22 @@ pub enum SpCommsError {
     },
 }
 
+#[derive(Debug, Error, SlogInlineError)]
+pub enum EreportError {
+    #[error("error communicating with SP {sp:?}")]
+    SpCommunicationFailed {
+        sp: SpIdentifier,
+        #[source]
+        err: CommunicationError,
+    },
+    #[error("error reading ereports from SP {sp:?}")]
+    Ereport {
+        sp: SpIdentifier,
+        #[source]
+        err: gateway_sp_comms::error::EreportError,
+    },
+}
+
 /// Errors returned by attempts to look up a SP in the management switch's
 /// discovery map.
 #[derive(Debug, Error, SlogInlineError)]
@@ -74,32 +91,9 @@ impl From<SpCommsError> for HttpError {
                 Some("SerialConsoleAttached".to_string()),
                 InlineErrorChain::new(&error).to_string(),
             ),
-            SpCommsError::SpCommunicationFailed {
-                err:
-                    CommunicationError::SpError(SpError::RequestUnsupportedForSp),
-                ..
-            } => HttpError::for_bad_request(
-                Some("RequestUnsupportedForSp".to_string()),
-                InlineErrorChain::new(&error).to_string(),
-            ),
-            SpCommsError::SpCommunicationFailed {
-                err:
-                    CommunicationError::SpError(
-                        SpError::RequestUnsupportedForComponent,
-                    ),
-                ..
-            } => HttpError::for_bad_request(
-                Some("RequestUnsupportedForComponent".to_string()),
-                InlineErrorChain::new(&error).to_string(),
-            ),
-            SpCommsError::SpCommunicationFailed {
-                err:
-                    CommunicationError::SpError(SpError::InvalidSlotForComponent),
-                ..
-            } => HttpError::for_bad_request(
-                Some("InvalidSlotForComponent".to_string()),
-                InlineErrorChain::new(&error).to_string(),
-            ),
+            ref e @ SpCommsError::SpCommunicationFailed { ref err, .. } => {
+                comms_error_to_http(&e, err)
+            }
             SpCommsError::UpdateFailed {
                 err: UpdateError::ImageTooLarge,
                 ..
@@ -139,19 +133,64 @@ impl From<SpCommsError> for HttpError {
                 "Timeout ",
                 InlineErrorChain::new(&error).to_string(),
             ),
-            SpCommsError::SpCommunicationFailed { .. } => {
-                http_err_with_message(
-                    dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
-                    "SpCommunicationFailed",
-                    InlineErrorChain::new(&error).to_string(),
-                )
-            }
             SpCommsError::UpdateFailed { .. } => http_err_with_message(
                 dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
                 "UpdateFailed",
                 InlineErrorChain::new(&error).to_string(),
             ),
         }
+    }
+}
+
+impl From<EreportError> for HttpError {
+    fn from(error: EreportError) -> HttpError {
+        match error {
+            ref e @ EreportError::SpCommunicationFailed { ref err, .. } => {
+                comms_error_to_http(&e, err)
+            }
+            ref e @ EreportError::Ereport { .. } => http_err_with_message(
+                dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR,
+                "EreportError",
+                InlineErrorChain::new(&e).to_string(),
+            ),
+        }
+    }
+}
+
+fn comms_error_to_http(
+    error: &dyn Error,
+    kind: &CommunicationError,
+) -> HttpError {
+    match kind {
+        CommunicationError::SpError(SpError::SerialConsoleAlreadyAttached) => {
+            HttpError::for_bad_request(
+                Some("SerialConsoleAttached".to_string()),
+                InlineErrorChain::new(&error).to_string(),
+            )
+        }
+        CommunicationError::SpError(SpError::RequestUnsupportedForSp) => {
+            HttpError::for_bad_request(
+                Some("RequestUnsupportedForSp".to_string()),
+                InlineErrorChain::new(&error).to_string(),
+            )
+        }
+        CommunicationError::SpError(
+            SpError::RequestUnsupportedForComponent,
+        ) => HttpError::for_bad_request(
+            Some("RequestUnsupportedForComponent".to_string()),
+            InlineErrorChain::new(&error).to_string(),
+        ),
+        CommunicationError::SpError(SpError::InvalidSlotForComponent) => {
+            HttpError::for_bad_request(
+                Some("InvalidSlotForComponent".to_string()),
+                InlineErrorChain::new(&error).to_string(),
+            )
+        }
+        _ => http_err_with_message(
+            dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
+            "SpCommunicationFailed",
+            InlineErrorChain::new(&error).to_string(),
+        ),
     }
 }
 
