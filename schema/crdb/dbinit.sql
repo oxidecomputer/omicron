@@ -5220,7 +5220,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert_glob (
 
 -- Look up all event class globs for an alert receiver.
 CREATE INDEX IF NOT EXISTS lookup_alert_globs_for_rx
-ON omicron.public.alert_rx_glbs (
+ON omicron.public.alert_glob (
     rx_id
 );
 

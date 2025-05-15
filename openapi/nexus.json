@@ -25849,13 +25849,6 @@
         "description": "A delivery of a webhook event.",
         "type": "object",
         "properties": {
-          "attempts": {
-            "description": "Individual attempts to deliver this webhook event, and their outcomes.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WebhookDeliveryAttempt"
-            }
-          },
           "alert_class": {
             "description": "The event class.",
             "type": "string"
@@ -25867,6 +25860,13 @@
                 "$ref": "#/components/schemas/TypedUuidForAlertKind"
               }
             ]
+          },
+          "attempts": {
+            "description": "Individual attempts to deliver this webhook event, and their outcomes.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookDeliveryAttempt"
+            }
           },
           "id": {
             "description": "The UUID of this delivery attempt.",
@@ -25904,9 +25904,9 @@
           }
         },
         "required": [
-          "attempts",
           "alert_class",
           "alert_id",
+          "attempts",
           "id",
           "state",
           "time_started",
