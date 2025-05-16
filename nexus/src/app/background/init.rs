@@ -505,6 +505,7 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(
                 support_bundle_collector::SupportBundleCollector::new(
                     datastore.clone(),
+                    resolver.clone(),
                     config.support_bundle_collector.disable,
                     nexus_id,
                 ),
