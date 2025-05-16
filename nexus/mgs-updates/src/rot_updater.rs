@@ -249,6 +249,36 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                 );
             };
 
+            let (
+                active, pending_persistent_boot_preference, transient_boot_preference
+            ) = match &state.rot {
+                RotState::V2 {
+                    active,
+                    pending_persistent_boot_preference,
+                    transient_boot_preference,
+                    ..
+                }
+                | RotState::V3 {
+                    active,
+                    pending_persistent_boot_preference,
+                    transient_boot_preference,
+                    ..
+                } => (
+                    active, pending_persistent_boot_preference, transient_boot_preference
+                ),
+                RotState::CommunicationFailed { message } => {
+                    return Err(PrecheckError::RotCommunicationFailed { message: message.to_string() })
+                },
+            };
+
+            // If the active slot does not match the expected active slot, there is
+            // likely another update happening. Bail out.
+            if expected_active_slot != active {
+                return Err(PrecheckError::WrongActiveSlot {
+                    expected: *expected_active_slot, found: *active
+                })
+            }
+
             // Fetch the caboose from the currently active slot.
             let caboose = mgs_clients
             .try_all_serially(log, move |mgs_client| async move {
@@ -348,36 +378,6 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                     });
                 }
             };
-
-            let (
-                active, pending_persistent_boot_preference, transient_boot_preference
-            ) = match &state.rot {
-                RotState::V2 {
-                    active,
-                    pending_persistent_boot_preference,
-                    transient_boot_preference,
-                    ..
-                }
-                | RotState::V3 {
-                    active,
-                    pending_persistent_boot_preference,
-                    transient_boot_preference,
-                    ..
-                } => (
-                    active, pending_persistent_boot_preference, transient_boot_preference
-                ),
-                RotState::CommunicationFailed { message } => {
-                    return Err(PrecheckError::RotCommunicationFailed { message: message.to_string() })
-                },
-            };
-
-            // If the active slot does not match the expected active slot, there is
-            // likely another update happening. Bail out.
-            if expected_active_slot != active {
-                return Err(PrecheckError::WrongActiveSlot {
-                    expected: *expected_active_slot, found: *active
-                })
-            }
 
             // If transient boot is being used, the persistent preference is not going to match 
             // the active slot. At the moment, this mismatch can also mean one of the partitions
