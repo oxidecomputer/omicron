@@ -2082,8 +2082,8 @@ fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             vec![
                 ColumnValue::new("id", probe_alert_id),
                 ColumnValue::new(
-                    "alert_class",
-                    SqlEnum::from(("webhook_alert_class", "probe")),
+                    "event_class",
+                    SqlEnum::from(("webhook_event_class", "probe")),
                 ),
                 ColumnValue::new("event", serde_json::json!({})),
                 ColumnValue::new("num_dispatched", 0i64),
