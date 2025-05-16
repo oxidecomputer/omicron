@@ -4,6 +4,7 @@
 
 //! Types for representing the hardware/software inventory in the database
 
+use crate::Generation;
 use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::typed_uuid::DbTypedUuid;
@@ -24,10 +25,15 @@ use diesel::{serialize, sql_types};
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
-    inv_collection, inv_collection_error, inv_dataset, inv_nvme_disk_firmware,
-    inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
-    inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
-    inv_sled_agent, inv_zpool, sw_caboose, sw_root_of_trust_page,
+    inv_collection, inv_collection_error, inv_dataset,
+    inv_last_reconciliation_dataset_result,
+    inv_last_reconciliation_disk_result, inv_last_reconciliation_zone_result,
+    inv_nvme_disk_firmware, inv_omicron_sled_config,
+    inv_omicron_sled_config_dataset, inv_omicron_sled_config_disk,
+    inv_omicron_sled_config_zone, inv_omicron_sled_config_zone_nic,
+    inv_physical_disk, inv_root_of_trust, inv_root_of_trust_page,
+    inv_service_processor, inv_sled_agent, inv_zpool, sw_caboose,
+    sw_root_of_trust_page,
 };
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneDataset, OmicronZoneImageSource,
@@ -41,6 +47,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::MupdateOverrideKind;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolKind;
@@ -792,12 +799,61 @@ pub struct InvSledAgent {
     pub usable_hardware_threads: SqlU32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
+    // Soft foreign key to an `InvOmicronSledConfig`
+    pub ledgered_sled_config: Option<Uuid>,
+
+    // Soft foreign key to an `InvOmicronSledConfig`. May or may not be the same
+    // as `ledgered_sled_config`.
+    pub last_reconciliation_sled_config: Option<Uuid>,
+
+    #[diesel(embed)]
+    pub reconciler_status: InvConfigReconcilerStatus,
 }
 
+/// See [`nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_sled_agent)]
+pub struct InvConfigReconcilerStatus {
+    pub reconciler_status_kind: InvConfigReconcilerStatusKind,
+    // Soft foreign key to an `InvOmicronSledConfig`. May or may not be the same
+    // as either of the other sled config keys above. Only populated if
+    // `reconciler_status_kind` is `Running`.
+    pub reconciler_status_sled_config: Option<Uuid>,
+    // Interpretation varies based on `reconciler_status_kind`:
+    //
+    // * `NotYetRun` - always `None`
+    // * `Running` - `started_at` time
+    // * `Idle` - `completed_at` time
+    pub reconciler_status_timestamp: Option<DateTime<Utc>>,
+    // Interpretation varies based on `reconciler_status_kind`:
+    //
+    // * `NotYetRun` - always `None`
+    // * `Running` - `running_for` duration
+    // * `Idle` - `ran_for` duration
+    pub reconciler_status_duration_secs: Option<f64>,
+}
+
+// See [`nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus`].
+impl_enum_type!(
+    InvConfigReconcilerStatusKindEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvConfigReconcilerStatusKind;
+
+    // Enum values
+    NotYetRun => b"not-yet-run"
+    Running => b"running"
+    Idle => b"idle"
+);
+
 impl InvSledAgent {
+    /// Construct a new `InvSledAgent`.
     pub fn new_without_baseboard(
         collection_id: CollectionUuid,
         sled_agent: &nexus_types::inventory::SledAgent,
+        ledgered_sled_config: Option<Uuid>,
+        last_reconciliation_sled_config: Option<Uuid>,
+        reconciler_status: InvConfigReconcilerStatus,
     ) -> Result<InvSledAgent, anyhow::Error> {
         // It's irritating to have to check this case at runtime.  The challenge
         // is that if this sled agent does have a baseboard id, we don't know
@@ -835,9 +891,39 @@ impl InvSledAgent {
                     sled_agent.usable_physical_ram,
                 ),
                 reservoir_size: ByteCount::from(sled_agent.reservoir_size),
+                ledgered_sled_config,
+                last_reconciliation_sled_config,
+                reconciler_status,
             })
         }
     }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_last_reconciliation_disk_result)]
+pub struct InvLastReconciliationDiskResult {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub disk_id: DbTypedUuid<omicron_uuid_kinds::PhysicalDiskKind>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_last_reconciliation_dataset_result)]
+pub struct InvLastReconciliationDatasetResult {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub dataset_id: DbTypedUuid<omicron_uuid_kinds::DatasetKind>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_last_reconciliation_zone_result)]
+pub struct InvLastReconciliationZoneResult {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub zone_id: DbTypedUuid<omicron_uuid_kinds::OmicronZoneKind>,
+    pub error_message: Option<String>,
 }
 
 /// See [`nexus_types::inventory::PhysicalDisk`].
@@ -1159,37 +1245,17 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
     }
 }
 
-/*
-/// Information about a sled's Omicron zones, part of
-/// [`nexus_types::inventory::SledAgent`].
-///
-/// TODO: This table is vestigial and can be combined with `InvSledAgent`. See
-/// [issue #6770](https://github.com/oxidecomputer/omicron/issues/6770).
+/// Top-level information contained in an
+/// [`nexus_sled_agent_shared::inventory::OmicronSledConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
-#[diesel(table_name = inv_sled_omicron_zones)]
-pub struct InvSledOmicronZones {
+#[diesel(table_name = inv_omicron_sled_config)]
+pub struct InvOmicronSledConfig {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub time_collected: DateTime<Utc>,
-    pub source: String,
     pub sled_id: DbTypedUuid<SledKind>,
+    pub id: Uuid,
     pub generation: Generation,
+    pub remove_mupdate_override: DbTypedUuid<MupdateOverrideKind>,
 }
-
-impl InvSledOmicronZones {
-    pub fn new(
-        inv_collection_id: CollectionUuid,
-        sled_agent: &nexus_types::inventory::SledAgent,
-    ) -> InvSledOmicronZones {
-        InvSledOmicronZones {
-            inv_collection_id: inv_collection_id.into(),
-            time_collected: sled_agent.time_collected,
-            source: sled_agent.source.clone(),
-            sled_id: sled_agent.sled_id.into(),
-            generation: Generation(sled_agent.omicron_zones.generation),
-        }
-    }
-}
-*/
 
 impl_enum_type!(
     ZoneTypeEnum:
@@ -1272,11 +1338,43 @@ impl From<nexus_sled_agent_shared::inventory::ZoneKind> for ZoneType {
     }
 }
 
+/// See [`omicron_common::disk::OmicronPhysicalDiskConfig`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_omicron_sled_config_disk)]
+pub struct InvOmicronSledConfigDisk {
+    pub sled_config_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<omicron_uuid_kinds::PhysicalDiskKind>,
+
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+
+    pub pool_id: Uuid,
+}
+
+/// See [`omicron_common::disk::DatasetConfig`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_omicron_sled_config_dataset)]
+pub struct InvOmicronSledConfigDataset {
+    pub sled_config_id: Uuid,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: DbTypedUuid<omicron_uuid_kinds::DatasetKind>,
+
+    pub pool_id: DbTypedUuid<ZpoolKind>,
+    pub kind: crate::DatasetKind,
+    zone_name: Option<String>,
+
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: String,
+}
+
 /// See [`nexus_sled_agent_shared::inventory::OmicronZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
-#[diesel(table_name = inv_omicron_zone)]
-pub struct InvOmicronZone {
-    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+#[diesel(table_name = inv_omicron_sled_config_zone)]
+pub struct InvOmicronSledConfigZone {
+    pub sled_config_id: Uuid,
     pub sled_id: DbTypedUuid<SledKind>,
     pub id: DbTypedUuid<OmicronZoneKind>,
     pub zone_type: ZoneType,
@@ -1299,18 +1397,18 @@ pub struct InvOmicronZone {
     pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
 }
 
-impl InvOmicronZone {
+impl InvOmicronSledConfigZone {
     pub fn new(
-        inv_collection_id: CollectionUuid,
+        sled_config_id: Uuid,
         sled_id: SledUuid,
         zone: &OmicronZoneConfig,
-    ) -> Result<InvOmicronZone, anyhow::Error> {
+    ) -> Result<InvOmicronSledConfigZone, anyhow::Error> {
         // Create a dummy record to start, then fill in the rest
         // according to the zone type
-        let mut inv_omicron_zone = InvOmicronZone {
+        let mut inv_omicron_zone = InvOmicronSledConfigZone {
             // Fill in the known fields that don't require inspecting
             // `zone.zone_type`
-            inv_collection_id: inv_collection_id.into(),
+            sled_config_id,
             sled_id: sled_id.into(),
             id: zone.id.into(),
             filesystem_pool: zone
@@ -1488,7 +1586,7 @@ impl InvOmicronZone {
 
     pub fn into_omicron_zone_config(
         self,
-        nic_row: Option<InvOmicronZoneNic>,
+        nic_row: Option<InvOmicronSledConfigZoneNic>,
     ) -> Result<OmicronZoneConfig, anyhow::Error> {
         // Build up a set of common fields for our `OmicronZoneType`s
         //
@@ -1638,9 +1736,9 @@ impl InvOmicronZone {
 }
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
-#[diesel(table_name = inv_omicron_zone_nic)]
-pub struct InvOmicronZoneNic {
-    inv_collection_id: DbTypedUuid<CollectionKind>,
+#[diesel(table_name = inv_omicron_sled_config_zone_nic)]
+pub struct InvOmicronSledConfigZoneNic {
+    sled_config_id: Uuid,
     pub id: Uuid,
     name: Name,
     ip: IpNetwork,
@@ -1651,8 +1749,8 @@ pub struct InvOmicronZoneNic {
     slot: SqlU8,
 }
 
-impl From<InvOmicronZoneNic> for OmicronZoneNic {
-    fn from(value: InvOmicronZoneNic) -> Self {
+impl From<InvOmicronSledConfigZoneNic> for OmicronZoneNic {
+    fn from(value: InvOmicronSledConfigZoneNic) -> Self {
         OmicronZoneNic {
             id: value.id,
             name: value.name,
@@ -1666,17 +1764,17 @@ impl From<InvOmicronZoneNic> for OmicronZoneNic {
     }
 }
 
-impl InvOmicronZoneNic {
+impl InvOmicronSledConfigZoneNic {
     pub fn new(
-        inv_collection_id: CollectionUuid,
+        sled_config_id: Uuid,
         zone: &OmicronZoneConfig,
-    ) -> Result<Option<InvOmicronZoneNic>, anyhow::Error> {
+    ) -> Result<Option<InvOmicronSledConfigZoneNic>, anyhow::Error> {
         let Some(nic) = zone.zone_type.service_vnic() else {
             return Ok(None);
         };
         let nic = OmicronZoneNic::new(zone.id, nic)?;
         Ok(Some(Self {
-            inv_collection_id: inv_collection_id.into(),
+            sled_config_id,
             id: nic.id,
             name: nic.name,
             ip: nic.ip,
