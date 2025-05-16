@@ -175,11 +175,8 @@ impl CurrentlyManagedZpoolsReceiver {
 
         let zpool_futs =
             current_zpools.0.iter().map(|&zpool_name| async move {
-                let info_result = tokio::task::spawn_blocking(move || {
-                    Zpool::get_info(&zpool_name.to_string())
-                })
-                .await
-                .expect("task did not panic");
+                let info_result =
+                    Zpool::get_info(&zpool_name.to_string()).await;
 
                 (zpool_name, info_result)
             });
