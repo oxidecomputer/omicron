@@ -544,7 +544,7 @@ impl ZoneCount {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{NaiveDateTime, TimeZone, Utc};
+    use chrono::{DateTime, Utc};
     use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -590,8 +590,7 @@ mod tests {
                 .build();
 
         // Define a time_created for consistent output across runs.
-        blueprint.time_created =
-            Utc.from_utc_datetime(&NaiveDateTime::UNIX_EPOCH);
+        blueprint.time_created = DateTime::<Utc>::UNIX_EPOCH;
 
         expectorate::assert_contents(
             "tests/output/example_builder_zone_counts_blueprint.txt",
