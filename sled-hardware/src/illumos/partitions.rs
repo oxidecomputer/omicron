@@ -141,7 +141,7 @@ fn parse_partition_types<const N: usize>(
 ///
 /// Returns a Vec of partitions on success. The index of the Vec is guaranteed
 /// to also be the index of the partition.
-pub fn ensure_partition_layout(
+pub async fn ensure_partition_layout(
     log: &Logger,
     paths: &DiskPaths,
     variant: DiskVariant,
@@ -156,11 +156,12 @@ pub fn ensure_partition_layout(
         identity,
         zpool_id,
     )
+    .await
 }
 
 // Same as the [ensure_partition_layout], but with generic parameters
 // for access to external resources.
-fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
+async fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
     log: &Logger,
     zpool_api: &dyn illumos_utils::zpool::Api,
     paths: &DiskPaths,
@@ -176,13 +177,19 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
     let devfs_path_str = paths.devfs_path.as_str().to_string();
     let log = log.new(slog::o!("path" => devfs_path_str));
 
-    let gpt = match GPT::read(&path) {
+    // The GPT returned from "GPT::read" is "!Send", so it must not live across
+    // any await points.
+    let err = match GPT::read(&path) {
         Ok(gpt) => {
             // This should be the common steady-state case
             info!(log, "Disk already has a GPT");
-            gpt
+            return read_partitions(gpt, &path, variant);
         }
-        Err(libefi_illumos::Error::LabelNotFound) => {
+        Err(err) => err,
+    };
+
+    match err {
+        libefi_illumos::Error::LabelNotFound => {
             // Fresh U.2 disks are an example of devices where "we don't expect
             // a GPT to exist".
             info!(log, "Disk does not have a GPT");
@@ -214,7 +221,7 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
 
                     // If a zpool does not already exist, create one.
                     let zpool_name = ZpoolName::new_external(zpool_id);
-                    zpool_api.create(&zpool_name, dev_path)?;
+                    zpool_api.create(&zpool_name, dev_path).await?;
                     return Ok(vec![Partition::ZfsPool]);
                 }
                 DiskVariant::M2 => {
@@ -226,13 +233,20 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
                 }
             }
         }
-        Err(err) => {
+        err => {
             return Err(PooledDiskError::Gpt {
                 path,
                 error: anyhow::Error::new(err),
             });
         }
     };
+}
+
+fn read_partitions<GPT: gpt::LibEfiGpt>(
+    gpt: GPT,
+    path: &Utf8Path,
+    variant: DiskVariant,
+) -> Result<Vec<Partition>, PooledDiskError> {
     let mut partitions: Vec<_> = gpt.partitions();
     match variant {
         DiskVariant::U2 => {
@@ -386,8 +400,8 @@ mod test {
         }
     }
 
-    #[test]
-    fn ensure_partition_layout_u2_no_format_without_dev_path() {
+    #[tokio::test]
+    async fn ensure_partition_layout_u2_no_format_without_dev_path() {
         let logctx = test_setup_log(
             "ensure_partition_layout_u2_no_format_without_dev_path",
         );
@@ -401,7 +415,8 @@ mod test {
             DiskVariant::U2,
             &mock_disk_identity(),
             None,
-        );
+        )
+        .await;
         match result {
             Err(PooledDiskError::CannotFormatMissingDevPath { .. }) => {}
             _ => panic!("Should have failed with a missing dev path error"),
@@ -410,8 +425,8 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    #[test]
-    fn ensure_partition_layout_u2_format_with_dev_path() {
+    #[tokio::test]
+    async fn ensure_partition_layout_u2_format_with_dev_path() {
         let logctx =
             test_setup_log("ensure_partition_layout_u2_format_with_dev_path");
         let log = &logctx.log;
@@ -430,6 +445,7 @@ mod test {
             &mock_disk_identity(),
             Some(ZpoolUuid::new_v4()),
         )
+        .await
         .expect("Should have succeeded partitioning disk");
 
         assert_eq!(partitions.len(), U2_EXPECTED_PARTITION_COUNT);
@@ -438,8 +454,8 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    #[test]
-    fn ensure_partition_layout_m2_cannot_format() {
+    #[tokio::test]
+    async fn ensure_partition_layout_m2_cannot_format() {
         let logctx = test_setup_log("ensure_partition_layout_m2_cannot_format");
         let log = &logctx.log.clone();
 
@@ -458,6 +474,7 @@ mod test {
                 &mock_disk_identity(),
                 None,
             )
+            .await
             .is_err()
         );
 
@@ -479,8 +496,8 @@ mod test {
         }
     }
 
-    #[test]
-    fn ensure_partition_layout_u2_with_expected_format() {
+    #[tokio::test]
+    async fn ensure_partition_layout_u2_with_expected_format() {
         let logctx =
             test_setup_log("ensure_partition_layout_u2_with_expected_format");
         let log = &logctx.log;
@@ -499,6 +516,7 @@ mod test {
             &mock_disk_identity(),
             None,
         )
+        .await
         .expect("Should be able to parse disk");
 
         assert_eq!(partitions.len(), U2_EXPECTED_PARTITION_COUNT);
@@ -524,8 +542,8 @@ mod test {
         }
     }
 
-    #[test]
-    fn ensure_partition_layout_m2_with_expected_format() {
+    #[tokio::test]
+    async fn ensure_partition_layout_m2_with_expected_format() {
         let logctx =
             test_setup_log("ensure_partition_layout_m2_with_expected_format");
         let log = &logctx.log;
@@ -544,6 +562,7 @@ mod test {
             &mock_disk_identity(),
             None,
         )
+        .await
         .expect("Should be able to parse disk");
 
         assert_eq!(partitions.len(), M2_EXPECTED_PARTITION_COUNT);
@@ -565,8 +584,8 @@ mod test {
         }
     }
 
-    #[test]
-    fn ensure_partition_layout_m2_fails_with_empty_gpt() {
+    #[tokio::test]
+    async fn ensure_partition_layout_m2_fails_with_empty_gpt() {
         let logctx =
             test_setup_log("ensure_partition_layout_m2_fails_with_empty_gpt");
         let log = &logctx.log;
@@ -586,6 +605,7 @@ mod test {
                 &mock_disk_identity(),
                 None,
             )
+            .await
             .expect_err("Should have failed parsing empty GPT"),
             PooledDiskError::BadPartitionLayout { .. }
         ));
@@ -593,8 +613,8 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    #[test]
-    fn ensure_partition_layout_u2_fails_with_empty_gpt() {
+    #[tokio::test]
+    async fn ensure_partition_layout_u2_fails_with_empty_gpt() {
         let logctx =
             test_setup_log("ensure_partition_layout_u2_fails_with_empty_gpt");
         let log = &logctx.log;
@@ -614,6 +634,7 @@ mod test {
                 &mock_disk_identity(),
                 None,
             )
+            .await
             .expect_err("Should have failed parsing empty GPT"),
             PooledDiskError::BadPartitionLayout { .. }
         ));

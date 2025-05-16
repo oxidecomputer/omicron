@@ -1081,41 +1081,12 @@ impl ZfsImpl for RealZfs {
         &self,
         args: DatasetEnsureArgs<'_>,
     ) -> Result<(), DatasetEnsureError> {
-        // Unpack `args` so we can clone `name` so we can move it into the
-        // closure below so that we can safely use `spawn_blocking`. We could
-        // also consider changing `DatasetEnsureArgs` to hold a `String` instead
-        // of a `&str`...
-        let DatasetEnsureArgs {
-            name,
-            mountpoint,
-            can_mount,
-            zoned,
-            encryption_details,
-            size_details,
-            id,
-            additional_options,
-        } = args;
-        let name = name.to_owned();
-        let full_name = name.clone();
-
-        tokio::task::spawn_blocking(move || {
-            let args = DatasetEnsureArgs {
-                name: &name,
-                mountpoint,
-                can_mount,
-                zoned,
-                encryption_details,
-                size_details,
-                id,
-                additional_options,
-            };
-            Zfs::ensure_dataset(args)
-        })
-        .await
-        .expect("blocking closure did not panic")
-        .map_err(|err| DatasetEnsureError::EnsureFailed {
-            name: full_name,
-            err,
+        let full_name = args.name;
+        Zfs::ensure_dataset(args).await.map_err(|err| {
+            DatasetEnsureError::EnsureFailed {
+                name: full_name.to_string(),
+                err,
+            }
         })
     }
 
@@ -1125,21 +1096,16 @@ impl ZfsImpl for RealZfs {
         mountpoint: Mountpoint,
     ) -> Result<(), NestedDatasetMountError> {
         let name_cloned = name.clone();
-        tokio::task::spawn_blocking(move || {
-            Zfs::ensure_dataset_mounted_and_exists(&name_cloned, &mountpoint)
-        })
-        .await
-        .expect("blocking closure did not panic")
-        .map_err(|err| NestedDatasetMountError::MountFailed { name, err })
+        Zfs::ensure_dataset_mounted_and_exists(&name_cloned, &mountpoint)
+            .await
+            .map_err(|err| NestedDatasetMountError::MountFailed { name, err })
     }
 
     async fn destroy_dataset(
         &self,
         name: String,
     ) -> Result<(), DestroyDatasetError> {
-        tokio::task::spawn_blocking(move || Zfs::destroy_dataset(&name))
-            .await
-            .expect("blocking closure did not panic")
+        Zfs::destroy_dataset(&name).await
     }
 
     async fn get_dataset_properties(
@@ -1148,11 +1114,7 @@ impl ZfsImpl for RealZfs {
         which: WhichDatasets,
     ) -> anyhow::Result<Vec<DatasetProperties>> {
         let datasets = datasets.to_vec();
-        tokio::task::spawn_blocking(move || {
-            Zfs::get_dataset_properties(&datasets, which)
-        })
-        .await
-        .expect("blocking closure did not panic")
+        Zfs::get_dataset_properties(&datasets, which).await
     }
 }
 
@@ -2116,7 +2078,17 @@ mod illumos_tests {
                     "Attempting automated cleanup of {}",
                     vdev_dir.path(),
                 );
-                self.cleanup();
+
+                // NOTE: There is an assertion in RealZfsTestHarness::new
+                // which should make this a safe invocation to call.
+                //
+                // Blocking the calling thread like this isn't ideal, but
+                // the scope is limited to "tests which are failing anyway".
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async move {
+                        self.cleanup().await;
+                    });
+                });
             }
         }
     }
@@ -2125,6 +2097,12 @@ mod illumos_tests {
         pub const DEFAULT_VDEV_SIZE: u64 = 64 * (1 << 20);
 
         fn new(log: Logger) -> Self {
+            assert_eq!(
+                tokio::runtime::Handle::current().runtime_flavor(),
+                tokio::runtime::RuntimeFlavor::MultiThread,
+                "RealZfsTestHarness requires a multi-threaded runtime to ensure deletion on drop"
+            );
+
             let vdev_dir =
                 Utf8TempDir::new_in("/var/tmp").expect("created tempdir");
 
@@ -2213,7 +2191,7 @@ mod illumos_tests {
             zpool
         }
 
-        fn cleanup(&mut self) {
+        async fn cleanup(&mut self) {
             let Some(vdev_dir) = self.vdev_dir.take() else {
                 // Already terminated
                 return;
@@ -2223,7 +2201,7 @@ mod illumos_tests {
 
             for pool in self.currently_managed_zpools_tx.borrow().iter() {
                 eprintln!("destroying pool: {pool}");
-                if let Err(err) = Zpool::destroy(&pool) {
+                if let Err(err) = Zpool::destroy(&pool).await {
                     eprintln!(
                         "failed to destroy {pool}: {}",
                         InlineErrorChain::new(&err)
@@ -2263,7 +2241,7 @@ mod illumos_tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn ensure_datasets() {
         let logctx = dev::test_setup_log("ensure_datasets");
         let mut harness = RealZfsTestHarness::new(logctx.log.clone());
@@ -2307,7 +2285,7 @@ mod illumos_tests {
             DatasetState::Ensured
         );
 
-        harness.cleanup();
+        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -2335,7 +2313,7 @@ mod illumos_tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn ensure_datasets_get_mounted() {
         let logctx = dev::test_setup_log("ensure_datasets_get_mounted");
         let mut harness = RealZfsTestHarness::new(logctx.log.clone());
@@ -2391,11 +2369,11 @@ mod illumos_tests {
         // ... and doing so mounts the dataset again.
         assert!(is_mounted(name).await);
 
-        harness.cleanup();
+        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn ensure_datasets_get_mounted_even_with_data() {
         let logctx =
             dev::test_setup_log("ensure_datasets_get_mounted_even_with_data");
@@ -2479,11 +2457,11 @@ mod illumos_tests {
             "err: {err}"
         );
 
-        harness.cleanup();
+        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn ensure_many_datasets() {
         let logctx = dev::test_setup_log("ensure_many_datasets");
         let mut harness = RealZfsTestHarness::new(logctx.log.clone());
@@ -2533,11 +2511,11 @@ mod illumos_tests {
             assert_matches!(result.state, DatasetState::Ensured);
         }
 
-        harness.cleanup();
+        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn nested_dataset() {
         let logctx = dev::test_setup_log("nested_dataset");
 
@@ -2689,7 +2667,7 @@ mod illumos_tests {
             .expect("no error listing datasets");
         assert_eq!(nested_datasets.len(), 0);
 
-        harness.cleanup();
+        harness.cleanup().await;
         logctx.cleanup_successful();
     }
 }

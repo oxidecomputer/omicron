@@ -290,7 +290,8 @@ async fn long_running_generate_config_task(
                     generation_tx.clone(),
                     clickward,
                     node_settings,
-                );
+                )
+                .await;
                 if let Err(e) = response.send(result) {
                     error!(
                         &log,
@@ -324,7 +325,7 @@ impl NodeSettings {
     }
 }
 
-fn generate_config_and_enable_svc(
+async fn generate_config_and_enable_svc(
     generation_tx: watch::Sender<Option<Generation>>,
     clickward: Clickward,
     node_settings: NodeSettings,
@@ -364,7 +365,7 @@ fn generate_config_and_enable_svc(
     generation_tx.send_replace(Some(incoming_generation));
 
     // Once we have generated the client we can safely enable the clickhouse_server service
-    Svcadm::enable_service(node_settings.fmri())?;
+    Svcadm::enable_service(node_settings.fmri()).await?;
 
     Ok(output)
 }
