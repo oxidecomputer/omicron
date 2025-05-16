@@ -6,7 +6,8 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
-const DEFAULT_MAX_PARALLELISM: usize = 16;
+/// The default number of parallel tasks used by [ParallelTaskSet].
+pub const DEFAULT_MAX_PARALLELISM: usize = 16;
 
 /// A collection of tokio tasks which execute in parallel on distinct tokio
 /// tasks, up to a user-specified maximum amount of parallelism.
@@ -34,11 +35,24 @@ pub struct ParallelTaskSet<T> {
     set: JoinSet<T>,
 }
 
+impl<T: 'static + Send> Default for ParallelTaskSet<T> {
+    fn default() -> Self {
+        ParallelTaskSet::new()
+    }
+}
+
 impl<T: 'static + Send> ParallelTaskSet<T> {
+    /// Creates a new [ParallelTaskSet], with [DEFAULT_MAX_PARALLELISM] as the
+    /// maximum number of tasks to run in parallel.
+    ///
+    /// If a different amount of parallism is desired, refer to:
+    /// [Self::new_with_parallelism].
     pub fn new() -> ParallelTaskSet<T> {
         Self::new_with_parallelism(DEFAULT_MAX_PARALLELISM)
     }
 
+    /// Creates a new [ParallelTaskSet], with `max_parallism` as the
+    /// maximum number of tasks to run in parallel.
     pub fn new_with_parallelism(max_parallism: usize) -> ParallelTaskSet<T> {
         let semaphore = Arc::new(Semaphore::new(max_parallism));
         let set = JoinSet::new();
