@@ -2198,14 +2198,67 @@ fn after_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-// TODO, obviously
+fn before_145_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Create one console_session without id, and one device_access_token without id.
+        ctx.client
+            .batch_execute(
+                "
+        INSERT INTO omicron.public.console_session
+          (token, time_created, time_last_used, silo_user_id)
+        VALUES
+          ('tok-console-145', now(), now(), gen_random_uuid());
 
-fn before_142_0_0<'a>(_ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {})
+        INSERT INTO omicron.public.device_access_token
+          (token, client_id, device_code, silo_user_id, time_created, time_requested)
+        VALUES
+          ('tok-device-145', gen_random_uuid(), 'code-145', gen_random_uuid(), now(), now());
+        ",
+            )
+            .await
+            .expect("failed to insert pre-migration rows for 145");
+    })
 }
 
-fn after_142_0_0<'a>(_ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {})
+fn after_145_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // After the migration each row should have a non-null id,
+        // keep its token, and enforce primary-key/unique index.
+
+        // console_session: check id ≠ NULL and token unchanged
+        let rows = ctx
+            .client
+            .query(
+                "SELECT id, token FROM omicron.public.console_session WHERE token = 'tok-console-145';",
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration console_session");
+        assert_eq!(rows.len(), 1);
+
+        let id: Option<Uuid> = (&rows[0]).get("id");
+        assert!(id.is_some());
+
+        let token: &str = (&rows[0]).get("token");
+        assert_eq!(token, "tok-console-145");
+
+        // device_access_token: same checks
+        let rows = ctx
+            .client
+            .query(
+                "SELECT id, token FROM omicron.public.device_access_token WHERE token = 'tok-device-145';",
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration device_access_token");
+        assert_eq!(rows.len(), 1);
+
+        let id: Option<Uuid> = (&rows[0]).get("id");
+        assert!(id.is_some());
+
+        let token: &str = (&rows[0]).get("token");
+        assert_eq!(token, "tok-device-145",);
+    })
 }
 
 // Lazily initializes all migration checks. The combination of Rust function
