@@ -394,7 +394,7 @@ impl AlertSubscription {
             Ok(())
         } else {
             Err(anyhow::anyhow!(
-                "webhook subscription {s:?} does not match the pattern {}",
+                "alert subscription {s:?} does not match the pattern {}",
                 AlertSubscription::PATTERN
             ))
         }
