@@ -387,7 +387,7 @@ impl AlertSubscription {
         static REGEX: std::sync::LazyLock<regex::Regex> =
             std::sync::LazyLock::new(|| {
                 regex::Regex::new(AlertSubscription::PATTERN).expect(
-                    "WebhookSubscription validation regex should be valid",
+                    "AlertSubscription validation regex should be valid",
                 )
             });
         if REGEX.is_match(s) {
