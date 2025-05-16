@@ -4796,6 +4796,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "http",
+ "id-map",
  "illumos-utils",
  "installinator-client",
  "installinator-common",
