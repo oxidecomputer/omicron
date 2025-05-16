@@ -377,25 +377,25 @@ impl JsonSchema for SwitchLinkState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
-pub struct WebhookSubscription(String);
+pub struct AlertSubscription(String);
 
-impl WebhookSubscription {
+impl AlertSubscription {
     const PATTERN: &str =
         r"^([a-zA-Z0-9_]+|\*|\*\*)(\.([a-zA-Z0-9_]+|\*|\*\*))*$";
 
     fn is_valid(s: &str) -> Result<(), anyhow::Error> {
         static REGEX: std::sync::LazyLock<regex::Regex> =
             std::sync::LazyLock::new(|| {
-                regex::Regex::new(WebhookSubscription::PATTERN).expect(
-                    "WebhookSubscription validation regex should be valid",
+                regex::Regex::new(AlertSubscription::PATTERN).expect(
+                    "AlertSubscription validation regex should be valid",
                 )
             });
         if REGEX.is_match(s) {
             Ok(())
         } else {
             Err(anyhow::anyhow!(
-                "webhook subscription {s:?} does not match the pattern {}",
-                WebhookSubscription::PATTERN
+                "alert subscription {s:?} does not match the pattern {}",
+                AlertSubscription::PATTERN
             ))
         }
     }
@@ -406,7 +406,7 @@ impl WebhookSubscription {
     }
 }
 
-impl TryFrom<String> for WebhookSubscription {
+impl TryFrom<String> for AlertSubscription {
     type Error = anyhow::Error;
     fn try_from(s: String) -> Result<Self, Self::Error> {
         Self::is_valid(&s)?;
@@ -414,7 +414,7 @@ impl TryFrom<String> for WebhookSubscription {
     }
 }
 
-impl std::str::FromStr for WebhookSubscription {
+impl std::str::FromStr for AlertSubscription {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::is_valid(s)?;
@@ -422,21 +422,21 @@ impl std::str::FromStr for WebhookSubscription {
     }
 }
 
-impl From<WebhookSubscription> for String {
-    fn from(WebhookSubscription(s): WebhookSubscription) -> Self {
+impl From<AlertSubscription> for String {
+    fn from(AlertSubscription(s): AlertSubscription) -> Self {
         s
     }
 }
 
-impl AsRef<str> for WebhookSubscription {
+impl AsRef<str> for AlertSubscription {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
 }
 
-impl JsonSchema for WebhookSubscription {
+impl JsonSchema for AlertSubscription {
     fn schema_name() -> String {
-        "WebhookSubscription".to_string()
+        "AlertSubscription".to_string()
     }
 
     fn json_schema(
@@ -455,7 +455,7 @@ impl JsonSchema for WebhookSubscription {
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: None,
                 min_length: None,
-                pattern: Some(WebhookSubscription::PATTERN.to_string()),
+                pattern: Some(AlertSubscription::PATTERN.to_string()),
             })),
             ..Default::default()
         }
@@ -463,7 +463,7 @@ impl JsonSchema for WebhookSubscription {
     }
 }
 
-impl std::fmt::Display for WebhookSubscription {
+impl std::fmt::Display for AlertSubscription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
@@ -471,9 +471,9 @@ impl std::fmt::Display for WebhookSubscription {
 
 #[cfg(test)]
 mod test {
+    use super::AlertSubscription;
     use super::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
     use super::Policy;
-    use super::WebhookSubscription;
     use serde::Deserialize;
 
     #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -550,7 +550,7 @@ mod test {
             "foo.[barbaz]",
         ];
         for s in successes {
-            match s.parse::<WebhookSubscription>() {
+            match s.parse::<AlertSubscription>() {
                 Ok(_) => {}
                 Err(e) => panic!(
                     "expected string {s:?} to be a valid webhook subscription: {e}"
@@ -559,7 +559,7 @@ mod test {
         }
 
         for s in failures {
-            match s.parse::<WebhookSubscription>() {
+            match s.parse::<AlertSubscription>() {
                 Ok(_) => panic!(
                     "expected string {s:?} to NOT be a valid webhook subscription"
                 ),

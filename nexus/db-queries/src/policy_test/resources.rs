@@ -74,7 +74,7 @@ pub async fn make_resources(
     builder.new_resource(authz::INVENTORY);
     builder.new_resource(authz::IP_POOL_LIST);
     builder.new_resource(authz::TARGET_RELEASE_CONFIG);
-    builder.new_resource(authz::WEBHOOK_EVENT_CLASS_LIST);
+    builder.new_resource(authz::ALERT_CLASS_LIST);
 
     // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
@@ -172,12 +172,12 @@ pub async fn make_resources(
         LookupType::ById(loopback_address_id.into_untyped_uuid()),
     ));
 
-    let webhook_event_id =
+    let webhook_alert_id =
         "31cb17da-4164-4cbf-b9a3-b3e4a687c08b".parse().unwrap();
-    builder.new_resource(authz::WebhookEvent::new(
+    builder.new_resource(authz::Alert::new(
         authz::FLEET,
-        webhook_event_id,
-        LookupType::ById(webhook_event_id.into_untyped_uuid()),
+        webhook_alert_id,
+        LookupType::ById(webhook_alert_id.into_untyped_uuid()),
     ));
 
     make_webhook_rx(&mut builder).await;
@@ -403,9 +403,9 @@ async fn make_project(
 /// very miniscule hierarchy (a secret).
 async fn make_webhook_rx(builder: &mut ResourceBuilder<'_>) {
     let rx_name = "webhooked-on-phonics";
-    let webhook_rx = authz::WebhookReceiver::new(
+    let webhook_rx = authz::AlertReceiver::new(
         authz::FLEET,
-        omicron_uuid_kinds::WebhookReceiverUuid::new_v4(),
+        omicron_uuid_kinds::AlertReceiverUuid::new_v4(),
         LookupType::ByName(rx_name.to_string()),
     );
     builder.new_resource(webhook_rx.clone());

@@ -23,6 +23,7 @@ use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
 use crate::helpers::display_option_blank;
+use alert::AlertArgs;
 use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -169,11 +170,9 @@ use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 use uuid::Uuid;
-use webhook::WebhookArgs;
-use webhook::cmd_db_webhook;
 
+mod alert;
 mod saga;
-mod webhook;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
@@ -387,8 +386,8 @@ enum DbCommands {
     Vmms(VmmListArgs),
     /// Print information about the oximeter collector.
     Oximeter(OximeterArgs),
-    /// Print information about webhooks
-    Webhook(WebhookArgs),
+    /// Print information about alerts
+    Alert(AlertArgs),
     /// Commands for querying and interacting with pools
     Zpool(ZpoolArgs),
 }
@@ -1467,7 +1466,7 @@ impl DbArgs {
                         command: OximeterCommands::ListProducers
                     }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
 
-                    DbCommands::Webhook(args) => cmd_db_webhook(&opctx, &datastore, &fetch_opts, &args).await,
+                    DbCommands::Alert(args) => alert::cmd_db_alert(&opctx, &datastore, &fetch_opts, &args).await,
                     DbCommands::Zpool(ZpoolArgs {
                         command: ZpoolCommands::List(args)
                     }) => cmd_db_zpool_list(&opctx, &datastore, &args).await,

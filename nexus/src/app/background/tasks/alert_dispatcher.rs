@@ -4,7 +4,7 @@
 
 //! Background task that dispatches queued webhook events to receivers.
 //!
-//! This task reads un-dispatched webhook events from the [`WebhookEvent`]
+//! This task reads un-dispatched webhook events from the [`Alert`]
 //! table, determines which webhook receivers are subscribed to those events,
 //! and constructs the event payload for those receivers.  It then inserts new
 //! records into the [`WebhookDelivery`] table for those deliveries, which are
@@ -18,16 +18,16 @@
 //! and how they fit together, refer to the comments in the [`app::webhook`]
 //! module.
 //!
-//! [`WebhookEvent`]: nexus_db_model::WebhookEvent
+//! [`Alert`]: nexus_db_model::Alert
 //! [`webhook_deliverator`]: super::webhook_deliverator
 //! [`app::webhook`]: crate::app::webhook
 
 use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
+use nexus_db_model::AlertDeliveryTrigger;
 use nexus_db_model::SCHEMA_VERSION;
 use nexus_db_model::WebhookDelivery;
-use nexus_db_model::WebhookDeliveryTrigger;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
@@ -35,24 +35,24 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::{
-    WebhookDispatched, WebhookDispatcherStatus, WebhookGlobStatus,
+    AlertDispatched, AlertDispatcherStatus, AlertGlobStatus,
 };
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use std::sync::Arc;
 
-pub struct WebhookDispatcher {
+pub struct AlertDispatcher {
     datastore: Arc<DataStore>,
     deliverator: Activator,
 }
 
-impl BackgroundTask for WebhookDispatcher {
+impl BackgroundTask for AlertDispatcher {
     fn activate<'a>(
         &'a mut self,
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
-            let mut status = WebhookDispatcherStatus {
+            let mut status = AlertDispatcherStatus {
                 globs_reprocessed: Default::default(),
                 glob_version: SCHEMA_VERSION,
                 dispatched: Vec::new(),
@@ -113,7 +113,7 @@ impl BackgroundTask for WebhookDispatcher {
     }
 }
 
-impl WebhookDispatcher {
+impl AlertDispatcher {
     pub fn new(datastore: Arc<DataStore>, deliverator: Activator) -> Self {
         Self { datastore, deliverator }
     }
@@ -121,7 +121,7 @@ impl WebhookDispatcher {
     async fn actually_activate(
         &mut self,
         opctx: &OpContext,
-        status: &mut WebhookDispatcherStatus,
+        status: &mut AlertDispatcherStatus,
     ) -> Result<(), Error> {
         // Before dispatching any events, ensure that all webhook globs are up
         // to date with the current schema version. This has to be done before
@@ -136,7 +136,7 @@ impl WebhookDispatcher {
         while let Some(p) = paginator.next() {
             let batch = self
                 .datastore
-                .webhook_glob_list_reprocessable(opctx, &p.current_pagparams())
+                .alert_glob_list_reprocessable(opctx, &p.current_pagparams())
                 .await
                 .map_err(|e| {
                     e.internal_context("failed to list outdated webhook globs")
@@ -154,7 +154,7 @@ impl WebhookDispatcher {
             for glob in batch {
                 let result = self
                     .datastore
-                    .webhook_glob_reprocess(opctx, &glob)
+                    .alert_glob_reprocess(opctx, &glob)
                     .await
                     .map_err(|e| {
                         globs_failed += 1;
@@ -169,10 +169,10 @@ impl WebhookDispatcher {
                         e.to_string()
                     })
                     .inspect(|status| match status {
-                        WebhookGlobStatus::Reprocessed { .. } => {
+                        AlertGlobStatus::Reprocessed { .. } => {
                             globs_reprocessed += 1
                         }
-                        WebhookGlobStatus::AlreadyReprocessed => {
+                        AlertGlobStatus::AlreadyReprocessed => {
                             globs_already_reprocessed += 1
                         }
                     });
@@ -203,38 +203,38 @@ impl WebhookDispatcher {
         // Select the next event that has yet to be dispatched in order of
         // creation, until there are none left in need of dispatching.
         while let Some(event) =
-            self.datastore.webhook_event_select_next_for_dispatch(opctx).await?
+            self.datastore.alert_select_next_for_dispatch(opctx).await?
         {
             slog::trace!(
                 &opctx.log,
                 "dispatching webhook event...";
-                "event_id" => ?event.id(),
-                "event_class" => %event.event_class,
+                "alert_id" => ?event.id(),
+                "alert_class" => %event.class,
             );
 
             // Okay, we found an event that needs to be dispatched. Next, get
-            // list the webhook receivers subscribed to this event class and
+            // list the alert receivers subscribed to this event class and
             // create delivery records for them.
             let rxs = match self
                 .datastore
-                .webhook_rx_list_subscribed_to_event(&opctx, event.event_class)
+                .alert_rx_list_subscribed_to_event(&opctx, event.class)
                 .await
             {
                 Ok(rxs) => rxs,
                 Err(error) => {
                     const MSG: &str =
-                        "failed to list webhook receivers subscribed to event";
+                        "failed to list alert receivers subscribed to event";
                     slog::error!(
                         &opctx.log,
                         "{MSG}";
-                        "event_id" => ?event.id(),
-                        "event_class" => %event.event_class,
+                        "alert_id" => ?event.id(),
+                        "alert_class" => %event.class,
                         "error" => &error,
                     );
                     status.errors.push(format!(
                         "{MSG} {} ({}): {error}",
                         event.id(),
-                        event.event_class
+                        event.class
                     ));
                     // We weren't able to find receivers for this event, so
                     // *don't* mark it as dispatched --- it's someone else's
@@ -246,24 +246,24 @@ impl WebhookDispatcher {
             let deliveries: Vec<WebhookDelivery> = rxs
                 .into_iter()
                 .map(|(rx, sub)| {
-                    // NOTE: In the future, if we add support for webhook receivers
+                    // NOTE: In the future, if we add support for alert receivers
                     // with roles other than 'fleet.viewer' (as described in
                     // https://rfd.shared.oxide.computer/rfd/538#rbac-filtering),
                     // this might be where we filter the actual dispatched payload
                     // based on the individual receiver's permissions.
                     slog::trace!(
                         &opctx.log,
-                        "webhook receiver is subscribed to event";
+                        "alert receiver is subscribed to event";
                         "rx_name" => %rx.name(),
                         "rx_id" => ?rx.id(),
-                        "event_id" => ?event.id(),
-                        "event_class" => %event.event_class,
+                        "alert_id" => ?event.id(),
+                        "alert_class" => %event.class,
                         "glob" => ?sub.glob,
                     );
                     WebhookDelivery::new(
                         &event.id(),
                         &rx.id(),
-                        WebhookDeliveryTrigger::Event,
+                        AlertDeliveryTrigger::Alert,
                     )
                 })
                 .collect();
@@ -280,8 +280,8 @@ impl WebhookDispatcher {
                         slog::error!(
                             &opctx.log,
                             "failed to insert webhook deliveries";
-                            "event_id" => ?event.id(),
-                            "event_class" => %event.event_class,
+                            "alert_id" => ?event.id(),
+                            "alert_class" => %event.class,
                             "error" => %error,
                             "num_subscribed" => ?subscribed,
                         );
@@ -289,23 +289,23 @@ impl WebhookDispatcher {
                             "failed to insert {subscribed} webhook deliveries \
                              for event {} ({}): {error}",
                             event.id(),
-                            event.event_class,
+                            event.class,
                         ));
                         // We weren't able to create deliveries for this event, so
                         // *don't* mark it as dispatched.
                         continue;
                     }
                 };
-                status.dispatched.push(WebhookDispatched {
-                    event_id: event.id(),
+                status.dispatched.push(AlertDispatched {
+                    alert_id: event.id(),
                     subscribed,
                     dispatched,
                 });
                 slog::debug!(
                     &opctx.log,
                     "dispatched webhook event";
-                    "event_id" => ?event.id(),
-                    "event_class" => %event.event_class,
+                    "alert_id" => ?event.id(),
+                    "alert_class" => %event.class,
                     "num_subscribed" => subscribed,
                     "num_dispatched" => dispatched,
                 );
@@ -314,8 +314,8 @@ impl WebhookDispatcher {
                 slog::debug!(
                     &opctx.log,
                     "no webhook receivers subscribed to event";
-                    "event_id" => ?event.id(),
-                    "event_class" => %event.event_class,
+                    "alert_id" => ?event.id(),
+                    "alert_class" => %event.class,
                 );
                 status.no_receivers.push(event.id());
                 0
@@ -323,14 +323,14 @@ impl WebhookDispatcher {
 
             if let Err(error) = self
                 .datastore
-                .webhook_event_mark_dispatched(&opctx, &event.id(), subscribed)
+                .alert_mark_dispatched(&opctx, &event.id(), subscribed)
                 .await
             {
                 slog::error!(
                     &opctx.log,
                     "failed to mark webhook event as dispatched";
-                    "event_id" => ?event.id(),
-                    "event_class" => %event.event_class,
+                    "alert_id" => ?event.id(),
+                    "alert_class" => %event.class,
                     "error" => %error,
                     "num_subscribed" => subscribed,
                 );
@@ -338,7 +338,7 @@ impl WebhookDispatcher {
                     "failed to mark webhook event {} ({}) as dispatched: \
                      {error}",
                     event.id(),
-                    event.event_class,
+                    event.class,
                 ));
             }
         }
@@ -354,8 +354,8 @@ mod test {
     use nexus_db_queries::db;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_uuid_kinds::WebhookEventUuid;
-    use omicron_uuid_kinds::WebhookReceiverUuid;
+    use omicron_uuid_kinds::AlertReceiverUuid;
+    use omicron_uuid_kinds::AlertUuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -364,9 +364,9 @@ mod test {
     // dispatching.
     #[nexus_test(server = crate::Server)]
     async fn test_glob_reprocessing(cptestctx: &ControlPlaneTestContext) {
-        use nexus_db_schema::schema::webhook_receiver::dsl as rx_dsl;
-        use nexus_db_schema::schema::webhook_rx_event_glob::dsl as glob_dsl;
-        use nexus_db_schema::schema::webhook_rx_subscription::dsl as subscription_dsl;
+        use nexus_db_schema::schema::alert_glob::dsl as glob_dsl;
+        use nexus_db_schema::schema::alert_receiver::dsl as rx_dsl;
+        use nexus_db_schema::schema::alert_subscription::dsl as subscription_dsl;
 
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
@@ -374,7 +374,7 @@ mod test {
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
-        let rx_id = WebhookReceiverUuid::new_v4();
+        let rx_id = AlertReceiverUuid::new_v4();
         let conn = datastore
             .pool_connection_for_tests()
             .await
@@ -383,9 +383,9 @@ mod test {
         // Unfortunately, we've gotta hand-create the receiver and its
         // subscriptions, so that we can create a set of globs that differs from
         // those generated by the currrent schema.
-        diesel::insert_into(rx_dsl::webhook_receiver)
-            .values(db::model::WebhookReceiver {
-                identity: db::model::WebhookReceiverIdentity::new(
+        diesel::insert_into(rx_dsl::alert_receiver)
+            .values(db::model::AlertReceiver {
+                identity: db::model::AlertReceiverIdentity::new(
                     rx_id,
                     IdentityMetadataCreateParams {
                         name: "my-cool-webhook".parse().unwrap(),
@@ -403,22 +403,22 @@ mod test {
 
         const GLOB_PATTERN: &str = "test.*.bar";
         let glob = GLOB_PATTERN
-            .parse::<db::model::WebhookGlob>()
+            .parse::<db::model::AlertGlob>()
             .expect("'test.*.bar should be an acceptable glob");
-        let mut glob = db::model::WebhookRxEventGlob::new(rx_id, glob);
+        let mut glob = db::model::AlertRxGlob::new(rx_id, glob);
         // Just make something up that's obviously outdated...
         glob.schema_version = Some(db::model::SemverVersion::new(100, 0, 0));
-        diesel::insert_into(glob_dsl::webhook_rx_event_glob)
+        diesel::insert_into(glob_dsl::alert_glob)
             .values(glob.clone())
             .execute_async(&*conn)
             .await
             .expect("should insert glob entry");
-        diesel::insert_into(subscription_dsl::webhook_rx_subscription)
+        diesel::insert_into(subscription_dsl::alert_subscription)
             .values(
                 // Pretend `test.quux.bar` doesn't exist yet
-                db::model::WebhookRxSubscription::for_glob(
+                db::model::AlertRxSubscription::for_glob(
                     &glob,
-                    db::model::WebhookEventClass::TestFooBar,
+                    db::model::AlertClass::TestFooBar,
                 ),
             )
             .execute_async(&*conn)
@@ -427,7 +427,7 @@ mod test {
         // Also give the webhook receiver a secret just so everything
         // looks normalish.
         let (authz_rx, _) = nexus_db_lookup::LookupPath::new(&opctx, datastore)
-            .webhook_receiver_id(rx_id)
+            .alert_receiver_id(rx_id)
             .fetch()
             .await
             .expect("webhook rx should be there");
@@ -443,24 +443,24 @@ mod test {
         // OKAY GREAT NOW THAT WE DID ALL THAT STUFF let's see if it actually
         // works...
 
-        // N.B. that we are using the `DataStore::webhook_event_create` method
-        // rather than `Nexus::webhook_event_publish` (the expected entrypoint
-        // to publishing a webhook event) because `webhook_event_publish` also
+        // N.B. that we are using the `DataStore::alert_create` method
+        // rather than `Nexus::alert_publish` (the expected entrypoint
+        // to publishing a webhook event) because `alert_publish` also
         // activates the dispatcher task, and for this test, we would like to be
         // responsible for activating it.
-        let event_id = WebhookEventUuid::new_v4();
+        let alert_id = AlertUuid::new_v4();
         datastore
-            .webhook_event_create(
+            .alert_create(
                 &opctx,
-                event_id,
-                db::model::WebhookEventClass::TestQuuxBar,
+                alert_id,
+                db::model::AlertClass::TestQuuxBar,
                 serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
             )
             .await
             .expect("creating the event should work");
 
         // okay now do the thing
-        let mut status = WebhookDispatcherStatus {
+        let mut status = AlertDispatcherStatus {
             globs_reprocessed: Default::default(),
             glob_version: SCHEMA_VERSION,
             dispatched: Vec::new(),
@@ -468,7 +468,7 @@ mod test {
             no_receivers: Vec::new(),
         };
 
-        let mut task = WebhookDispatcher::new(
+        let mut task = AlertDispatcher::new(
             datastore.clone(),
             nexus.background_tasks.task_webhook_deliverator.clone(),
         );
@@ -478,9 +478,9 @@ mod test {
 
         // The globs should have been reprocessed, creating a subscription to
         // `test.quux.bar`.
-        let subscriptions = subscription_dsl::webhook_rx_subscription
+        let subscriptions = subscription_dsl::alert_subscription
             .filter(subscription_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
-            .load_async::<db::model::WebhookRxSubscription>(&*conn)
+            .load_async::<db::model::AlertRxSubscription>(&*conn)
             .await
             .expect("should be able to get subscriptions")
             .into_iter()
@@ -491,18 +491,18 @@ mod test {
                     sub.glob.as_deref(),
                     Some(GLOB_PATTERN),
                     "found a subscription to {} that was not from our glob: {sub:?}",
-                    sub.event_class,
+                    sub.class,
                 );
-                sub.event_class
+                sub.class
             }).collect::<std::collections::HashSet<_>>();
         assert_eq!(subscriptions.len(), 2);
         assert!(
-            subscriptions.contains(&db::model::WebhookEventClass::TestFooBar),
+            subscriptions.contains(&db::model::AlertClass::TestFooBar),
             "subscription to test.foo.bar should exist; subscriptions: \
              {subscriptions:?}",
         );
         assert!(
-            subscriptions.contains(&db::model::WebhookEventClass::TestQuuxBar),
+            subscriptions.contains(&db::model::AlertClass::TestQuuxBar),
             "subscription to test.quux.bar should exist; subscriptions: \
              {subscriptions:?}",
         );
@@ -514,7 +514,7 @@ mod test {
         assert!(
             matches!(
                 reprocessed_entry,
-                Some(Ok(WebhookGlobStatus::Reprocessed { .. }))
+                Some(Ok(AlertGlobStatus::Reprocessed { .. }))
             ),
             "glob status should be 'reprocessed'"
         );
@@ -534,7 +534,7 @@ mod test {
                 .webhook_rx_delivery_list(
                     &opctx,
                     &rx_id,
-                    &[WebhookDeliveryTrigger::Event],
+                    &[AlertDeliveryTrigger::Alert],
                     Vec::new(),
                     &p.current_pagparams(),
                 )
@@ -546,7 +546,7 @@ mod test {
             deliveries.extend(batch);
         }
         let event =
-            deliveries.iter().find(|(d, _, _)| d.event_id == event_id.into());
+            deliveries.iter().find(|(d, _, _)| d.alert_id == alert_id.into());
         assert!(
             dbg!(event).is_some(),
             "delivery entry for dispatched event must exist"

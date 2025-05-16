@@ -10,7 +10,7 @@ use std::fmt;
 use std::str::FromStr;
 
 impl_enum_type!(
-    WebhookDeliveryTriggerEnum:
+    AlertDeliveryTriggerEnum:
 
     #[derive(
         Copy,
@@ -24,48 +24,48 @@ impl_enum_type!(
         strum::VariantArray,
     )]
     #[serde(rename_all = "snake_case")]
-    pub enum WebhookDeliveryTrigger;
+    pub enum AlertDeliveryTrigger;
 
-    Event => b"event"
+    Alert => b"alert"
     Resend => b"resend"
     Probe => b"probe"
 
 );
 
-impl WebhookDeliveryTrigger {
+impl AlertDeliveryTrigger {
     pub const ALL: &'static [Self] = <Self as strum::VariantArray>::VARIANTS;
 }
 
-impl fmt::Display for WebhookDeliveryTrigger {
+impl fmt::Display for AlertDeliveryTrigger {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // Forward to the canonical implementation in nexus-types.
-        views::WebhookDeliveryTrigger::from(*self).fmt(f)
+        views::AlertDeliveryTrigger::from(*self).fmt(f)
     }
 }
 
-impl From<WebhookDeliveryTrigger> for views::WebhookDeliveryTrigger {
-    fn from(trigger: WebhookDeliveryTrigger) -> Self {
+impl From<AlertDeliveryTrigger> for views::AlertDeliveryTrigger {
+    fn from(trigger: AlertDeliveryTrigger) -> Self {
         match trigger {
-            WebhookDeliveryTrigger::Event => Self::Event,
-            WebhookDeliveryTrigger::Resend => Self::Resend,
-            WebhookDeliveryTrigger::Probe => Self::Probe,
+            AlertDeliveryTrigger::Alert => Self::Alert,
+            AlertDeliveryTrigger::Resend => Self::Resend,
+            AlertDeliveryTrigger::Probe => Self::Probe,
         }
     }
 }
 
-impl From<views::WebhookDeliveryTrigger> for WebhookDeliveryTrigger {
-    fn from(trigger: views::WebhookDeliveryTrigger) -> Self {
+impl From<views::AlertDeliveryTrigger> for AlertDeliveryTrigger {
+    fn from(trigger: views::AlertDeliveryTrigger) -> Self {
         match trigger {
-            views::WebhookDeliveryTrigger::Event => Self::Event,
-            views::WebhookDeliveryTrigger::Resend => Self::Resend,
-            views::WebhookDeliveryTrigger::Probe => Self::Probe,
+            views::AlertDeliveryTrigger::Alert => Self::Alert,
+            views::AlertDeliveryTrigger::Resend => Self::Resend,
+            views::AlertDeliveryTrigger::Probe => Self::Probe,
         }
     }
 }
 
-impl FromStr for WebhookDeliveryTrigger {
+impl FromStr for AlertDeliveryTrigger {
     type Err = omicron_common::api::external::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        views::WebhookDeliveryTrigger::from_str(s).map(Into::into)
+        views::AlertDeliveryTrigger::from_str(s).map(Into::into)
     }
 }
