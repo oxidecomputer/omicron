@@ -36,18 +36,22 @@ use nexus_db_schema::schema::{
     sw_root_of_trust_page,
 };
 use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneDataset, OmicronZoneImageSource,
-    OmicronZoneType,
+    ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
+    OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, NvmeFirmware, PowerState, RotPage,
     RotSlot,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideKind;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolKind;
@@ -908,13 +912,53 @@ pub struct InvLastReconciliationDiskResult {
     pub error_message: Option<String>,
 }
 
+impl InvLastReconciliationDiskResult {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        disk_id: PhysicalDiskUuid,
+        result: ConfigReconcilerInventoryResult,
+    ) -> Self {
+        let error_message = match result {
+            ConfigReconcilerInventoryResult::Ok => None,
+            ConfigReconcilerInventoryResult::Err { message } => Some(message),
+        };
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            disk_id: disk_id.into(),
+            error_message,
+        }
+    }
+}
+
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_last_reconciliation_dataset_result)]
 pub struct InvLastReconciliationDatasetResult {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub dataset_id: DbTypedUuid<omicron_uuid_kinds::DatasetKind>,
+    pub dataset_id: DbTypedUuid<DatasetKind>,
     pub error_message: Option<String>,
+}
+
+impl InvLastReconciliationDatasetResult {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        dataset_id: DatasetUuid,
+        result: ConfigReconcilerInventoryResult,
+    ) -> Self {
+        let error_message = match result {
+            ConfigReconcilerInventoryResult::Ok => None,
+            ConfigReconcilerInventoryResult::Err { message } => Some(message),
+        };
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            dataset_id: dataset_id.into(),
+            error_message,
+        }
+    }
 }
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
@@ -924,6 +968,26 @@ pub struct InvLastReconciliationZoneResult {
     pub sled_id: DbTypedUuid<SledKind>,
     pub zone_id: DbTypedUuid<omicron_uuid_kinds::OmicronZoneKind>,
     pub error_message: Option<String>,
+}
+
+impl InvLastReconciliationZoneResult {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+        result: ConfigReconcilerInventoryResult,
+    ) -> Self {
+        let error_message = match result {
+            ConfigReconcilerInventoryResult::Ok => None,
+            ConfigReconcilerInventoryResult::Err { message } => Some(message),
+        };
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            zone_id: zone_id.into(),
+            error_message,
+        }
+    }
 }
 
 /// See [`nexus_types::inventory::PhysicalDisk`].
@@ -1245,8 +1309,7 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
     }
 }
 
-/// Top-level information contained in an
-/// [`nexus_sled_agent_shared::inventory::OmicronSledConfig`].
+/// Top-level information contained in an [`OmicronSledConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config)]
 pub struct InvOmicronSledConfig {
@@ -1254,7 +1317,26 @@ pub struct InvOmicronSledConfig {
     pub sled_id: DbTypedUuid<SledKind>,
     pub id: Uuid,
     pub generation: Generation,
-    pub remove_mupdate_override: DbTypedUuid<MupdateOverrideKind>,
+    pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
+}
+
+impl InvOmicronSledConfig {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        id: Uuid,
+        config: &OmicronSledConfig,
+    ) -> Self {
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            id,
+            generation: Generation(config.generation),
+            remove_mupdate_override: config
+                .remove_mupdate_override
+                .map(From::from),
+        }
+    }
 }
 
 impl_enum_type!(
@@ -1350,7 +1432,25 @@ pub struct InvOmicronSledConfigDisk {
     pub serial: String,
     pub model: String,
 
-    pub pool_id: Uuid,
+    pub pool_id: DbTypedUuid<ZpoolKind>,
+}
+
+impl InvOmicronSledConfigDisk {
+    pub fn new(
+        sled_config_id: Uuid,
+        sled_id: SledUuid,
+        disk_config: OmicronPhysicalDiskConfig,
+    ) -> Self {
+        Self {
+            sled_config_id,
+            sled_id: sled_id.into(),
+            id: disk_config.id.into(),
+            vendor: disk_config.identity.vendor,
+            serial: disk_config.identity.serial,
+            model: disk_config.identity.model,
+            pool_id: disk_config.pool_id.into(),
+        }
+    }
 }
 
 /// See [`omicron_common::disk::DatasetConfig`].
@@ -1368,6 +1468,26 @@ pub struct InvOmicronSledConfigDataset {
     pub quota: Option<ByteCount>,
     pub reservation: Option<ByteCount>,
     pub compression: String,
+}
+
+impl InvOmicronSledConfigDataset {
+    pub fn new(
+        sled_config_id: Uuid,
+        sled_id: SledUuid,
+        dataset_config: &DatasetConfig,
+    ) -> Self {
+        Self {
+            sled_config_id,
+            sled_id: sled_id.into(),
+            id: dataset_config.id.into(),
+            pool_id: dataset_config.name.pool().id().into(),
+            kind: dataset_config.name.kind().into(),
+            zone_name: dataset_config.name.kind().zone_name().map(String::from),
+            quota: dataset_config.inner.quota.map(|q| q.into()),
+            reservation: dataset_config.inner.reservation.map(|r| r.into()),
+            compression: dataset_config.inner.compression.to_string(),
+        }
+    }
 }
 
 /// See [`nexus_sled_agent_shared::inventory::OmicronZoneConfig`].
