@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use illumos_utils::dladm::EtherstubVnic;
 use illumos_utils::zpool::PathInPool;
 use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
@@ -14,10 +13,12 @@ use omicron_common::disk::DatasetName;
 use omicron_common::disk::DiskIdentity;
 use sled_agent_api::ArtifactConfig;
 use sled_storage::config::MountConfig;
+use sled_storage::disk::Disk;
 use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::NestedDatasetLocation;
 use slog::Logger;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::watch;
@@ -45,9 +46,11 @@ use crate::SledAgentFacilities;
 use crate::TimeSyncStatus;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::dataset_serialization_task::NestedDatasetMountError;
+use crate::dump_setup_task;
 use crate::internal_disks::InternalDisksReceiver;
 use crate::ledger::LedgerTaskHandle;
 use crate::raw_disks;
+use crate::raw_disks::RawDisksReceiver;
 use crate::raw_disks::RawDisksSender;
 use crate::reconciler_task;
 use crate::reconciler_task::CurrentlyManagedZpools;
@@ -68,6 +71,8 @@ pub struct ConfigReconcilerSpawnToken {
     time_sync_config: TimeSyncConfig,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+    external_disks_tx: watch::Sender<HashSet<Disk>>,
+    raw_disks_rx: RawDisksReceiver,
     ledger_task_log: Logger,
     reconciler_task_log: Logger,
 }
@@ -107,12 +112,22 @@ impl ConfigReconcilerHandle {
         let internal_disks_rx =
             InternalDisksReceiver::spawn_internal_disks_task(
                 Arc::clone(&mount_config),
-                raw_disks_rx,
+                raw_disks_rx.clone(),
                 base_log,
             );
 
+        // Spawn the task that manages dump devices.
+        let (external_disks_tx, external_disks_rx) =
+            watch::channel(HashSet::new());
+        dump_setup_task::spawn(
+            internal_disks_rx.clone(),
+            external_disks_rx,
+            Arc::clone(&mount_config),
+            base_log,
+        );
+
         let (reconciler_result_tx, reconciler_result_rx) =
-            watch::channel(ReconcilerResult::default());
+            watch::channel(ReconcilerResult::new(Arc::clone(&mount_config)));
         let (currently_managed_zpools_tx, currently_managed_zpools_rx) =
             watch::channel(Arc::default());
         let currently_managed_zpools_rx =
@@ -142,6 +157,8 @@ impl ConfigReconcilerHandle {
                 time_sync_config,
                 reconciler_result_tx,
                 currently_managed_zpools_tx,
+                external_disks_tx,
+                raw_disks_rx,
                 ledger_task_log: base_log
                     .new(slog::o!("component" => "SledConfigLedgerTask")),
                 reconciler_task_log: base_log
@@ -164,7 +181,6 @@ impl ConfigReconcilerHandle {
         U: SledAgentArtifactStore,
     >(
         &self,
-        underlay_vnic: EtherstubVnic,
         sled_agent_facilities: T,
         sled_agent_artifact_store: U,
         token: ConfigReconcilerSpawnToken,
@@ -174,6 +190,8 @@ impl ConfigReconcilerHandle {
             time_sync_config,
             reconciler_result_tx,
             currently_managed_zpools_tx,
+            external_disks_tx,
+            raw_disks_rx,
             ledger_task_log,
             reconciler_task_log,
         } = token;
@@ -198,12 +216,15 @@ impl ConfigReconcilerHandle {
         }
 
         reconciler_task::spawn(
+            Arc::clone(self.internal_disks_rx.mount_config()),
+            self.dataset_task.clone(),
             key_requester,
             time_sync_config,
-            underlay_vnic,
             current_config_rx,
             reconciler_result_tx,
             currently_managed_zpools_tx,
+            external_disks_tx,
+            raw_disks_rx,
             sled_agent_facilities,
             reconciler_task_log,
         );

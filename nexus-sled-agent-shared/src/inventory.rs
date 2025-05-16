@@ -22,6 +22,7 @@ use omicron_common::{
     update::ArtifactId,
     zpool_name::ZpoolName,
 };
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
 use schemars::JsonSchema;
@@ -140,6 +141,7 @@ pub struct OmicronSledConfig {
     pub disks: IdMap<OmicronPhysicalDiskConfig>,
     pub datasets: IdMap<DatasetConfig>,
     pub zones: IdMap<OmicronZoneConfig>,
+    pub remove_mupdate_override: Option<MupdateOverrideUuid>,
 }
 
 impl Ledgerable for OmicronSledConfig {
@@ -221,6 +223,13 @@ impl OmicronZoneConfig {
     /// currently true).
     pub fn underlay_ip(&self) -> Ipv6Addr {
         self.zone_type.underlay_ip()
+    }
+
+    pub fn zone_name(&self) -> String {
+        illumos_utils::running_zone::InstalledZone::get_zone_name(
+            self.zone_type.kind().zone_prefix(),
+            Some(self.id),
+        )
     }
 }
 

@@ -67,7 +67,8 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
-use sled_diagnostics::{SledDiagnosticsCmdError, SledDiagnosticsCmdOutput};
+use sled_diagnostics::SledDiagnosticsCmdError;
+use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
@@ -1472,6 +1473,12 @@ impl SledAgent {
         &self,
     ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
         sled_diagnostics::zpool_info().await
+    }
+
+    pub(crate) async fn support_health_check(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::health_check().await
     }
 }
 

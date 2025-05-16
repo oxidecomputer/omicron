@@ -498,7 +498,7 @@ pub trait NexusExternalApi {
     async fn saml_identity_provider_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ProviderPath>,
-        query_params: Query<params::SiloSelector>,
+        query_params: Query<params::OptionalSiloSelector>,
     ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError>;
 
     // TODO: no DELETE for identity providers?
@@ -3141,7 +3141,7 @@ pub trait NexusExternalApi {
     /// View a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
         tags = ["hidden"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_view(
@@ -3152,7 +3152,7 @@ pub trait NexusExternalApi {
     /// Download the index of a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/index",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/index",
         tags = ["hidden"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_index(
@@ -3163,7 +3163,7 @@ pub trait NexusExternalApi {
     /// Download the contents of a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
         tags = ["hidden"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_download(
@@ -3174,7 +3174,7 @@ pub trait NexusExternalApi {
     /// Download a file within a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
         tags = ["hidden"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_download_file(
@@ -3185,7 +3185,7 @@ pub trait NexusExternalApi {
     /// Download the metadata of a support bundle
     #[endpoint {
         method = HEAD,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
         tags = ["hidden"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_head(
@@ -3196,7 +3196,7 @@ pub trait NexusExternalApi {
     /// Download the metadata of a file within the support bundle
     #[endpoint {
         method = HEAD,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
         tags = ["hidden"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_head_file(
@@ -3220,7 +3220,7 @@ pub trait NexusExternalApi {
     /// collected, or to remove metadata for a support bundle that has failed.
     #[endpoint {
         method = DELETE,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
         tags = ["hidden"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_delete(

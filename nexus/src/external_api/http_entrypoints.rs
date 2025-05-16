@@ -706,7 +706,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn saml_identity_provider_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ProviderPath>,
-        query_params: Query<params::SiloSelector>,
+        query_params: Query<params::OptionalSiloSelector>,
     ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -717,7 +717,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let query = query_params.into_inner();
             let saml_identity_provider_selector =
                 params::SamlIdentityProviderSelector {
-                    silo: Some(query.silo),
+                    silo: query.silo,
                     saml_identity_provider: path.provider,
                 };
             let (.., provider) = nexus
@@ -7060,7 +7060,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let bundle = nexus
                 .support_bundle_view(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                 )
                 .await?;
 
@@ -7090,7 +7090,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                     SupportBundleQueryType::Index,
                     head,
                     range,
@@ -7122,7 +7122,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                     SupportBundleQueryType::Whole,
                     head,
                     range,
@@ -7153,9 +7153,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(
-                        path.bundle.support_bundle,
-                    ),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle.bundle_id),
                     SupportBundleQueryType::Path { file_path: path.file },
                     head,
                     range,
@@ -7186,7 +7184,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                     SupportBundleQueryType::Whole,
                     head,
                     range,
@@ -7217,9 +7215,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(
-                        path.bundle.support_bundle,
-                    ),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle.bundle_id),
                     SupportBundleQueryType::Path { file_path: path.file },
                     head,
                     range,
@@ -7271,7 +7267,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .support_bundle_delete(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                 )
                 .await?;
 
