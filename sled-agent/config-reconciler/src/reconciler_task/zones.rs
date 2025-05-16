@@ -20,6 +20,7 @@ use illumos_utils::zone::AdmError;
 use illumos_utils::zone::Api as _;
 use illumos_utils::zone::DeleteAddressError;
 use illumos_utils::zone::Zones;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::address::Ipv6Subnet;
@@ -31,6 +32,7 @@ use slog::Logger;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::num::NonZeroUsize;
@@ -95,6 +97,31 @@ impl OmicronZones {
             ZoneState::PartiallyShutDown { .. }
             | ZoneState::FailedToStart(_) => true,
         })
+    }
+
+    pub(crate) fn to_inventory(
+        &self,
+    ) -> BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult> {
+        self.zones
+            .iter()
+            .map(|zone| match &zone.state {
+                ZoneState::Running(_) => {
+                    (zone.config.id, ConfigReconcilerInventoryResult::Ok)
+                }
+                ZoneState::PartiallyShutDown { err, .. } => (
+                    zone.config.id,
+                    ConfigReconcilerInventoryResult::Err {
+                        message: InlineErrorChain::new(err).to_string(),
+                    },
+                ),
+                ZoneState::FailedToStart(err) => (
+                    zone.config.id,
+                    ConfigReconcilerInventoryResult::Err {
+                        message: InlineErrorChain::new(err).to_string(),
+                    },
+                ),
+            })
+            .collect()
     }
 
     /// Attempt to shut down any zones that aren't present in `desired_zones`,

@@ -7,6 +7,7 @@
 
 use id_map::IdMap;
 use id_map::IdMappable;
+use nexus_sled_agent_shared::inventory::InventoryDisk;
 use omicron_common::disk::DiskIdentity;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
@@ -123,6 +124,26 @@ impl RawDisksSender {
             Arc::make_mut(disks).remove(identity);
             true
         })
+    }
+
+    pub(crate) fn to_inventory(&self) -> Vec<InventoryDisk> {
+        self.0
+            .borrow()
+            .iter()
+            .map(|disk| {
+                let firmware = disk.firmware();
+                InventoryDisk {
+                    identity: disk.identity().clone(),
+                    variant: disk.variant(),
+                    slot: disk.slot(),
+                    active_firmware_slot: firmware.active_slot(),
+                    next_active_firmware_slot: firmware.next_active_slot(),
+                    number_of_firmware_slots: firmware.number_of_slots(),
+                    slot1_is_read_only: firmware.slot1_read_only(),
+                    slot_firmware_versions: firmware.slots().to_vec(),
+                }
+            })
+            .collect()
     }
 }
 

@@ -71,6 +71,7 @@ pub use dataset_serialization_task::NestedDatasetMountError;
 pub use handle::AvailableDatasetsReceiver;
 pub use handle::ConfigReconcilerHandle;
 pub use handle::ConfigReconcilerSpawnToken;
+pub use handle::InventoryError;
 pub use handle::ReconcilerInventory;
 pub use handle::TimeSyncConfig;
 pub use internal_disks::InternalDisks;

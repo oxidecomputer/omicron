@@ -117,6 +117,7 @@ pub(crate) enum CurrentSledConfig {
 #[derive(Debug)]
 pub(crate) struct LedgerTaskHandle {
     request_tx: mpsc::Sender<LedgerTaskRequest>,
+    current_config_rx: watch::Receiver<CurrentSledConfig>,
 }
 
 impl LedgerTaskHandle {
@@ -160,7 +161,14 @@ impl LedgerTaskHandle {
             .run(),
         );
 
-        (Self { request_tx }, current_config_rx)
+        (
+            Self { request_tx, current_config_rx: current_config_rx.clone() },
+            current_config_rx,
+        )
+    }
+
+    pub(crate) fn current_config(&self) -> CurrentSledConfig {
+        self.current_config_rx.borrow().clone()
     }
 
     pub async fn set_new_config(
