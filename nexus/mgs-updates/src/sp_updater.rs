@@ -216,7 +216,8 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
             } = &update.details
             else {
                 unreachable!(
-                    "pending MGS update details will always be for the SP"
+                    "pending MGS update details within ReconfiguratorSpUpdater \
+                    will always be for the SP"
                 );
             };
             if caboose.version != expected_active_version.to_string() {

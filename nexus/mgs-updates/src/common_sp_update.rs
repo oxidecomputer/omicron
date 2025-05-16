@@ -10,6 +10,7 @@ use super::UpdateProgress;
 use futures::future::BoxFuture;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
+use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use slog::Logger;
@@ -278,8 +279,16 @@ pub enum PrecheckStatus {
 
 #[derive(Debug, Error)]
 pub enum PrecheckError {
+    #[error(
+        "pending_persistent_boot_preference and/or transient_boot_preference is set"
+    )]
+    EphemeralRotBootPreferenceSet,
+
     #[error("communicating with MGS")]
     GatewayClientError(#[from] GatewayClientError),
+
+    #[error("communicating with RoT: {message:?}")]
+    RotCommunicationFailed { message: String },
 
     #[error(
         "in {sp_type} slot {slot_id}, expected to find \
@@ -294,6 +303,9 @@ pub enum PrecheckError {
         found_part: String,
         found_serial: String,
     },
+
+    #[error("expected to find active slot {expected:?}, but found {found:?}")]
+    WrongActiveSlot { expected: RotSlot, found: RotSlot },
 
     #[error(
         "expected to find active version {:?}, but found {found:?}",

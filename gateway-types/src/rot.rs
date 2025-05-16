@@ -166,6 +166,7 @@ impl From<gateway_messages::RotBootInfo> for RotState {
 #[derive(
     Debug,
     Clone,
+    Copy,
     PartialEq,
     Eq,
     PartialOrd,
