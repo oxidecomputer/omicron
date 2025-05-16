@@ -1249,9 +1249,6 @@ pub static DEMO_WEBHOOK_SECRET_CREATE: LazyLock<params::WebhookSecretCreate> =
         secret: "TRUSTNO1".to_string(),
     });
 
-// pub static DEMO_ALERT_SUBSCRIPTION: LazyLock<shared::WebhookSubscription> =
-//     LazyLock::new(|| "test.foo.baz".parse().unwrap());
-
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
 /// These structs are also used to check whether we're covering all endpoints in
