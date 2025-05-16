@@ -26,7 +26,7 @@ impl_enum_type!(
     #[serde(rename_all = "snake_case")]
     pub enum AlertDeliveryTrigger;
 
-    Event => b"event"
+    Alert => b"alert"
     Resend => b"resend"
     Probe => b"probe"
 
@@ -46,7 +46,7 @@ impl fmt::Display for AlertDeliveryTrigger {
 impl From<AlertDeliveryTrigger> for views::AlertDeliveryTrigger {
     fn from(trigger: AlertDeliveryTrigger) -> Self {
         match trigger {
-            AlertDeliveryTrigger::Event => Self::Event,
+            AlertDeliveryTrigger::Alert => Self::Alert,
             AlertDeliveryTrigger::Resend => Self::Resend,
             AlertDeliveryTrigger::Probe => Self::Probe,
         }
@@ -56,7 +56,7 @@ impl From<AlertDeliveryTrigger> for views::AlertDeliveryTrigger {
 impl From<views::AlertDeliveryTrigger> for AlertDeliveryTrigger {
     fn from(trigger: views::AlertDeliveryTrigger) -> Self {
         match trigger {
-            views::AlertDeliveryTrigger::Event => Self::Event,
+            views::AlertDeliveryTrigger::Alert => Self::Alert,
             views::AlertDeliveryTrigger::Resend => Self::Resend,
             views::AlertDeliveryTrigger::Probe => Self::Probe,
         }

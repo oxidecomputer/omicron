@@ -472,11 +472,11 @@ impl DataStore {
 
         let alert_class = alert_dsl::alert
             .filter(alert_dsl::id.eq(authz_event.id().into_untyped_uuid()))
-            .select(alert_dsl::event_class)
+            .select(alert_dsl::alert_class)
             .single_value();
         subscription_dsl::alert_subscription
             .filter(subscription_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
-            .filter(subscription_dsl::event_class.nullable().eq(alert_class))
+            .filter(subscription_dsl::alert_class.nullable().eq(alert_class))
             .select(subscription_dsl::rx_id)
             .first_async::<Uuid>(&*conn)
             .await
@@ -575,7 +575,7 @@ impl DataStore {
             AlertSubscriptionKind::Exact(class) => {
                 diesel::delete(subscription_dsl::alert_subscription)
                     .filter(subscription_dsl::rx_id.eq(rx_id))
-                    .filter(subscription_dsl::event_class.eq(class))
+                    .filter(subscription_dsl::alert_class.eq(class))
                     .execute_async(&*conn)
                     .await
                     .map_err(error_handler)?;
@@ -605,7 +605,7 @@ impl DataStore {
         let exact = subscription_dsl::alert_subscription
             .filter(subscription_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
             .filter(subscription_dsl::glob.is_null())
-            .select(subscription_dsl::event_class)
+            .select(subscription_dsl::alert_class)
             .load_async::<AlertClass>(conn)
             .await
             .map_err(|e| {
@@ -793,7 +793,7 @@ impl DataStore {
         alert_class: AlertClass,
     ) -> impl RunnableQuery<(AlertReceiver, AlertRxSubscription)> {
         subscription_dsl::alert_subscription
-            .filter(subscription_dsl::event_class.eq(alert_class))
+            .filter(subscription_dsl::alert_class.eq(alert_class))
             .order_by(subscription_dsl::rx_id.asc())
             .inner_join(
                 rx_dsl::alert_receiver

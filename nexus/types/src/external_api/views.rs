@@ -1266,7 +1266,7 @@ impl std::str::FromStr for AlertDeliveryState {
     }
 }
 
-/// The reason a webhook event was delivered
+/// The reason an alert was delivered
 #[derive(
     Copy,
     Clone,
@@ -1280,9 +1280,9 @@ impl std::str::FromStr for AlertDeliveryState {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum AlertDeliveryTrigger {
-    /// Delivery was triggered by the event occurring for the first time.
-    Event,
-    /// Delivery was triggered by a request to resend the event.
+    /// Delivery was triggered by the alert itself.
+    Alert,
+    /// Delivery was triggered by a request to resend the alert.
     Resend,
     /// This delivery is a liveness probe.
     Probe,
@@ -1291,7 +1291,7 @@ pub enum AlertDeliveryTrigger {
 impl AlertDeliveryTrigger {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Event => "event",
+            Self::Alert => "alert",
             Self::Resend => "resend",
             Self::Probe => "probe",
         }

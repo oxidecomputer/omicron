@@ -432,7 +432,7 @@ async fn cmd_db_webhook_rx_info(
     let exact = subscription_dsl::alert_subscription
         .filter(subscription_dsl::rx_id.eq(id.into_untyped_uuid()))
         .filter(subscription_dsl::glob.is_null())
-        .select(subscription_dsl::event_class)
+        .select(subscription_dsl::alert_class)
         .load_async::<AlertClass>(&*conn)
         .await;
     match exact {
@@ -476,7 +476,7 @@ async fn cmd_db_webhook_rx_info(
                 let exact = subscription_dsl::alert_subscription
                     .filter(subscription_dsl::rx_id.eq(id.into_untyped_uuid()))
                     .filter(subscription_dsl::glob.eq(glob))
-                    .select(subscription_dsl::event_class)
+                    .select(subscription_dsl::alert_class)
                     .load_async::<AlertClass>(&*conn)
                     .await;
                 match exact {
@@ -553,7 +553,7 @@ async fn cmd_db_webhook_delivery_list(
     }
 
     if let Some(id) = event {
-        query = query.filter(delivery_dsl::event_id.eq(id.into_untyped_uuid()));
+        query = query.filter(delivery_dsl::alert_id.eq(id.into_untyped_uuid()));
     }
 
     let ctx = || "listing webhook deliveries";
@@ -942,13 +942,13 @@ async fn cmd_db_alert_list(
     }
 
     impl From<&'_ Alert> for AlertRow {
-        fn from(event: &'_ Alert) -> Self {
+        fn from(alert: &'_ Alert) -> Self {
             Self {
-                id: event.identity.id.into_untyped_uuid(),
-                class: event.class,
-                time_created: event.identity.time_created,
-                time_dispatched: event.time_dispatched,
-                dispatched: event.num_dispatched,
+                id: alert.identity.id.into_untyped_uuid(),
+                class: alert.class,
+                time_created: alert.identity.time_created,
+                time_dispatched: alert.time_dispatched,
+                dispatched: alert.num_dispatched,
             }
         }
     }
@@ -963,7 +963,7 @@ async fn cmd_db_alert_list(
 
     let mut table = if *payload {
         let rows = alerts.iter().map(|alert| {
-            let payload = match serde_json::to_string(&alert.event) {
+            let payload = match serde_json::to_string(&alert.payload) {
                 Ok(payload) => payload,
                 Err(e) => {
                     eprintln!(
@@ -996,7 +996,7 @@ async fn cmd_db_alert_info(
     let AlertInfoArgs { id } = args;
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let event = alert_dsl::alert
+    let alert = alert_dsl::alert
         .filter(alert_dsl::id.eq(id.into_untyped_uuid()))
         .select(Alert::as_select())
         .limit(1)
@@ -1010,9 +1010,9 @@ async fn cmd_db_alert_info(
         identity: db::model::AlertIdentity { id, time_created, time_modified },
         time_dispatched,
         class,
-        event,
+        payload,
         num_dispatched,
-    } = event;
+    } = alert;
 
     const CLASS: &str = "class";
     const TIME_DISPATCHED: &str = "fully dispatched at";
@@ -1039,8 +1039,8 @@ async fn cmd_db_alert_info(
     }
 
     println!("\n{:=<80}", "== ALERT PAYLOAD ");
-    serde_json::to_writer_pretty(std::io::stdout(), &event).with_context(
-        || format!("failed to serialize event payload: {event:?}"),
+    serde_json::to_writer_pretty(std::io::stdout(), &payload).with_context(
+        || format!("failed to serialize alert payload: {payload:?}"),
     )?;
 
     let ctx = || format!("listing deliveries for alert {id:?}");

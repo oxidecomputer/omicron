@@ -26,7 +26,7 @@ impl DataStore {
         opctx: &OpContext,
         id: AlertUuid,
         class: AlertClass,
-        event: serde_json::Value,
+        payload: serde_json::Value,
     ) -> CreateResult<Alert> {
         let conn = self.pool_connection_authorized(&opctx).await?;
         diesel::insert_into(alert_dsl::alert)
@@ -34,7 +34,7 @@ impl DataStore {
                 identity: AlertIdentity::new(id),
                 time_dispatched: None,
                 class,
-                event,
+                payload,
                 num_dispatched: 0,
             })
             .returning(Alert::as_returning())

@@ -26,24 +26,24 @@ pub struct Alert {
     #[diesel(embed)]
     pub identity: AlertIdentity,
 
-    /// The time at which this event was dispatched by creating entries in the
+    /// The time at which this alert was dispatched by creating entries in the
     /// `webhook_delivery` table.
     ///
-    /// If this is `None`, this event has yet to be dispatched.
+    /// If this is `None`, this alert has yet to be dispatched.
     pub time_dispatched: Option<DateTime<Utc>>,
 
-    /// The class of this event.
-    #[diesel(column_name = event_class)]
+    /// The class of this alert.
+    #[diesel(column_name = alert_class)]
     pub class: AlertClass,
 
-    /// The event's data payload.
-    pub event: serde_json::Value,
+    /// The alert's data payload.
+    pub payload: serde_json::Value,
 
     pub num_dispatched: i64,
 }
 
 impl Alert {
-    /// UUID of the singleton event entry for webhook liveness probes.
+    /// UUID of the singleton event entry for alert receiver liveness probes.
     pub const PROBE_ALERT_ID: uuid::Uuid =
         uuid::Uuid::from_u128(0x001de000_7768_4000_8000_000000000001);
 }

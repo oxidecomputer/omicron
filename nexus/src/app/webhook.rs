@@ -340,7 +340,7 @@ impl Nexus {
                 opctx,
                 &authz_rx.id(),
                 // No probes; they could have their own list endpoint later...
-                &[AlertDeliveryTrigger::Event, AlertDeliveryTrigger::Resend],
+                &[AlertDeliveryTrigger::Alert, AlertDeliveryTrigger::Resend],
                 only_states,
                 pagparams,
             )

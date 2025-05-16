@@ -2057,7 +2057,7 @@ fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 r#"
                 SELECT
                     id,
-                    alert_class,
+                    event_class,
                     event,
                     num_dispatched
                 FROM webhook_event

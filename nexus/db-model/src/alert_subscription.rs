@@ -21,7 +21,7 @@ use std::str::FromStr;
 #[diesel(table_name = alert_subscription)]
 pub struct AlertRxSubscription {
     pub rx_id: DbTypedUuid<AlertReceiverKind>,
-    #[diesel(column_name = event_class)]
+    #[diesel(column_name = alert_class)]
     pub class: AlertClass,
     pub glob: Option<String>,
     pub time_created: DateTime<Utc>,

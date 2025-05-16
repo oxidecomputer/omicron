@@ -5242,13 +5242,11 @@ CREATE INDEX IF NOT EXISTS lookup_alert_globs_by_schema_version
 ON omicron.public.alert_glob (schema_version);
 
 CREATE TABLE IF NOT EXISTS omicron.public.alert_subscription (
-    -- UUID of the webhook receiver (foreign key into
-    -- `omicron.public.webhook_rx`)
+    -- UUID of the alert receiver (foreign key into
+    -- `omicron.public.alert_receiver`)
     rx_id UUID NOT NULL,
     -- An alert class to which the receiver is subscribed.
-    -- XXX(eliza): I would much prefer that this be called "alert_class", but we
-    -- cannot idempotently rename columns in our present version of CRDB...
-    event_class omicron.public.alert_class NOT NULL,
+    alert_class omicron.public.alert_class NOT NULL,
     -- If this subscription is a concrete instantiation of a glob pattern, the
     -- value of the glob that created it (and, a foreign key into
     -- `webhook_rx_event_glob`). If the receiver is subscribed to this exact
@@ -5261,14 +5259,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert_subscription (
 
     time_created TIMESTAMPTZ NOT NULL,
 
-    PRIMARY KEY (rx_id, event_class)
+    PRIMARY KEY (rx_id, alert_class)
 );
 
 -- Look up all receivers subscribed to an alert class. This is used by
 -- the dispatcher to determine who is interested in a particular event.
 CREATE INDEX IF NOT EXISTS lookup_alert_rxs_for_class
 ON omicron.public.alert_subscription (
-    event_class
+    alert_class
 );
 
 -- Look up all exact event class subscriptions for a receiver.
@@ -5290,16 +5288,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    -- The class of event that this is.
-    -- XXX(eliza): I would much prefer that this be called "alert_class", but we
-    -- cannot idempotently rename columns in our present version of CRDB...
-    event_class omicron.public.alert_class NOT NULL,
-    -- Actual event data. The structure of this depends on the event class.
-    event JSONB NOT NULL,
+    -- The class of alert that this is.
+    alert_class omicron.public.alert_class NOT NULL,
+    -- Actual alert data. The structure of this depends on the alert class.
+    payload JSONB NOT NULL,
 
-    -- Set when dispatch entries have been created for this event.
+    -- Set when dispatch entries have been created for this alert.
     time_dispatched TIMESTAMPTZ,
-    -- The number of receivers that this event was dispatched to.
+    -- The number of receivers that this alart was dispatched to.
     num_dispatched INT8 NOT NULL,
 
     CONSTRAINT time_dispatched_set_if_dispatched CHECK (
@@ -5316,18 +5312,18 @@ INSERT INTO omicron.public.alert (
     id,
     time_created,
     time_modified,
-    event_class,
-    event,
+    alert_class,
+    payload,
     time_dispatched,
     num_dispatched
 ) VALUES (
-    -- NOTE: this UUID is duplicated in nexus_db_model::webhook_event.
+    -- NOTE: this UUID is duplicated in nexus_db_model::alert.
     '001de000-7768-4000-8000-000000000001',
     NOW(),
     NOW(),
     'probe',
     '{}',
-    -- Pretend to be dispatched so we won't show up in "list events needing
+    -- Pretend to be dispatched so we won't show up in "list alerts needing
     -- dispatch" queries
     NOW(),
     0
@@ -5348,8 +5344,8 @@ ON omicron.public.alert (
 
 -- Describes why an alert delivery was triggered
 CREATE TYPE IF NOT EXISTS omicron.public.alert_delivery_trigger AS ENUM (
-    --  This delivery was triggered by the event being dispatched.
-    'event',
+    --  This delivery was triggered by the alert being dispatched.
+    'alert',
     -- This delivery was triggered by an explicit call to the alert resend API.
     'resend',
     --- This delivery is a liveness probe.
@@ -5371,11 +5367,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- UUID of this delivery.
     id UUID PRIMARY KEY,
     --- UUID of the alert (foreign key into `omicron.public.alert`).
-    -- XXX(eliza): I would much prefer that this be called "alert_id", but we
-    -- cannot idempotently rename columns in our present version of CRDB...
-    event_id UUID NOT NULL,
+    alert_id UUID NOT NULL,
     -- UUID of the webhook receiver (foreign key into
-    -- `omicron.public.webhook_rx`)
+    -- `omicron.public.alert_receiver`)
     rx_id UUID NOT NULL,
 
     triggered_by omicron.public.alert_delivery_trigger NOT NULL,
@@ -5412,21 +5406,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
 -- re-delivery to be triggered multiple times.
 CREATE UNIQUE INDEX IF NOT EXISTS one_webhook_event_dispatch_per_rx
 ON omicron.public.webhook_delivery (
-    event_id, rx_id
+    alert_id, rx_id
 )
 WHERE
-    triggered_by = 'event';
+    triggered_by = 'alert';
 
 -- Index for looking up all webhook messages dispatched to a receiver ID
 CREATE INDEX IF NOT EXISTS lookup_webhook_delivery_dispatched_to_rx
 ON omicron.public.webhook_delivery (
-    rx_id, event_id
+    rx_id, alert_id
 );
 
 -- Index for looking up all delivery attempts for an alert
 CREATE INDEX IF NOT EXISTS lookup_webhook_deliveries_for_alert
 ON omicron.public.webhook_delivery (
-    event_id
+    alert_id
 );
 
 -- Index for looking up all currently in-flight webhook messages, and ordering

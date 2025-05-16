@@ -263,7 +263,7 @@ impl AlertDispatcher {
                     WebhookDelivery::new(
                         &event.id(),
                         &rx.id(),
-                        AlertDeliveryTrigger::Event,
+                        AlertDeliveryTrigger::Alert,
                     )
                 })
                 .collect();
@@ -534,7 +534,7 @@ mod test {
                 .webhook_rx_delivery_list(
                     &opctx,
                     &rx_id,
-                    &[AlertDeliveryTrigger::Event],
+                    &[AlertDeliveryTrigger::Alert],
                     Vec::new(),
                     &p.current_pagparams(),
                 )

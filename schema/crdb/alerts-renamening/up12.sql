@@ -1,2 +1,4 @@
-ALTER INDEX IF EXISTS lookup_undispatched_webhook_events
-RENAME TO lookup_undispatched_alerts;
+CREATE INDEX IF NOT EXISTS lookup_exact_subscriptions_for_alert_rx
+on omicron.public.alert_subscription (
+    rx_id
+) WHERE glob IS NULL;

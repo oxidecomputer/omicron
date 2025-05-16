@@ -4,13 +4,13 @@ SELECT
   alert.time_created,
   alert.time_modified,
   alert.time_dispatched,
-  alert.event_class,
-  alert.event,
+  alert.alert_class,
+  alert.payload,
   alert.num_dispatched
 FROM
-  alert INNER JOIN webhook_delivery AS delivery ON delivery.event_id = alert.id
+  alert INNER JOIN webhook_delivery AS delivery ON delivery.alert_id = alert.id
 WHERE
-  (alert.event_class != $1 AND delivery.rx_id = $2)
+  (alert.alert_class != $1 AND delivery.rx_id = $2)
   AND NOT
       (
         EXISTS(
@@ -19,7 +19,7 @@ WHERE
           FROM
             webhook_delivery AS also_delivey
           WHERE
-            (also_delivey.event_id = alert.id AND also_delivey.state != $3)
+            (also_delivey.alert_id = alert.id AND also_delivey.state != $3)
             AND also_delivey.triggered_by != $4
         )
       )

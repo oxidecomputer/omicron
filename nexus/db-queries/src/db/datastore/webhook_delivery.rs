@@ -70,14 +70,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         diesel::insert_into(dsl::webhook_delivery)
             .values(deliveries)
-            // N.B. that this is intended to ignore conflicts on the
-            // "one_webhook_event_dispatch_per_rx" index, but ON CONFLICT ... DO
-            // NOTHING can't be used with the names of indices, only actual
-            // UNIQUE CONSTRAINTs. So we just do a blanket ON CONFLICT DO
-            // NOTHING, which is fine, becausse the only other uniqueness
-            // constraint is the UUID primary key, and we kind of assume UUID
-            // collisions don't happen. Oh well.
-            .on_conflict((dsl::event_id, dsl::rx_id))
+            .on_conflict((dsl::alert_id, dsl::rx_id))
             .as_partial_index()
             .do_nothing()
             .execute_async(&*conn)
@@ -107,16 +100,16 @@ impl DataStore {
             schema::webhook_delivery as also_delivey
         );
         alert_dsl::alert
-            .filter(alert_dsl::event_class.ne(AlertClass::Probe))
+            .filter(alert_dsl::alert_class.ne(AlertClass::Probe))
             .inner_join(
-                delivery.on(delivery.field(dsl::event_id).eq(alert_dsl::id)),
+                delivery.on(delivery.field(dsl::alert_id).eq(alert_dsl::id)),
             )
             .filter(delivery.field(dsl::rx_id).eq(rx_id.into_untyped_uuid()))
             .filter(not(exists(
                 also_delivery
                     .select(also_delivery.field(dsl::id))
                     .filter(
-                        also_delivery.field(dsl::event_id).eq(alert_dsl::id),
+                        also_delivery.field(dsl::alert_id).eq(alert_dsl::id),
                     )
                     .filter(
                         also_delivery
@@ -161,13 +154,13 @@ impl DataStore {
         // Join with the event table on the delivery's event ID,
         // so that we can grab the event class of the event that initiated
         // this delivery.
-        .inner_join(alert_dsl::alert.on(dsl::event_id.eq(alert_dsl::id)));
+        .inner_join(alert_dsl::alert.on(dsl::alert_id.eq(alert_dsl::id)));
         if !only_states.is_empty() {
             query = query.filter(dsl::state.eq_any(only_states));
         }
 
         let deliveries = query
-            .select((WebhookDelivery::as_select(), alert_dsl::event_class))
+            .select((WebhookDelivery::as_select(), alert_dsl::alert_class))
             .load_async::<(WebhookDelivery, AlertClass)>(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -241,11 +234,11 @@ impl DataStore {
             .order_by(dsl::time_created.asc())
             // Join with the `webhook_event` table to get the event class, which
             // is necessary to construct delivery requests.
-            .inner_join(alert_dsl::alert.on(alert_dsl::id.eq(dsl::event_id)))
+            .inner_join(alert_dsl::alert.on(alert_dsl::id.eq(dsl::alert_id)))
             .select((
                 WebhookDelivery::as_select(),
-                alert_dsl::event_class,
-                alert_dsl::event,
+                alert_dsl::alert_class,
+                alert_dsl::payload,
             ))
             .load_async(&*conn)
             .await
@@ -505,7 +498,7 @@ mod test {
         let dispatch1 = WebhookDelivery::new(
             &alert_id,
             &rx_id,
-            AlertDeliveryTrigger::Event,
+            AlertDeliveryTrigger::Alert,
         );
         let inserted = datastore
             .webhook_delivery_create_batch(&opctx, vec![dispatch1.clone()])
@@ -516,7 +509,7 @@ mod test {
         let dispatch2 = WebhookDelivery::new(
             &alert_id,
             &rx_id,
-            AlertDeliveryTrigger::Event,
+            AlertDeliveryTrigger::Alert,
         );
         let inserted = datastore
             .webhook_delivery_create_batch(opctx, vec![dispatch2.clone()])

@@ -1,2 +1,1 @@
-ALTER INDEX IF EXISTS lookup_exact_subscriptions_for_webhook_rx
-RENAME TO lookup_exact_subscriptions_for_alert_rx;
+DROP TABLE IF EXISTS omicron.public.webhook_rx_subscription;
