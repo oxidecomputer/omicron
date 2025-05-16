@@ -436,7 +436,7 @@ impl AsRef<str> for AlertSubscription {
 
 impl JsonSchema for AlertSubscription {
     fn schema_name() -> String {
-        "WebhookSubscription".to_string()
+        "AlertSubscription".to_string()
     }
 
     fn json_schema(
