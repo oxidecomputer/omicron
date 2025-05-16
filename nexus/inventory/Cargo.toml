@@ -17,6 +17,7 @@ clickhouse-admin-types.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
 gateway-messages.workspace = true
+gateway-types.workspace = true
 id-map.workspace = true
 nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true

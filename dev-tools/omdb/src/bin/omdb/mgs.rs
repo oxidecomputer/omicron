@@ -12,7 +12,6 @@ use clap::Args;
 use clap::Subcommand;
 use futures::StreamExt;
 use gateway_client::types::PowerState;
-use gateway_client::types::RotSlot;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpComponentInfo;
@@ -22,6 +21,7 @@ use gateway_client::types::SpIgnitionInfo;
 use gateway_client::types::SpIgnitionSystemType;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use gateway_types::rot::RotSlot;
 use internal_dns_types::names::ServiceName;
 use tabled::Tabled;
 

@@ -5,9 +5,10 @@
 //! Tests `RotUpdater`'s delivery of updates to RoTs via MGS
 
 use gateway_client::SpComponent;
-use gateway_client::types::{GetRotBootInfoParams, RotSlot, SpType};
+use gateway_client::types::{GetRotBootInfoParams, SpType};
 use gateway_messages::{RotBootInfo, SpPort};
 use gateway_test_utils::setup as mgs_setup;
+use gateway_types::rot::RotSlot;
 use hubtools::RawHubrisArchive;
 use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 use nexus_mgs_updates::{MgsClients, RotUpdater, UpdateProgress};

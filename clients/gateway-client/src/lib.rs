@@ -7,7 +7,6 @@
 //! Interface for API requests to a Management Gateway Service (MGS) instance
 
 pub use gateway_messages::SpComponent;
-use types::RotSlot;
 
 // We specifically want to allow consumers, such as `wicketd`, to embed
 // inventory datatypes into their own APIs, rather than recreate structs.
@@ -65,7 +64,6 @@ progenitor::generate_api!(
         ImageVersion = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotImageDetails = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotImageError = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        RotSlot = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpComponentCaboose = { derives = [PartialEq, Eq] },
         SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },
@@ -76,6 +74,7 @@ progenitor::generate_api!(
         SpUpdateStatus = { derives = [PartialEq, Hash, Eq] },
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
+    replace = { RotSlot = gateway_types::rot::RotSlot },
 );
 
 // Override the impl of Ord for SpIdentifier because the default one orders the
@@ -89,27 +88,5 @@ impl Ord for crate::types::SpIdentifier {
 impl PartialOrd for crate::types::SpIdentifier {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
-    }
-}
-
-pub trait RotSlotExt {
-    fn to_u16(&self) -> u16;
-
-    fn toggled(&self) -> Self;
-}
-
-impl RotSlotExt for RotSlot {
-    fn to_u16(&self) -> u16 {
-        match self {
-            RotSlot::A => 0,
-            RotSlot::B => 1,
-        }
-    }
-
-    fn toggled(&self) -> Self {
-        match self {
-            RotSlot::A => RotSlot::B,
-            RotSlot::B => RotSlot::A,
-        }
     }
 }

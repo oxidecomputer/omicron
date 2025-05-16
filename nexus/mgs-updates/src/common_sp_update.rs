@@ -8,9 +8,9 @@
 use super::MgsClients;
 use super::UpdateProgress;
 use futures::future::BoxFuture;
-use gateway_client::types::RotSlot;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
+use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use slog::Logger;

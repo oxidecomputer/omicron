@@ -3645,7 +3645,6 @@
         ]
       },
       "RotSlot": {
-        "description": "`RotSlot`\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"slot\" ], \"properties\": { \"slot\": { \"type\": \"string\", \"enum\": [ \"a\" ] } } }, { \"type\": \"object\", \"required\": [ \"slot\" ], \"properties\": { \"slot\": { \"type\": \"string\", \"enum\": [ \"b\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
