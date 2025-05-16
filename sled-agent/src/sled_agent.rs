@@ -420,7 +420,8 @@ impl SledAgent {
         sled_diagnostics::LogsHandle::new(
             log.new(o!("component" => "sled-diagnostics-cleanup")),
         )
-        .cleanup_snapshots();
+        .cleanup_snapshots()
+        .await;
 
         let storage_manager = &long_running_task_handles.storage_manager;
         let boot_disk = storage_manager
@@ -448,7 +449,7 @@ impl SledAgent {
         }
 
         info!(log, "Mounting backing filesystems");
-        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1)?;
+        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1).await?;
 
         // TODO-correctness Bootstrap-agent already ensures the underlay
         // etherstub and etherstub VNIC exist on startup - could it pass them
@@ -456,8 +457,10 @@ impl SledAgent {
         let etherstub = Dladm::ensure_etherstub(
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
         )
+        .await
         .map_err(|e| Error::Etherstub(e))?;
         let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
+            .await
             .map_err(|e| Error::EtherstubVnic(e))?;
 
         // Ensure the global zone has a functioning IPv6 address.
@@ -467,10 +470,11 @@ impl SledAgent {
             *sled_address.ip(),
             "sled6",
         )
+        .await
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
-        let underlay_nics = underlay::find_nics(&config.data_links)?;
+        let underlay_nics = underlay::find_nics(&config.data_links).await?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Start collecting metric data.
@@ -486,7 +490,7 @@ impl SledAgent {
             MetricsManager::new(&log, identifiers.clone(), *sled_address.ip())?;
 
         // Start tracking the underlay physical links.
-        for link in underlay::find_chelsio_links(&config.data_links)? {
+        for link in underlay::find_chelsio_links(&config.data_links).await? {
             match metrics_manager
                 .request_queue()
                 .track_physical("global", &link.0)
@@ -1370,6 +1374,7 @@ impl SledAgent {
         for zpool in all_disks.all_u2_zpools() {
             let info =
                 match illumos_utils::zpool::Zpool::get_info(&zpool.to_string())
+                    .await
                 {
                     Ok(info) => info,
                     Err(err) => {

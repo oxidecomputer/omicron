@@ -722,12 +722,9 @@ impl ZoneFacilities for RealZoneFacilities {
         &self,
         addrobj: AddrObject,
     ) -> Result<(), ZoneShutdownError> {
-        tokio::task::spawn_blocking(move || {
-            Zones::delete_address(None, &addrobj)
-        })
-        .await
-        .expect("closure did not panic")
-        .map_err(ZoneShutdownError::DeleteGzAddrObj)
+        Zones::delete_address(None, &addrobj)
+            .await
+            .map_err(ZoneShutdownError::DeleteGzAddrObj)
     }
 }
 

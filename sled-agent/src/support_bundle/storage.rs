@@ -135,7 +135,7 @@ pub trait LocalStorage: Sync {
     async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error>;
 
     /// Returns properties about a dataset
-    fn dyn_dataset_get(
+    async fn dyn_dataset_get(
         &self,
         dataset_name: &String,
     ) -> Result<DatasetProperties, Error>;
@@ -180,7 +180,7 @@ impl LocalStorage for StorageHandle {
         self.datasets_config_list().await.map_err(|err| err.into())
     }
 
-    fn dyn_dataset_get(
+    async fn dyn_dataset_get(
         &self,
         dataset_name: &String,
     ) -> Result<DatasetProperties, Error> {
@@ -188,6 +188,7 @@ impl LocalStorage for StorageHandle {
             &[dataset_name.clone()],
             illumos_utils::zfs::WhichDatasets::SelfOnly,
         )
+        .await
         .map_err(|err| Error::DatasetLookup(err))?
         .pop() else {
             // This should not be possible, unless the "zfs get" command is
@@ -246,7 +247,7 @@ impl LocalStorage for crate::sim::Storage {
         self.lock().datasets_config_list().map_err(|err| err.into())
     }
 
-    fn dyn_dataset_get(
+    async fn dyn_dataset_get(
         &self,
         dataset_name: &String,
     ) -> Result<DatasetProperties, Error> {
@@ -457,7 +458,7 @@ impl<'a> SupportBundleManager<'a> {
             .ok_or_else(|| Error::DatasetNotFound)?;
 
         let dataset_props =
-            self.storage.dyn_dataset_get(&dataset.name.full_name())?;
+            self.storage.dyn_dataset_get(&dataset.name.full_name()).await?;
         if !dataset_props.mounted {
             return Err(Error::DatasetNotMounted {
                 dataset: dataset.name.clone(),
