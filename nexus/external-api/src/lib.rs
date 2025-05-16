@@ -3582,10 +3582,10 @@ pub trait NexusExternalApi {
 
     /// Delete alert receiver
     #[endpoint {
-            method = DELETE,
-            path = "/v1/alert-receivers/{receiver}",
-            tags = ["system/alerts"],
-        }]
+        method = DELETE,
+        path = "/v1/alert-receivers/{receiver}",
+        tags = ["system/alerts"],
+    }]
     async fn alert_receiver_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::AlertReceiverSelector>,
@@ -3593,10 +3593,10 @@ pub trait NexusExternalApi {
 
     /// Add alert receiver subscription
     #[endpoint {
-            method = POST,
-            path = "/v1/alert-receivers/{receiver}/subscriptions",
-            tags = ["system/alerts"],
-        }]
+        method = POST,
+        path = "/v1/alert-receivers/{receiver}/subscriptions",
+        tags = ["system/alerts"],
+    }]
     async fn alert_receiver_subscription_add(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::AlertReceiverSelector>,
@@ -3605,10 +3605,10 @@ pub trait NexusExternalApi {
 
     /// Remove alert receiver subscription
     #[endpoint {
-            method = DELETE,
-            path = "/v1/alert-receivers/{receiver}/subscriptions/{subscription}",
-            tags = ["system/alerts"],
-        }]
+        method = DELETE,
+        path = "/v1/alert-receivers/{receiver}/subscriptions/{subscription}",
+        tags = ["system/alerts"],
+    }]
     async fn alert_receiver_subscription_remove(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::AlertSubscriptionSelector>,
@@ -3622,10 +3622,10 @@ pub trait NexusExternalApi {
     /// more of these parameters are provided, only those which are set to
     /// "true" are included in the response.
     #[endpoint {
-            method = GET,
-            path = "/v1/alert-deliveries",
-            tags = ["system/alerts"],
-        }]
+        method = GET,
+        path = "/v1/alert-deliveries",
+        tags = ["system/alerts"],
+    }]
     async fn alert_delivery_list(
         rqctx: RequestContext<Self::Context>,
         receiver: Query<params::AlertReceiverSelector>,
@@ -3635,10 +3635,10 @@ pub trait NexusExternalApi {
 
     /// Request re-delivery of alert
     #[endpoint {
-                method = POST,
-                path = "/v1/alerts/{alert_id}/resend",
-                tags = ["system/alerts"],
-            }]
+        method = POST,
+        path = "/v1/alerts/{alert_id}/resend",
+        tags = ["system/alerts"],
+    }]
     async fn alert_delivery_resend(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::AlertSelector>,
