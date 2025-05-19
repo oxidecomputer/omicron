@@ -31,7 +31,6 @@ use sled_agent_client::Client as SledAgentClient;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
 use uuid::Uuid;

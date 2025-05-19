@@ -49,7 +49,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, WebhookDeliveryUuid};
 use parallel_task_set::ParallelTaskSet;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 // The Deliverator belongs to an elite order, a hallowed sub-category. He's got
