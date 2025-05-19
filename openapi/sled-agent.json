@@ -1128,7 +1128,6 @@
             "name": "range",
             "description": "A request to access a portion of the resource, such as:\n\n``` bytes=0-499 ```\n\nhttps://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range",
             "schema": {
-              "nullable": true,
               "type": "string"
             }
           },

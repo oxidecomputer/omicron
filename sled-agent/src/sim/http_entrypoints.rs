@@ -38,6 +38,7 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
+use range_requests::PotentialRange;
 use range_requests::RequestContextEx;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
@@ -433,9 +434,10 @@ impl SledAgentApi for SledAgentSimImpl {
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = headers.into_inner().range.map(|r| {
-            PotentialRange::new(r.as_bytes())
-        });
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,

@@ -263,9 +263,10 @@ impl SledAgentApi for SledAgentImpl {
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = headers.into_inner().range.map(|r| {
-            PotentialRange::new(r.as_bytes())
-        });
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         Ok(sa
             .as_support_bundle_storage()
             .get(
