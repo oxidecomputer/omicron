@@ -459,8 +459,6 @@ impl BackgroundTask for InstanceWatcher {
             let mut instances = VecDeque::new();
             let mut total: usize = 0;
             loop {
-                let mut what_happened = tasks.wait_for_something_to_happen().await;
-                let output = what_happened.take_output();
                 if instances.is_empty() {
                    if let Some(p) = paginator.take().and_then(Paginator::next) {
                         let maybe_batch = self
@@ -484,7 +482,7 @@ impl BackgroundTask for InstanceWatcher {
                         instances = batch.into();
                     }
                 }
-                if let Some((sled, instance, vmm, project)) = instances.pop_front() {
+                let next = instances.pop_front().map(|(sled, instance, vmm, project)| {
                     let client = match curr_client {
                         // If we are still talking to the same sled, reuse the
                         // existing client and its connection pool.
@@ -503,11 +501,9 @@ impl BackgroundTask for InstanceWatcher {
                     };
 
                     let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
-                    what_happened.spawn(self.check_instance(opctx, client, target, vmm, sled));
-                } else if output.is_none() {
-                    break;
-                }
-                if let Some(check) = output {
+                    self.check_instance(opctx, client, target ,vmm ,sled)
+                });
+                let done = tasks.spawn_and_join(next, |check| {
                     total += 1;
                     match check.outcome {
                         CheckOutcome::Success(state) => {
@@ -528,6 +524,9 @@ impl BackgroundTask for InstanceWatcher {
                         update_sagas_queued += 1;
                     }
                     self.metrics.lock().unwrap().record_check(check);
+                }).await;
+                if done.is_break() {
+                    break;
                 }
             }
 

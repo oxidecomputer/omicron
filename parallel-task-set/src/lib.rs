@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError};
 use tokio::task::JoinSet;
 
 /// The default number of parallel tasks used by [ParallelTaskSet].
@@ -82,6 +83,43 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
         let set = JoinSet::new();
 
         Self { semaphore, set }
+    }
+
+    pub async fn spawn_and_join<F>(
+        &mut self,
+        next_future: Option<F>,
+        mut handle_output: impl FnMut(T),
+    ) -> std::ops::ControlFlow<()>
+    where
+        F: Future<Output = T> + Send + 'static,
+    {
+        if let Some(future) = next_future {
+            loop {
+                match Arc::clone(&self.semaphore).try_acquire_owned() {
+                    Ok(permit) => {
+                        self.set.spawn(async move {
+                            let output = future.await;
+                            drop(permit);
+                            output
+                        });
+                        return std::ops::ControlFlow::Continue(());
+                    }
+                    Err(TryAcquireError::Closed) => {
+                        unreachable!("we never close the semaphore")
+                    }
+                    Err(TryAcquireError::NoPermits) => {
+                        if let Some(output) = self.join_next().await {
+                            handle_output(output);
+                        }
+                    }
+                }
+            }
+        } else {
+            while let Some(output) = self.join_next().await {
+                handle_output(output);
+            }
+            std::ops::ControlFlow::Break(())
+        }
     }
 
     // TODO(eliza) make up a better name for this lol
