@@ -48,9 +48,9 @@ use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, WebhookDeliveryUuid};
+use parallel_task_set::ParallelTaskSet;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use tokio::task::JoinSet;
 
 // The Deliverator belongs to an elite order, a hallowed sub-category. He's got
 // esprit up to here. Right now he is preparing to carry out his third mission
@@ -141,20 +141,17 @@ impl WebhookDeliverator {
         Self { datastore, nexus_id, cfg, client }
     }
 
-    const MAX_CONCURRENT_RXS: NonZeroU32 = {
-        match NonZeroU32::new(8) {
-            Some(nz) => nz,
-            None => unreachable!(),
-        }
-    };
+    const MAX_CONCURRENT_RXS: usize = 8;
 
     async fn actually_activate(
         &mut self,
         opctx: &OpContext,
         status: &mut WebhookDeliveratorStatus,
     ) -> Result<(), Error> {
-        let mut tasks = JoinSet::new();
-        let mut paginator = Paginator::new(Self::MAX_CONCURRENT_RXS);
+        let mut tasks =
+            ParallelTaskSet::new_with_parallelism(Self::MAX_CONCURRENT_RXS);
+        let mut paginator =
+            Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
             let rxs = self
                 .datastore
@@ -194,14 +191,16 @@ impl WebhookDeliverator {
                     (rx_id, status)
                 });
             }
+        }
 
-            while let Some(result) = tasks.join_next().await {
-                let (rx_id, rx_status) = result.expect(
-                "delivery tasks should not be canceled, and nexus is compiled \
-                with `panic=\"abort\"`, so they will not have panicked",
-            );
-                status.by_rx.insert(rx_id, rx_status);
-            }
+        let results = tasks.join_all().await;
+        slog::info!(
+            &opctx.log,
+            "all webhook delivery tasks completed";
+            "num_receivers" => results.len(),
+        );
+        for (rx_id, rx_status) in results {
+            status.by_rx.insert(rx_id, rx_status);
         }
 
         Ok(())
