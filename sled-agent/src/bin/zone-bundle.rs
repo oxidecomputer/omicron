@@ -216,7 +216,7 @@ async fn fetch_underlay_address() -> anyhow::Result<Ipv6Addr> {
         use illumos_utils::ipadm::Ipadm;
         use std::net::IpAddr;
         const EXPECTED_ADDR_OBJ: &str = "underlay0/sled6";
-        match Ipadm::addrobj_addr(EXPECTED_ADDR_OBJ) {
+        match Ipadm::addrobj_addr(EXPECTED_ADDR_OBJ).await {
             // If we failed because there was no such interface, then fall back
             // to localhost.
             Ok(None) => Ok(Ipv6Addr::LOCALHOST),
