@@ -15,7 +15,6 @@ use schemars::{
 use serde::{Deserialize, Serialize};
 use serde_with::rust::deserialize_ignore_any;
 use thiserror::Error;
-use tokio::task::JoinError;
 use update_engine::{AsError, StepSpec, errors::NestedEngineError};
 
 // ---
