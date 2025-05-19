@@ -87,7 +87,7 @@ impl From<ExecutionError> for HttpError {
     }
 }
 
-fn command_to_string(command: &mut std::process::Command) -> String {
+fn command_to_string(command: &std::process::Command) -> String {
     command
         .get_args()
         .map(|s| s.to_string_lossy().into())
@@ -124,6 +124,23 @@ pub fn execute(
 
     if !output.status.success() {
         return Err(output_to_exec_error(command, &output));
+    }
+
+    Ok(output)
+}
+
+pub async fn execute_async(
+    command: &mut tokio::process::Command,
+) -> Result<std::process::Output, ExecutionError> {
+    let output = command.output().await.map_err(|err| {
+        ExecutionError::ExecutionStart {
+            command: command_to_string(command.as_std()),
+            err,
+        }
+    })?;
+
+    if !output.status.success() {
+        return Err(output_to_exec_error(command.as_std(), &output));
     }
 
     Ok(output)

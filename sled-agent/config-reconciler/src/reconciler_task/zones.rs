@@ -20,6 +20,7 @@ use illumos_utils::zone::AdmError;
 use illumos_utils::zone::Api as _;
 use illumos_utils::zone::DeleteAddressError;
 use illumos_utils::zone::Zones;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::address::Ipv6Subnet;
@@ -31,6 +32,7 @@ use slog::Logger;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::num::NonZeroUsize;
@@ -45,6 +47,17 @@ pub enum TimeSyncStatus {
     ConfiguredToSkip,
     FailedToGetSyncStatus(Arc<TimeSyncError>),
     TimeSync(TimeSync),
+}
+
+impl TimeSyncStatus {
+    pub(crate) fn is_synchronized(&self) -> bool {
+        match self {
+            TimeSyncStatus::NotYetChecked
+            | TimeSyncStatus::FailedToGetSyncStatus(_) => false,
+            TimeSyncStatus::ConfiguredToSkip => true,
+            TimeSyncStatus::TimeSync(time_sync) => time_sync.sync,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -74,6 +87,41 @@ impl OmicronZones {
         timesync_config: TimeSyncConfig,
     ) -> Self {
         Self { zones: IdMap::default(), mount_config, timesync_config }
+    }
+
+    pub(crate) fn has_retryable_error(&self) -> bool {
+        self.zones.iter().any(|zone| match &zone.state {
+            ZoneState::Running(_) => false,
+            // Assume any error is retryable. This might not be right? We can
+            // narrow this down in the future.
+            ZoneState::PartiallyShutDown { .. }
+            | ZoneState::FailedToStart(_) => true,
+        })
+    }
+
+    pub(crate) fn to_inventory(
+        &self,
+    ) -> BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult> {
+        self.zones
+            .iter()
+            .map(|zone| match &zone.state {
+                ZoneState::Running(_) => {
+                    (zone.config.id, ConfigReconcilerInventoryResult::Ok)
+                }
+                ZoneState::PartiallyShutDown { err, .. } => (
+                    zone.config.id,
+                    ConfigReconcilerInventoryResult::Err {
+                        message: InlineErrorChain::new(err).to_string(),
+                    },
+                ),
+                ZoneState::FailedToStart(err) => (
+                    zone.config.id,
+                    ConfigReconcilerInventoryResult::Err {
+                        message: InlineErrorChain::new(err).to_string(),
+                    },
+                ),
+            })
+            .collect()
     }
 
     /// Attempt to shut down any zones that aren't present in `desired_zones`,
@@ -109,64 +157,55 @@ impl OmicronZones {
         // Filter desired zones down to just those that we need to stop. See
         // [`ZoneState`] for more discussion of why we're willing (or unwilling)
         // to stop zones in various current states.
-        let mut zones_to_shut_down = self
-            .zones
-            .iter()
-            .filter(|z| {
-                match desired_zones.get(&z.config.id) {
-                    // We no longer want this zone to be running.
-                    None => true,
+        let zones_to_shut_down = self.zones.iter().filter(|z| {
+            match desired_zones.get(&z.config.id) {
+                // We no longer want this zone to be running.
+                None => true,
 
-                    // We do want this zone to be running; check the current
-                    // state.
-                    Some(desired_config) => match &z.state {
-                        // Only shut down a running zone if the desired config
-                        // has changed from the config used to start it.
-                        ZoneState::Running(_) => {
-                            if z.config == *desired_config {
-                                false
-                            } else {
-                                info!(
-                                    log,
-                                    "starting shutdown of running zone; config \
-                                     has changed";
-                                    "zone" => z.config.zone_name(),
-                                    "old-config" => ?z.config,
-                                    "new-config" => ?desired_config,
-                                );
-                                true
-                            }
-                        }
-
-                        // Shut down zones in other states, but log why first.
-                        ZoneState::PartiallyShutDown { err, .. } => {
+                // We do want this zone to be running; check the current
+                // state.
+                Some(desired_config) => match &z.state {
+                    // Only shut down a running zone if the desired config
+                    // has changed from the config used to start it.
+                    ZoneState::Running(_) => {
+                        if z.config == *desired_config {
+                            false
+                        } else {
                             info!(
                                 log,
-                                "resuming shutdown of partially-shut-down zone";
+                                "starting shutdown of running zone; config \
+                                 has changed";
                                 "zone" => z.config.zone_name(),
-                                "prev_err" => InlineErrorChain::new(err),
+                                "old-config" => ?z.config,
+                                "new-config" => ?desired_config,
                             );
                             true
                         }
+                    }
 
-                        ZoneState::FailedToStart(err) => {
-                            info!(
-                                log,
-                                "starting shutdown of a failed-to-start zone";
-                                "zone" => z.config.zone_name(),
-                                "prev_err" => InlineErrorChain::new(err),
-                            );
-                            true
-                        }
-                    },
-                }
-            })
-            .peekable();
+                    // Shut down zones in other states, but log why first.
+                    ZoneState::PartiallyShutDown { err, .. } => {
+                        info!(
+                            log,
+                            "resuming shutdown of partially-shut-down zone";
+                            "zone" => z.config.zone_name(),
+                            "prev_err" => InlineErrorChain::new(err),
+                        );
+                        true
+                    }
 
-        // Save a bit of work: bail out now if we have no zones to stop.
-        if zones_to_shut_down.peek().is_none() {
-            return Ok(());
-        }
+                    ZoneState::FailedToStart(err) => {
+                        info!(
+                            log,
+                            "starting shutdown of a failed-to-start zone";
+                            "zone" => z.config.zone_name(),
+                            "prev_err" => InlineErrorChain::new(err),
+                        );
+                        true
+                    }
+                },
+            }
+        });
 
         // Map the zones to the futures that will try to shut them down.
         let shutdown_futures = zones_to_shut_down.map(|zone| {
@@ -213,53 +252,45 @@ impl OmicronZones {
         // Filter desired zones down to just those that we need to start. See
         // [`ZoneState`] for more discussion of why we're willing (or unwilling)
         // to start zones in various current states.
-        let mut zones_to_start = desired_zones
-            .iter()
-            .filter(|zone| {
-                match self.zones.get(&zone.id).map(|z| &z.state) {
-                    // This is entirely new zone - start it!
-                    None => {
-                        info!(
-                            log, "starting new zone";
-                            "config" => ?zone,
-                        );
-                        true
-                    }
-
-                    // This is a zone we've tried to start before; try again!
-                    Some(ZoneState::FailedToStart(err)) => {
-                        info!(
-                            log,
-                            "retrying start of zone";
-                            "config" => ?zone,
-                            "prev_err" => InlineErrorChain::new(err),
-                        );
-                        true
-                    }
-
-                    // We want this zone to be running now but previously needed
-                    // to stop it and failed to do so: don't try to start it
-                    // again until we succeed in stopping it.
-                    Some(ZoneState::PartiallyShutDown { err, .. }) => {
-                        warn!(
-                            log,
-                            "refusing to start zone (partially shut down)";
-                            "config" => ?zone,
-                            "shutdown_err" => InlineErrorChain::new(err),
-                        );
-                        false
-                    }
-
-                    // The common case: this zone is already running.
-                    Some(ZoneState::Running(_)) => false,
+        let zones_to_start = desired_zones.iter().filter(|zone| {
+            match self.zones.get(&zone.id).map(|z| &z.state) {
+                // This is entirely new zone - start it!
+                None => {
+                    info!(
+                        log, "starting new zone";
+                        "config" => ?zone,
+                    );
+                    true
                 }
-            })
-            .peekable();
 
-        // Save a bit of work: bail out now if we have no zones to start.
-        if zones_to_start.peek().is_none() {
-            return;
-        }
+                // This is a zone we've tried to start before; try again!
+                Some(ZoneState::FailedToStart(err)) => {
+                    info!(
+                        log,
+                        "retrying start of zone";
+                        "config" => ?zone,
+                        "prev_err" => InlineErrorChain::new(err),
+                    );
+                    true
+                }
+
+                // We want this zone to be running now but previously needed
+                // to stop it and failed to do so: don't try to start it
+                // again until we succeed in stopping it.
+                Some(ZoneState::PartiallyShutDown { err, .. }) => {
+                    warn!(
+                        log,
+                        "refusing to start zone (partially shut down)";
+                        "config" => ?zone,
+                        "shutdown_err" => InlineErrorChain::new(err),
+                    );
+                    false
+                }
+
+                // The common case: this zone is already running.
+                Some(ZoneState::Running(_)) => false,
+            }
+        });
 
         // Build up the futures for starting each zone.
         let all_u2_pools = all_u2_pools.clone().into_vec();
@@ -291,7 +322,7 @@ impl OmicronZones {
     }
 
     /// Check the timesync status from a running NTP zone (if it exists)
-    pub(super) async fn check_timesync(self) -> TimeSyncStatus {
+    pub(super) async fn check_timesync(&self) -> TimeSyncStatus {
         match &self.timesync_config {
             TimeSyncConfig::Normal => {
                 match self.timesync_status_from_ntp_zone().await {
@@ -718,12 +749,9 @@ impl ZoneFacilities for RealZoneFacilities {
         &self,
         addrobj: AddrObject,
     ) -> Result<(), ZoneShutdownError> {
-        tokio::task::spawn_blocking(move || {
-            Zones::delete_address(None, &addrobj)
-        })
-        .await
-        .expect("closure did not panic")
-        .map_err(ZoneShutdownError::DeleteGzAddrObj)
+        Zones::delete_address(None, &addrobj)
+            .await
+            .map_err(ZoneShutdownError::DeleteGzAddrObj)
     }
 }
 

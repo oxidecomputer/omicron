@@ -240,8 +240,6 @@ pub enum WriteError {
     ChecksumValidationError(#[source] anyhow::Error),
     #[error("error removing files from {path}: {error}")]
     RemoveFilesError { path: Utf8PathBuf, error: std::io::Error },
-    #[error("error computing control plane hashes")]
-    ControlPlaneHashComputeError(#[source] JoinError),
     #[error("error fsyncing output directory: {error}")]
     SyncOutputDirError { error: std::io::Error },
     #[error("error interacting with zpool: {error}")]

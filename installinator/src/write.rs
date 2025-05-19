@@ -31,7 +31,7 @@ use slog::{Logger, info, warn};
 use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt},
-    task::{JoinError, JoinSet},
+    task::JoinSet,
 };
 use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
 use tufaceous_lib::ControlPlaneZoneImages;
@@ -682,12 +682,8 @@ impl ControlPlaneZoneWriteContext<'_> {
                 "Writing MUPdate override file",
                 async move |cx| {
                     let transport = transport.into_value(cx.token()).await;
-                    let mupdate_json = self
-                        .mupdate_override_artifact(mupdate_uuid)
-                        .await
-                        .map_err(|error| {
-                            WriteError::ControlPlaneHashComputeError(error)
-                        })?;
+                    let mupdate_json =
+                        self.mupdate_override_artifact(mupdate_uuid).await;
 
                     let out_path = self
                         .output_directory
@@ -759,7 +755,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                     std::mem::drop(output_directory);
 
                     if let Some(zpool) = zpool {
-                        Zpool::export(zpool)?;
+                        Zpool::export(zpool).await?;
                     }
 
                     StepSuccess::new(()).into()
@@ -771,29 +767,31 @@ impl ControlPlaneZoneWriteContext<'_> {
     async fn mupdate_override_artifact(
         &self,
         mupdate_uuid: MupdateOverrideUuid,
-    ) -> Result<BufList, JoinError> {
+    ) -> BufList {
         let hash_ids =
             [self.host_phase_2_id.clone(), self.control_plane_id.clone()]
                 .into_iter()
                 .collect();
-        let zones = compute_zone_hashes(&self.zones).await?;
+        let zones = compute_zone_hashes(&self.zones).await;
 
         let mupdate_override =
             MupdateOverrideInfo { mupdate_uuid, hash_ids, zones };
         let json_bytes = serde_json::to_vec(&mupdate_override)
             .expect("this serialization is infallible");
-        Ok(BufList::from(json_bytes))
+        BufList::from(json_bytes)
     }
 }
 
 /// Computes the zone hash IDs.
 ///
-/// Hash computation is done in parallel on blocking tasks. If the runtime shuts
-/// down causing a task abort, or a task panics (should not happen in normal
-/// use), a `JoinError` is returned.
+/// Hash computation is done in parallel on blocking tasks.
+///
+/// # Panics
+///
+/// Panics if the runtime shuts down causing a task abort, or a task panics.
 async fn compute_zone_hashes(
     images: &ControlPlaneZoneImages,
-) -> Result<IdMap<MupdateOverrideZone>, JoinError> {
+) -> IdMap<MupdateOverrideZone> {
     let mut tasks = JoinSet::new();
     for (file_name, data) in &images.zones {
         let file_name = file_name.clone();
@@ -810,9 +808,11 @@ async fn compute_zone_hashes(
 
     let mut output = IdMap::new();
     while let Some(res) = tasks.join_next().await {
-        output.insert(res?);
+        // Propagate panics across tasks—this is the standard pattern we follow
+        // in installinator.
+        output.insert(res.expect("task panicked"));
     }
-    Ok(output)
+    output
 }
 
 fn remove_contents_of(path: &Utf8Path) -> io::Result<()> {
