@@ -33,7 +33,6 @@ const ALERTS_BASE_PATH: &str = "/v1/alerts";
 const ALERT_RECEIVERS_BASE_PATH: &str = "/v1/alert-receivers";
 const WEBHOOK_RECEIVERS_BASE_PATH: &str = "/v1/webhook-receivers";
 const SECRETS_BASE_PATH: &str = "/v1/webhook-secrets";
-const DELIVERIES_BASE_PATH: &str = "/v1/alert-deliveries";
 
 async fn webhook_create(
     ctx: &ControlPlaneTestContext,
@@ -112,15 +111,11 @@ async fn alert_deliveries_list(
     client: &ClientTestContext,
     webhook_name_or_id: impl Into<NameOrId>,
 ) -> Collection<views::AlertDelivery> {
-    let rx = webhook_name_or_id.into();
-    NexusRequest::iter_collection_authn(
-        client,
-        &format!("{DELIVERIES_BASE_PATH}?receiver={rx}"),
-        "",
-        None,
-    )
-    .await
-    .unwrap()
+    let mut rx_url = alert_rx_url(webhook_name_or_id);
+    rx_url.push_str("/deliveries");
+    NexusRequest::iter_collection_authn(client, &rx_url, "", None)
+        .await
+        .unwrap()
 }
 
 async fn alert_delivery_resend(
@@ -239,7 +234,7 @@ fn subscription_remove_url(
     )
 }
 
-async fn webhook_send_probe(
+async fn alert_receiver_send_probe(
     ctx: &ControlPlaneTestContext,
     webhook_id: &AlertReceiverUuid,
     resend: bool,
@@ -247,7 +242,7 @@ async fn webhook_send_probe(
 ) -> views::AlertProbeResult {
     let pathparams = if resend { "?resend=true" } else { "" };
     let path =
-        format!("{WEBHOOK_RECEIVERS_BASE_PATH}/{webhook_id}/probe{pathparams}");
+        format!("{ALERT_RECEIVERS_BASE_PATH}/{webhook_id}/probe{pathparams}");
     NexusRequest::new(
         RequestBuilder::new(&ctx.external_client, http::Method::POST, &path)
             .expect_status(Some(status)),
@@ -1141,9 +1136,13 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     };
 
     // Send a probe. The probe should fail due to a timeout.
-    let probe1 =
-        webhook_send_probe(&cptestctx, &rx_id, false, http::StatusCode::OK)
-            .await;
+    let probe1 = alert_receiver_send_probe(
+        &cptestctx,
+        &rx_id,
+        false,
+        http::StatusCode::OK,
+    )
+    .await;
     dbg!(&probe1);
 
     mock.assert_async().await;
@@ -1183,9 +1182,13 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
             .await
     };
 
-    let probe2 =
-        webhook_send_probe(&cptestctx, &rx_id, false, http::StatusCode::OK)
-            .await;
+    let probe2 = alert_receiver_send_probe(
+        &cptestctx,
+        &rx_id,
+        false,
+        http::StatusCode::OK,
+    )
+    .await;
     dbg!(&probe2);
 
     mock.assert_async().await;
@@ -1228,9 +1231,13 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
             .await
     };
 
-    let probe3 =
-        webhook_send_probe(&cptestctx, &rx_id, false, http::StatusCode::OK)
-            .await;
+    let probe3 = alert_receiver_send_probe(
+        &cptestctx,
+        &rx_id,
+        false,
+        http::StatusCode::OK,
+    )
+    .await;
     dbg!(&probe3);
     mock.assert_async().await;
 
@@ -1392,9 +1399,13 @@ async fn test_probe_resends_failed_deliveries(
 
     // Send a probe with ?resend=true
     let rx_id = AlertReceiverUuid::from_untyped_uuid(webhook.identity.id);
-    let probe =
-        webhook_send_probe(&cptestctx, &rx_id, true, http::StatusCode::OK)
-            .await;
+    let probe = alert_receiver_send_probe(
+        &cptestctx,
+        &rx_id,
+        true,
+        http::StatusCode::OK,
+    )
+    .await;
     dbg!(&probe);
     probe_mock.assert_async().await;
     probe_mock.delete_async().await;
