@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::sync::Arc;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
 
 /// The default number of parallel tasks used by [ParallelTaskSet].
@@ -35,6 +35,30 @@ pub struct ParallelTaskSet<T> {
     set: JoinSet<T>,
 }
 
+pub struct SomethingHappened<'set, T> {
+    output: Option<T>,
+    permit: OwnedSemaphorePermit,
+    set: &'set mut ParallelTaskSet<T>,
+}
+
+impl<T: Send + 'static> SomethingHappened<'_, T> {
+    pub fn take_output(&mut self) -> Option<T> {
+        self.output.take()
+    }
+
+    pub fn spawn(
+        self,
+        future: impl std::future::Future<Output = T> + Send + 'static,
+    ) {
+        let Self { permit, set, .. } = self;
+        set.spawn(async move {
+            let result = future.await;
+            drop(permit);
+            result
+        })
+    }
+}
+
 impl<T: 'static + Send> Default for ParallelTaskSet<T> {
     fn default() -> Self {
         ParallelTaskSet::new()
@@ -58,6 +82,21 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
         let set = JoinSet::new();
 
         Self { semaphore, set }
+    }
+
+    // TODO(eliza) make up a better name for this lol
+    pub async fn wait_for_something_to_happen(
+        &mut self,
+    ) -> SomethingHappened<'_, T> {
+        if let Ok(permit) = Arc::clone(&self.semaphore).try_acquire_owned() {
+            return SomethingHappened { output: None, set: self, permit };
+        }
+        let output = self.join_next().await;
+        let permit = Arc::clone(&self.semaphore)
+            .acquire_owned()
+            .await
+            .expect("semaphore is never closed");
+        SomethingHappened { output, permit, set: self }
     }
 
     /// Spawn a task immediately, but only allow it to execute if the task

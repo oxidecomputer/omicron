@@ -30,6 +30,7 @@ use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::Client as SledAgentClient;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -436,7 +437,7 @@ impl BackgroundTask for InstanceWatcher {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            let mut paginator = Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE);
+            let mut paginator = Some(Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE));
             let mut tasks = ParallelTaskSet::new_with_parallelism(
                 MAX_CONCURRENT_CHECKS,
             );
@@ -455,28 +456,35 @@ impl BackgroundTask for InstanceWatcher {
             // the database query by sled ID, and reuse the same sled-agent
             // client as long as we are talking to the same sled.
             let mut curr_client: Option<(Uuid, SledAgentClient)> = None;
-            while let Some(p) = paginator.next() {
-                let maybe_batch = self
-                    .datastore
-                    .instance_and_vmm_list_by_sled_agent(
-                        opctx,
-                        &p.current_pagparams(),
-                    )
-                    .await;
-                let batch = match maybe_batch {
-                    Ok(batch) => batch,
-                    Err(e) => {
-                        slog::error!(
-                            opctx.log,
-                            "sled instances by sled agent query failed: {e}"
-                        );
-                        return serde_json::json!({ "error": e.to_string() });
+            let mut instances = VecDeque::new();
+            let mut total: usize = 0;
+            loop {
+                let mut what_happened = tasks.wait_for_something_to_happen().await;
+                let output = what_happened.take_output();
+                if instances.is_empty() {
+                   if let Some(p) = paginator.take().and_then(Paginator::next) {
+                        let maybe_batch = self
+                            .datastore
+                            .instance_and_vmm_list_by_sled_agent(
+                                opctx,
+                                &p.current_pagparams(),
+                            )
+                            .await;
+                        let batch = match maybe_batch {
+                            Ok(batch) => batch,
+                            Err(e) => {
+                                slog::error!(
+                                    opctx.log,
+                                    "sled instances by sled agent query failed: {e}"
+                                );
+                                return serde_json::json!({ "error": e.to_string() });
+                            }
+                        };
+                        paginator = Some(p.found_batch(&batch, &|(sled, _, vmm, _)| (sled.id(), vmm.id)));
+                        instances = batch.into();
                     }
-                };
-                paginator = p.found_batch(&batch, &|(sled, _, vmm, _)| (sled.id(), vmm.id));
-
-                // Spawn a task to check on each sled in the batch.
-                for (sled, instance, vmm, project) in batch {
+                }
+                if let Some((sled, instance, vmm, project)) = instances.pop_front() {
                     let client = match curr_client {
                         // If we are still talking to the same sled, reuse the
                         // existing client and its connection pool.
@@ -495,35 +503,34 @@ impl BackgroundTask for InstanceWatcher {
                     };
 
                     let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
-                    tasks.spawn(self.check_instance(opctx, client, target, vmm, sled));
+                    what_happened.spawn(self.check_instance(opctx, client, target, vmm, sled));
+                } else if output.is_none() {
+                    break;
                 }
-            }
-
-            // Now, wait for the check results to come back.
-            let checks = tasks.join_all().await;
-            let total = checks.len();
-            for check in checks {
-                match check.outcome {
-                    CheckOutcome::Success(state) => {
-                        *instance_states
-                            .entry(state.to_string())
-                            .or_default() += 1;
-                    }
-                    CheckOutcome::Failure(reason) => {
-                        *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
-                    }
-                    CheckOutcome::Unknown => {
-                        if let Err(reason) = check.result {
-                            *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
+                if let Some(check) = output {
+                    total += 1;
+                    match check.outcome {
+                        CheckOutcome::Success(state) => {
+                            *instance_states
+                                .entry(state.to_string())
+                                .or_default() += 1;
+                        }
+                        CheckOutcome::Failure(reason) => {
+                            *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
+                        }
+                        CheckOutcome::Unknown => {
+                            if let Err(reason) = check.result {
+                                *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
+                            }
                         }
                     }
+                    if check.update_saga_queued {
+                        update_sagas_queued += 1;
+                    }
+                    self.metrics.lock().unwrap().record_check(check);
                 }
-                if check.update_saga_queued {
-                    update_sagas_queued += 1;
-                }
-                self.metrics.lock().unwrap().record_check(check);
-
             }
+
             // All requests completed! Prune any old instance metrics for
             // instances that we didn't check --- if we didn't spawn a check for
             // something, that means it wasn't present in the most recent
