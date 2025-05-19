@@ -4,7 +4,7 @@
 
 use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, TryAcquireError};
+use tokio::sync::{Semaphore, TryAcquireError};
 use tokio::task::JoinSet;
 
 /// The default number of parallel tasks used by [ParallelTaskSet].
@@ -61,42 +61,39 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
         Self { semaphore, set }
     }
 
-    pub async fn spawn_and_join<F>(
-        &mut self,
-        next_future: Option<F>,
-    ) -> std::ops::ControlFlow<(), Option<T>>
+    /// Spawn the provided `next_future`, potentially waiting until a previously
+    /// spawned task completes if the `ParallelTaskSet` is at its concurrency
+    /// limit. Note that, *unlike* [`join_next()`], this method returning `None`
+    /// does NOT indicate that the set is empty, just that it was not necessary
+    /// to wait for a pervious task to complete in order to spawn the existing
+    /// one.
+    pub async fn spawn_and_join<F>(&mut self, future: F) -> Option<T>
     where
         F: Future<Output = T> + Send + 'static,
     {
-        if let Some(future) = next_future {
-            let (permit, output) =
-                match Arc::clone(&self.semaphore).try_acquire_owned() {
-                    Ok(permit) => (permit, None),
-                    Err(TryAcquireError::Closed) => {
-                        unreachable!("we never close the semaphore")
-                    }
-                    Err(TryAcquireError::NoPermits) => {
-                        let joined = self.join_next().await;
-                        let permit = Arc::clone(&self.semaphore)
-                            .acquire_owned()
-                            .await
-                            .expect("we never close the semaphore");
-                        (permit, joined)
-                    }
-                };
+        let (permit, output) =
+            match Arc::clone(&self.semaphore).try_acquire_owned() {
+                Ok(permit) => (permit, None),
+                Err(TryAcquireError::Closed) => {
+                    unreachable!("we never close the semaphore")
+                }
+                Err(TryAcquireError::NoPermits) => {
+                    let joined = self.join_next().await;
+                    let permit = Arc::clone(&self.semaphore)
+                        .acquire_owned()
+                        .await
+                        .expect("we never close the semaphore");
+                    (permit, joined)
+                }
+            };
 
-            self.set.spawn(async move {
-                let output = future.await;
-                drop(permit);
-                output
-            });
-            return std::ops::ControlFlow::Continue(output);
-        } else {
-            match self.join_next().await {
-                Some(output) => std::ops::ControlFlow::Continue(Some(output)),
-                None => std::ops::ControlFlow::Break(()),
-            }
-        }
+        self.set.spawn(async move {
+            let output = future.await;
+            drop(permit);
+            output
+        });
+
+        output
     }
 
     /// Spawn a task immediately, but only allow it to execute if the task

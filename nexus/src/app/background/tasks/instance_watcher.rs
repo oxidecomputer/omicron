@@ -482,7 +482,8 @@ impl BackgroundTask for InstanceWatcher {
                         instances = batch.into();
                     }
                 }
-                let next = instances.pop_front().map(|(sled, instance, vmm, project)| {
+
+                let completed_check = if let Some((sled, instance, vmm, project)) = instances.pop_front() {
                     let client = match curr_client {
                         // If we are still talking to the same sled, reuse the
                         // existing client and its connection pool.
@@ -501,33 +502,39 @@ impl BackgroundTask for InstanceWatcher {
                     };
 
                     let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
-                    self.check_instance(opctx, client, target ,vmm ,sled)
-                });
-                match tasks.spawn_and_join(next).await {
-                    std::ops::ControlFlow::Break(_) => break,
-                    std::ops::ControlFlow::Continue(None) => {},
-                    std::ops::ControlFlow::Continue(Some(check)) => {
-                        total += 1;
-                        match check.outcome {
-                            CheckOutcome::Success(state) => {
-                                *instance_states
-                                    .entry(state.to_string())
-                                    .or_default() += 1;
-                            }
-                            CheckOutcome::Failure(reason) => {
-                                *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
-                            }
-                            CheckOutcome::Unknown => {
-                                if let Err(reason) = check.result {
-                                    *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
-                                }
-                            }
-                        }
-                        if check.update_saga_queued {
-                            update_sagas_queued += 1;
-                        }
-                        self.metrics.lock().unwrap().record_check(check);
+                    tasks.spawn_and_join(self.check_instance(opctx, client, target ,vmm ,sled)).await
+                } else {
+                    // If there are no remaining instances to check, wait for
+                    // all previously spawned check to complete.
+                    match tasks.join_next().await {
+                        // The ParallelTaskSet` is empty, and there are no new
+                        // instances to check, so we're done here.
+                        None => break,
+                        Some(check) => Some(check),
                     }
+                };
+
+                if let Some(check) = completed_check {
+                    total += 1;
+                    match check.outcome {
+                        CheckOutcome::Success(state) => {
+                            *instance_states
+                                .entry(state.to_string())
+                                .or_default() += 1;
+                        }
+                        CheckOutcome::Failure(reason) => {
+                            *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
+                        }
+                        CheckOutcome::Unknown => {
+                            if let Err(reason) = check.result {
+                                *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
+                            }
+                        }
+                    }
+                    if check.update_saga_queued {
+                        update_sagas_queued += 1;
+                    }
+                    self.metrics.lock().unwrap().record_check(check);
                 }
             }
 
