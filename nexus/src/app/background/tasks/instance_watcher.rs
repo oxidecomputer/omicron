@@ -26,6 +26,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use oximeter::types::ProducerRegistry;
+use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::Client as SledAgentClient;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -64,7 +65,7 @@ pub(crate) struct InstanceWatcher {
 /// forgotten about the instances it was supposed to know about.  For now, we
 /// tune this pretty low, choosing safety over low recovery latency for these
 /// relatively rare events.
-const MAX_CONCURRENT_CHECKS: NonZeroU32 = NonZeroU32::new(16).unwrap();
+const MAX_CONCURRENT_CHECKS: usize = 16;
 
 impl InstanceWatcher {
     pub(crate) fn new(
@@ -436,23 +437,11 @@ impl BackgroundTask for InstanceWatcher {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            let mut tasks = tokio::task::JoinSet::new();
-            // We're using the size of the database query page as a simple
-            // mechanism for limiting the number of concurrent health checks: if
-            // we only query for `MAX_CONCURRENT_CHECKS` records at a time, and
-            // we wait until all spawned health checks have completed before
-            // reading the next batch, it follows that there are only ever
-            // `MAX_CONCURRENT_CHECKS` checks in flight at a time.
-            //
-            // This does mean that, unlike using a counting semaphore or
-            // similar, we may have fewer than the limit health checks running
-            // in parallel as we will not query for a new batch until *all*
-            // checks for the current batch have completed.  If that becomes an
-            // issue, we could implement a more sophisticated
-            // concurrency-limiting scheme later.
-            let mut paginator = Paginator::new(MAX_CONCURRENT_CHECKS);
+            let mut paginator = Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE);
+            let mut tasks = ParallelTaskSet::new_with_parallelism(
+                MAX_CONCURRENT_CHECKS,
+            );
 
-            let mut total: usize = 0;
             let mut update_sagas_queued: usize = 0;
             let mut instance_states: BTreeMap<String, usize> =
                 BTreeMap::new();
@@ -509,40 +498,33 @@ impl BackgroundTask for InstanceWatcher {
                     let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
                     tasks.spawn(self.check_instance(opctx, client, target, vmm, sled));
                 }
-
-                // Now, wait for the check results to come back.
-                while let Some(result) = tasks.join_next().await {
-                    total += 1;
-                    let check = result.expect(
-                        "a `JoinError` is returned if a spawned task \
-                        panics, or if the task is aborted. we never abort \
-                        tasks on this `JoinSet`, and nexus is compiled with \
-                        `panic=\"abort\"`, so neither of these cases should \
-                        ever occur",
-                    );
-                    match check.outcome {
-                        CheckOutcome::Success(state) => {
-                            *instance_states
-                                .entry(state.to_string())
-                                .or_default() += 1;
-                        }
-                        CheckOutcome::Failure(reason) => {
-                            *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
-                        }
-                        CheckOutcome::Unknown => {
-                            if let Err(reason) = check.result {
-                                *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
-                            }
-                        }
-                    }
-                    if check.update_saga_queued {
-                        update_sagas_queued += 1;
-                    }
-                    self.metrics.lock().unwrap().record_check(check);
-
-                }
             }
 
+            // Now, wait for the check results to come back.
+            let checks = tasks.join_all().await;
+            let total = checks.len();
+            for check in checks {
+                match check.outcome {
+                    CheckOutcome::Success(state) => {
+                        *instance_states
+                            .entry(state.to_string())
+                            .or_default() += 1;
+                    }
+                    CheckOutcome::Failure(reason) => {
+                        *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
+                    }
+                    CheckOutcome::Unknown => {
+                        if let Err(reason) = check.result {
+                            *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
+                        }
+                    }
+                }
+                if check.update_saga_queued {
+                    update_sagas_queued += 1;
+                }
+                self.metrics.lock().unwrap().record_check(check);
+
+            }
             // All requests completed! Prune any old instance metrics for
             // instances that we didn't check --- if we didn't spawn a check for
             // something, that means it wasn't present in the most recent
