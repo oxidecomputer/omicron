@@ -503,30 +503,31 @@ impl BackgroundTask for InstanceWatcher {
                     let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
                     self.check_instance(opctx, client, target ,vmm ,sled)
                 });
-                let done = tasks.spawn_and_join(next, |check| {
-                    total += 1;
-                    match check.outcome {
-                        CheckOutcome::Success(state) => {
-                            *instance_states
-                                .entry(state.to_string())
-                                .or_default() += 1;
-                        }
-                        CheckOutcome::Failure(reason) => {
-                            *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
-                        }
-                        CheckOutcome::Unknown => {
-                            if let Err(reason) = check.result {
-                                *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
+                match tasks.spawn_and_join(next).await {
+                    std::ops::ControlFlow::Break(_) => break,
+                    std::ops::ControlFlow::Continue(None) => {},
+                    std::ops::ControlFlow::Continue(Some(check)) => {
+                        total += 1;
+                        match check.outcome {
+                            CheckOutcome::Success(state) => {
+                                *instance_states
+                                    .entry(state.to_string())
+                                    .or_default() += 1;
+                            }
+                            CheckOutcome::Failure(reason) => {
+                                *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
+                            }
+                            CheckOutcome::Unknown => {
+                                if let Err(reason) = check.result {
+                                    *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
+                                }
                             }
                         }
+                        if check.update_saga_queued {
+                            update_sagas_queued += 1;
+                        }
+                        self.metrics.lock().unwrap().record_check(check);
                     }
-                    if check.update_saga_queued {
-                        update_sagas_queued += 1;
-                    }
-                    self.metrics.lock().unwrap().record_check(check);
-                }).await;
-                if done.is_break() {
-                    break;
                 }
             }
 

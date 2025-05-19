@@ -36,30 +36,6 @@ pub struct ParallelTaskSet<T> {
     set: JoinSet<T>,
 }
 
-pub struct SomethingHappened<'set, T> {
-    output: Option<T>,
-    permit: OwnedSemaphorePermit,
-    set: &'set mut ParallelTaskSet<T>,
-}
-
-impl<T: Send + 'static> SomethingHappened<'_, T> {
-    pub fn take_output(&mut self) -> Option<T> {
-        self.output.take()
-    }
-
-    pub fn spawn(
-        self,
-        future: impl std::future::Future<Output = T> + Send + 'static,
-    ) {
-        let Self { permit, set, .. } = self;
-        set.spawn(async move {
-            let result = future.await;
-            drop(permit);
-            result
-        })
-    }
-}
-
 impl<T: 'static + Send> Default for ParallelTaskSet<T> {
     fn default() -> Self {
         ParallelTaskSet::new()
@@ -88,53 +64,39 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
     pub async fn spawn_and_join<F>(
         &mut self,
         next_future: Option<F>,
-        mut handle_output: impl FnMut(T),
-    ) -> std::ops::ControlFlow<()>
+    ) -> std::ops::ControlFlow<(), Option<T>>
     where
         F: Future<Output = T> + Send + 'static,
     {
         if let Some(future) = next_future {
-            loop {
+            let (permit, output) =
                 match Arc::clone(&self.semaphore).try_acquire_owned() {
-                    Ok(permit) => {
-                        self.set.spawn(async move {
-                            let output = future.await;
-                            drop(permit);
-                            output
-                        });
-                        return std::ops::ControlFlow::Continue(());
-                    }
+                    Ok(permit) => (permit, None),
                     Err(TryAcquireError::Closed) => {
                         unreachable!("we never close the semaphore")
                     }
                     Err(TryAcquireError::NoPermits) => {
-                        if let Some(output) = self.join_next().await {
-                            handle_output(output);
-                        }
+                        let joined = self.join_next().await;
+                        let permit = Arc::clone(&self.semaphore)
+                            .acquire_owned()
+                            .await
+                            .expect("we never close the semaphore");
+                        (permit, joined)
                     }
-                }
-            }
-        } else {
-            while let Some(output) = self.join_next().await {
-                handle_output(output);
-            }
-            std::ops::ControlFlow::Break(())
-        }
-    }
+                };
 
-    // TODO(eliza) make up a better name for this lol
-    pub async fn wait_for_something_to_happen(
-        &mut self,
-    ) -> SomethingHappened<'_, T> {
-        if let Ok(permit) = Arc::clone(&self.semaphore).try_acquire_owned() {
-            return SomethingHappened { output: None, set: self, permit };
+            self.set.spawn(async move {
+                let output = future.await;
+                drop(permit);
+                output
+            });
+            return std::ops::ControlFlow::Continue(output);
+        } else {
+            match self.join_next().await {
+                Some(output) => std::ops::ControlFlow::Continue(Some(output)),
+                None => std::ops::ControlFlow::Break(()),
+            }
         }
-        let output = self.join_next().await;
-        let permit = Arc::clone(&self.semaphore)
-            .acquire_owned()
-            .await
-            .expect("semaphore is never closed");
-        SomethingHappened { output, permit, set: self }
     }
 
     /// Spawn a task immediately, but only allow it to execute if the task
@@ -146,9 +108,11 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
         let semaphore = Arc::clone(&self.semaphore);
         let _abort_handle = self.set.spawn(async move {
             // Hold onto the permit until the command finishes executing
-            let _permit =
+            let permit =
                 semaphore.acquire_owned().await.expect("semaphore acquire");
-            command.await
+            let output = command.await;
+            drop(permit);
+            output
         });
     }
 
