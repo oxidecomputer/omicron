@@ -1193,10 +1193,10 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
 
     mock.assert_async().await;
     expect_delivery_attempts(
-        &probe1.probe.attempts,
+        &probe2.probe.attempts,
         &[ExpectAttempt {
             result: views::WebhookDeliveryAttemptResult::FailedTimeout,
-            status: Some(503),
+            status: None,
         }],
     );
     assert_eq!(probe2.probe.alert_class, "probe");
@@ -1242,7 +1242,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     mock.assert_async().await;
 
     expect_delivery_attempts(
-        &probe1.probe.attempts,
+        &probe3.probe.attempts,
         &[ExpectAttempt {
             result: views::WebhookDeliveryAttemptResult::Succeeded,
             status: Some(200),
