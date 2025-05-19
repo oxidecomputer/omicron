@@ -10,13 +10,19 @@ use either::Either;
 use futures::future;
 use illumos_utils::zpool::PathInPool;
 use key_manager::StorageKeyRequester;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
 use slog::Logger;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -78,11 +84,11 @@ pub(crate) fn spawn<T: SledAgentFacilities>(
     );
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct ReconcilerResult {
     mount_config: Arc<MountConfig>,
     status: ReconcilerTaskStatus,
-    latest_result: Option<Arc<LatestReconcilerTaskResultInner>>,
+    latest_result: Option<LatestReconciliationResult>,
 }
 
 impl ReconcilerResult {
@@ -94,14 +100,14 @@ impl ReconcilerResult {
         }
     }
 
-    pub fn timesync_status(&self) -> TimeSyncStatus {
+    pub(crate) fn timesync_status(&self) -> TimeSyncStatus {
         self.latest_result
-            .as_deref()
+            .as_ref()
             .map(|inner| inner.timesync_status.clone())
             .unwrap_or(TimeSyncStatus::NotYetChecked)
     }
 
-    pub fn all_mounted_debug_datasets(
+    pub(crate) fn all_mounted_debug_datasets(
         &self,
     ) -> impl Iterator<Item = PathInPool> + '_ {
         let Some(latest_result) = &self.latest_result else {
@@ -114,7 +120,7 @@ impl ReconcilerResult {
         )
     }
 
-    pub fn all_mounted_zone_root_datasets(
+    pub(crate) fn all_mounted_zone_root_datasets(
         &self,
     ) -> impl Iterator<Item = PathInPool> + '_ {
         let Some(latest_result) = &self.latest_result else {
@@ -125,6 +131,16 @@ impl ReconcilerResult {
                 .datasets
                 .all_mounted_zone_root_datasets(&self.mount_config),
         )
+    }
+
+    pub(crate) fn to_inventory(
+        &self,
+    ) -> (ConfigReconcilerInventoryStatus, Option<ConfigReconcilerInventory>)
+    {
+        let status = self.status.to_inventory();
+        let latest_result =
+            self.latest_result.as_ref().map(|r| r.to_inventory());
+        (status, latest_result)
     }
 }
 
@@ -144,11 +160,52 @@ pub enum ReconcilerTaskStatus {
     },
 }
 
+impl ReconcilerTaskStatus {
+    fn to_inventory(&self) -> ConfigReconcilerInventoryStatus {
+        match self {
+            Self::NotYetRunning
+            | Self::WaitingForInternalDisks
+            | Self::WaitingForInitialConfig => {
+                ConfigReconcilerInventoryStatus::NotYetRun
+            }
+            Self::PerformingReconciliation {
+                config,
+                started_at_time,
+                started_at_instant,
+            } => ConfigReconcilerInventoryStatus::Running {
+                config: config.clone(),
+                started_at: *started_at_time,
+                running_for: started_at_instant.elapsed(),
+            },
+            Self::Idle { completed_at_time, ran_for } => {
+                ConfigReconcilerInventoryStatus::Idle {
+                    completed_at: *completed_at_time,
+                    ran_for: *ran_for,
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
-struct LatestReconcilerTaskResultInner {
+struct LatestReconciliationResult {
     sled_config: OmicronSledConfig,
+    external_disks_inventory:
+        BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
     datasets: DatasetEnsureResult,
+    zones_inventory: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     timesync_status: TimeSyncStatus,
+}
+
+impl LatestReconciliationResult {
+    fn to_inventory(&self) -> ConfigReconcilerInventory {
+        ConfigReconcilerInventory {
+            last_reconciled_config: self.sled_config.clone(),
+            external_disks: self.external_disks_inventory.clone(),
+            datasets: self.datasets.to_inventory(),
+            zones: self.zones_inventory.clone(),
+        }
+    }
 }
 
 struct ReconcilerTask {
@@ -415,9 +472,11 @@ impl ReconcilerTask {
             ReconciliationResult::NoRetryNeeded
         };
 
-        let inner = LatestReconcilerTaskResultInner {
+        let inner = LatestReconciliationResult {
             sled_config,
+            external_disks_inventory: self.external_disks.to_inventory(),
             datasets,
+            zones_inventory: self.zones.to_inventory(),
             timesync_status,
         };
         self.reconciler_result_tx.send_modify(|r| {
@@ -425,7 +484,7 @@ impl ReconcilerTask {
                 completed_at_time: Utc::now(),
                 ran_for: started_at_instant.elapsed(),
             };
-            r.latest_result = Some(Arc::new(inner));
+            r.latest_result = Some(inner);
         });
 
         result
