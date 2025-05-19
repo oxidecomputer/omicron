@@ -4,6 +4,7 @@
 
 //! Types for representing the hardware/software inventory in the database
 
+use crate::ArtifactHash;
 use crate::Generation;
 use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
@@ -1614,6 +1615,17 @@ impl TryFrom<InvOmicronSledConfigDataset> for DatasetConfig {
     }
 }
 
+impl_enum_type!(
+    InvZoneImageSourceEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvZoneImageSource;
+
+    // Enum values
+    InstallDataset => b"install_dataset"
+    Artifact => b"artifact"
+);
+
 /// See [`nexus_sled_agent_shared::inventory::OmicronZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_zone)]
@@ -1639,6 +1651,8 @@ pub struct InvOmicronSledConfigZone {
     pub snat_first_port: Option<SqlU16>,
     pub snat_last_port: Option<SqlU16>,
     pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
+    pub image_source: InvZoneImageSource,
+    pub image_artifact_sha256: Option<ArtifactHash>,
 }
 
 impl InvOmicronSledConfigZone {
@@ -1647,6 +1661,15 @@ impl InvOmicronSledConfigZone {
         sled_config_id: Uuid,
         zone: &OmicronZoneConfig,
     ) -> Result<InvOmicronSledConfigZone, anyhow::Error> {
+        let (image_source, image_artifact_sha256) = match &zone.image_source {
+            OmicronZoneImageSource::InstallDataset => {
+                (InvZoneImageSource::InstallDataset, None)
+            }
+            OmicronZoneImageSource::Artifact { hash } => {
+                (InvZoneImageSource::Artifact, Some(ArtifactHash(*hash)))
+            }
+        };
+
         // Create a dummy record to start, then fill in the rest
         // according to the zone type
         let mut inv_omicron_zone = InvOmicronSledConfigZone {
@@ -1681,6 +1704,8 @@ impl InvOmicronSledConfigZone {
             snat_ip: None,
             snat_first_port: None,
             snat_last_port: None,
+            image_source,
+            image_artifact_sha256,
         };
 
         match &zone.zone_type {
@@ -1968,13 +1993,31 @@ impl InvOmicronSledConfigZone {
             }
         };
 
+        let image_source = match (self.image_source, self.image_artifact_sha256)
+        {
+            (InvZoneImageSource::InstallDataset, None) => {
+                OmicronZoneImageSource::InstallDataset
+            }
+            (InvZoneImageSource::Artifact, Some(ArtifactHash(hash))) => {
+                OmicronZoneImageSource::Artifact { hash }
+            }
+            (InvZoneImageSource::InstallDataset, Some(_))
+            | (InvZoneImageSource::Artifact, None) => {
+                bail!(
+                    "invalid image source column combination: {:?}, {:?}",
+                    self.image_source,
+                    self.image_artifact_sha256
+                )
+            }
+        };
+
         Ok(OmicronZoneConfig {
             id: self.id.into(),
             filesystem_pool: self
                 .filesystem_pool
                 .map(|id| ZpoolName::new_external(id.into())),
             zone_type,
-            image_source: OmicronZoneImageSource::InstallDataset,
+            image_source,
         })
     }
 }
@@ -1983,7 +2026,7 @@ impl InvOmicronSledConfigZone {
 #[diesel(table_name = inv_omicron_sled_config_zone_nic)]
 pub struct InvOmicronSledConfigZoneNic {
     inv_collection_id: DbTypedUuid<CollectionKind>,
-    sled_config_id: Uuid,
+    pub sled_config_id: Uuid,
     pub id: Uuid,
     name: Name,
     ip: IpNetwork,

@@ -2443,11 +2443,12 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
-                nics.extend(
-                    batch.into_iter().map(|found_zone_nic| {
-                        (found_zone_nic.id, found_zone_nic)
-                    }),
-                );
+                nics.extend(batch.into_iter().map(|found_zone_nic| {
+                    (
+                        (found_zone_nic.sled_config_id, found_zone_nic.id),
+                        found_zone_nic,
+                    )
+                }));
             }
 
             nics
@@ -2489,7 +2490,7 @@ impl DataStore {
                     // inv_omicron_sled_config_zone with that id.  This should
                     // be impossible and reflects either a bug or database
                     // corruption.
-                    omicron_zone_nics.remove(&id).ok_or_else(|| {
+                    omicron_zone_nics.remove(&(z.sled_config_id, id)).ok_or_else(|| {
                         Error::internal_error(&format!(
                             "zone {:?}: expected to find NIC {:?}, but didn't",
                             z.id, z.nic_id
@@ -3148,7 +3149,7 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_sled_agent_shared::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-        ConfigReconcilerInventoryStatus,
+        ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
     };
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::BaseboardId;
@@ -3162,6 +3163,7 @@ mod test {
     use pretty_assertions::assert_eq;
     use std::num::NonZeroU32;
     use std::time::Duration;
+    use tufaceous_artifact::ArtifactHash;
 
     struct CollectionCounts {
         baseboards: usize,
@@ -3911,7 +3913,7 @@ mod test {
     #[tokio::test]
     async fn test_reconciler_status_fields() {
         // Setup
-        let logctx = dev::test_setup_log("inventory_deletion");
+        let logctx = dev::test_setup_log("reconciler_status_fields");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -3994,6 +3996,61 @@ mod test {
         check_all_inv_tables(&datastore, AllInvTables::AreEmpty).await.expect(
             "All inv_... tables should be deleted alongside collection",
         );
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_zone_image_source() {
+        // Setup
+        let logctx = dev::test_setup_log("zone_image_source");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Start with a representative collection.
+        let Representative { builder, .. } = representative();
+        let mut collection = builder.build();
+
+        // Mutate some zones on one of the sleds to have various image sources.
+        {
+            // Find a sled that has a few zones in one of its sled configs.
+            let sa = collection
+                .sled_agents
+                .values_mut()
+                .find(|sa| {
+                    sa.ledgered_sled_config
+                        .as_ref()
+                        .map_or(false, |config| config.zones.len() >= 3)
+                })
+                .expect("at least one sled has 3 or more zones");
+            let mut zones_iter =
+                sa.ledgered_sled_config.as_mut().unwrap().zones.iter_mut();
+
+            let mut z1 = zones_iter.next().expect("at least 1 zone");
+            let mut z2 = zones_iter.next().expect("at least 2 zones");
+            let mut z3 = zones_iter.next().expect("at least 3 zones");
+            z1.image_source = OmicronZoneImageSource::InstallDataset;
+            z2.image_source = OmicronZoneImageSource::Artifact {
+                hash: ArtifactHash([0; 32]),
+            };
+            z3.image_source = OmicronZoneImageSource::Artifact {
+                hash: ArtifactHash([1; 32]),
+            };
+            eprintln!("changed image sources: {z1:?} {z2:?} {z3:?}");
+        }
+
+        // Write it to the db; read it back and check it survived.
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection.id)
+            .await
+            .expect("failed to read collection back");
+        assert_eq!(collection, collection_read);
 
         // Clean up.
         db.terminate().await;

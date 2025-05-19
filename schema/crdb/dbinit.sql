@@ -3620,23 +3620,27 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     reconciler_status_kind inv_config_reconciler_status_kind NOT NULL,
     -- (foreign key into `inv_omicron_sled_config` table)
     -- only present if `reconciler_status_kind = 'running'`
-    reconciler_status_sled_config UUID CHECK (
+    reconciler_status_sled_config UUID,
+    -- only present if `reconciler_status_kind != 'not-yet-run'`
+    reconciler_status_timestamp TIMESTAMPTZ,
+    -- only present if `reconciler_status_kind != 'not-yet-run'`
+    reconciler_status_duration_secs FLOAT,
+
+    CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
             AND reconciler_status_sled_config IS NOT NULL)
         OR
         (reconciler_status_kind != 'running'
             AND reconciler_status_sled_config IS NULL)
     ),
-    -- only present if `reconciler_status_kind != 'not-yet-run'`
-    reconciler_status_timestamp TIMESTAMPTZ CHECK (
+    CONSTRAINT reconciler_status_timestamp_present_unless_not_yet_run CHECK (
         (reconciler_status_kind = 'not-yet-run'
             AND reconciler_status_timestamp IS NULL)
         OR
         (reconciler_status_kind != 'not-yet-run'
             AND reconciler_status_timestamp IS NOT NULL)
     ),
-    -- only present if `reconciler_status_kind != 'not-yet-run'`
-    reconciler_status_duration_secs FLOAT CHECK (
+    CONSTRAINT reconciler_status_duration_present_unless_not_yet_run CHECK (
         (reconciler_status_kind = 'not-yet-run'
             AND reconciler_status_duration_secs IS NULL)
         OR
@@ -3835,6 +3839,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
   'oximeter'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.inv_zone_image_source AS ENUM (
+    'install_dataset',
+    'artifact'
+);
+
 -- `zones` portion of an `OmicronSledConfig` observed from sled-agent
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     -- where this observation came from
@@ -3901,6 +3910,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     -- TODO: This is nullable for backwards compatibility.
     -- Eventually, that nullability should be removed.
     filesystem_pool UUID,
+
+    -- zone image source
+    image_source omicron.public.inv_zone_image_source NOT NULL,
+    image_artifact_sha256 STRING(64),
+
+    CONSTRAINT zone_image_source_artifact_hash_present CHECK (
+        (image_source = 'artifact'
+            AND image_artifact_sha256 IS NOT NULL)
+        OR
+        (image_source != 'artifact'
+            AND image_artifact_sha256 IS NULL)
+    ),
 
     PRIMARY KEY (inv_collection_id, sled_config_id, id)
 );

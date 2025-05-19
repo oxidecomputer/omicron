@@ -1712,6 +1712,9 @@ table! {
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
         filesystem_pool -> Nullable<Uuid>,
+
+        image_source -> crate::enums::InvZoneImageSourceEnum,
+        image_artifact_sha256 -> Nullable<Text>,
     }
 }
 
