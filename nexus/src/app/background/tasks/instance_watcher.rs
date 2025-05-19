@@ -512,7 +512,7 @@ impl BackgroundTask for InstanceWatcher {
                         };
 
                         let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
-                        permit.spawn(self.check_instance(opctx, client, target, vmm, sled));
+                        tasks.spawn_with_permit(permit, self.check_instance(opctx, client, target, vmm, sled));
                     },
                     result = tasks.join_next() => {
                         let check = match result {

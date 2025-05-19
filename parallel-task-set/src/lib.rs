@@ -37,10 +37,7 @@ pub struct ParallelTaskSet<T> {
 
 /// A reserved permit to spawn one additional task on a [`ParallelTaskSet`].
 #[must_use = "a TaskSetPermit does nothing if not used"]
-pub struct TaskSetPermit<'set, T> {
-    permit: OwnedSemaphorePermit,
-    set: &'set mut JoinSet<T>,
-}
+pub struct TaskSetPermit(OwnedSemaphorePermit);
 
 impl<T: 'static + Send> Default for ParallelTaskSet<T> {
     fn default() -> Self {
@@ -82,12 +79,25 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
         });
     }
 
-    pub async fn ready_to_spawn(&mut self) -> TaskSetPermit<'_, T> {
+    pub fn spawn_with_permit(
+        &mut self,
+        TaskSetPermit(permit): TaskSetPermit,
+        future: impl std::future::Future<Output = T> + Send + 'static,
+    ) {
+        let _abort_handle = self.set.spawn(async move {
+            let result = future.await;
+            // Hold onto the permit until the command finishes executing
+            drop(permit);
+            result
+        });
+    }
+
+    pub async fn ready_to_spawn(&mut self) -> TaskSetPermit {
         let permit = Arc::clone(&self.semaphore)
             .acquire_owned()
             .await
             .expect("semaphore is never closed");
-        TaskSetPermit { permit, set: &mut self.set }
+        TaskSetPermit(permit)
     }
 
     /// Waits for the next task to complete and return its output.
@@ -106,20 +116,6 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
     /// This method panics any of the tasks return a JoinError
     pub async fn join_all(self) -> Vec<T> {
         self.set.join_all().await
-    }
-}
-
-impl<T: Send + 'static> TaskSetPermit<'_, T> {
-    pub fn spawn(
-        self,
-        future: impl std::future::Future<Output = T> + Send + 'static,
-    ) {
-        let Self { permit, set } = self;
-        set.spawn(async move {
-            let result = future.await;
-            drop(permit);
-            result
-        });
     }
 }
 
