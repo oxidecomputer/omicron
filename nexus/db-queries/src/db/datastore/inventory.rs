@@ -1453,9 +1453,14 @@ impl DataStore {
             ndatasets,
             nphysical_disks,
             nnvme_disk_disk_firmware,
-            nsled_agent_zones,
-            nzones,
-            nnics,
+            nlast_reconciliation_disk_results,
+            nlast_reconciliation_dataset_results,
+            nlast_reconciliation_zone_results,
+            nomicron_sled_configs,
+            nomicron_sled_config_disks,
+            nomicron_sled_config_datasets,
+            nomicron_sled_config_zones,
+            nomicron_sled_config_zone_nics,
             nzpools,
             nerrors,
             nclickhouse_keeper_membership,
@@ -1553,38 +1558,74 @@ impl DataStore {
                         .await?
                     };
 
-                    let nsled_agent_zones = 0;
-                    let nzones = 0;
-                    let nnics = 0;
-                    /*
-                    // Remove rows associated with Omicron zones
-                    let nsled_agent_zones = {
-                        use nexus_db_schema::schema::inv_sled_omicron_zones::dsl;
-                        diesel::delete(dsl::inv_sled_omicron_zones.filter(
+                    // Remove rows associated with the last reconciliation
+                    // result (disks, datasets, and zones).
+                    let nlast_reconciliation_disk_results = {
+                        use nexus_db_schema::schema::inv_last_reconciliation_disk_result::dsl;
+                        diesel::delete(dsl::inv_last_reconciliation_disk_result.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nlast_reconciliation_dataset_results = {
+                        use nexus_db_schema::schema::inv_last_reconciliation_dataset_result::dsl;
+                        diesel::delete(dsl::inv_last_reconciliation_dataset_result.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nlast_reconciliation_zone_results = {
+                        use nexus_db_schema::schema::inv_last_reconciliation_zone_result::dsl;
+                        diesel::delete(dsl::inv_last_reconciliation_zone_result.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
                         .await?
                     };
 
-                    let nzones = {
-                        use nexus_db_schema::schema::inv_omicron_zone::dsl;
-                        diesel::delete(dsl::inv_omicron_zone.filter(
+                    // Remove rows associated with `OmicronSledConfig`s.
+                    let nomicron_sled_configs = {
+                        use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
+                        diesel::delete(dsl::inv_omicron_sled_config.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
                         .await?
                     };
-
-                    let nnics = {
-                        use nexus_db_schema::schema::inv_omicron_zone_nic::dsl;
-                        diesel::delete(dsl::inv_omicron_zone_nic.filter(
+                    let nomicron_sled_config_disks = {
+                        use nexus_db_schema::schema::inv_omicron_sled_config_disk::dsl;
+                        diesel::delete(dsl::inv_omicron_sled_config_disk.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
                         .await?
                     };
-                    */
+                    let nomicron_sled_config_datasets = {
+                        use nexus_db_schema::schema::inv_omicron_sled_config_dataset::dsl;
+                        diesel::delete(dsl::inv_omicron_sled_config_dataset.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nomicron_sled_config_zones = {
+                        use nexus_db_schema::schema::inv_omicron_sled_config_zone::dsl;
+                        diesel::delete(dsl::inv_omicron_sled_config_zone.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nomicron_sled_config_zone_nics = {
+                        use nexus_db_schema::schema::inv_omicron_sled_config_zone_nic::dsl;
+                        diesel::delete(dsl::inv_omicron_sled_config_zone_nic.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                     let nzpools = {
                         use nexus_db_schema::schema::inv_zpool::dsl;
@@ -1627,9 +1668,14 @@ impl DataStore {
                         ndatasets,
                         nphysical_disks,
                         nnvme_disk_firwmare,
-                        nsled_agent_zones,
-                        nzones,
-                        nnics,
+                        nlast_reconciliation_disk_results,
+                        nlast_reconciliation_dataset_results,
+                        nlast_reconciliation_zone_results,
+                        nomicron_sled_configs,
+                        nomicron_sled_config_disks,
+                        nomicron_sled_config_datasets,
+                        nomicron_sled_config_zones,
+                        nomicron_sled_config_zone_nics,
                         nzpools,
                         nerrors,
                         nclickhouse_keeper_membership,
@@ -1651,9 +1697,17 @@ impl DataStore {
             "ndatasets" => ndatasets,
             "nphysical_disks" => nphysical_disks,
             "nnvme_disk_firmware" => nnvme_disk_disk_firmware,
-            "nsled_agent_zones" => nsled_agent_zones,
-            "nzones" => nzones,
-            "nnics" => nnics,
+            "nlast_reconciliation_disk_results" =>
+                nlast_reconciliation_disk_results,
+            "nlast_reconciliation_dataset_results" =>
+                nlast_reconciliation_dataset_results,
+            "nlast_reconciliation_zone_results" =>
+                nlast_reconciliation_zone_results,
+            "nomicron_sled_configs" => nomicron_sled_configs,
+            "nomicron_sled_config_disks" => nomicron_sled_config_disks,
+            "nomicron_sled_config_datasets" => nomicron_sled_config_datasets,
+            "nomicron_sled_config_zones" => nomicron_sled_config_zones,
+            "nomicron_sled_config_zone_nics" => nomicron_sled_config_zone_nics,
             "nzpools" => nzpools,
             "nerrors" => nerrors,
             "nclickhouse_keeper_membership" => nclickhouse_keeper_membership
@@ -2365,11 +2419,6 @@ impl DataStore {
             configs
         };
 
-        // Build the set of this collection's sled IDs (for filtering the batch
-        // queries below).
-        let omicron_sled_config_ids =
-            omicron_sled_configs.keys().copied().collect::<Vec<_>>();
-
         // Assemble a mutable map of all the NICs found, by NIC id.  As we
         // match these up with the corresponding zone below, we'll remove items
         // from this set.  That way we can tell if the same NIC was used twice
@@ -2386,9 +2435,7 @@ impl DataStore {
                     dsl::id,
                     &p.current_pagparams(),
                 )
-                .filter(
-                    dsl::sled_config_id.eq_any(omicron_sled_config_ids.clone()),
-                )
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfigZoneNic::as_select())
                 .load_async(&*conn)
                 .await
@@ -2419,9 +2466,7 @@ impl DataStore {
                     dsl::id,
                     &p.current_pagparams(),
                 )
-                .filter(
-                    dsl::sled_config_id.eq_any(omicron_sled_config_ids.clone()),
-                )
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfigZone::as_select())
                 .load_async(&*conn)
                 .await
@@ -2493,9 +2538,7 @@ impl DataStore {
                     dsl::id,
                     &p.current_pagparams(),
                 )
-                .filter(
-                    dsl::sled_config_id.eq_any(omicron_sled_config_ids.clone()),
-                )
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfigDataset::as_select())
                 .load_async(&*conn)
                 .await
@@ -2531,9 +2574,7 @@ impl DataStore {
                     dsl::id,
                     &p.current_pagparams(),
                 )
-                .filter(
-                    dsl::sled_config_id.eq_any(omicron_sled_config_ids.clone()),
-                )
+                .filter(dsl::inv_collection_id.eq(db_id))
                 .select(InvOmicronSledConfigDisk::as_select())
                 .load_async(&*conn)
                 .await
@@ -3012,17 +3053,30 @@ impl ConfigReconcilerRows {
             config,
         ));
         self.disks.extend(config.disks.iter().map(|disk| {
-            InvOmicronSledConfigDisk::new(sled_config_id, disk.clone())
+            InvOmicronSledConfigDisk::new(
+                collection_id,
+                sled_config_id,
+                disk.clone(),
+            )
         }));
         self.datasets.extend(config.datasets.iter().map(|dataset| {
-            InvOmicronSledConfigDataset::new(sled_config_id, dataset)
+            InvOmicronSledConfigDataset::new(
+                collection_id,
+                sled_config_id,
+                dataset,
+            )
         }));
         for zone in &config.zones {
-            self.zones
-                .push(InvOmicronSledConfigZone::new(sled_config_id, zone)?);
-            if let Some(nic) =
-                InvOmicronSledConfigZoneNic::new(sled_config_id, zone)?
-            {
+            self.zones.push(InvOmicronSledConfigZone::new(
+                collection_id,
+                sled_config_id,
+                zone,
+            )?);
+            if let Some(nic) = InvOmicronSledConfigZoneNic::new(
+                collection_id,
+                sled_config_id,
+                zone,
+            )? {
                 self.zone_nics.push(nic);
             }
         }

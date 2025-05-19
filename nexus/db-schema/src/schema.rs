@@ -1688,7 +1688,8 @@ table! {
 }
 
 table! {
-    inv_omicron_sled_config_zone (sled_config_id, id) {
+    inv_omicron_sled_config_zone (inv_collection_id, sled_config_id, id) {
+        inv_collection_id -> Uuid,
         sled_config_id -> Uuid,
 
         id -> Uuid,
@@ -1715,7 +1716,8 @@ table! {
 }
 
 table! {
-    inv_omicron_sled_config_zone_nic (sled_config_id, id) {
+    inv_omicron_sled_config_zone_nic (inv_collection_id, sled_config_id, id) {
+        inv_collection_id -> Uuid,
         sled_config_id -> Uuid,
         id -> Uuid,
         name -> Text,
@@ -1729,7 +1731,8 @@ table! {
 }
 
 table! {
-    inv_omicron_sled_config_dataset (sled_config_id, id) {
+    inv_omicron_sled_config_dataset (inv_collection_id, sled_config_id, id) {
+        inv_collection_id -> Uuid,
         sled_config_id -> Uuid,
         sled_id -> Uuid,
         id -> Uuid,
@@ -1745,7 +1748,8 @@ table! {
 }
 
 table! {
-    inv_omicron_sled_config_disk (sled_config_id, id) {
+    inv_omicron_sled_config_disk (inv_collection_id, sled_config_id, id) {
+        inv_collection_id -> Uuid,
         sled_config_id -> Uuid,
         sled_id -> Uuid,
         id -> Uuid,

@@ -3838,6 +3838,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
 -- `zones` portion of an `OmicronSledConfig` observed from sled-agent
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     -- where this observation came from
+    inv_collection_id UUID NOT NULL,
+
     -- (foreign key into `inv_omicron_sled_config` table)
     sled_config_id UUID NOT NULL,
 
@@ -3900,7 +3902,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     -- Eventually, that nullability should be removed.
     filesystem_pool UUID,
 
-    PRIMARY KEY (sled_config_id, id)
+    PRIMARY KEY (inv_collection_id, sled_config_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS inv_omicron_sled_config_zone_nic_id
@@ -3912,6 +3914,9 @@ CREATE INDEX IF NOT EXISTS inv_omicron_sled_config_zone_nic_id
     );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_nic (
+    -- where this observation came from
+    inv_collection_id UUID NOT NULL,
+
     sled_config_id UUID NOT NULL,
     id UUID NOT NULL,
     name TEXT NOT NULL,
@@ -3922,10 +3927,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_nic (
     is_primary BOOLEAN NOT NULL,
     slot INT2 NOT NULL,
 
-    PRIMARY KEY (sled_config_id, id)
+    PRIMARY KEY (inv_collection_id, sled_config_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_dataset (
+    -- where this observation came from
+    inv_collection_id UUID NOT NULL,
+
     -- foreign key into the `inv_omicron_sled_config` table
     sled_config_id UUID NOT NULL,
     id UUID NOT NULL,
@@ -3944,10 +3952,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_dataset (
       (kind = 'zone' AND zone_name IS NOT NULL)
     ),
 
-    PRIMARY KEY (sled_config_id, id)
+    PRIMARY KEY (inv_collection_id, sled_config_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_disk (
+    -- where this observation came from
+    inv_collection_id UUID NOT NULL,
+
     -- foreign key into the `inv_omicron_sled_config` table
     sled_config_id UUID NOT NULL,
     id UUID NOT NULL,
@@ -3958,7 +3969,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_disk (
 
     pool_id UUID NOT NULL,
 
-    PRIMARY KEY (sled_config_id, id)
+    PRIMARY KEY (inv_collection_id, sled_config_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (

@@ -1510,6 +1510,7 @@ impl From<nexus_sled_agent_shared::inventory::ZoneKind> for ZoneType {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_disk)]
 pub struct InvOmicronSledConfigDisk {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_config_id: Uuid,
     pub id: DbTypedUuid<omicron_uuid_kinds::PhysicalDiskKind>,
 
@@ -1522,10 +1523,12 @@ pub struct InvOmicronSledConfigDisk {
 
 impl InvOmicronSledConfigDisk {
     pub fn new(
+        inv_collection_id: CollectionUuid,
         sled_config_id: Uuid,
         disk_config: OmicronPhysicalDiskConfig,
     ) -> Self {
         Self {
+            inv_collection_id: inv_collection_id.into(),
             sled_config_id,
             id: disk_config.id.into(),
             vendor: disk_config.identity.vendor,
@@ -1554,6 +1557,7 @@ impl From<InvOmicronSledConfigDisk> for OmicronPhysicalDiskConfig {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_dataset)]
 pub struct InvOmicronSledConfigDataset {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_config_id: Uuid,
     pub id: DbTypedUuid<omicron_uuid_kinds::DatasetKind>,
 
@@ -1567,8 +1571,13 @@ pub struct InvOmicronSledConfigDataset {
 }
 
 impl InvOmicronSledConfigDataset {
-    pub fn new(sled_config_id: Uuid, dataset_config: &DatasetConfig) -> Self {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_config_id: Uuid,
+        dataset_config: &DatasetConfig,
+    ) -> Self {
         Self {
+            inv_collection_id: inv_collection_id.into(),
             sled_config_id,
             id: dataset_config.id.into(),
             pool_id: dataset_config.name.pool().id().into(),
@@ -1609,6 +1618,7 @@ impl TryFrom<InvOmicronSledConfigDataset> for DatasetConfig {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_zone)]
 pub struct InvOmicronSledConfigZone {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_config_id: Uuid,
     pub id: DbTypedUuid<OmicronZoneKind>,
     pub zone_type: ZoneType,
@@ -1633,6 +1643,7 @@ pub struct InvOmicronSledConfigZone {
 
 impl InvOmicronSledConfigZone {
     pub fn new(
+        inv_collection_id: CollectionUuid,
         sled_config_id: Uuid,
         zone: &OmicronZoneConfig,
     ) -> Result<InvOmicronSledConfigZone, anyhow::Error> {
@@ -1641,6 +1652,7 @@ impl InvOmicronSledConfigZone {
         let mut inv_omicron_zone = InvOmicronSledConfigZone {
             // Fill in the known fields that don't require inspecting
             // `zone.zone_type`
+            inv_collection_id: inv_collection_id.into(),
             sled_config_id,
             id: zone.id.into(),
             filesystem_pool: zone
@@ -1970,6 +1982,7 @@ impl InvOmicronSledConfigZone {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_zone_nic)]
 pub struct InvOmicronSledConfigZoneNic {
+    inv_collection_id: DbTypedUuid<CollectionKind>,
     sled_config_id: Uuid,
     pub id: Uuid,
     name: Name,
@@ -1998,6 +2011,7 @@ impl From<InvOmicronSledConfigZoneNic> for OmicronZoneNic {
 
 impl InvOmicronSledConfigZoneNic {
     pub fn new(
+        inv_collection_id: CollectionUuid,
         sled_config_id: Uuid,
         zone: &OmicronZoneConfig,
     ) -> Result<Option<InvOmicronSledConfigZoneNic>, anyhow::Error> {
@@ -2006,6 +2020,7 @@ impl InvOmicronSledConfigZoneNic {
         };
         let nic = OmicronZoneNic::new(zone.id, nic)?;
         Ok(Some(Self {
+            inv_collection_id: inv_collection_id.into(),
             sled_config_id,
             id: nic.id,
             name: nic.name,
