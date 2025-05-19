@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::sync::Arc;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 /// The default number of parallel tasks used by [ParallelTaskSet].
@@ -34,10 +34,6 @@ pub struct ParallelTaskSet<T> {
     semaphore: Arc<Semaphore>,
     set: JoinSet<T>,
 }
-
-/// A reserved permit to spawn one additional task on a [`ParallelTaskSet`].
-#[must_use = "a TaskSetPermit does nothing if not used"]
-pub struct TaskSetPermit(OwnedSemaphorePermit);
 
 impl<T: 'static + Send> Default for ParallelTaskSet<T> {
     fn default() -> Self {
@@ -77,27 +73,6 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
                 semaphore.acquire_owned().await.expect("semaphore acquire");
             command.await
         });
-    }
-
-    pub fn spawn_with_permit(
-        &mut self,
-        TaskSetPermit(permit): TaskSetPermit,
-        future: impl std::future::Future<Output = T> + Send + 'static,
-    ) {
-        let _abort_handle = self.set.spawn(async move {
-            let result = future.await;
-            // Hold onto the permit until the command finishes executing
-            drop(permit);
-            result
-        });
-    }
-
-    pub async fn ready_to_spawn(&mut self) -> TaskSetPermit {
-        let permit = Arc::clone(&self.semaphore)
-            .acquire_owned()
-            .await
-            .expect("semaphore is never closed");
-        TaskSetPermit(permit)
     }
 
     /// Waits for the next task to complete and return its output.

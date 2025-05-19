@@ -30,7 +30,6 @@ use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::Client as SledAgentClient;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -188,7 +187,6 @@ impl InstanceWatcher {
                             "status" => ?status, "error" => ?rsp.into_inner());
                         } else {
                             slog::info!(opctx.log, "check incomplete due to server error";
-
                         "status" => ?status, "error" => ?rsp.into_inner());
                         }
 
@@ -457,100 +455,75 @@ impl BackgroundTask for InstanceWatcher {
             // the database query by sled ID, and reuse the same sled-agent
             // client as long as we are talking to the same sled.
             let mut curr_client: Option<(Uuid, SledAgentClient)> = None;
-            let mut instances = VecDeque::new();
-            let mut total: usize = 0;
-            loop {
-                if instances.is_empty() {
-                    if let Some(p) = paginator.next() {
-                        let maybe_batch = self
-                            .datastore
-                            .instance_and_vmm_list_by_sled_agent(
-                                opctx,
-                                &p.current_pagparams(),
-                            )
-                            .await;
-                        let batch = match maybe_batch {
-                            Ok(batch) => batch,
-                            Err(e) => {
-                                slog::error!(
-                                    opctx.log,
-                                    "sled instances by sled agent query failed: {e}"
-                                );
-                                return serde_json::json!({ "error": e.to_string() });
-                            }
-                        };
-                        paginator = p.found_batch(&batch, &|(sled, _, vmm, _)| (sled.id(), vmm.id));
-                        instances = batch.into();
+            while let Some(p) = paginator.next() {
+                let maybe_batch = self
+                    .datastore
+                    .instance_and_vmm_list_by_sled_agent(
+                        opctx,
+                        &p.current_pagparams(),
+                    )
+                    .await;
+                let batch = match maybe_batch {
+                    Ok(batch) => batch,
+                    Err(e) => {
+                        slog::error!(
+                            opctx.log,
+                            "sled instances by sled agent query failed: {e}"
+                        );
+                        return serde_json::json!({ "error": e.to_string() });
                     }
-                }
+                };
+                paginator = p.found_batch(&batch, &|(sled, _, vmm, _)| (sled.id(), vmm.id));
 
-                tokio::select! {
-                    // Use `biased` here to ensure that we check if we can spawn
-                    // another task before trying to drain a task, so that the set
-                    // is always saturated when there are instances remaining to
-                    // check.
-                    biased;
-                    permit = tasks.ready_to_spawn(), if !instances.is_empty() => {
-                        let (sled, instance, vmm, project) = instances
-                            .pop_front()
-                            .expect("this should return `Some` if is_empty() returned `None`");
-                        let client = match curr_client {
-                            // If we are still talking to the same sled, reuse the
-                            // existing client and its connection pool.
-                            Some((sled_id, ref client)) if sled_id == sled.id() => client.clone(),
-                            // Otherwise, if we've moved on to a new sled, refresh
-                            // the client.
-                            ref mut curr => {
-                                let client = nexus_networking::sled_client_from_address(
-                                    sled.id(),
-                                    sled.address(),
-                                    &opctx.log,
-                                );
-                                *curr = Some((sled.id(), client.clone()));
-                                client
-                            },
-                        };
+                // Spawn a task to check on each sled in the batch.
+                for (sled, instance, vmm, project) in batch {
+                    let client = match curr_client {
+                        // If we are still talking to the same sled, reuse the
+                        // existing client and its connection pool.
+                        Some((sled_id, ref client)) if sled_id == sled.id() => client.clone(),
+                        // Otherwise, if we've moved on to a new sled, refresh
+                        // the client.
+                        ref mut curr => {
+                            let client = nexus_networking::sled_client_from_address(
+                                sled.id(),
+                                sled.address(),
+                                &opctx.log,
+                            );
+                            *curr = Some((sled.id(), client.clone()));
+                            client
+                        },
+                    };
 
-                        let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
-                        tasks.spawn_with_permit(permit, self.check_instance(opctx, client, target, vmm, sled));
-                    },
-                    result = tasks.join_next() => {
-                        let check = match result {
-                            Some(c) => c,
-                            // If there are no instances left to check, we're done!
-                            None if instances.is_empty() => break,
-                            // Instances remaining to check so just continue the
-                            // loop and spawn the next task.
-                            None => continue,
-                        };
-                        total += 1;
-                        match check.outcome {
-                            CheckOutcome::Success(state) => {
-                                *instance_states
-                                    .entry(state.to_string())
-                                    .or_default() += 1;
-                            }
-                            CheckOutcome::Failure(reason) => {
-                                *check_failures
-                                    .entry(reason.as_str().into_owned())
-                                    .or_default() += 1;
-                            }
-                            CheckOutcome::Unknown => {
-                                if let Err(reason) = check.result {
-                                    *check_errors
-                                        .entry(reason.as_str().into_owned())
-                                        .or_default() += 1;
-                                }
-                            }
-                        }
-                        if check.update_saga_queued {
-                            update_sagas_queued += 1;
-                        }
-                        self.metrics.lock().unwrap().record_check(check);
-                    }
+                    let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
+                    tasks.spawn(self.check_instance(opctx, client, target, vmm, sled));
                 }
             }
 
+            // Now, wait for the check results to come back.
+            let checks = tasks.join_all().await;
+            let total = checks.len();
+            for check in checks {
+                match check.outcome {
+                    CheckOutcome::Success(state) => {
+                        *instance_states
+                            .entry(state.to_string())
+                            .or_default() += 1;
+                    }
+                    CheckOutcome::Failure(reason) => {
+                        *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
+                    }
+                    CheckOutcome::Unknown => {
+                        if let Err(reason) = check.result {
+                            *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
+                        }
+                    }
+                }
+                if check.update_saga_queued {
+                    update_sagas_queued += 1;
+                }
+                self.metrics.lock().unwrap().record_check(check);
+
+            }
             // All requests completed! Prune any old instance metrics for
             // instances that we didn't check --- if we didn't spawn a check for
             // something, that means it wasn't present in the most recent
