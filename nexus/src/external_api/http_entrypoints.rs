@@ -8159,7 +8159,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let pag_params = data_page_params_for(&rqctx, &query)?;
             let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let deliveries = nexus
-                .webhook_receiver_delivery_list(&opctx, rx, filter, &pag_params)
+                .alert_receiver_delivery_list(&opctx, rx, filter, &pag_params)
                 .await?;
 
             Ok(HttpResponseOk(ScanByTimeAndId::results_page(

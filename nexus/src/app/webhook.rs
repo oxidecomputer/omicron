@@ -310,48 +310,6 @@ impl Nexus {
             resends_started,
         })
     }
-
-    pub async fn webhook_receiver_delivery_list(
-        &self,
-        opctx: &OpContext,
-        rx: lookup::AlertReceiver<'_>,
-        filter: params::AlertDeliveryStateFilter,
-        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
-    ) -> ListResultVec<views::AlertDelivery> {
-        let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
-        let only_states = if filter.include_all() {
-            Vec::new()
-        } else {
-            let mut states = Vec::with_capacity(3);
-            if filter.include_failed() {
-                states.push(AlertDeliveryState::Failed);
-            }
-            if filter.include_pending() {
-                states.push(AlertDeliveryState::Pending);
-            }
-            if filter.include_delivered() {
-                states.push(AlertDeliveryState::Delivered);
-            }
-            states
-        };
-        let deliveries = self
-            .datastore()
-            .webhook_rx_delivery_list(
-                opctx,
-                &authz_rx.id(),
-                // No probes; they could have their own list endpoint later...
-                &[AlertDeliveryTrigger::Alert, AlertDeliveryTrigger::Resend],
-                only_states,
-                pagparams,
-            )
-            .await?
-            .into_iter()
-            .map(|(delivery, class, attempts)| {
-                delivery.to_api_delivery(class, &attempts)
-            })
-            .collect();
-        Ok(deliveries)
-    }
 }
 
 /// Construct a [`reqwest::Client`] configured for webhook delivery requests.

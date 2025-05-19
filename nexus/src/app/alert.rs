@@ -144,12 +144,15 @@
 //!     delete this footnote.
 
 use crate::Nexus;
+use chrono::DateTime;
+use chrono::Utc;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::model::Alert;
 use nexus_db_queries::db::model::AlertClass;
+use nexus_db_queries::db::model::AlertDeliveryState;
 use nexus_db_queries::db::model::AlertDeliveryTrigger;
 use nexus_db_queries::db::model::WebhookDelivery;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
@@ -169,6 +172,7 @@ use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::WebhookDeliveryUuid;
+use uuid::Uuid;
 
 impl Nexus {
     /// Publish a new alert, with the provided `id`, `alert_class`, and
@@ -347,6 +351,48 @@ impl Nexus {
         let (subscriptions, secrets) =
             self.datastore().webhook_rx_config_fetch(opctx, &authz_rx).await?;
         Ok(WebhookReceiverConfig { rx, secrets, subscriptions })
+    }
+
+    pub async fn alert_receiver_delivery_list(
+        &self,
+        opctx: &OpContext,
+        rx: lookup::AlertReceiver<'_>,
+        filter: params::AlertDeliveryStateFilter,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
+    ) -> ListResultVec<views::AlertDelivery> {
+        let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
+        let only_states = if filter.include_all() {
+            Vec::new()
+        } else {
+            let mut states = Vec::with_capacity(3);
+            if filter.include_failed() {
+                states.push(AlertDeliveryState::Failed);
+            }
+            if filter.include_pending() {
+                states.push(AlertDeliveryState::Pending);
+            }
+            if filter.include_delivered() {
+                states.push(AlertDeliveryState::Delivered);
+            }
+            states
+        };
+        let deliveries = self
+            .datastore()
+            .webhook_rx_delivery_list(
+                opctx,
+                &authz_rx.id(),
+                // No probes; they could have their own list endpoint later...
+                &[AlertDeliveryTrigger::Alert, AlertDeliveryTrigger::Resend],
+                only_states,
+                pagparams,
+            )
+            .await?
+            .into_iter()
+            .map(|(delivery, class, attempts)| {
+                delivery.to_api_delivery(class, &attempts)
+            })
+            .collect();
+        Ok(deliveries)
     }
 
     //
