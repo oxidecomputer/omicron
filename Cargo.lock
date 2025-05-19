@@ -7415,6 +7415,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "oxql-types",
+ "parallel-task-set",
  "parse-display",
  "paste",
  "pem",
@@ -8824,6 +8825,15 @@ dependencies = [
  "bytecount",
  "fnv",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "parallel-task-set"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "rand 0.8.5",
+ "tokio",
 ]
 
 [[package]]
