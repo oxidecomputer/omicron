@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::sync::Arc;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
 
 /// The default number of parallel tasks used by [ParallelTaskSet].
@@ -33,6 +33,13 @@ pub const DEFAULT_MAX_PARALLELISM: usize = 16;
 pub struct ParallelTaskSet<T> {
     semaphore: Arc<Semaphore>,
     set: JoinSet<T>,
+}
+
+/// A reserved permit to spawn one additional task on a [`ParallelTaskSet`].
+#[must_use = "a TaskSetPermit does nothing if not used"]
+pub struct TaskSetPermit<'set, T> {
+    permit: OwnedSemaphorePermit,
+    set: &'set mut JoinSet<T>,
 }
 
 impl<T: 'static + Send> Default for ParallelTaskSet<T> {
@@ -75,6 +82,14 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
         });
     }
 
+    pub async fn ready_to_spawn(&mut self) -> TaskSetPermit<'_, T> {
+        let permit = Arc::clone(&self.semaphore)
+            .acquire_owned()
+            .await
+            .expect("semaphore is never closed");
+        TaskSetPermit { permit, set: &mut self.set }
+    }
+
     /// Waits for the next task to complete and return its output.
     ///
     /// # Panics
@@ -91,6 +106,20 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
     /// This method panics any of the tasks return a JoinError
     pub async fn join_all(self) -> Vec<T> {
         self.set.join_all().await
+    }
+}
+
+impl<T: Send + 'static> TaskSetPermit<'_, T> {
+    pub fn spawn(
+        self,
+        future: impl std::future::Future<Output = T> + Send + 'static,
+    ) {
+        let Self { permit, set } = self;
+        set.spawn(async move {
+            let result = future.await;
+            drop(permit);
+            result
+        });
     }
 }
 
