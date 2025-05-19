@@ -2536,7 +2536,7 @@ impl AlertDeliveryStateFilter {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookProbe {
+pub struct AlertReceiverProbe {
     /// If true, resend all events that have not been delivered successfully if
     /// the probe request succeeds.
     #[serde(default)]

@@ -244,7 +244,7 @@ async fn webhook_send_probe(
     webhook_id: &AlertReceiverUuid,
     resend: bool,
     status: http::StatusCode,
-) -> views::WebhookProbeResult {
+) -> views::AlertProbeResult {
     let pathparams = if resend { "?resend=true" } else { "" };
     let path =
         format!("{WEBHOOK_RECEIVERS_BASE_PATH}/{webhook_id}/probe{pathparams}");

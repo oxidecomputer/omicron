@@ -1415,10 +1415,10 @@ pub struct AlertDeliveryId {
     pub delivery_id: Uuid,
 }
 
-/// Data describing the result of a webhook liveness probe attempt.
+/// Data describing the result of an alert receiver liveness probe attempt.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookProbeResult {
-    /// The outcome of the probe request.
+pub struct AlertProbeResult {
+    /// The outcome of the probe delivery.
     pub probe: AlertDelivery,
     /// If the probe request succeeded, and resending failed deliveries on
     /// success was requested, the number of new delivery attempts started.

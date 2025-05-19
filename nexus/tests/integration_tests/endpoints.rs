@@ -1198,18 +1198,14 @@ pub static DEMO_WEBHOOK_RECEIVER_URL: LazyLock<String> = LazyLock::new(|| {
     format!("{WEBHOOK_RECEIVERS_URL}/{}", *DEMO_WEBHOOK_RECEIVER_NAME)
 });
 
-pub static DEMO_WEBHOOK_RECEIVER_PROBE_URL: LazyLock<String> =
-    LazyLock::new(|| {
-        format!("{WEBHOOK_RECEIVERS_URL}/{}/probe", *DEMO_WEBHOOK_RECEIVER_NAME)
-    });
+pub static DEMO_ALERT_RECEIVER_PROBE_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/probe", *DEMO_ALERT_RECEIVER_URL));
+
+pub static DEMO_ALERT_DELIVERIES_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/deliveries", *DEMO_ALERT_RECEIVER_URL));
 
 pub static DEMO_ALERT_SUBSCRIPTIONS_URL: LazyLock<String> =
-    LazyLock::new(|| {
-        format!(
-            "{ALERT_RECEIVERS_URL}/{}/subscriptions",
-            *DEMO_WEBHOOK_RECEIVER_NAME
-        )
-    });
+    LazyLock::new(|| format!("{}/subscriptions", *DEMO_ALERT_RECEIVER_URL));
 
 pub static DEMO_ALERT_SUBSCRIPTION: LazyLock<shared::AlertSubscription> =
     LazyLock::new(|| "test.foo.**".parse().unwrap());
@@ -1223,14 +1219,10 @@ pub static DEMO_ALERT_SUBSCRIPTION_CREATE: LazyLock<
 pub static DEMO_ALERT_SUBSCRIPTION_DELETE_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!(
-            "{ALERT_RECEIVERS_URL}/{}/subscriptions/{}",
-            *DEMO_WEBHOOK_RECEIVER_NAME, *DEMO_ALERT_SUBSCRIPTION,
+            "{}/subscriptions/{}",
+            *DEMO_ALERT_RECEIVER_URL, *DEMO_ALERT_SUBSCRIPTION,
         )
     });
-
-pub static DEMO_ALERT_DELIVERY_URL: LazyLock<String> = LazyLock::new(|| {
-    format!("/v1/alert-deliveries?receiver={}", *DEMO_WEBHOOK_RECEIVER_NAME)
-});
 
 pub static DEMO_WEBHOOK_SECRETS_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/webhook-secrets?receiver={}", *DEMO_WEBHOOK_RECEIVER_NAME)
@@ -2865,7 +2857,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 )],
             },
             VerifyEndpoint {
-                url: &DEMO_WEBHOOK_RECEIVER_PROBE_URL,
+                url: &DEMO_ALERT_RECEIVER_PROBE_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Post(
@@ -2906,7 +2898,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 allowed_methods: vec![AllowedMethod::Delete],
             },
             VerifyEndpoint {
-                url: &DEMO_ALERT_DELIVERY_URL,
+                url: &DEMO_ALERT_DELIVERIES_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],

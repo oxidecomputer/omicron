@@ -29,7 +29,6 @@
 
 use crate::Nexus;
 use anyhow::Context;
-use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
@@ -54,7 +53,6 @@ use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -71,7 +69,6 @@ use sha2::Sha256;
 use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
-use uuid::Uuid;
 
 impl Nexus {
     pub fn webhook_secret_lookup<'a>(
@@ -179,8 +176,8 @@ impl Nexus {
         &self,
         opctx: &OpContext,
         rx: lookup::AlertReceiver<'_>,
-        params: params::WebhookProbe,
-    ) -> Result<views::WebhookProbeResult, Error> {
+        params: params::AlertReceiverProbe,
+    ) -> Result<views::AlertProbeResult, Error> {
         let (authz_rx, rx) = rx.fetch_for(authz::Action::ListChildren).await?;
         let rx_id = authz_rx.id();
         let datastore = self.datastore();
@@ -305,7 +302,7 @@ impl Nexus {
             None
         };
 
-        Ok(views::WebhookProbeResult {
+        Ok(views::AlertProbeResult {
             probe: delivery.to_api_delivery(CLASS, &[attempt]),
             resends_started,
         })

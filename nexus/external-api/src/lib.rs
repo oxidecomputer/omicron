@@ -3623,15 +3623,49 @@ pub trait NexusExternalApi {
     /// "true" are included in the response.
     #[endpoint {
         method = GET,
-        path = "/v1/alert-deliveries",
+        path = "/v1/alert-receivers/{receiver}/deliveries",
         tags = ["system/alerts"],
     }]
     async fn alert_delivery_list(
         rqctx: RequestContext<Self::Context>,
-        receiver: Query<params::AlertReceiverSelector>,
+        path_params: Path<params::AlertReceiverSelector>,
         state_filter: Query<params::AlertDeliveryStateFilter>,
         pagination: Query<PaginatedByTimeAndId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::AlertDelivery>>, HttpError>;
+
+    /// Send liveness probe to alert receiver
+    ///
+    /// This endpoint synchronously sends a liveness probe to the selected alert
+    /// receiver. The response message describes the outcome of the probe:
+    /// either the successful response (as appropriate), or indication of why
+    /// the probe failed.
+    ///
+    /// The result of the probe is represented as an `AlertDelivery` model.
+    /// Details relating to the status of the probe depend on the alert delivery
+    /// mechanism, and are included in the `AlertDeliveryAttempts` model. For
+    /// example, webhook receiver liveness probes include the HTTP status code
+    /// returned by the receiver endpoint.
+    ///
+    /// Note that the response status is `200 OK` as long as a probe request was
+    /// able to be sent to the receiver endpoint. If an HTTP-based receiver,
+    /// such as a webhook, responds to the another status code, including an
+    /// error, this will be indicated by the response body, *not* the status of
+    /// the response.
+    ///
+    /// The `resend` query parameter can be used to request re-delivery of
+    /// failed events if the liveness probe succeeds. If it is set to true and
+    /// the liveness probe succeeds, any alerts for which delivery to this
+    /// receiver has failed will be queued for re-delivery.
+    #[endpoint {
+        method = POST,
+        path = "/v1/alert-receivers/{receiver}/probe",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_probe(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertReceiverSelector>,
+        query_params: Query<params::AlertReceiverProbe>,
+    ) -> Result<HttpResponseOk<views::AlertProbeResult>, HttpError>;
 
     /// Request re-delivery of alert
     #[endpoint {
@@ -3673,34 +3707,6 @@ pub trait NexusExternalApi {
         path_params: Path<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Send liveness probe to webhook receiver
-    ///
-    /// This endpoint synchronously sends a liveness probe request to the
-    /// selected webhook receiver. The response message describes the outcome of
-    /// the probe request: either the response from the receiver endpoint, or an
-    /// indication of why the probe failed.
-    ///
-    /// Note that the response status is `200 OK` as long as a probe request was
-    /// able to be sent to the receiver endpoint. If the receiver responds with
-    /// another status code, including an error, this will be indicated by the
-    /// response body, *not* the status of the response.
-    ///
-    /// The `resend` query parameter can be used to request re-delivery of
-    /// failed events if the liveness probe succeeds. If it is set to true and
-    /// the webhook receiver responds to the probe request with a `2xx` status
-    /// code, any events for which delivery to this receiver has failed will be
-    /// queued for re-delivery.
-    #[endpoint {
-        method = POST,
-        path = "/v1/webhook-receivers/{receiver}/probe",
-        tags = ["system/alerts"],
-    }]
-    async fn webhook_receiver_probe(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::AlertReceiverSelector>,
-        query_params: Query<params::WebhookProbe>,
-    ) -> Result<HttpResponseOk<views::WebhookProbeResult>, HttpError>;
 
     /// List webhook receiver secret IDs
     #[endpoint {

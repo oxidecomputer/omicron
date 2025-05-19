@@ -8032,11 +8032,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_receiver_probe(
+    async fn alert_receiver_probe(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::AlertReceiverSelector>,
-        query_params: Query<params::WebhookProbe>,
-    ) -> Result<HttpResponseOk<views::WebhookProbeResult>, HttpError> {
+        query_params: Query<params::AlertReceiverProbe>,
+    ) -> Result<HttpResponseOk<views::AlertProbeResult>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -8141,7 +8141,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn alert_delivery_list(
         rqctx: RequestContext<Self::Context>,
-        receiver: Query<params::AlertReceiverSelector>,
+        receiver: Path<params::AlertReceiverSelector>,
         filter: Query<params::AlertDeliveryStateFilter>,
         query: Query<PaginatedByTimeAndId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::AlertDelivery>>, HttpError>
