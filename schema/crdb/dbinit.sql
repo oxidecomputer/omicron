@@ -3619,29 +3619,29 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- Columns making up the status of the config reconciler.
     reconciler_status_kind inv_config_reconciler_status_kind NOT NULL,
     -- (foreign key into `inv_omicron_sled_config` table)
-    -- only present if `inv_config_reconciler_status_kind = 'running'`
+    -- only present if `reconciler_status_kind = 'running'`
     reconciler_status_sled_config UUID CHECK (
-        (inv_config_reconciler_status_kind = 'running'
+        (reconciler_status_kind = 'running'
             AND reconciler_status_sled_config IS NOT NULL)
         OR
-        (inv_config_reconciler_status_kind != 'running'
+        (reconciler_status_kind != 'running'
             AND reconciler_status_sled_config IS NULL)
     ),
-    -- only present if `inv_config_reconciler_status_kind != 'not-yet-run'`
+    -- only present if `reconciler_status_kind != 'not-yet-run'`
     reconciler_status_timestamp TIMESTAMPTZ CHECK (
-        (inv_config_reconciler_status_kind = 'not-yet-run'
-            AND reconciler_status_sled_config IS NULL)
+        (reconciler_status_kind = 'not-yet-run'
+            AND reconciler_status_timestamp IS NULL)
         OR
-        (inv_config_reconciler_status_kind != 'not-yet-run'
-            AND reconciler_status_sled_config IS NOT NULL)
+        (reconciler_status_kind != 'not-yet-run'
+            AND reconciler_status_timestamp IS NOT NULL)
     ),
-    -- only present if `inv_config_reconciler_status_kind != 'not-yet-run'`
+    -- only present if `reconciler_status_kind != 'not-yet-run'`
     reconciler_status_duration_secs FLOAT CHECK (
-        (inv_config_reconciler_status_kind = 'not-yet-run'
-            AND reconciler_status_sled_config IS NULL)
+        (reconciler_status_kind = 'not-yet-run'
+            AND reconciler_status_duration_secs IS NULL)
         OR
-        (inv_config_reconciler_status_kind != 'not-yet-run'
-            AND reconciler_status_sled_config IS NOT NULL)
+        (reconciler_status_kind != 'not-yet-run'
+            AND reconciler_status_duration_secs IS NOT NULL)
     ),
 
     PRIMARY KEY (inv_collection_id, sled_id)
@@ -3752,10 +3752,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
 
-    -- unique id for this sled (should be foreign keys into `sled` table, though
-    -- it's conceivable a sled will report an id that we don't know about)
-    sled_id UUID NOT NULL,
-
     -- ID of this sled config. A given inventory report from a sled agent may
     -- contain 0-3 sled configs, so we generate these IDs on insertion and
     -- record them as the foreign keys in `inv_sled_agent`.
@@ -3767,7 +3763,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- remove mupdate override ID, if set
     remove_mupdate_override UUID,
 
-    PRIMARY KEY (inv_collection_id, sled_id, id)
+    PRIMARY KEY (inv_collection_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_disk_result (
@@ -3845,10 +3841,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     -- (foreign key into `inv_omicron_sled_config` table)
     sled_config_id UUID NOT NULL,
 
-    -- unique id for this sled (should be foreign keys into `sled` table, though
-    -- it's conceivable a sled will report an id that we don't know about)
-    sled_id UUID NOT NULL,
-
     -- unique id for this zone
     id UUID NOT NULL,
     zone_type omicron.public.zone_type NOT NULL,
@@ -3914,8 +3906,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
 CREATE INDEX IF NOT EXISTS inv_omicron_sled_config_zone_nic_id
     ON omicron.public.inv_omicron_sled_config_zone (nic_id)
     STORING (
-        sled_id,
-        sled_config_id,
         primary_service_ip,
         second_service_ip,
         snat_ip
@@ -3938,7 +3928,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_nic (
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_dataset (
     -- foreign key into the `inv_omicron_sled_config` table
     sled_config_id UUID NOT NULL,
-    sled_id UUID NOT NULL,
     id UUID NOT NULL,
 
     pool_id UUID NOT NULL,
@@ -3961,7 +3950,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_dataset (
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_disk (
     -- foreign key into the `inv_omicron_sled_config` table
     sled_config_id UUID NOT NULL,
-    sled_id UUID NOT NULL,
     id UUID NOT NULL,
 
     vendor TEXT NOT NULL,

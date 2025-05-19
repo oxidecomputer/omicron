@@ -35,6 +35,7 @@ use nexus_db_schema::schema::{
     inv_service_processor, inv_sled_agent, inv_zpool, sw_caboose,
     sw_root_of_trust_page,
 };
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
@@ -45,6 +46,8 @@ use nexus_types::inventory::{
 };
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetName;
+use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
@@ -60,6 +63,7 @@ use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
 use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddrV6};
+use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -837,6 +841,62 @@ pub struct InvConfigReconcilerStatus {
     pub reconciler_status_duration_secs: Option<f64>,
 }
 
+impl InvConfigReconcilerStatus {
+    /// Convert `self` to a [`ConfigReconcilerInventoryStatus`].
+    ///
+    /// `get_config` should perform the lookup of a serialized
+    /// `OmicronSledConfig` given its ID. It will be called only if `self.kind`
+    /// is `InvConfigReconcilerStatusKind::Running`; the other variants do not
+    /// carry a sled config ID.
+    pub fn to_status<F>(
+        &self,
+        get_config: F,
+    ) -> anyhow::Result<ConfigReconcilerInventoryStatus>
+    where
+        F: FnOnce(&Uuid) -> Option<OmicronSledConfig>,
+    {
+        let status = match self.reconciler_status_kind {
+            InvConfigReconcilerStatusKind::NotYetRun => {
+                ConfigReconcilerInventoryStatus::NotYetRun
+            }
+            InvConfigReconcilerStatusKind::Running => {
+                let config_id = self.reconciler_status_sled_config.context(
+                    "missing reconciler status sled config for kind 'running'",
+                )?;
+                let config = get_config(&config_id)
+                    .context("missing sled config we should have fetched")?;
+                ConfigReconcilerInventoryStatus::Running {
+                    config,
+                    started_at: self.reconciler_status_timestamp.context(
+                        "missing reconciler status timestamp \
+                         for kind 'running'",
+                    )?,
+                    running_for: Duration::from_secs_f64(
+                        self.reconciler_status_duration_secs.context(
+                            "missing reconciler status duration \
+                             for kind 'running'",
+                        )?,
+                    ),
+                }
+            }
+            InvConfigReconcilerStatusKind::Idle => {
+                ConfigReconcilerInventoryStatus::Idle {
+                    completed_at: self.reconciler_status_timestamp.context(
+                        "missing reconciler status timestamp for kind 'idle'",
+                    )?,
+                    ran_for: Duration::from_secs_f64(
+                        self.reconciler_status_duration_secs.context(
+                            "missing reconciler status duration \
+                             for kind 'idle'",
+                        )?,
+                    ),
+                }
+            }
+        };
+        Ok(status)
+    }
+}
+
 // See [`nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus`].
 impl_enum_type!(
     InvConfigReconcilerStatusKindEnum:
@@ -932,6 +992,15 @@ impl InvLastReconciliationDiskResult {
     }
 }
 
+impl From<InvLastReconciliationDiskResult> for ConfigReconcilerInventoryResult {
+    fn from(result: InvLastReconciliationDiskResult) -> Self {
+        match result.error_message {
+            None => Self::Ok,
+            Some(message) => Self::Err { message },
+        }
+    }
+}
+
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_last_reconciliation_dataset_result)]
 pub struct InvLastReconciliationDatasetResult {
@@ -961,6 +1030,17 @@ impl InvLastReconciliationDatasetResult {
     }
 }
 
+impl From<InvLastReconciliationDatasetResult>
+    for ConfigReconcilerInventoryResult
+{
+    fn from(result: InvLastReconciliationDatasetResult) -> Self {
+        match result.error_message {
+            None => Self::Ok,
+            Some(message) => Self::Err { message },
+        }
+    }
+}
+
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_last_reconciliation_zone_result)]
 pub struct InvLastReconciliationZoneResult {
@@ -986,6 +1066,15 @@ impl InvLastReconciliationZoneResult {
             sled_id: sled_id.into(),
             zone_id: zone_id.into(),
             error_message,
+        }
+    }
+}
+
+impl From<InvLastReconciliationZoneResult> for ConfigReconcilerInventoryResult {
+    fn from(result: InvLastReconciliationZoneResult) -> Self {
+        match result.error_message {
+            None => Self::Ok,
+            Some(message) => Self::Err { message },
         }
     }
 }
@@ -1314,7 +1403,6 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
 #[diesel(table_name = inv_omicron_sled_config)]
 pub struct InvOmicronSledConfig {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub sled_id: DbTypedUuid<SledKind>,
     pub id: Uuid,
     pub generation: Generation,
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
@@ -1323,13 +1411,11 @@ pub struct InvOmicronSledConfig {
 impl InvOmicronSledConfig {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        sled_id: SledUuid,
         id: Uuid,
         config: &OmicronSledConfig,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
-            sled_id: sled_id.into(),
             id,
             generation: Generation(config.generation),
             remove_mupdate_override: config
@@ -1425,7 +1511,6 @@ impl From<nexus_sled_agent_shared::inventory::ZoneKind> for ZoneType {
 #[diesel(table_name = inv_omicron_sled_config_disk)]
 pub struct InvOmicronSledConfigDisk {
     pub sled_config_id: Uuid,
-    pub sled_id: DbTypedUuid<SledKind>,
     pub id: DbTypedUuid<omicron_uuid_kinds::PhysicalDiskKind>,
 
     pub vendor: String,
@@ -1438,12 +1523,10 @@ pub struct InvOmicronSledConfigDisk {
 impl InvOmicronSledConfigDisk {
     pub fn new(
         sled_config_id: Uuid,
-        sled_id: SledUuid,
         disk_config: OmicronPhysicalDiskConfig,
     ) -> Self {
         Self {
             sled_config_id,
-            sled_id: sled_id.into(),
             id: disk_config.id.into(),
             vendor: disk_config.identity.vendor,
             serial: disk_config.identity.serial,
@@ -1453,12 +1536,25 @@ impl InvOmicronSledConfigDisk {
     }
 }
 
+impl From<InvOmicronSledConfigDisk> for OmicronPhysicalDiskConfig {
+    fn from(disk: InvOmicronSledConfigDisk) -> Self {
+        Self {
+            identity: DiskIdentity {
+                vendor: disk.vendor,
+                serial: disk.serial,
+                model: disk.model,
+            },
+            id: disk.id.into(),
+            pool_id: disk.pool_id.into(),
+        }
+    }
+}
+
 /// See [`omicron_common::disk::DatasetConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_dataset)]
 pub struct InvOmicronSledConfigDataset {
     pub sled_config_id: Uuid,
-    pub sled_id: DbTypedUuid<SledKind>,
     pub id: DbTypedUuid<omicron_uuid_kinds::DatasetKind>,
 
     pub pool_id: DbTypedUuid<ZpoolKind>,
@@ -1471,14 +1567,9 @@ pub struct InvOmicronSledConfigDataset {
 }
 
 impl InvOmicronSledConfigDataset {
-    pub fn new(
-        sled_config_id: Uuid,
-        sled_id: SledUuid,
-        dataset_config: &DatasetConfig,
-    ) -> Self {
+    pub fn new(sled_config_id: Uuid, dataset_config: &DatasetConfig) -> Self {
         Self {
             sled_config_id,
-            sled_id: sled_id.into(),
             id: dataset_config.id.into(),
             pool_id: dataset_config.name.pool().id().into(),
             kind: dataset_config.name.kind().into(),
@@ -1490,12 +1581,35 @@ impl InvOmicronSledConfigDataset {
     }
 }
 
+impl TryFrom<InvOmicronSledConfigDataset> for DatasetConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(
+        dataset: InvOmicronSledConfigDataset,
+    ) -> Result<Self, Self::Error> {
+        let pool = omicron_common::zpool_name::ZpoolName::new_external(
+            dataset.pool_id.into(),
+        );
+        let kind =
+            crate::DatasetKind::try_into_api(dataset.kind, dataset.zone_name)?;
+
+        Ok(Self {
+            id: dataset.id.into(),
+            name: DatasetName::new(pool, kind),
+            inner: omicron_common::disk::SharedDatasetConfig {
+                quota: dataset.quota.map(|b| b.into()),
+                reservation: dataset.reservation.map(|b| b.into()),
+                compression: dataset.compression.parse()?,
+            },
+        })
+    }
+}
+
 /// See [`nexus_sled_agent_shared::inventory::OmicronZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_sled_config_zone)]
 pub struct InvOmicronSledConfigZone {
     pub sled_config_id: Uuid,
-    pub sled_id: DbTypedUuid<SledKind>,
     pub id: DbTypedUuid<OmicronZoneKind>,
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
@@ -1520,7 +1634,6 @@ pub struct InvOmicronSledConfigZone {
 impl InvOmicronSledConfigZone {
     pub fn new(
         sled_config_id: Uuid,
-        sled_id: SledUuid,
         zone: &OmicronZoneConfig,
     ) -> Result<InvOmicronSledConfigZone, anyhow::Error> {
         // Create a dummy record to start, then fill in the rest
@@ -1529,7 +1642,6 @@ impl InvOmicronSledConfigZone {
             // Fill in the known fields that don't require inspecting
             // `zone.zone_type`
             sled_config_id,
-            sled_id: sled_id.into(),
             id: zone.id.into(),
             filesystem_pool: zone
                 .filesystem_pool

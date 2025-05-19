@@ -1678,9 +1678,8 @@ table! {
 }
 
 table! {
-    inv_omicron_sled_config (inv_collection_id, sled_id, id) {
+    inv_omicron_sled_config (inv_collection_id, id) {
         inv_collection_id -> Uuid,
-        sled_id -> Uuid,
         id -> Uuid,
 
         generation -> Int8,
@@ -1690,7 +1689,6 @@ table! {
 
 table! {
     inv_omicron_sled_config_zone (sled_config_id, id) {
-        sled_id -> Uuid,
         sled_config_id -> Uuid,
 
         id -> Uuid,
