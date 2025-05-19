@@ -3631,7 +3631,7 @@ pub trait NexusExternalApi {
         receiver: Query<params::AlertReceiverSelector>,
         state_filter: Query<params::AlertDeliveryStateFilter>,
         pagination: Query<PaginatedByTimeAndId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertDelivery>>, HttpError>;
 
     /// Request re-delivery of alert
     #[endpoint {

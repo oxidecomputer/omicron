@@ -8144,7 +8144,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         receiver: Query<params::AlertReceiverSelector>,
         filter: Query<params::AlertDeliveryStateFilter>,
         query: Query<PaginatedByTimeAndId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertDelivery>>, HttpError>
     {
         let apictx = rqctx.context();
         let handler = async {

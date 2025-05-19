@@ -1180,12 +1180,12 @@ pub struct WebhookSecret {
 
 /// A delivery of a webhook event.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookDelivery {
+pub struct AlertDelivery {
     /// The UUID of this delivery attempt.
     pub id: Uuid,
 
-    /// The UUID of the webhook receiver that this event was delivered to.
-    pub webhook_id: AlertReceiverUuid,
+    /// The UUID of the alert receiver that this event was delivered to.
+    pub receiver_id: AlertReceiverUuid,
 
     /// The event class.
     pub alert_class: String,
@@ -1200,7 +1200,7 @@ pub struct WebhookDelivery {
     pub trigger: AlertDeliveryTrigger,
 
     /// Individual attempts to deliver this webhook event, and their outcomes.
-    pub attempts: Vec<WebhookDeliveryAttempt>,
+    pub attempts: AlertDeliveryAttempts,
 
     /// The time at which this delivery began (i.e. the event was dispatched to
     /// the receiver).
@@ -1319,6 +1319,19 @@ impl std::str::FromStr for AlertDeliveryTrigger {
     }
 }
 
+/// A list of attempts to deliver an alert to a receiver.
+///
+/// The type of the delivery attempt model depends on the receiver type, as it
+/// may contain information specific to that delivey mechanism. For example,
+/// webhook delivery attempts contain the HTTP status code of the webhook
+/// request.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertDeliveryAttempts {
+    /// A list of attempts to deliver an alert to a webhook receiver.
+    Webhook(Vec<WebhookDeliveryAttempt>),
+}
+
 /// An individual delivery attempt for a webhook event.
 ///
 /// This represents a single HTTP request that was sent to the receiver, and its
@@ -1406,7 +1419,7 @@ pub struct AlertDeliveryId {
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookProbeResult {
     /// The outcome of the probe request.
-    pub probe: WebhookDelivery,
+    pub probe: AlertDelivery,
     /// If the probe request succeeded, and resending failed deliveries on
     /// success was requested, the number of new delivery attempts started.
     /// Otherwise, if the probe did not succeed, or resending failed deliveries

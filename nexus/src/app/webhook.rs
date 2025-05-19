@@ -317,7 +317,7 @@ impl Nexus {
         rx: lookup::AlertReceiver<'_>,
         filter: params::AlertDeliveryStateFilter,
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
-    ) -> ListResultVec<views::WebhookDelivery> {
+    ) -> ListResultVec<views::AlertDelivery> {
         let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
         let only_states = if filter.include_all() {
             Vec::new()

@@ -115,26 +115,24 @@ impl WebhookDelivery {
         &self,
         alert_class: AlertClass,
         attempts: &[WebhookDeliveryAttempt],
-    ) -> views::WebhookDelivery {
-        let mut view = views::WebhookDelivery {
-            id: self.id.into_untyped_uuid(),
-            webhook_id: self.rx_id.into(),
-            alert_class: alert_class.as_str().to_owned(),
-            alert_id: self.alert_id.into(),
-            state: self.state.into(),
-            trigger: self.triggered_by.into(),
-            attempts: attempts
-                .iter()
-                .map(views::WebhookDeliveryAttempt::from)
-                .collect(),
-            time_started: self.time_created,
-        };
+    ) -> views::AlertDelivery {
+        let mut attempts: Vec<_> =
+            attempts.iter().map(views::WebhookDeliveryAttempt::from).collect();
         // Make sure attempts are in order; each attempt entry also includes an
         // attempt number, which should be used authoritatively to determine the
         // ordering of attempts, but it seems nice to also sort the list,
         // because we can...
-        view.attempts.sort_by_key(|a| a.attempt);
-        view
+        attempts.sort_by_key(|a| a.attempt);
+        views::AlertDelivery {
+            id: self.id.into_untyped_uuid(),
+            receiver_id: self.rx_id.into(),
+            alert_class: alert_class.as_str().to_owned(),
+            alert_id: self.alert_id.into(),
+            state: self.state.into(),
+            trigger: self.triggered_by.into(),
+            attempts: views::AlertDeliveryAttempts::Webhook(attempts),
+            time_started: self.time_created,
+        }
     }
 }
 

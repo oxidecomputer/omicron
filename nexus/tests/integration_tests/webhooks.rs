@@ -111,7 +111,7 @@ fn resend_url(
 async fn alert_deliveries_list(
     client: &ClientTestContext,
     webhook_name_or_id: impl Into<NameOrId>,
-) -> Collection<views::WebhookDelivery> {
+) -> Collection<views::AlertDelivery> {
     let rx = webhook_name_or_id.into();
     NexusRequest::iter_collection_authn(
         client,
@@ -336,9 +336,10 @@ struct ExpectAttempt {
 /// such as timestamps, which are variable.
 #[track_caller]
 fn expect_delivery_attempts(
-    actual: &[views::WebhookDeliveryAttempt],
+    actual: &views::AlertDeliveryAttempts,
     expected: &[ExpectAttempt],
 ) {
+    let views::AlertDeliveryAttempts::Webhook(actual) = actual;
     assert_eq!(
         actual.len(),
         expected.len(),
@@ -930,7 +931,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     );
 
     let delivery = dbg!(&deliveries.all_items[0]);
-    assert_eq!(delivery.webhook_id.into_untyped_uuid(), webhook.identity.id);
+    assert_eq!(delivery.receiver_id.into_untyped_uuid(), webhook.identity.id);
     assert_eq!(delivery.alert_id, id);
     assert_eq!(delivery.alert_class, "test.foo");
     assert_eq!(delivery.state, views::AlertDeliveryState::Pending);
@@ -1004,7 +1005,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     );
 
     let delivery = dbg!(&deliveries.all_items[0]);
-    assert_eq!(delivery.webhook_id.into_untyped_uuid(), webhook.identity.id);
+    assert_eq!(delivery.receiver_id.into_untyped_uuid(), webhook.identity.id);
     assert_eq!(delivery.alert_id, id);
     assert_eq!(delivery.alert_class, "test.foo");
     assert_eq!(delivery.state, views::AlertDeliveryState::Pending);
@@ -1073,7 +1074,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
         deliveries.all_items
     );
     let delivery = dbg!(&deliveries.all_items[0]);
-    assert_eq!(delivery.webhook_id.into_untyped_uuid(), webhook.identity.id);
+    assert_eq!(delivery.receiver_id.into_untyped_uuid(), webhook.identity.id);
     assert_eq!(delivery.alert_id, id);
     assert_eq!(delivery.alert_class, "test.foo");
     assert_eq!(delivery.state, views::AlertDeliveryState::Delivered);
@@ -1147,9 +1148,12 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
 
     mock.assert_async().await;
 
-    assert_eq!(
-        probe1.probe.attempts[0].result,
-        views::WebhookDeliveryAttemptResult::FailedTimeout
+    expect_delivery_attempts(
+        &probe1.probe.attempts,
+        &[ExpectAttempt {
+            result: views::WebhookDeliveryAttemptResult::FailedTimeout,
+            status: None,
+        }],
     );
     assert_eq!(probe1.probe.alert_class, "probe");
     assert_eq!(probe1.probe.trigger, views::AlertDeliveryTrigger::Probe);
@@ -1185,9 +1189,12 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     dbg!(&probe2);
 
     mock.assert_async().await;
-    assert_eq!(
-        probe2.probe.attempts[0].result,
-        views::WebhookDeliveryAttemptResult::FailedHttpError
+    expect_delivery_attempts(
+        &probe1.probe.attempts,
+        &[ExpectAttempt {
+            result: views::WebhookDeliveryAttemptResult::FailedTimeout,
+            status: Some(503),
+        }],
     );
     assert_eq!(probe2.probe.alert_class, "probe");
     assert_eq!(probe2.probe.trigger, views::AlertDeliveryTrigger::Probe);
@@ -1226,9 +1233,13 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
             .await;
     dbg!(&probe3);
     mock.assert_async().await;
-    assert_eq!(
-        probe3.probe.attempts[0].result,
-        views::WebhookDeliveryAttemptResult::Succeeded
+
+    expect_delivery_attempts(
+        &probe1.probe.attempts,
+        &[ExpectAttempt {
+            result: views::WebhookDeliveryAttemptResult::Succeeded,
+            status: Some(200),
+        }],
     );
     assert_eq!(probe3.probe.alert_class, "probe");
     assert_eq!(probe3.probe.trigger, views::AlertDeliveryTrigger::Probe);

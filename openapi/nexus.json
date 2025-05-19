@@ -1298,7 +1298,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebhookDeliveryResultsPage"
+                  "$ref": "#/components/schemas/AlertDeliveryResultsPage"
                 }
               }
             }
@@ -13258,6 +13258,97 @@
           "items"
         ]
       },
+      "AlertDelivery": {
+        "description": "A delivery of a webhook event.",
+        "type": "object",
+        "properties": {
+          "alert_class": {
+            "description": "The event class.",
+            "type": "string"
+          },
+          "alert_id": {
+            "description": "The UUID of the event.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForAlertKind"
+              }
+            ]
+          },
+          "attempts": {
+            "description": "Individual attempts to deliver this webhook event, and their outcomes.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertDeliveryAttempts"
+              }
+            ]
+          },
+          "id": {
+            "description": "The UUID of this delivery attempt.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiver_id": {
+            "description": "The UUID of the alert receiver that this event was delivered to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForAlertReceiverKind"
+              }
+            ]
+          },
+          "state": {
+            "description": "The state of this delivery.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertDeliveryState"
+              }
+            ]
+          },
+          "time_started": {
+            "description": "The time at which this delivery began (i.e. the event was dispatched to the receiver).",
+            "type": "string",
+            "format": "date-time"
+          },
+          "trigger": {
+            "description": "Why this delivery was performed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertDeliveryTrigger"
+              }
+            ]
+          }
+        },
+        "required": [
+          "alert_class",
+          "alert_id",
+          "attempts",
+          "id",
+          "receiver_id",
+          "state",
+          "time_started",
+          "trigger"
+        ]
+      },
+      "AlertDeliveryAttempts": {
+        "description": "A list of attempts to deliver an alert to a receiver.\n\nThe type of the delivery attempt model depends on the receiver type, as it may contain information specific to that delivey mechanism. For example, webhook delivery attempts contain the HTTP status code of the webhook request.",
+        "oneOf": [
+          {
+            "description": "A list of attempts to deliver an alert to a webhook receiver.",
+            "type": "object",
+            "properties": {
+              "webhook": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WebhookDeliveryAttempt"
+                }
+              }
+            },
+            "required": [
+              "webhook"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "AlertDeliveryId": {
         "type": "object",
         "properties": {
@@ -13268,6 +13359,27 @@
         },
         "required": [
           "delivery_id"
+        ]
+      },
+      "AlertDeliveryResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertDelivery"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "AlertDeliveryState": {
@@ -25850,75 +25962,6 @@
           "secrets"
         ]
       },
-      "WebhookDelivery": {
-        "description": "A delivery of a webhook event.",
-        "type": "object",
-        "properties": {
-          "alert_class": {
-            "description": "The event class.",
-            "type": "string"
-          },
-          "alert_id": {
-            "description": "The UUID of the event.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForAlertKind"
-              }
-            ]
-          },
-          "attempts": {
-            "description": "Individual attempts to deliver this webhook event, and their outcomes.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WebhookDeliveryAttempt"
-            }
-          },
-          "id": {
-            "description": "The UUID of this delivery attempt.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "state": {
-            "description": "The state of this delivery.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/AlertDeliveryState"
-              }
-            ]
-          },
-          "time_started": {
-            "description": "The time at which this delivery began (i.e. the event was dispatched to the receiver).",
-            "type": "string",
-            "format": "date-time"
-          },
-          "trigger": {
-            "description": "Why this delivery was performed.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/AlertDeliveryTrigger"
-              }
-            ]
-          },
-          "webhook_id": {
-            "description": "The UUID of the webhook receiver that this event was delivered to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForAlertReceiverKind"
-              }
-            ]
-          }
-        },
-        "required": [
-          "alert_class",
-          "alert_id",
-          "attempts",
-          "id",
-          "state",
-          "time_started",
-          "trigger",
-          "webhook_id"
-        ]
-      },
       "WebhookDeliveryAttempt": {
         "description": "An individual delivery attempt for a webhook event.\n\nThis represents a single HTTP request that was sent to the receiver, and its outcome.",
         "type": "object",
@@ -26011,27 +26054,6 @@
           "status"
         ]
       },
-      "WebhookDeliveryResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WebhookDelivery"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
       "WebhookProbeResult": {
         "description": "Data describing the result of a webhook liveness probe attempt.",
         "type": "object",
@@ -26040,7 +26062,7 @@
             "description": "The outcome of the probe request.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/WebhookDelivery"
+                "$ref": "#/components/schemas/AlertDelivery"
               }
             ]
           },
