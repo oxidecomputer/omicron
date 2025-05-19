@@ -485,6 +485,11 @@ impl BackgroundTask for InstanceWatcher {
                 }
 
                 tokio::select! {
+                    // Use `biased` here to ensure that we check if we can spawn
+                    // another task before trying to drain a task, so that the set
+                    // is always saturated when there are instances remaining to
+                    // check.
+                    biased;
                     permit = tasks.ready_to_spawn(), if !instances.is_empty() => {
                         let (sled, instance, vmm, project) = instances
                             .pop_front()
