@@ -591,11 +591,11 @@ mod test {
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use gateway_client::types::PowerState;
-    use gateway_client::types::RotSlot;
     use gateway_client::types::RotState;
     use gateway_client::types::SpComponentCaboose;
     use gateway_client::types::SpState;
     use gateway_client::types::SpType;
+    use gateway_types::rot::RotSlot;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
