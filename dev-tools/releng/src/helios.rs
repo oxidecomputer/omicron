@@ -131,7 +131,7 @@ set name=variant.opensolaris.zone value=global value=nonglobal
 
     let stdout = Command::new("pkg")
         .args(["list", "-g", HELIOS_REPO, "-F", "json"])
-        .args(["-o", "fmri", "*@latest"])
+        .args(["-o", "fmri", "-n", "*"])
         .ensure_stdout(&logger)
         .await?;
     let packages: Vec<Package> = serde_json::from_str(&stdout)
