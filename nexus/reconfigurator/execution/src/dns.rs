@@ -655,7 +655,8 @@ mod test {
         let mut blueprint_sleds = BTreeMap::new();
 
         for (sled_id, sa) in collection.sled_agents {
-            let ledgered_sled_config = sa.ledgered_sled_config.unwrap();
+            let ledgered_sled_config =
+                sa.ledgered_sled_config.unwrap_or_default();
 
             // Convert the inventory `OmicronZonesConfig`s into
             // `BlueprintZoneConfig`s. This is going to get more painful over

@@ -644,7 +644,7 @@ pub fn sled_agent(
 ) -> Inventory {
     // Assume the `ledgered_sled_config` was reconciled successfully.
     let last_reconciliation = ledgered_sled_config.clone().map(|config| {
-        let external_disks = dbg!(&config)
+        let external_disks = config
             .disks
             .iter()
             .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))

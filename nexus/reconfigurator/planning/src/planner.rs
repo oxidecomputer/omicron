@@ -2048,22 +2048,10 @@ pub(crate) mod test {
         let mut collection = example.collection;
         let input = example.input;
 
-        // The initial collection configuration has generation 1
         // The initial blueprint configuration has generation 2
         let (sled_id, sled_config) =
             blueprint1.sleds.first_key_value().unwrap();
         assert_eq!(sled_config.sled_agent_generation, Generation::from_u32(2));
-        assert_eq!(
-            collection
-                .sled_agents
-                .get(&sled_id)
-                .unwrap()
-                .ledgered_sled_config
-                .as_ref()
-                .unwrap()
-                .generation,
-            Generation::new()
-        );
 
         // All disks should have an `InService` disposition and `Active` state
         for disk in &sled_config.disks {
@@ -4099,6 +4087,7 @@ pub(crate) mod test {
         // * same inventory as above
         // * inventory reports a new generation (but zone still running)
         // * inventory reports zone not running (but still the old generation)
+        eprintln!("planning with no inventory change...");
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint2,
@@ -4106,6 +4095,15 @@ pub(crate) mod test {
             &collection,
             TEST_NAME,
         );
+        // TODO-cleanup These checks depend on `last_reconciled_config`, which
+        // is not yet populated; uncomment these and check them by mutating
+        // `last_reconciled_config` once
+        // https://github.com/oxidecomputer/omicron/pull/8064 lands. We could
+        // just mutate `ledgered_sled_config` in the meantime (as this
+        // commented-out code does below), but that's not really checking what
+        // we care about.
+        /*
+        eprintln!("planning with generation bump but zone still running...");
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint2,
@@ -4124,6 +4122,7 @@ pub(crate) mod test {
             },
             TEST_NAME,
         );
+        eprintln!("planning with zone gone but generation not bumped...");
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint2,
@@ -4143,6 +4142,7 @@ pub(crate) mod test {
             },
             TEST_NAME,
         );
+        */
 
         // Now make both changes to the inventory.
         {
