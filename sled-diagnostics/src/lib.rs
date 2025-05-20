@@ -98,7 +98,7 @@ pub async fn pargs_oxide_processes(
         Err(e) => return vec![Err(e.into())],
     };
 
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(pids.len());
     let mut commands =
         ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
     for pid in pids {
@@ -128,7 +128,7 @@ pub async fn pstack_oxide_processes(
         Err(e) => return vec![Err(e.into())],
     };
 
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(pids.len());
     let mut commands =
         ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
     for pid in pids {
@@ -157,7 +157,7 @@ pub async fn pfiles_oxide_processes(
         Err(e) => return vec![Err(e.into())],
     };
 
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(pids.len());
     let mut commands =
         ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
     for pid in pids {
