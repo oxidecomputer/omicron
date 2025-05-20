@@ -1195,8 +1195,8 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     expect_delivery_attempts(
         &probe2.probe.attempts,
         &[ExpectAttempt {
-            result: views::WebhookDeliveryAttemptResult::FailedTimeout,
-            status: None,
+            result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+            status: Some(503),
         }],
     );
     assert_eq!(probe2.probe.alert_class, "probe");
