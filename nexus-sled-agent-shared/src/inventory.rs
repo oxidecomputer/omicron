@@ -4,8 +4,11 @@
 
 //! Inventory types shared between Nexus and sled-agent.
 
+use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use daft::Diffable;
 use id_map::IdMap;
 use id_map::IdMappable;
@@ -21,8 +24,8 @@ use omicron_common::{
     },
     zpool_name::ZpoolName,
 };
-use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
+use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -113,6 +116,56 @@ pub struct Inventory {
     pub zpools: Vec<InventoryZpool>,
     pub datasets: Vec<InventoryDataset>,
     pub omicron_physical_disks_generation: Generation,
+}
+
+/// Describes the last attempt made by the sled-agent-config-reconciler to
+/// reconcile the current sled config against the actual state of the sled.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ConfigReconcilerInventory {
+    pub last_reconciled_config: OmicronSledConfig,
+    pub external_disks:
+        BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
+    pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
+    pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum ConfigReconcilerInventoryResult {
+    Ok,
+    Err { message: String },
+}
+
+impl From<Result<(), String>> for ConfigReconcilerInventoryResult {
+    fn from(result: Result<(), String>) -> Self {
+        match result {
+            Ok(()) => Self::Ok,
+            Err(message) => Self::Err { message },
+        }
+    }
+}
+
+/// Status of the sled-agent-config-reconciler task.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ConfigReconcilerInventoryStatus {
+    /// The reconciler task has not yet run for the first time since sled-agent
+    /// started.
+    NotYetRun,
+    /// The reconciler task is actively running.
+    Running {
+        config: OmicronSledConfig,
+        started_at: DateTime<Utc>,
+        running_for: Duration,
+    },
+    /// The reconciler task is currently idle, but previously did complete a
+    /// reconciliation attempt.
+    ///
+    /// This variant does not include the `OmicronSledConfig` used in the last
+    /// attempt, because that's always available via
+    /// [`ConfigReconcilerInventory::last_reconciled_config`].
+    Idle { completed_at: DateTime<Utc>, ran_for: Duration },
 }
 
 /// Describes the role of the sled within the rack.

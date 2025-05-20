@@ -2273,7 +2273,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=872aae7d76493f2a4f59711b24dde55523536b40#872aae7d76493f2a4f59711b24dde55523536b40"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=875ae5b7f8f0e32e9be672a36b5dda109b9b2450#875ae5b7f8f0e32e9be672a36b5dda109b9b2450"
 dependencies = [
  "oxnet",
  "percent-encoding",
@@ -5776,7 +5776,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=872aae7d76493f2a4f59711b24dde55523536b40#872aae7d76493f2a4f59711b24dde55523536b40"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=875ae5b7f8f0e32e9be672a36b5dda109b9b2450#875ae5b7f8f0e32e9be672a36b5dda109b9b2450"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6633,6 +6633,7 @@ dependencies = [
 name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "daft",
  "id-map",
  "illumos-utils",
@@ -7477,6 +7478,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "oxql-types",
+ "parallel-task-set",
  "parse-display",
  "paste",
  "pem",
@@ -8886,6 +8888,15 @@ dependencies = [
  "bytecount",
  "fnv",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "parallel-task-set"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "rand 0.8.5",
+ "tokio",
 ]
 
 [[package]]

@@ -154,12 +154,13 @@ impl Config {
         Ok(config)
     }
 
-    pub fn get_link(&self) -> Result<PhysicalLink, ConfigError> {
+    pub async fn get_link(&self) -> Result<PhysicalLink, ConfigError> {
         if let Some(link) = self.data_link.as_ref() {
             Ok(link.clone())
         } else {
             if is_gimlet().map_err(ConfigError::SystemDetection)? {
                 Dladm::list_physical()
+                    .await
                     .map_err(ConfigError::FindLinks)?
                     .into_iter()
                     .find(|link| link.0.starts_with(CHELSIO_LINK_PREFIX))
@@ -169,7 +170,7 @@ impl Config {
                         )
                     })
             } else {
-                Dladm::find_physical().map_err(ConfigError::FindLinks)
+                Dladm::find_physical().await.map_err(ConfigError::FindLinks)
             }
         }
     }

@@ -6,10 +6,12 @@
 
 use crate::zone::ROUTE;
 use crate::{
-    ExecutionError, PFEXEC, command_to_string, execute, output_to_exec_error,
+    ExecutionError, PFEXEC, command_to_string, execute_async,
+    output_to_exec_error,
 };
 use libc::ESRCH;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use tokio::process::Command;
 
 /// Wraps commands for interacting with routing tables.
 pub struct Route {}
@@ -21,7 +23,7 @@ pub enum Gateway {
 }
 
 impl Route {
-    pub fn ensure_default_route_with_gateway(
+    pub async fn ensure_default_route_with_gateway(
         gateway: Gateway,
     ) -> Result<(), ExecutionError> {
         let inet;
@@ -38,37 +40,40 @@ impl Route {
         }
         // Add the desired route if it doesn't already exist
         let destination = "default";
-        let mut cmd = std::process::Command::new(PFEXEC);
+        let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[ROUTE, "-n", "get", inet, destination, inet, &gw]);
 
-        let out =
-            cmd.output().map_err(|err| ExecutionError::ExecutionStart {
-                command: command_to_string(cmd),
+        let out = cmd.output().await.map_err(|err| {
+            ExecutionError::ExecutionStart {
+                command: command_to_string(cmd.as_std()),
                 err,
-            })?;
+            }
+        })?;
         match out.status.code() {
             Some(0) => (),
             // If the entry is not found in the table,
             // the exit status of the command will be 3 (ESRCH).
             // When that is the case, we'll add the route.
             Some(ESRCH) => {
-                let mut cmd = std::process::Command::new(PFEXEC);
+                let mut cmd = Command::new(PFEXEC);
                 let cmd =
                     cmd.args(&[ROUTE, "add", inet, destination, inet, &gw]);
-                execute(cmd)?;
+                execute_async(cmd).await?;
             }
-            Some(_) | None => return Err(output_to_exec_error(cmd, &out)),
+            Some(_) | None => {
+                return Err(output_to_exec_error(cmd.as_std(), &out));
+            }
         };
         Ok(())
     }
 
-    pub fn ensure_opte_route(
+    pub async fn ensure_opte_route(
         gateway: &Ipv4Addr,
         iface: &String,
         opte_ip: &IpAddr,
     ) -> Result<(), ExecutionError> {
         // Add the desired route if it doesn't already exist
-        let mut cmd = std::process::Command::new(PFEXEC);
+        let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[
             ROUTE,
             "-n",
@@ -81,18 +86,19 @@ impl Route {
             &iface.to_string(),
         ]);
 
-        let out =
-            cmd.output().map_err(|err| ExecutionError::ExecutionStart {
-                command: command_to_string(cmd),
+        let out = cmd.output().await.map_err(|err| {
+            ExecutionError::ExecutionStart {
+                command: command_to_string(cmd.as_std()),
                 err,
-            })?;
+            }
+        })?;
         match out.status.code() {
             Some(0) => (),
             // If the entry is not found in the table,
             // the exit status of the command will be 3 (ESRCH).
             // When that is the case, we'll add the route.
             Some(ESRCH) => {
-                let mut cmd = std::process::Command::new(PFEXEC);
+                let mut cmd = Command::new(PFEXEC);
                 let cmd = cmd.args(&[
                     ROUTE,
                     "add",
@@ -103,19 +109,21 @@ impl Route {
                     "-ifp",
                     &iface.to_string(),
                 ]);
-                execute(cmd)?;
+                execute_async(cmd).await?;
             }
-            Some(_) | None => return Err(output_to_exec_error(cmd, &out)),
+            Some(_) | None => {
+                return Err(output_to_exec_error(cmd.as_std(), &out));
+            }
         };
         Ok(())
     }
 
-    pub fn add_bootstrap_route(
+    pub async fn add_bootstrap_route(
         bootstrap_prefix: u16,
         gz_bootstrap_addr: Ipv6Addr,
         zone_vnic_name: &str,
     ) -> Result<(), ExecutionError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+        let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[
             ROUTE,
             "add",
@@ -125,7 +133,7 @@ impl Route {
             "-ifp",
             zone_vnic_name,
         ]);
-        execute(cmd)?;
+        execute_async(cmd).await?;
         Ok(())
     }
 }
