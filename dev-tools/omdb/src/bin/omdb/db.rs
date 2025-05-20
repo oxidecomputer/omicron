@@ -125,6 +125,7 @@ use nexus_db_queries::db::queries::region_allocation;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -7423,8 +7424,112 @@ fn collect_config_reconciler_errors<T: Ord + Display>(
 }
 
 fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
+    let OmicronSledConfig {
+        generation,
+        disks,
+        datasets,
+        zones,
+        remove_mupdate_override,
+    } = config;
+
     println!("\n{label} SLED CONFIG");
-    todo!("finish this method: {config:?}");
+    println!("    generation: {}", generation);
+    println!("    remove_mupdate_override: {remove_mupdate_override:?}");
+
+    if disks.is_empty() {
+        println!("    disk config empty");
+    } else {
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct DiskRow {
+            id: Uuid,
+            zpool_id: Uuid,
+            vendor: String,
+            model: String,
+            serial: String,
+        }
+
+        let rows = disks.iter().map(|d| DiskRow {
+            id: d.id.into_untyped_uuid(),
+            zpool_id: d.pool_id.into_untyped_uuid(),
+            vendor: d.identity.vendor.clone(),
+            model: d.identity.model.clone(),
+            serial: d.identity.serial.clone(),
+        });
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(1, 1, 0, 0))
+            .to_string();
+        println!("    DISKS: {}", disks.len());
+        println!("{table}");
+    }
+
+    if datasets.is_empty() {
+        println!("    dataset config empty");
+    } else {
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct DatasetRow {
+            id: Uuid,
+            name: String,
+            compression: String,
+            quota: String,
+            reservation: String,
+        }
+
+        let rows = datasets.iter().map(|d| DatasetRow {
+            id: d.id.into_untyped_uuid(),
+            name: d.name.full_name(),
+            compression: d.inner.compression.to_string(),
+            quota: d
+                .inner
+                .quota
+                .map(|q| q.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            reservation: d
+                .inner
+                .reservation
+                .map(|r| r.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+        });
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(1, 1, 0, 0))
+            .to_string();
+        println!("    DATASETS: {}", datasets.len());
+        println!("{table}");
+    }
+
+    if zones.is_empty() {
+        println!("    zone config empty");
+    } else {
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct ZoneRow {
+            id: Uuid,
+            kind: &'static str,
+            image_source: String,
+        }
+
+        let rows = zones.iter().map(|z| ZoneRow {
+            id: z.id.into_untyped_uuid(),
+            kind: z.zone_type.kind().report_str(),
+            image_source: match &z.image_source {
+                OmicronZoneImageSource::InstallDataset => {
+                    "install-dataset".to_string()
+                }
+                OmicronZoneImageSource::Artifact { hash } => {
+                    format!("artifact: {hash}")
+                }
+            },
+        });
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(1, 1, 0, 0))
+            .to_string();
+        println!("    ZONES: {}", datasets.len());
+        println!("{table}");
+    }
 }
 
 fn inv_collection_print_keeper_membership(collection: &Collection) {
