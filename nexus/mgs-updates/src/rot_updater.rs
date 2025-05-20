@@ -236,8 +236,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
             }
 
             let PendingMgsUpdateDetails::Rot {
-                expected_slot_a_version,
-                expected_slot_b_version,
+                expected_inactive_version,
                 expected_active_slot,
                 expected_persistent_boot_preference,
                 ..
@@ -273,9 +272,9 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
 
             // If the active slot does not match the expected active slot, there is
             // likely another update happening. Bail out.
-            if expected_active_slot != active {
+            if expected_active_slot.slot() != active {
                 return Err(PrecheckError::WrongActiveSlot {
-                    expected: *expected_active_slot, found: *active
+                    expected: expected_active_slot.slot, found: *active
                 })
             }
 
@@ -287,7 +286,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                         update.sp_type,
                         update.slot_id,
                         &SpComponent::ROT.to_string(),
-                        expected_active_slot.to_u16(),
+                        expected_active_slot.slot().to_u16(),
                     )
                     .await
             })
@@ -307,20 +306,9 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
             // don't want to roll that back.  (If for some reason we *do* want
             // to do this update, the planner will have to notice that what's
             // here is wrong and update the blueprint.)
-            let (expected_active_slot_version, expected_inactive_slot_version) = match expected_active_slot {
-                RotSlot::A => (expected_slot_a_version, expected_slot_b_version),
-                RotSlot::B => (expected_slot_b_version, expected_slot_a_version)
-            };
-
-            let expected_active_slot_version = match expected_active_slot_version {
-                ExpectedVersion::Version(v) => v,
-                ExpectedVersion::NoValidVersion => unreachable!(
-                    "the active slot will always have an expected version"
-                ),
-            };
-            if caboose.version != expected_active_slot_version.to_string() {
+            if caboose.version != expected_active_slot.version.to_string() {
                 return Err(PrecheckError::WrongActiveVersion {
-                    expected: expected_active_slot_version.clone(),
+                    expected: expected_active_slot.version.clone(),
                     found: caboose.version,
                 });
             }
@@ -340,7 +328,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                             update.sp_type,
                             update.slot_id,
                             &SpComponent::ROT.to_string(),
-                            expected_active_slot.toggled().to_u16(),
+                            expected_active_slot.slot().toggled().to_u16(),
                         )
                         .await
                 })
@@ -357,7 +345,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                     }
                 }
             };
-            match (&expected_inactive_slot_version, &found_version) {
+            match (&expected_inactive_version, &found_version) {
                 // expected garbage, found garbage
                 (
                     ExpectedVersion::NoValidVersion,
@@ -373,7 +361,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                 | (ExpectedVersion::Version(_), FoundVersion::MissingVersion)
                 | (ExpectedVersion::Version(_), FoundVersion::Version(_)) => {
                     return Err(PrecheckError::WrongInactiveVersion {
-                        expected: expected_inactive_slot_version.clone(),
+                        expected: expected_inactive_version.clone(),
                         found: found_version,
                     });
                 }

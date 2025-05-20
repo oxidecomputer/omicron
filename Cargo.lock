@@ -3601,6 +3601,7 @@ dependencies = [
 name = "gateway-types"
 version = "0.1.0"
 dependencies = [
+ "daft",
  "gateway-messages",
  "hex",
  "ipcc",

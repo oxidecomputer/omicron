@@ -89,7 +89,10 @@ impl SpComponentUpdate {
                     target_sp_type: request.sp_type,
                     target_sp_slot: request.slot_id,
                     // Like the SP, we request an update to the inactive slot
-                    firmware_slot: expected_active_slot.toggled().to_u16(),
+                    firmware_slot: expected_active_slot
+                        .slot()
+                        .toggled()
+                        .to_u16(),
                     update_id,
                 }
             }
