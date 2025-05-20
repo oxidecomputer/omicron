@@ -11,7 +11,10 @@ use dns_service_client::{
     ERROR_CODE_UPDATE_IN_PROGRESS,
 };
 use dropshot::RequestContext;
-use internal_dns_types::{v1::{self, config::TranslationError as V1TranslationError}, v2::{self, config::TranslationError as V2TranslationError}};
+use internal_dns_types::{
+    v1::{self, config::TranslationError as V1TranslationError},
+    v2::{self, config::TranslationError as V2TranslationError},
+};
 
 pub struct Context {
     store: storage::Store,
@@ -71,7 +74,7 @@ impl DnsServerApi for DnsServerApiImpl {
                 return Err(dropshot::HttpError::for_bad_request(
                     None,
                     ERROR_CODE_INCOMPATIBLE_RECORD.to_string(),
-                ))
+                ));
             }
         };
         Self::dns_config_put(rqctx, provided_config).await

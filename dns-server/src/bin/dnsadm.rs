@@ -264,8 +264,9 @@ fn add_record(
     verify_zone_name(zone_name)?;
 
     let generation = config.generation;
-    let serial = config.serial.checked_add(1)
-        .ok_or_else(|| anyhow!("Cannot produce new serial for {}", config.serial))?;
+    let serial = config.serial.checked_add(1).ok_or_else(|| {
+        anyhow!("Cannot produce new serial for {}", config.serial)
+    })?;
     let (our_zone, other_zones): (Vec<_>, Vec<_>) =
         config.zones.into_iter().partition(|z| z.zone_name == zone_name);
     let our_records = our_zone

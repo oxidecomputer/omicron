@@ -43,7 +43,10 @@ impl TryInto<v2::config::DnsConfigParams> for DnsConfigParams {
     type Error = TranslationError;
 
     fn try_into(self) -> Result<v2::config::DnsConfigParams, Self::Error> {
-        let serial: u32 = self.generation.as_u64().try_into()
+        let serial: u32 = self
+            .generation
+            .as_u64()
+            .try_into()
             .map_err(|_| TranslationError::GenerationTooLarge)?;
 
         let mut converted_zones: Vec<v2::config::DnsConfigZone> = Vec::new();

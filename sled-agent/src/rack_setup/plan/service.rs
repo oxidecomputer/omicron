@@ -415,10 +415,11 @@ impl Plan {
 
             let id = OmicronZoneUuid::new_v4();
             dns_builder
-                .host_zone_with_one_backend(
+                .host_zone_internal_dns(
                     id,
                     ServiceName::InternalDns,
                     http_address,
+                    dns_address.into(),
                 )
                 .unwrap();
             let dataset_name =
@@ -495,17 +496,18 @@ impl Plan {
             let internal_ip = sled.addr_alloc.next().expect("Not enough addrs");
             let http_port = omicron_common::address::DNS_HTTP_PORT;
             let http_address = SocketAddrV6::new(internal_ip, http_port, 0, 0);
+            let dns_port = omicron_common::address::DNS_PORT;
+            let dns_sockaddr = SocketAddr::new(external_ip, dns_port);
             dns_builder
-                .host_zone_with_one_backend(
+                .host_zone_external_dns(
                     id,
                     ServiceName::ExternalDns,
                     http_address,
+                    dns_sockaddr,
                 )
                 .unwrap();
-            let dns_port = omicron_common::address::DNS_PORT;
-            let dns_address = from_sockaddr_to_external_floating_addr(
-                SocketAddr::new(external_ip, dns_port),
-            );
+            let dns_address =
+                from_sockaddr_to_external_floating_addr(dns_sockaddr);
             let dataset_kind = DatasetKind::ExternalDns;
             let dataset_name = sled.alloc_dataset_from_u2s(dataset_kind)?;
             let filesystem_pool = dataset_name.pool().clone();

@@ -67,7 +67,7 @@ use omicron_common::address::{CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT};
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 
 // "v2" types are the most recent, so we re-export them here for dependents that
 // just want "latest".
@@ -144,6 +144,19 @@ pub struct DnsConfigBuilder {
     /// network
     zones: BTreeMap<Zone, Ipv6Addr>,
 
+    /// a map of DNS service zone UUIDs to the address that service answers DNS
+    /// queries on.  Each DNS server is present on the control plane network
+    /// with its HTTP interface on an IPv6 address in the map above, as well as
+    /// listening on port 53 for DNS queries on a different IP address.  These
+    /// addresses may be IPv4 or IPv6, depending on if the server is for
+    /// internal or external use, and the rack's external IP range.
+    internal_dns_addresses: BTreeMap<Zone, IpAddr>,
+
+    /// similar to `internal_dns_addresses`, but for IPs that external DNS
+    /// servers answer queries on.  Internal and external DNS addresses are
+    /// stored separately here to simplify collecting NS records for DNS zones.
+    external_dns_addresses: BTreeMap<Zone, IpAddr>,
+
     /// set of services (see module-level comment) that have been configured so
     /// far, mapping the name of the service (encapsulated in a [`ServiceName`])
     /// to the backends configured for that service.  The set of backends is
@@ -199,6 +212,8 @@ impl DnsConfigBuilder {
         DnsConfigBuilder {
             sleds: BTreeMap::new(),
             zones: BTreeMap::new(),
+            external_dns_addresses: BTreeMap::new(),
+            internal_dns_addresses: BTreeMap::new(),
             service_instances_zones: BTreeMap::new(),
             service_instances_sleds: BTreeMap::new(),
         }
@@ -535,6 +550,58 @@ impl DnsConfigBuilder {
         )
     }
 
+    /// Higher-level shorthand for adding an internal DNS zone, including
+    /// records for both its HTTP and DNS interfaces.
+    ///
+    /// # Errors
+    ///
+    /// This fails if the provided `service` is not for an internal DNS zone. It
+    /// also fails if the given zone has already been added to the
+    /// configuration.
+    pub fn host_zone_internal_dns(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        service: ServiceName,
+        http_address: SocketAddrV6,
+        dns_address: SocketAddr,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(service == ServiceName::InternalDns, "TODO: asdf");
+        let zone = self.host_zone(zone_id, *http_address.ip())?;
+        self.service_backend_zone(service, &zone, http_address.port())?;
+        let prior_address =
+            self.internal_dns_addresses.insert(zone.clone(), dns_address.ip());
+        if let Some(addr) = prior_address {
+            anyhow::bail!("zone {} already had a DNS address: {}", zone, addr);
+        }
+        Ok(())
+    }
+
+    /// Higher-level shorthand for adding an external DNS zone, including
+    /// records for both its HTTP and DNS interfaces.
+    ///
+    /// # Errors
+    ///
+    /// This fails if the provided `service` is not for an external DNS zone. It
+    /// also fails if the given zone has already been added to the
+    /// configuration.
+    pub fn host_zone_external_dns(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        service: ServiceName,
+        http_address: SocketAddrV6,
+        dns_address: SocketAddr,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(service == ServiceName::ExternalDns, "TODO: asdf");
+        let zone = self.host_zone(zone_id, *http_address.ip())?;
+        self.service_backend_zone(service, &zone, http_address.port())?;
+        let prior_address =
+            self.external_dns_addresses.insert(zone.clone(), dns_address.ip());
+        if let Some(addr) = prior_address {
+            anyhow::bail!("zone {} already had a DNS address: {}", zone, addr);
+        }
+        Ok(())
+    }
+
     /// Construct a `DnsConfigZone` describing the control plane DNS zone
     /// described up to this point
     pub fn build_zone(self) -> DnsConfigZone {
@@ -569,6 +636,35 @@ impl DnsConfigBuilder {
         let zone_records = self.zones.into_iter().map(|(zone, zone_ip)| {
             (zone.dns_name(), vec![DnsRecord::Aaaa(zone_ip)])
         });
+
+        // DNS nameservers can be added in arbitrary order to this builder.
+        // Before assembling DNS records, sort the addresses to some stability
+        // in which IPs are for which nameserver records.
+        let mut internal_dns_addresses =
+            self.internal_dns_addresses.values().collect::<Vec<_>>();
+        internal_dns_addresses.sort();
+        let mut internal_nameservers = Vec::new();
+        let mut internal_dns_records = internal_dns_addresses
+            .iter()
+            .enumerate()
+            .map(|(idx, ip)| {
+                // Enumeration starts at zero, but name server names start from one.
+                let name = format!("ns{}", idx + 1);
+                internal_nameservers.push(DnsRecord::Ns(format!(
+                    "{}.{}",
+                    name,
+                    crate::names::DNS_ZONE
+                )));
+                (
+                    name,
+                    match ip {
+                        IpAddr::V4(ip) => vec![DnsRecord::A(*ip)],
+                        IpAddr::V6(ip) => vec![DnsRecord::Aaaa(*ip)],
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        internal_dns_records.push(("@".to_string(), internal_nameservers));
 
         // Assemble the set of SRV records, which implicitly point back at
         // zones' AAAA records.
@@ -613,6 +709,7 @@ impl DnsConfigBuilder {
         let all_records = sled_records
             .chain(zone_records)
             .chain(boundary_ntp_records)
+            .chain(internal_dns_records)
             .chain(srv_records_sleds)
             .chain(srv_records_zones)
             .collect();
@@ -628,7 +725,10 @@ impl DnsConfigBuilder {
         let generation = Generation::new();
         DnsConfigParams {
             generation,
-            serial: generation.as_u64().try_into().expect("initial generation fits into u32"),
+            serial: generation
+                .as_u64()
+                .try_into()
+                .expect("initial generation fits into u32"),
             time_created: chrono::Utc::now(),
             zones: vec![zone],
         }

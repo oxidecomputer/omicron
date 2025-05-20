@@ -59,7 +59,13 @@ impl TryFrom<DnsConfig> for v1::config::DnsConfig {
     type Error = TranslationError;
 
     fn try_from(v2: DnsConfig) -> Result<Self, Self::Error> {
-        let DnsConfig { generation, serial: _, time_created, time_applied, zones } = v2;
+        let DnsConfig {
+            generation,
+            serial: _,
+            time_created,
+            time_applied,
+            zones,
+        } = v2;
 
         Ok(v1::config::DnsConfig {
             generation,

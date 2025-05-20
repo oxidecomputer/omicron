@@ -22,11 +22,8 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
-use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
@@ -48,7 +45,6 @@ use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views;
-use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
 use omicron_common::api::external::AddressLotKind;
@@ -206,37 +202,6 @@ impl super::Nexus {
         );
 
         let silo_name = &request.recovery_silo.silo_name;
-        // Records that should be present at the rack-internal zone apex -
-        // `oxide.internal`.
-        let mut int_zone_records = Vec::new();
-        // Internal DNS serves the `control-plane.oxide.internal` zone, where
-        // internal records for rack-internal services are served. The
-        // name servers themselves will be given
-        // `ns$N.control-plane.oxide.internal` name, with NS and A records.
-        //
-        // Again, the choice of which server is which `ns$N` is arbitrary.
-        let mut internal_dns_records = Vec::new();
-
-        for (_, zc) in request
-            .blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        {
-            match zc.zone_type {
-                BlueprintZoneType::InternalDns(
-                    blueprint_zone_type::InternalDns { dns_address, .. },
-                ) => {
-                    internal_dns_records
-                        .push(DnsRecord::Aaaa(*dns_address.ip()));
-                    let seen_intdns = internal_dns_records.len();
-                    int_zone_records.push(DnsRecord::Ns(format!(
-                        "ns{}.{}",
-                        seen_intdns,
-                        internal_dns_types::names::DNS_ZONE
-                    )));
-                }
-                _ => {}
-            }
-        }
 
         let mut dns_update = DnsVersionUpdateBuilder::new(
             DnsGroup::External,
