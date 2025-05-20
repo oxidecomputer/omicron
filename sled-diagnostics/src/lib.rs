@@ -112,7 +112,9 @@ pub async fn pargs_oxide_processes(
             results.push(res);
         }
     }
-    commands.join_all().await
+
+    results.extend(commands.join_all().await);
+    results
 }
 
 pub async fn pstack_oxide_processes(
