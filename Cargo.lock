@@ -11721,6 +11721,7 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "oxlog",
+ "parallel-task-set",
  "rand 0.8.5",
  "schemars",
  "serde",

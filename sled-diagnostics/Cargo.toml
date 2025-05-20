@@ -17,6 +17,7 @@ libc.workspace = true
 omicron-workspace-hack.workspace = true
 once_cell.workspace = true
 oxlog.workspace = true
+parallel-task-set.workspace = true
 rand.workspace = true
 schemars.workspace = true
 serde.workspace = true
