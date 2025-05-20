@@ -22,14 +22,13 @@ use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
 use crate::zone_bundle::ZoneBundler;
 use bootstore::schemes::v0 as bootstore;
-use illumos_utils::zpool::ZpoolName;
 use key_manager::{KeyManager, StorageKeyRequester};
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, RawDisksSender,
     TimeSyncConfig,
 };
 use sled_agent_types::zone_bundle::CleanupContext;
-use sled_agent_zone_images::{ZoneImageSourceResolver, ZoneImageZpools};
+use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
@@ -106,10 +105,9 @@ pub async fn spawn_all_longrunning_tasks(
     // Wait for the boot disk so that we can work with any ledgers,
     // such as those needed by the bootstore and sled-agent
     info!(log, "Waiting for boot disk");
-    let disk_id = config_reconciler.wait_for_boot_disk().await;
-    info!(log, "Found boot disk {:?}", disk_id);
+    let internal_disks = config_reconciler.wait_for_boot_disk().await;
+    info!(log, "Found boot disk {:?}", internal_disks.boot_disk_id());
 
-    let all_disks = storage_manager.get_latest_disks().await;
     let bootstore = spawn_bootstore_tasks(
         log,
         &config_reconciler,
@@ -118,9 +116,8 @@ pub async fn spawn_all_longrunning_tasks(
     )
     .await;
 
-    let zone_bundler = spawn_zone_bundler_tasks(log, &config_reconciler);
-    let zone_image_resolver =
-        make_zone_image_resolver(log, &all_disks, &boot_zpool);
+    let zone_bundler = spawn_zone_bundler_tasks(log, &config_reconciler).await;
+    let zone_image_resolver = ZoneImageSourceResolver::new(log, internal_disks);
 
     (
         LongRunningTaskHandles {
@@ -227,18 +224,7 @@ async fn spawn_zone_bundler_tasks(
         config_reconciler.available_datasets_rx(),
         CleanupContext::default(),
     )
-}
-
-fn make_zone_image_resolver(
-    log: &Logger,
-    all_disks: &AllDisks,
-    boot_zpool: &ZpoolName,
-) -> ZoneImageSourceResolver {
-    let zpools = ZoneImageZpools {
-        root: &all_disks.mount_config().root,
-        all_m2_zpools: all_disks.all_m2_zpools(),
-    };
-    ZoneImageSourceResolver::new(log, &zpools, boot_zpool)
+    .await
 }
 
 async fn upsert_synthetic_disks_if_needed(

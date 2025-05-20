@@ -143,6 +143,7 @@ impl BootstrapAgentStartup {
             sled_mode,
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
+            long_running_task_handles.zone_image_resolver.clone(),
             long_running_task_handles
                 .config_reconciler
                 .internal_disks_rx()

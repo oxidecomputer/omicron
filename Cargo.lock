@@ -11704,6 +11704,7 @@ dependencies = [
  "omicron-workspace-hack",
  "pretty_assertions",
  "serde_json",
+ "sled-agent-config-reconciler",
  "sled-storage",
  "slog",
  "slog-error-chain",

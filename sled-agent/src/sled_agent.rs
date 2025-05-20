@@ -4,14 +4,14 @@
 
 //! Sled agent implementation
 
-use crate::artifact_store::{self, ArtifactStore};
+use crate::artifact_store::ArtifactStore;
 use crate::boot_disk_os_writer::BootDiskOsWriter;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
-use crate::metrics::{self, MetricsManager, MetricsRequestQueue};
+use crate::metrics::{MetricsManager, MetricsRequestQueue};
 use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
@@ -22,6 +22,7 @@ use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::{self, ZoneBundler};
+use anyhow::anyhow;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;
@@ -31,15 +32,14 @@ use futures::stream::FuturesUnordered;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zpool::ZpoolName;
+use itertools::Itertools as _;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, SledRole,
+    Inventory, OmicronSledConfig, OmicronZoneConfig, SledRole,
 };
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
 };
-use omicron_common::api::external::{
-    ByteCount, ByteCountRangeError, Generation, Vni,
-};
+use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
@@ -71,7 +71,9 @@ use sled_agent_types::zone_bundle::{
 };
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
-use sled_hardware::{HardwareManager, MemoryReservations, underlay};
+use sled_hardware::{
+    HardwareManager, MemoryReservations, PooledDiskError, underlay,
+};
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::config::MountConfig;
@@ -84,7 +86,7 @@ use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
-use illumos_utils::dladm::Dladm;
+use illumos_utils::dladm::{Dladm, EtherstubVnic};
 use illumos_utils::zone::Api;
 use illumos_utils::zone::Zones;
 
@@ -295,18 +297,15 @@ pub enum InventoryError {
     // system.
     #[error(transparent)]
     BadByteCount(#[from] ByteCountRangeError),
-    #[error("failed to get current ledgered disks")]
-    GetDisksConfig(#[source] sled_storage::error::Error),
-    #[error("failed to get current ledgered datasets")]
-    GetDatasetsConfig(#[source] sled_storage::error::Error),
+    #[error(transparent)]
+    InventoryError(#[from] sled_agent_config_reconciler::InventoryError),
 }
 
 impl From<InventoryError> for omicron_common::api::external::Error {
     fn from(inventory_error: InventoryError) -> Self {
         match inventory_error {
             e @ (InventoryError::BadByteCount(..)
-            | InventoryError::GetDisksConfig(_)
-            | InventoryError::GetDatasetsConfig(_)) => {
+            | InventoryError::InventoryError(_)) => {
                 omicron_common::api::external::Error::internal_error(
                     &InlineErrorChain::new(&e).to_string(),
                 )
@@ -609,8 +608,8 @@ impl SledAgent {
 
         // Start reconciling against our ledgered sled config.
         config_reconciler.spawn_reconciliation_task(
-            etherstub_vnic,
             ReconcilerFacilities {
+                etherstub_vnic,
                 service_manager: services.clone(),
                 metrics_queue: metrics_manager.request_queue(),
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
@@ -1133,7 +1132,7 @@ impl SledAgent {
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
-        } = self.inner.config_reconciler.inventory();
+        } = self.inner.config_reconciler.inventory(&self.log).await?;
 
         Ok(Inventory {
             sled_id,
@@ -1312,15 +1311,16 @@ pub async fn sled_add(
 }
 
 struct ReconcilerFacilities {
+    etherstub_vnic: EtherstubVnic,
     service_manager: ServiceManager,
     metrics_queue: MetricsRequestQueue,
     zone_bundler: ZoneBundler,
 }
 
 impl SledAgentFacilities for ReconcilerFacilities {
-    type StartZoneError = services::Error;
-    type MetricsUntrackZoneLinksError = Vec<metrics::Error>;
-    type ZoneBundleCreateError = BundleError;
+    fn underlay_vnic(&self) -> &EtherstubVnic {
+        &self.etherstub_vnic
+    }
 
     async fn on_time_sync(&self) {
         self.service_manager.on_time_sync().await
@@ -1332,26 +1332,35 @@ impl SledAgentFacilities for ReconcilerFacilities {
         mount_config: &MountConfig,
         is_time_synchronized: bool,
         all_u2_pools: &[ZpoolName],
-    ) -> Result<RunningZone, Self::StartZoneError> {
-        self.service_manager
+    ) -> anyhow::Result<RunningZone> {
+        let zone = self
+            .service_manager
             .start_omicron_zone(
                 mount_config,
                 zone_config,
                 is_time_synchronized,
                 all_u2_pools,
             )
-            .await
+            .await?;
+        Ok(zone)
     }
 
     fn metrics_untrack_zone_links(
         &self,
         zone: &RunningZone,
-    ) -> Result<(), Self::MetricsUntrackZoneLinksError> {
-        self.metrics_queue.untrack_zone_links(zone)
-    }
-
-    fn ddm_add_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX>) {
-        self.service_manager.ddm_reconciler().add_internal_dns_subnet(prefix);
+    ) -> anyhow::Result<()> {
+        match self.metrics_queue.untrack_zone_links(zone) {
+            Ok(()) => Ok(()),
+            Err(errors) => {
+                let mut errors =
+                    errors.iter().map(|err| InlineErrorChain::new(err));
+                Err(anyhow!(
+                    "{} errors untracking zone links: {}",
+                    errors.len(),
+                    errors.join(", ")
+                ))
+            }
+        }
     }
 
     fn ddm_remove_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX>) {
@@ -1364,7 +1373,7 @@ impl SledAgentFacilities for ReconcilerFacilities {
         &self,
         zone: &RunningZone,
         cause: ZoneBundleCause,
-    ) -> Result<(), Self::ZoneBundleCreateError> {
+    ) -> anyhow::Result<()> {
         self.zone_bundler.create(zone, cause).await?;
         Ok(())
     }
@@ -1374,12 +1383,10 @@ impl SledAgentFacilities for ReconcilerFacilities {
 struct SledAgentArtifactStoreWrapper(Arc<ArtifactStore<InternalDisksReceiver>>);
 
 impl SledAgentArtifactStore for SledAgentArtifactStoreWrapper {
-    type ArtifactExistsValidationError = artifact_store::Error;
-
     async fn validate_artifact_exists_in_storage(
         &self,
         artifact: ArtifactHash,
-    ) -> Result<(), Self::ArtifactExistsValidationError> {
+    ) -> anyhow::Result<()> {
         self.0.get(artifact).await?;
         Ok(())
     }

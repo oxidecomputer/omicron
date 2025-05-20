@@ -96,15 +96,15 @@ use omicron_common::ledger::Ledgerable;
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use rand::prelude::SliceRandom;
-use sled_agent_zone_images::{ZoneImageSourceResolver, ZoneImageZpools};
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
+use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
-use sled_storage::dataset::{INSTALL_DATASET, ZONE_DATASET};
+use sled_storage::dataset::ZONE_DATASET;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -920,12 +920,6 @@ impl ServiceManager {
         }
     }
 
-
-    // TODO-john still needed?
-    #[cfg(all(test, target_os = "illumos"))]
-    fn override_image_directory(&self, path: Utf8PathBuf) {
-        self.inner.zone_image_resolver.override_image_directory(path);
-    }
     pub(crate) fn ddm_reconciler(&self) -> &DdmReconciler {
         &self.inner.ddm_reconciler
     }
@@ -1530,44 +1524,9 @@ impl ServiceManager {
             ZoneArgs::Omicron(zone_config) => &zone_config.zone.image_source,
             ZoneArgs::Switch(_) => &OmicronZoneImageSource::InstallDataset,
         };
-        let all_disks = self.inner.storage.get_latest_disks().await;
-        let zpools = ZoneImageZpools {
-            root: &all_disks.mount_config().root,
-            all_m2_zpools: all_disks.all_m2_zpools(),
-/* TODO-john fix this
-        let zone_image_file_name = match image_source {
-            OmicronZoneImageSource::InstallDataset => None,
-            OmicronZoneImageSource::Artifact { hash } => Some(hash.to_string()),
-        };
-        let internal_disks = self.inner.internal_disks_rx.current();
-        let zone_image_paths = match image_source {
-            OmicronZoneImageSource::InstallDataset => {
-                // Look for the image in the ramdisk first
-                let mut zone_image_paths =
-                    vec![Utf8PathBuf::from("/opt/oxide")];
-
-                // If the boot disk exists, look for the image in the "install"
-                // dataset there too.
-                if let Some(boot_zpool) = internal_disks.boot_disk_zpool() {
-                    zone_image_paths.push(boot_zpool.dataset_mountpoint(
-                        &internal_disks.mount_config().root,
-                        INSTALL_DATASET,
-                    ));
-                }
-
-                zone_image_paths
-            }
-            OmicronZoneImageSource::Artifact { .. } => {
-                internal_disks.all_artifact_datasets().collect()
-            }
-*/
-        };
-        let boot_zpool =
-            all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
         let file_source = self.inner.zone_image_resolver.file_source_for(
             image_source,
-            &zpools,
-            boot_zpool.as_ref(),
+            self.inner.internal_disks_rx.current(),
         );
 
         let zone_type_str = match &request {

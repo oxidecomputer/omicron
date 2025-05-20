@@ -25,6 +25,7 @@ use sled_hardware::PooledDiskError;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::CLUSTER_DATASET;
 use sled_storage::dataset::CONFIG_DATASET;
+use sled_storage::dataset::INSTALL_DATASET;
 use sled_storage::dataset::M2_ARTIFACT_DATASET;
 use sled_storage::dataset::M2_DEBUG_DATASET;
 use sled_storage::disk::Disk;
@@ -38,7 +39,6 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::future::Future;
-use std::mem;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
@@ -70,6 +70,8 @@ enum InternalDisksReceiverInner {
 impl InternalDisksReceiver {
     /// Create an `InternalDisksReceiver` that always reports a fixed set of
     /// disks.
+    ///
+    /// The first disk is set as the boot disk.
     #[cfg(any(test, feature = "testing"))]
     pub fn fake_static(
         mount_config: Arc<MountConfig>,
@@ -77,18 +79,27 @@ impl InternalDisksReceiver {
     ) -> Self {
         let inner = InternalDisksReceiverInner::FakeStatic(Arc::new(
             disks
-                .map(|(identity, zpool_name)| {
-                    InternalDiskDetails::fake_details(identity, zpool_name)
+                .enumerate()
+                .map(|(i, (identity, zpool_name))| {
+                    InternalDiskDetails::fake_details(
+                        identity,
+                        zpool_name,
+                        i == 0,
+                    )
                 })
                 .collect(),
         ));
 
-        // We never report errors from our static set; move the sender to a task
-        // that idles so we don't get recv errors.
+        // We never report errors from our static set. If there's a Tokio
+        // runtime, move the sender to a task that idles so we don't get recv
+        // errors; otherwise, don't bother because no one can await changes on
+        // `errors_rx` anyway (e.g., if we're being used from a non-tokio test).
         let (errors_tx, errors_rx) = watch::channel(Arc::default());
-        tokio::spawn(async move {
-            errors_tx.closed().await;
-        });
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::spawn(async move {
+                errors_tx.closed().await;
+            });
+        }
 
         Self { mount_config, inner, errors_rx }
     }
@@ -109,7 +120,7 @@ impl InternalDisksReceiver {
             .clone()
             .into_iter()
             .map(|(identity, zpool_name)| {
-                InternalDiskDetails::fake_details(identity, zpool_name)
+                InternalDiskDetails::fake_details(identity, zpool_name, false)
             })
             .collect();
         let (mapped_tx, mapped_rx) = watch::channel(Arc::new(current));
@@ -122,7 +133,9 @@ impl InternalDisksReceiver {
                     .clone()
                     .into_iter()
                     .map(|(identity, zpool_name)| {
-                        InternalDiskDetails::fake_details(identity, zpool_name)
+                        InternalDiskDetails::fake_details(
+                            identity, zpool_name, false,
+                        )
                     })
                     .collect();
                 if mapped_tx.send(Arc::new(remapped)).is_err() {
@@ -206,6 +219,20 @@ impl InternalDisksReceiver {
         InternalDisks { disks, mount_config: Arc::clone(&self.mount_config) }
     }
 
+    /// Get an [`InternalDisksWithBootDisk`], panicking if we have no boot
+    /// disk.
+    ///
+    /// This method is only available to tests; production code should instead
+    /// use `current()` and/or `wait_for_boot_disk()`.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn current_with_boot_disk(&self) -> InternalDisksWithBootDisk {
+        let disks = self.current();
+        InternalDisksWithBootDisk::new(disks).expect(
+            "current_with_boot_disk() should be called by \
+             tests that set up a fake boot disk",
+        )
+    }
+
     /// Get the current set of managed internal disks and mark the returned
     /// value as seen.
     ///
@@ -264,40 +291,17 @@ impl InternalDisksReceiver {
     /// Wait until the boot disk is managed, returning its identity.
     ///
     /// Internally updates the most-recently-seen value.
-    pub(crate) async fn wait_for_boot_disk(&mut self) -> Arc<DiskIdentity> {
-        match &mut self.inner {
-            InternalDisksReceiverInner::Real(disks_rx) => loop {
-                let disks = disks_rx.borrow_and_update();
-                if let Some(disk) = disks.iter().find(|d| d.is_boot_disk()) {
-                    return Arc::clone(&disk.identity);
-                }
-                mem::drop(disks);
-
-                disks_rx
-                    .changed()
-                    .await
-                    .expect("InternalDisks task never dies");
-            },
-            #[cfg(any(test, feature = "testing"))]
-            InternalDisksReceiverInner::FakeStatic(disks) => {
-                if let Some(disk) = disks.iter().find(|d| d.is_boot_disk()) {
-                    return Arc::clone(&disk.id.identity);
-                }
-                panic!("fake InternalDisksReceiver has no boot disk")
-            }
-            #[cfg(any(test, feature = "testing"))]
-            InternalDisksReceiverInner::FakeDynamic(disks_rx) => loop {
-                let disks = disks_rx.borrow_and_update();
-                if let Some(disk) = disks.iter().find(|d| d.is_boot_disk()) {
-                    return Arc::clone(&disk.id.identity);
-                }
-                mem::drop(disks);
-
-                disks_rx
-                    .changed()
-                    .await
-                    .expect("InternalDisks task never dies");
-            },
+    pub(crate) async fn wait_for_boot_disk(
+        &mut self,
+    ) -> InternalDisksWithBootDisk {
+        loop {
+            let current = self.current_and_update();
+            if let Some(with_boot_disk) =
+                InternalDisksWithBootDisk::new(current)
+            {
+                return with_boot_disk;
+            };
+            self.changed().await.expect("InternalDisks task never dies");
         }
     }
 
@@ -324,6 +328,12 @@ impl InternalDisks {
     pub fn boot_disk_zpool(&self) -> Option<&ZpoolName> {
         self.disks.iter().find_map(|d| {
             if d.is_boot_disk() { Some(&d.zpool_name) } else { None }
+        })
+    }
+
+    pub fn boot_disk_install_dataset(&self) -> Option<Utf8PathBuf> {
+        self.boot_disk_zpool().map(|zpool| {
+            zpool.dataset_mountpoint(&self.mount_config.root, INSTALL_DATASET)
         })
     }
 
@@ -393,6 +403,58 @@ impl InternalDisks {
     }
 }
 
+/// An [`InternalDisks`] with a guaranteed-present boot disk.
+pub struct InternalDisksWithBootDisk {
+    inner: InternalDisks,
+    boot_disk: InternalDiskDetailsId,
+}
+
+impl InternalDisksWithBootDisk {
+    fn new(inner: InternalDisks) -> Option<Self> {
+        let boot_disk = inner
+            .disks
+            .iter()
+            .find_map(|d| if d.is_boot_disk() { Some(d.id()) } else { None })?;
+        Some(Self { inner, boot_disk })
+    }
+
+    fn boot_disk(&self) -> &InternalDiskDetails {
+        match self.inner.disks.get(&self.boot_disk) {
+            Some(details) => details,
+            None => unreachable!("boot disk present by construction"),
+        }
+    }
+
+    pub fn boot_disk_id(&self) -> &Arc<DiskIdentity> {
+        &self.boot_disk().id.identity
+    }
+
+    pub fn boot_disk_zpool(&self) -> ZpoolName {
+        self.boot_disk().zpool_name
+    }
+
+    pub fn boot_disk_install_dataset(&self) -> Utf8PathBuf {
+        self.boot_disk_zpool().dataset_mountpoint(
+            &self.inner.mount_config().root,
+            INSTALL_DATASET,
+        )
+    }
+
+    pub fn non_boot_disk_install_datasets(
+        &self,
+    ) -> impl Iterator<Item = (ZpoolName, Utf8PathBuf)> + '_ {
+        self.inner.disks.iter().filter(|disk| disk.id != self.boot_disk).map(
+            |disk| {
+                let dataset = disk.zpool_name.dataset_mountpoint(
+                    &self.inner.mount_config.root,
+                    INSTALL_DATASET,
+                );
+                (disk.zpool_name, dataset)
+            },
+        )
+    }
+}
+
 // A subset of `Disk` properties. We store this in `InternalDisks` instead of
 // `Disk`s both to avoid exposing raw `Disk`s outside this crate and to support
 // easier faking for tests.
@@ -452,15 +514,19 @@ impl From<&'_ InternalDisk> for InternalDiskDetails {
 
 impl InternalDiskDetails {
     #[cfg(any(test, feature = "testing"))]
-    fn fake_details(identity: DiskIdentity, zpool_name: ZpoolName) -> Self {
-        // We can expand the interface for fake disks if we need to be able to
-        // specify more of these properties in future tests.
+    fn fake_details(
+        identity: DiskIdentity,
+        zpool_name: ZpoolName,
+        is_boot_disk: bool,
+    ) -> Self {
         Self {
             id: InternalDiskDetailsId {
                 identity: Arc::new(identity),
-                is_boot_disk: false,
+                is_boot_disk,
             },
             zpool_name,
+            // We can expand the interface for fake disks if we need to be able
+            // to specify more of these properties in future tests.
             slot: None,
             raw_devfs_path: None,
         }

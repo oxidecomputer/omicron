@@ -76,6 +76,7 @@ pub use handle::ReconcilerInventory;
 pub use handle::TimeSyncConfig;
 pub use internal_disks::InternalDisks;
 pub use internal_disks::InternalDisksReceiver;
+pub use internal_disks::InternalDisksWithBootDisk;
 pub use ledger::LedgerArtifactConfigError;
 pub use ledger::LedgerNewConfigError;
 pub use ledger::LedgerTaskError;

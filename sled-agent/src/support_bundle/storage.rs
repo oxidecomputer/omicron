@@ -14,7 +14,6 @@ use futures::Stream;
 use futures::StreamExt;
 use illumos_utils::zfs::DatasetProperties;
 use omicron_common::api::external::Error as ExternalError;
-use omicron_common::api::external::Generation;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
@@ -31,6 +30,11 @@ use sha2::{Digest, Sha256};
 use sled_agent_api::*;
 use sled_agent_config_reconciler::ConfigReconcilerHandle;
 use sled_agent_config_reconciler::DatasetTaskError;
+use sled_agent_config_reconciler::InventoryError;
+use sled_agent_config_reconciler::NestedDatasetDestroyError;
+use sled_agent_config_reconciler::NestedDatasetEnsureError;
+use sled_agent_config_reconciler::NestedDatasetListError;
+use sled_agent_config_reconciler::NestedDatasetMountError;
 use sled_agent_types::support_bundle::BUNDLE_FILE_NAME;
 use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME_SUFFIX;
 use sled_storage::manager::NestedDatasetConfig;
@@ -38,7 +42,6 @@ use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::NestedDatasetLocation;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
 use std::io::Write;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
@@ -91,6 +94,21 @@ pub enum Error {
 
     #[error(transparent)]
     DatasetTask(#[from] DatasetTaskError),
+
+    #[error("Could not access ledgered sled config")]
+    LedgeredSledConfig(#[source] InventoryError),
+
+    #[error(transparent)]
+    NestedDatasetMountError(#[from] NestedDatasetMountError),
+
+    #[error(transparent)]
+    NestedDatasetEnsureError(#[from] NestedDatasetEnsureError),
+
+    #[error(transparent)]
+    NestedDatasetDestroyError(#[from] NestedDatasetDestroyError),
+
+    #[error(transparent)]
+    NestedDatasetListError(#[from] NestedDatasetListError),
 }
 
 fn err_str(err: &dyn std::error::Error) -> String {
@@ -154,7 +172,7 @@ pub trait LocalStorage: Sync {
     /// Returns all nested datasets within an existing dataset
     async fn dyn_nested_dataset_list(
         &self,
-        name: NestedDatasetLocation,
+        name: DatasetName,
         options: NestedDatasetListOptions,
     ) -> Result<Vec<NestedDatasetConfig>, Error>;
 
@@ -177,21 +195,20 @@ impl LocalStorage for ConfigReconcilerHandle {
     async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
         // TODO-cleanup This is super gross; add a better API (maybe fetch a
         // single dataset by ID, since that's what our caller wants?)
-        Ok(self
-            .inventory()
-            .ledgered_sled_config
-            .map(|sled_config| DatasetsConfig {
-                generation: sled_config.generation,
-                datasets: sled_config
-                    .datasets
-                    .into_iter()
-                    .map(|d| (d.id, d))
-                    .collect(),
-            })
-            .unwrap_or_else(|| DatasetsConfig {
-                generation: Generation::new(),
-                datasets: BTreeMap::new(),
-            }))
+        let sled_config =
+            self.ledgered_sled_config().map_err(Error::LedgeredSledConfig)?;
+        let sled_config = match sled_config {
+            Some(config) => config,
+            None => return Ok(DatasetsConfig::default()),
+        };
+        Ok(DatasetsConfig {
+            generation: sled_config.generation,
+            datasets: sled_config
+                .datasets
+                .into_iter()
+                .map(|d| (d.id, d))
+                .collect(),
+        })
     }
 
     async fn dyn_dataset_get(
@@ -222,29 +239,39 @@ impl LocalStorage for ConfigReconcilerHandle {
     ) -> Result<Utf8PathBuf, Error> {
         self.nested_dataset_ensure_mounted(dataset)
             .await
-            .map_err(|err| err.into())
+            .map_err(Error::from)?
+            .map_err(Error::from)
     }
 
     async fn dyn_nested_dataset_list(
         &self,
-        name: NestedDatasetLocation,
+        name: DatasetName,
         options: NestedDatasetListOptions,
     ) -> Result<Vec<NestedDatasetConfig>, Error> {
-        self.nested_dataset_list(name, options).await.map_err(|err| err.into())
+        self.nested_dataset_list(name, options)
+            .await
+            .map_err(Error::from)?
+            .map_err(Error::from)
     }
 
     async fn dyn_nested_dataset_ensure(
         &self,
         config: NestedDatasetConfig,
     ) -> Result<(), Error> {
-        self.nested_dataset_ensure(config).await.map_err(|err| err.into())
+        self.nested_dataset_ensure(config)
+            .await
+            .map_err(Error::from)?
+            .map_err(Error::from)
     }
 
     async fn dyn_nested_dataset_destroy(
         &self,
         name: NestedDatasetLocation,
     ) -> Result<(), Error> {
-        self.nested_dataset_destroy(name).await.map_err(|err| err.into())
+        self.nested_dataset_destroy(name)
+            .await
+            .map_err(Error::from)?
+            .map_err(Error::from)
     }
 }
 
@@ -273,10 +300,15 @@ impl LocalStorage for crate::sim::Storage {
 
     async fn dyn_nested_dataset_list(
         &self,
-        name: NestedDatasetLocation,
+        name: DatasetName,
         options: NestedDatasetListOptions,
     ) -> Result<Vec<NestedDatasetConfig>, Error> {
-        self.lock().nested_dataset_list(name, options).map_err(|err| err.into())
+        self.lock()
+            .nested_dataset_list(
+                NestedDatasetLocation { path: String::new(), root: name },
+                options,
+            )
+            .map_err(|err| err.into())
     }
 
     async fn dyn_nested_dataset_ensure(
@@ -493,12 +525,10 @@ impl<'a> SupportBundleManager<'a> {
     ) -> Result<Vec<SupportBundleMetadata>, Error> {
         let root =
             self.get_mounted_dataset_config(zpool_id, dataset_id).await?.name;
-        let dataset_location =
-            NestedDatasetLocation { path: String::from(""), root };
         let datasets = self
             .storage
             .dyn_nested_dataset_list(
-                dataset_location,
+                root,
                 NestedDatasetListOptions::ChildrenOnly,
             )
             .await?;
@@ -986,12 +1016,15 @@ mod tests {
 
         async fn dyn_nested_dataset_list(
             &self,
-            name: NestedDatasetLocation,
+            name: DatasetName,
             options: NestedDatasetListOptions,
         ) -> Result<Vec<NestedDatasetConfig>, Error> {
-            self.nested_dataset_list(name, options)
-                .await
-                .map_err(|err| err.into())
+            self.nested_dataset_list(
+                NestedDatasetLocation { path: String::new(), root: name },
+                options,
+            )
+            .await
+            .map_err(|err| err.into())
         }
 
         async fn dyn_nested_dataset_ensure(
