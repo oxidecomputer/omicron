@@ -2,7 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use dropshot::test_util::ClientTestContext;
+use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+use nexus_db_queries::db::identity::{Asset, Resource};
+use nexus_test_utils::http_testing::TestResponse;
+use nexus_test_utils::{
+    http_testing::{AuthnMode, NexusRequest, RequestBuilder},
+    resource_helpers::grant_iam,
+};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{
     params::{DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify},
@@ -12,7 +20,9 @@ use nexus_types::external_api::{
 };
 
 use http::{StatusCode, header, method::Method};
+use oxide_client::types::SiloRole;
 use serde::Deserialize;
+// use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -149,4 +159,49 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(token.token_type, DeviceAccessTokenType::Bearer);
     assert_eq!(token.access_token.len(), 52);
     assert!(token.access_token.starts_with("oxide-token-"));
+
+    // now make a request with the token. it 403s because unpriv user has no roles
+    project_list(&testctx, &token.access_token, StatusCode::FORBIDDEN)
+        .await
+        .expect("projects list should 403 with no roles");
+
+    // make sure it also fails with a nonsense token
+    project_list(&testctx, "oxide-token-xyz", StatusCode::UNAUTHORIZED)
+        .await
+        .expect("projects list should 403 with nonsense token");
+
+    // grant unprivileged user silo viewer so they can fetch the projects
+    grant_iam(
+        testctx,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name),
+        SiloRole::Viewer,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // now make the request again and it should work
+    project_list(&testctx, &token.access_token, StatusCode::OK)
+        .await
+        .expect("failed to get projects with token");
+
+    // not ready yet for this, but it did work when I hard-coded the expiration
+
+    // wait 5 seconds and then run the request again, expecting 403 due to expiration
+    // sleep(Duration::from_secs(5)).await;
+    // project_list(&testctx, &token.access_token, StatusCode::UNAUTHORIZED)
+    //     .await
+    //     .expect("projects list should 401 after sleep makes token expire");
+}
+
+async fn project_list(
+    testctx: &ClientTestContext,
+    token: &str,
+    status: StatusCode,
+) -> Result<TestResponse, anyhow::Error> {
+    RequestBuilder::new(testctx, Method::GET, "/v1/projects")
+        .header(header::AUTHORIZATION, format!("Bearer {}", token))
+        .expect_status(Some(status))
+        .execute()
+        .await
 }
