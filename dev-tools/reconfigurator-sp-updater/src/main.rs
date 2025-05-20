@@ -337,7 +337,7 @@ fn cmd_config(
                                             expected persistent_boot_preference {:?}
                                             expected pending_persistent_boot_preference {:?}
                                             expected transient_boot_preference {:?}",
-                    expected_active_slot.slot(), expected_active_slot.version,
+                    expected_active_slot.slot(), expected_active_slot.version(),
                     expected_inactive_version, expected_persistent_boot_preference,
                     expected_pending_persistent_boot_preference,
                     expected_transient_boot_preference,

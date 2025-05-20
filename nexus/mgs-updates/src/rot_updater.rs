@@ -306,9 +306,9 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
             // don't want to roll that back.  (If for some reason we *do* want
             // to do this update, the planner will have to notice that what's
             // here is wrong and update the blueprint.)
-            if caboose.version != expected_active_slot.version.to_string() {
+            if caboose.version != expected_active_slot.version().to_string() {
                 return Err(PrecheckError::WrongActiveVersion {
-                    expected: expected_active_slot.version.clone(),
+                    expected: expected_active_slot.version(),
                     found: caboose.version,
                 });
             }

@@ -1384,6 +1384,10 @@ impl ExpectedActiveRotSlot {
     pub fn slot(&self) -> &RotSlot {
         &self.slot
     }
+
+    pub fn version(&self) -> ArtifactVersion {
+        self.version.clone()
+    }
 }
 
 /// The desired state of an Omicron-managed physical disk in a blueprint.
