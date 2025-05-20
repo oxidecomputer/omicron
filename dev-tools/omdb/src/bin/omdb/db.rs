@@ -7458,7 +7458,7 @@ fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
         });
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(1, 1, 0, 0))
+            .with(tabled::settings::Padding::new(8, 1, 0, 0))
             .to_string();
         println!("    DISKS: {}", disks.len());
         println!("{table}");
@@ -7494,7 +7494,7 @@ fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
         });
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(1, 1, 0, 0))
+            .with(tabled::settings::Padding::new(8, 1, 0, 0))
             .to_string();
         println!("    DATASETS: {}", datasets.len());
         println!("{table}");
@@ -7525,9 +7525,9 @@ fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
         });
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(1, 1, 0, 0))
+            .with(tabled::settings::Padding::new(8, 1, 0, 0))
             .to_string();
-        println!("    ZONES: {}", datasets.len());
+        println!("    ZONES: {}", zones.len());
         println!("{table}");
     }
 }
