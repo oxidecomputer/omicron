@@ -729,11 +729,10 @@ impl SledAgent {
 
         let storage = self.storage.lock();
 
-        let disks_config = storage
-            .omicron_physical_disks_list()
-            .context("list disks config")?;
+        let disks_config =
+            storage.omicron_physical_disks_list().unwrap_or_default();
         let datasets_config =
-            storage.datasets_config_list().context("list datasets config")?;
+            storage.datasets_config_list().unwrap_or_default();
         let zones_config = self.fake_zones.lock().unwrap().clone();
 
         let sled_config = OmicronSledConfig {

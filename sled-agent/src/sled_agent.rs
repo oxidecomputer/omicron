@@ -1368,10 +1368,24 @@ impl SledAgent {
             self.storage().datasets_config_list(),
             self.inner.services.omicron_zones_list()
         );
-        let disks_config =
-            disks_config.map_err(InventoryError::GetDisksConfig)?;
-        let datasets_config =
-            datasets_config.map_err(InventoryError::GetDatasetsConfig)?;
+
+        // RSS asks for our inventory _before_ it sends us an
+        // `OmicronSledConfig`; echo back the default (empty) disk and dataset
+        // configs if we have no ledger at all.
+        let disks_config = match disks_config {
+            Ok(disks_config) => disks_config,
+            Err(sled_storage::error::Error::LedgerNotFound) => {
+                OmicronPhysicalDisksConfig::default()
+            }
+            Err(err) => return Err(InventoryError::GetDisksConfig(err)),
+        };
+        let datasets_config = match datasets_config {
+            Ok(datasets_config) => datasets_config,
+            Err(sled_storage::error::Error::LedgerNotFound) => {
+                DatasetsConfig::default()
+            }
+            Err(err) => return Err(InventoryError::GetDatasetsConfig(err)),
+        };
 
         for (identity, variant, slot, firmware) in all_disks.iter_all() {
             disks.push(InventoryDisk {
