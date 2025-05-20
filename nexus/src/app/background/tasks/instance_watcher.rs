@@ -502,7 +502,7 @@ impl BackgroundTask for InstanceWatcher {
                     };
 
                     let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
-                    tasks.spawn_and_join(self.check_instance(opctx, client, target ,vmm ,sled)).await
+                    tasks.spawn(self.check_instance(opctx, client, target ,vmm ,sled)).await
                 } else {
                     // If there are no remaining instances to check, wait for
                     // all previously spawned check to complete.

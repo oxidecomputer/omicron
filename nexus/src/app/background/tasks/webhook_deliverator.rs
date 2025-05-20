@@ -171,7 +171,9 @@ impl WebhookDeliverator {
                     "rx_name".to_string() => rx.rx.name().to_string(),
                 });
                 let deliverator = self.clone();
-                tasks.spawn(async move {
+                // Spawn the next delivery attempt, potentially joining a
+                // previous one if the concurrency limit has been reached.
+                let prev_result = tasks.spawn(async move {
                     let status = match deliverator.rx_deliver(&opctx, rx).await
                     {
                         Ok(status) => status,
@@ -188,19 +190,23 @@ impl WebhookDeliverator {
                         }
                     };
                     (rx_id, status)
-                });
+                }).await;
+                if let Some((rx_id, rx_status)) = prev_result {
+                    status.by_rx.insert(rx_id, rx_status);
+                }
             }
         }
 
-        let results = tasks.join_all().await;
+        // Wait for the remaining batch of tasks to come back.
+        while let Some((rx_id, rx_status)) = tasks.join_next().await {
+            status.by_rx.insert(rx_id, rx_status);
+        }
+
         slog::info!(
             &opctx.log,
             "all webhook delivery tasks completed";
-            "num_receivers" => results.len(),
+            "num_receivers" => status.by_rx.len(),
         );
-        for (rx_id, rx_status) in results {
-            status.by_rx.insert(rx_id, rx_status);
-        }
 
         Ok(())
     }

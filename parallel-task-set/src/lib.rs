@@ -63,11 +63,17 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
 
     /// Spawn the provided `next_future`, potentially waiting until a previously
     /// spawned task completes if the `ParallelTaskSet` is at its concurrency
-    /// limit. Note that, *unlike* [`join_next()`], this method returning `None`
-    /// does NOT indicate that the set is empty, just that it was not necessary
-    /// to wait for a pervious task to complete in order to spawn the existing
-    /// one.
-    pub async fn spawn_and_join<F>(&mut self, future: F) -> Option<T>
+    /// limit.
+    ///
+    /// Note that, *unlike* [`join_next()`], this method returning `None` does
+    /// NOT indicate that the set is empty, just that it was not necessary to
+    /// wait for a previous task to complete in order to spawn the existing one.
+    /// Therefore, callers wishing to ensure all tasks spawned on this
+    /// [`ParallelTaskSet`] have completed should consider using [`join_next()`]
+    /// once all tasks have been spawned.
+    ///
+    /// [`join_next()`]: Self::join_next
+    pub async fn spawn<F>(&mut self, future: F) -> Option<T>
     where
         F: Future<Output = T> + Send + 'static,
     {
@@ -94,23 +100,6 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
         });
 
         output
-    }
-
-    /// Spawn a task immediately, but only allow it to execute if the task
-    /// set is within the maximum parallelism constraint.
-    pub fn spawn<F>(&mut self, command: F)
-    where
-        F: std::future::Future<Output = T> + Send + 'static,
-    {
-        let semaphore = Arc::clone(&self.semaphore);
-        let _abort_handle = self.set.spawn(async move {
-            // Hold onto the permit until the command finishes executing
-            let permit =
-                semaphore.acquire_owned().await.expect("semaphore acquire");
-            let output = command.await;
-            drop(permit);
-            output
-        });
     }
 
     /// Waits for the next task to complete and return its output.
@@ -146,39 +135,51 @@ mod test {
 
         let task_limit = 16;
         let mut set = ParallelTaskSet::new_with_parallelism(task_limit);
+        let mut i = 0;
 
-        for _ in 0..task_limit * 10 {
-            set.spawn({
-                let count = count.clone();
-                async move {
-                    // How many tasks - including our own - are running right
-                    // now?
-                    let watermark = count.fetch_add(1, Ordering::SeqCst) + 1;
-
-                    // The tasks should all execute for a short but variable
-                    // amount of time.
-                    let duration_ms = rand::thread_rng().gen_range(0..10);
-                    tokio::time::sleep(tokio::time::Duration::from_millis(
-                        duration_ms,
-                    ))
-                    .await;
-
-                    count.fetch_sub(1, Ordering::SeqCst);
-
-                    watermark
-                }
-            });
-        }
-
-        let watermarks = set.join_all().await;
-
-        for (i, watermark) in watermarks.into_iter().enumerate() {
+        let mut check_watermark = |watermark: usize| {
             println!("task {i} saw {watermark} concurrent tasks");
 
             assert!(
                 watermark <= task_limit,
                 "Observed simultaneous task execution of {watermark} tasks on the {i}-th worker"
             );
+
+            i += 1;
+        };
+
+        for _ in 0..task_limit * 10 {
+            let prev = set
+                .spawn({
+                    let count = count.clone();
+                    async move {
+                        // How many tasks - including our own - are running right
+                        // now?
+                        let watermark =
+                            count.fetch_add(1, Ordering::SeqCst) + 1;
+
+                        // The tasks should all execute for a short but variable
+                        // amount of time.
+                        let duration_ms = rand::thread_rng().gen_range(0..10);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            duration_ms,
+                        ))
+                        .await;
+
+                        count.fetch_sub(1, Ordering::SeqCst);
+
+                        watermark
+                    }
+                })
+                .await;
+            if let Some(watermark) = prev {
+                check_watermark(watermark);
+            }
+        }
+
+        let watermarks = set.join_all().await;
+        for watermark in watermarks {
+            check_watermark(watermark);
         }
     }
 }
