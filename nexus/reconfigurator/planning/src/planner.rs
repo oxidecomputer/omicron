@@ -214,17 +214,18 @@ impl<'a> Planner<'a> {
         // The sled is not expunged. We have to see if the inventory
         // reflects the parent blueprint disk generation. If it does
         // then we mark any expunged disks decommissioned.
+        //
+        // TODO-correctness We inspect `last_reconciliation` here to confirm
+        // that the config reconciler has acted on the generation we're waiting
+        // for. This might be overly conservative - would it be okay to act on
+        // `ledgered_sled_config` instead, and decommission disks as long as the
+        // sled knows it should stop using it (even if it hasn't yet)?
         let Some(seen_generation) = self
             .inventory
             .sled_agents
             .get(&sled_id)
-            // TODO-correctness For now this is correct, because sled-agent
-            // doesn't ledger a config until it's applied it. However, once
-            // https://github.com/oxidecomputer/omicron/pull/8064 lands,
-            // sled-agent will ledger a config and then later reconcile it; do
-            // we need to wait for that reconciliation to decommission disks?
-            .and_then(|sa| sa.ledgered_sled_config.as_ref())
-            .map(|config| config.generation)
+            .and_then(|sa| sa.last_reconciliation.as_ref())
+            .map(|reconciled| reconciled.last_reconciled_config.generation)
         else {
             // There is no current inventory for the sled agent, so we cannot
             // decommission any disks.
@@ -424,15 +425,10 @@ impl<'a> Planner<'a> {
                     as_of_generation,
                     ready_for_cleanup,
                 } if !ready_for_cleanup => {
-                    // TODO-correctness For now this is correct, because
-                    // sled-agent doesn't ledger a config until it's applied it.
-                    // However, as a part of landing
-                    // https://github.com/oxidecomputer/omicron/pull/8064,
-                    // this needs to change to check the last reconciled config
-                    // instead of just the ledgered config.
-                    if let Some(config) = &sled_inv.ledgered_sled_config {
-                        if config.generation >= as_of_generation
-                            && !config.zones.contains_key(&zone.id)
+                    if let Some(reconciled) = &sled_inv.last_reconciliation {
+                        if reconciled.last_reconciled_config.generation
+                            >= as_of_generation
+                            && !reconciled.zones.contains_key(&zone.id)
                         {
                             zones_ready_for_cleanup.push(zone.id);
                         }
@@ -569,22 +565,23 @@ impl<'a> Planner<'a> {
             // NTP zone), we'll need to be careful how we do it to avoid a
             // problem here.
             //
-            // TODO-cleanup Once
-            // https://github.com/oxidecomputer/omicron/pull/8064 lands, the
-            // above comment will be overly conservative; sled-agent won't
-            // reject configs just because time isn't sync'd yet. We may be able
-            // to remove this check entirely. (It's probably also fine to keep
-            // it for now; removing it just saves us an extra planning iteration
-            // when adding a new sled.)
+            // TODO-cleanup The above comment is now overly conservative;
+            // sled-agent won't reject configs just because time isn't sync'd
+            // yet. We may be able to remove this check entirely, but we'd need
+            // to do some testing to confirm no surprises. (It's probably also
+            // fine to keep it for now; removing it just saves us an extra
+            // planning iteration when adding a new sled.)
             let has_ntp_inventory = self
                 .inventory
                 .sled_agents
                 .get(&sled_id)
                 .map(|sled_agent| {
-                    sled_agent.ledgered_sled_config.as_ref().map_or(
+                    sled_agent.last_reconciliation.as_ref().map_or(
                         false,
-                        |config| {
-                            config.zones.iter().any(|z| z.zone_type.is_ntp())
+                        |reconciliation| {
+                            reconciliation
+                                .running_omicron_zones()
+                                .any(|z| z.zone_type.is_ntp())
                         },
                     )
                 })
