@@ -97,7 +97,7 @@ impl DataStore {
         use diesel::dsl::*;
         let (delivery, also_delivery) = diesel::alias!(
             schema::webhook_delivery as delivery,
-            schema::webhook_delivery as also_delivey
+            schema::webhook_delivery as also_delivery
         );
         alert_dsl::alert
             .filter(alert_dsl::alert_class.ne(AlertClass::Probe))

@@ -13329,7 +13329,7 @@
         ]
       },
       "AlertDeliveryAttempts": {
-        "description": "A list of attempts to deliver an alert to a receiver.\n\nThe type of the delivery attempt model depends on the receiver type, as it may contain information specific to that delivey mechanism. For example, webhook delivery attempts contain the HTTP status code of the webhook request.",
+        "description": "A list of attempts to deliver an alert to a receiver.\n\nThe type of the delivery attempt model depends on the receiver type, as it may contain information specific to that delivery mechanism. For example, webhook delivery attempts contain the HTTP status code of the webhook request.",
         "oneOf": [
           {
             "description": "A list of attempts to deliver an alert to a webhook receiver.",

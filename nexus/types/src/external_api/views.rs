@@ -1322,7 +1322,7 @@ impl std::str::FromStr for AlertDeliveryTrigger {
 /// A list of attempts to deliver an alert to a receiver.
 ///
 /// The type of the delivery attempt model depends on the receiver type, as it
-/// may contain information specific to that delivey mechanism. For example,
+/// may contain information specific to that delivery mechanism. For example,
 /// webhook delivery attempts contain the HTTP status code of the webhook
 /// request.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
