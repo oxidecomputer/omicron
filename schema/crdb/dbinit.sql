@@ -3617,7 +3617,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     last_reconciliation_sled_config UUID,
 
     -- Columns making up the status of the config reconciler.
-    reconciler_status_kind inv_config_reconciler_status_kind NOT NULL,
+    reconciler_status_kind omicron.public.inv_config_reconciler_status_kind NOT NULL,
     -- (foreign key into `inv_omicron_sled_config` table)
     -- only present if `reconciler_status_kind = 'running'`
     reconciler_status_sled_config UUID,
