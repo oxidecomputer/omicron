@@ -99,7 +99,11 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo: &authz::Silo,
     ) -> Result<SiloSettings, Error> {
+        // Works for everyone when making a token because everyone can read
+        // their own silo. Operators looking at silo settings will have silo
+        // read on all silos.
         opctx.authorize(authz::Action::Read, authz_silo).await?;
+
         use nexus_db_schema::schema::silo_settings::dsl;
         dsl::silo_settings
             .filter(dsl::silo_id.eq(authz_silo.id()))
