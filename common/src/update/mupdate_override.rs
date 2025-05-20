@@ -46,6 +46,9 @@ pub struct MupdateOverrideZone {
     /// The file name.
     pub file_name: String,
 
+    /// The file size.
+    pub file_size: u64,
+
     /// The hash of the file.
     pub hash: ArtifactHash,
 }

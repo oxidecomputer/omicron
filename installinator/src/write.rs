@@ -800,9 +800,13 @@ async fn compute_zone_hashes(
         // Compute hashes in parallel.
         tasks.spawn_blocking(move || {
             let mut hasher = Sha256::new();
-            hasher.update(data);
+            hasher.update(&data);
             let hash = hasher.finalize();
-            MupdateOverrideZone { file_name, hash: ArtifactHash(hash.into()) }
+            MupdateOverrideZone {
+                file_name,
+                file_size: u64::try_from(data.len()).unwrap(),
+                hash: ArtifactHash(hash.into()),
+            }
         });
     }
 
