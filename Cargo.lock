@@ -4796,6 +4796,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "http",
+ "id-map",
  "illumos-utils",
  "installinator-client",
  "installinator-common",
@@ -11697,11 +11698,14 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pretty_assertions",
+ "rayon",
  "serde_json",
+ "sha2",
  "sled-storage",
  "slog",
  "slog-error-chain",
  "thiserror 1.0.69",
+ "tufaceous-artifact",
 ]
 
 [[package]]

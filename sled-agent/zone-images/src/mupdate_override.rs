@@ -6,8 +6,12 @@
 //!
 //! For more about commingling MUPdate and update, see RFD 556.
 
+use std::fmt;
 use std::fs;
+use std::fs::File;
 use std::fs::FileType;
+use std::io;
+use std::io::Read;
 use std::sync::Arc;
 
 use crate::ZoneImageZpools;
@@ -17,6 +21,11 @@ use id_map::IdMap;
 use id_map::IdMappable;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::update::MupdateOverrideInfo;
+use omicron_common::update::MupdateOverrideZone;
+use rayon::iter::ParallelBridge;
+use rayon::iter::ParallelIterator;
+use sha2::Digest;
+use sha2::Sha256;
 use sled_storage::dataset::INSTALL_DATASET;
 use slog::debug;
 use slog::error;
@@ -25,6 +34,7 @@ use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use thiserror::Error;
+use tufaceous_artifact::ArtifactHash;
 
 #[derive(Debug)]
 pub(crate) struct AllMupdateOverrides {
@@ -73,7 +83,7 @@ impl AllMupdateOverrides {
             .all_m2_zpools
             .iter()
             .filter(|&zpool_name| zpool_name != boot_zpool);
-        let non_boot_disks_overrides = non_boot_zpools
+        let non_boot_disk_overrides = non_boot_zpools
             .map(|zpool_name| {
                 let dataset =
                     zpool_name.dataset_mountpoint(zpools.root, INSTALL_DATASET);
@@ -94,7 +104,7 @@ impl AllMupdateOverrides {
             boot_zpool: *boot_zpool,
             boot_disk_path,
             boot_disk_override: boot_disk_res,
-            non_boot_disk_overrides: non_boot_disks_overrides,
+            non_boot_disk_overrides,
         };
 
         ret.log_results(&log);
@@ -177,7 +187,7 @@ fn read_mupdate_override(
             fs::symlink_metadata(dataset_dir).map_err(|error| {
                 MupdateOverrideReadError::DatasetDirMetadata {
                     dataset_dir: dataset_dir.to_owned(),
-                    error: Arc::new(error),
+                    error: ArcIoError::new(error),
                 }
             })?;
         if !dir_metadata.is_dir() {
@@ -193,11 +203,25 @@ fn read_mupdate_override(
                     .map_err(|error| {
                     MupdateOverrideReadError::Deserialize {
                         path: override_path.to_owned(),
-                        error: Arc::new(error),
+                        error: ArcSerdeJsonError::new(error),
                         contents: data,
                     }
                 })?;
-                Some(data)
+                let artifacts =
+                    MupdateOverrideArtifactsResult::new(dataset_dir, data);
+                if artifacts.is_valid() {
+                    // If there are errors, return them as appropriate.
+                    Some(artifacts.info)
+                } else {
+                    // At least one artifact was invalid: return an error.
+                    //
+                    // XXX: Should we be more fine-grained than this, handle
+                    // errors on a per-artifact basis? Seems excessive.
+                    return Err(MupdateOverrideReadError::ArtifactRead {
+                        dataset_dir: dataset_dir.to_owned(),
+                        artifacts,
+                    });
+                }
             }
             Err(error) => {
                 if error.kind() == std::io::ErrorKind::NotFound {
@@ -210,7 +234,7 @@ fn read_mupdate_override(
                 } else {
                     return Err(MupdateOverrideReadError::Read {
                         path: override_path.to_owned(),
-                        error: Arc::new(error),
+                        error: ArcIoError::new(error),
                     });
                 }
             }
@@ -398,7 +422,182 @@ impl MupdateOverrideNonBootMismatch {
     }
 }
 
-#[derive(Clone, Debug, Error)]
+/// The result of reading artifacts from an install dataset.
+///
+/// This may or may not be valid, depending on the status of the artifacts. See
+/// [`Self::is_valid`].
+#[derive(Clone, Debug, PartialEq)]
+struct MupdateOverrideArtifactsResult {
+    info: MupdateOverrideInfo,
+    data: IdMap<MupdateOverrideArtifactResult>,
+}
+
+impl MupdateOverrideArtifactsResult {
+    /// Makes a new `MupdateOverrideArtifacts` by reading artifacts from the
+    /// given directory.
+    fn new(dir: &Utf8Path, info: MupdateOverrideInfo) -> Self {
+        let artifacts: Vec<_> = info
+            .zones
+            .iter()
+            // Parallelize artifact reading to speed it up.
+            .par_bridge()
+            .map(|zone| {
+                let artifact_path = dir.join(&zone.file_name);
+                let status = validate_one(&artifact_path, &zone);
+
+                MupdateOverrideArtifactResult {
+                    file_name: zone.file_name.clone(),
+                    path: artifact_path,
+                    expected_size: zone.file_size,
+                    expected_hash: zone.hash,
+                    status,
+                }
+            })
+            .collect();
+
+        Self { info, data: artifacts.into_iter().collect() }
+    }
+
+    fn is_valid(&self) -> bool {
+        self.data.iter().all(|artifact| artifact.is_valid())
+    }
+
+    fn display(&self) -> MupdateOverrideArtifactsDisplay<'_> {
+        MupdateOverrideArtifactsDisplay { artifacts: &self.data }
+    }
+}
+
+struct MupdateOverrideArtifactsDisplay<'a> {
+    artifacts: &'a IdMap<MupdateOverrideArtifactResult>,
+}
+
+impl fmt::Display for MupdateOverrideArtifactsDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for artifact in self.artifacts.iter() {
+            match &artifact.status {
+                ArtifactReadResult::Matches => {
+                    writeln!(
+                        f,
+                        "  {}: ok ({} bytes, {})",
+                        artifact.file_name,
+                        artifact.expected_size,
+                        artifact.expected_hash
+                    )?;
+                }
+                ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
+                    writeln!(
+                        f,
+                        "  {}: mismatch (expected {} bytes, {}; \
+                         found {} bytes, {})",
+                        artifact.file_name,
+                        artifact.expected_size,
+                        artifact.expected_hash,
+                        actual_size,
+                        actual_hash
+                    )?;
+                }
+                ArtifactReadResult::Error(error) => {
+                    writeln!(f, "  {}: error ({})", artifact.file_name, error)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct MupdateOverrideArtifactResult {
+    /// The filename.
+    file_name: String,
+
+    /// The full path to the file.
+    path: Utf8PathBuf,
+
+    /// The expected size.
+    expected_size: u64,
+
+    /// The expected hash.
+    expected_hash: ArtifactHash,
+
+    /// The status on disk.
+    status: ArtifactReadResult,
+}
+
+impl MupdateOverrideArtifactResult {
+    fn is_valid(&self) -> bool {
+        matches!(self.status, ArtifactReadResult::Matches)
+    }
+}
+
+impl IdMappable for MupdateOverrideArtifactResult {
+    type Id = String;
+
+    fn id(&self) -> Self::Id {
+        self.file_name.clone()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum ArtifactReadResult {
+    /// The artifact was read successfully and matches.
+    Matches,
+
+    /// The artifact was read successfully but does not match.
+    Mismatch {
+        /// The actual file size.
+        actual_size: u64,
+
+        /// The actual hash.
+        actual_hash: ArtifactHash,
+    },
+
+    /// An error occurred while reading the artifact.
+    Error(ArcIoError),
+}
+
+fn validate_one(
+    artifact_path: &Utf8Path,
+    zone: &MupdateOverrideZone,
+) -> ArtifactReadResult {
+    let mut f = match File::open(artifact_path) {
+        Ok(f) => f,
+        Err(error) => {
+            return ArtifactReadResult::Error(ArcIoError::new(error));
+        }
+    };
+
+    match compute_size_and_hash(&mut f) {
+        Ok((actual_size, actual_hash)) => {
+            if zone.file_size == actual_size && zone.hash == actual_hash {
+                ArtifactReadResult::Matches
+            } else {
+                ArtifactReadResult::Mismatch { actual_size, actual_hash }
+            }
+        }
+        Err(error) => ArtifactReadResult::Error(ArcIoError::new(error)),
+    }
+}
+
+fn compute_size_and_hash(
+    f: &mut File,
+) -> Result<(u64, ArtifactHash), io::Error> {
+    let mut hasher = Sha256::new();
+    // Zone artifacts are pretty big, so we read them in chunks.
+    let mut buffer = [0u8; 8192];
+    let mut total_bytes_read = 0;
+    loop {
+        let bytes_read = f.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+        total_bytes_read += bytes_read;
+    }
+    Ok((total_bytes_read as u64, ArtifactHash(hasher.finalize().into())))
+}
+
+#[derive(Clone, Debug, PartialEq, Error)]
 enum MupdateOverrideReadError {
     #[error(
         "error retrieving metadata for install dataset directory \
@@ -407,7 +606,7 @@ enum MupdateOverrideReadError {
     DatasetDirMetadata {
         dataset_dir: Utf8PathBuf,
         #[source]
-        error: Arc<std::io::Error>,
+        error: ArcIoError,
     },
 
     #[error(
@@ -420,7 +619,7 @@ enum MupdateOverrideReadError {
     Read {
         path: Utf8PathBuf,
         #[source]
-        error: Arc<std::io::Error>,
+        error: ArcIoError,
     },
 
     #[error(
@@ -431,67 +630,53 @@ enum MupdateOverrideReadError {
         path: Utf8PathBuf,
         contents: String,
         #[source]
-        error: Arc<serde_json::Error>,
+        error: ArcSerdeJsonError,
+    },
+
+    #[error("error reading artifacts in `{dataset_dir}:\n{}`", artifacts.display())]
+    ArtifactRead {
+        dataset_dir: Utf8PathBuf,
+        artifacts: MupdateOverrideArtifactsResult,
     },
 }
 
-/// This aids tremendously in testing.
-///
-/// `MupdateOverrideReadError` forms an equivalence class (i.e. it satisfies the
-/// reflexive property `a == a`), so it should in principle be okay to implement
-/// `Eq` for it as well. But this algorithm doesn't fully compare for equality,
-/// just enough for tests, so we don't implement `Eq`.
-///
-/// (But if there's a use case for `Eq` in the future, we should consider
-/// implementing it.)
-impl PartialEq for MupdateOverrideReadError {
+/// An `io::Error` wrapper that implements `Clone` and `PartialEq`.
+#[derive(Clone, Debug, Error)]
+#[error(transparent)]
+struct ArcIoError(Arc<io::Error>);
+
+impl ArcIoError {
+    fn new(error: io::Error) -> Self {
+        Self(Arc::new(error))
+    }
+}
+
+/// Testing aid.
+impl PartialEq for ArcIoError {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::DatasetDirMetadata { dataset_dir: dir1, error: error1 },
-                Self::DatasetDirMetadata { dataset_dir: dir2, error: error2 },
-            ) => {
-                // Simply comparing io::ErrorKind is good enough for tests.
-                dir1 == dir2 && error1.kind() == error2.kind()
-            }
-            (
-                Self::DatasetNotDirectory {
-                    dataset_dir: dir1,
-                    file_type: type1,
-                },
-                Self::DatasetNotDirectory {
-                    dataset_dir: dir2,
-                    file_type: type2,
-                },
-            ) => dir1 == dir2 && type1 == type2,
-            (
-                Self::Read { path: path1, error: error1 },
-                Self::Read { path: path2, error: error2 },
-            ) => {
-                // Simply comparing io::ErrorKind is good enough for tests.
-                path1 == path2 && error1.kind() == error2.kind()
-            }
-            (
-                Self::Deserialize {
-                    path: path1,
-                    contents: contents1,
-                    error: error1,
-                },
-                Self::Deserialize {
-                    path: path2,
-                    contents: contents2,
-                    error: error2,
-                },
-            ) => {
-                // Comparing error line/column/category is enough for tests.
-                path1 == path2
-                    && contents1 == contents2
-                    && error1.line() == error2.line()
-                    && error1.column() == error2.column()
-                    && error1.classify() == error2.classify()
-            }
-            _ => false,
-        }
+        // Simply comparing io::ErrorKind is good enough for tests.
+        self.0.kind() == other.0.kind()
+    }
+}
+
+/// A `serde_json::Error` that implements `Clone` and `PartialEq`.
+#[derive(Clone, Debug, Error)]
+#[error(transparent)]
+struct ArcSerdeJsonError(Arc<serde_json::Error>);
+
+impl ArcSerdeJsonError {
+    fn new(error: serde_json::Error) -> Self {
+        Self(Arc::new(error))
+    }
+}
+
+/// Testing aid.
+impl PartialEq for ArcSerdeJsonError {
+    fn eq(&self, other: &Self) -> bool {
+        // Simply comparing line/column/category is good enough for tests.
+        self.0.line() == other.0.line()
+            && self.0.column() == other.0.column()
+            && self.0.classify() == other.0.classify()
     }
 }
 
@@ -970,6 +1155,7 @@ mod tests {
         MupdateOverrideInfo {
             mupdate_uuid: OVERRIDE_UUID,
             hash_ids: BTreeSet::new(),
+            zones: IdMap::new(),
         }
     }
 
@@ -977,13 +1163,16 @@ mod tests {
         MupdateOverrideInfo {
             mupdate_uuid: OVERRIDE_2_UUID,
             hash_ids: BTreeSet::new(),
+            zones: IdMap::new(),
         }
     }
 
     fn dataset_missing_error(dir_path: &Utf8Path) -> MupdateOverrideReadError {
         MupdateOverrideReadError::DatasetDirMetadata {
             dataset_dir: dir_path.to_owned(),
-            error: Arc::new(io::Error::from(io::ErrorKind::NotFound)),
+            error: ArcIoError(Arc::new(io::Error::from(
+                io::ErrorKind::NotFound,
+            ))),
         }
     }
 
@@ -1007,10 +1196,10 @@ mod tests {
         MupdateOverrideReadError::Deserialize {
             path: dir_path.join(json_path),
             contents: contents.to_owned(),
-            error: Arc::new(
+            error: ArcSerdeJsonError(Arc::new(
                 serde_json::from_str::<MupdateOverrideInfo>(contents)
                     .unwrap_err(),
-            ),
+            )),
         }
     }
 }
