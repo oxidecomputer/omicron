@@ -9388,7 +9388,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsResultsPage"
+                  "$ref": "#/components/schemas/SwitchPortSettingsIdentityResultsPage"
                 }
               }
             }
@@ -9426,7 +9426,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsView"
+                  "$ref": "#/components/schemas/SwitchPortSettings"
                 }
               }
             }
@@ -9492,7 +9492,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsView"
+                  "$ref": "#/components/schemas/SwitchPortSettings"
                 }
               }
             }
@@ -12783,10 +12783,19 @@
             "items": {
               "$ref": "#/components/schemas/Address"
             }
+          },
+          "link_name": {
+            "description": "Link to assign the address to",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           }
         },
         "required": [
-          "addresses"
+          "addresses",
+          "link_name"
         ]
       },
       "AddressLot": {
@@ -14117,6 +14126,14 @@
       "BgpPeerConfig": {
         "type": "object",
         "properties": {
+          "link_name": {
+            "description": "Link that the peer is reachable on",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "peers": {
             "type": "array",
             "items": {
@@ -14125,6 +14142,7 @@
           }
         },
         "required": [
+          "link_name",
           "peers"
         ]
       },
@@ -20054,6 +20072,14 @@
               }
             ]
           },
+          "link_name": {
+            "description": "Link name",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "lldp": {
             "description": "The link-layer discovery protocol (LLDP) configuration for the link.",
             "allOf": [
@@ -20088,6 +20114,7 @@
         },
         "required": [
           "autoneg",
+          "link_name",
           "lldp",
           "mtu",
           "speed"
@@ -21477,6 +21504,14 @@
         "description": "Route configuration data associated with a switch port configuration.",
         "type": "object",
         "properties": {
+          "link_name": {
+            "description": "Link the route should be active on",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "routes": {
             "description": "The set of routes assigned to a switch port.",
             "type": "array",
@@ -21486,6 +21521,7 @@
           }
         },
         "required": [
+          "link_name",
           "routes"
         ]
       },
@@ -23214,6 +23250,14 @@
               }
             ]
           },
+          "link_name": {
+            "description": "Link the interface will be assigned to",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "v6_enabled": {
             "description": "Whether or not IPv6 is enabled.",
             "type": "boolean"
@@ -23221,6 +23265,7 @@
         },
         "required": [
           "kind",
+          "link_name",
           "v6_enabled"
         ]
       },
@@ -23363,7 +23408,7 @@
           "switch_location"
         ]
       },
-      "SwitchPortAddressConfig": {
+      "SwitchPortAddressView": {
         "description": "An IP address configuration for a port settings object.",
         "type": "object",
         "properties": {
@@ -23379,6 +23424,19 @@
             "description": "The id of the address lot block this address is drawn from.",
             "type": "string",
             "format": "uuid"
+          },
+          "address_lot_id": {
+            "description": "The id of the address lot this address is drawn from.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "address_lot_name": {
+            "description": "The name of the address lot this address is drawn from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "interface_name": {
             "description": "The interface name this address belongs to.",
@@ -23400,6 +23458,8 @@
         "required": [
           "address",
           "address_lot_block_id",
+          "address_lot_id",
+          "address_lot_name",
           "interface_name",
           "port_settings_id"
         ]
@@ -23534,11 +23594,14 @@
             "description": "The name of this link.",
             "type": "string"
           },
-          "lldp_link_config_id": {
+          "lldp_link_config": {
             "nullable": true,
-            "description": "The link-layer discovery protocol service configuration id for this link.",
-            "type": "string",
-            "format": "uuid"
+            "description": "The link-layer discovery protocol service configuration for this link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpLinkConfig"
+              }
+            ]
           },
           "mtu": {
             "description": "The maximum transmission unit for this link.",
@@ -23559,11 +23622,14 @@
               }
             ]
           },
-          "tx_eq_config_id": {
+          "tx_eq_config": {
             "nullable": true,
-            "description": "The tx_eq configuration id for this link.",
-            "type": "string",
-            "format": "uuid"
+            "description": "The tx_eq configuration for this link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig2"
+              }
+            ]
           }
         },
         "required": [
@@ -23609,11 +23675,8 @@
           },
           "gw": {
             "description": "The route's gateway address.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpNet"
-              }
-            ]
+            "type": "string",
+            "format": "ip"
           },
           "interface_name": {
             "description": "The interface name this route configuration is assigned to.",
@@ -23647,6 +23710,198 @@
         ]
       },
       "SwitchPortSettings": {
+        "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "Layer 3 IP address settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortAddressView"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peer settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeer"
+            }
+          },
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "groups": {
+            "description": "Switch port settings included from other switch port settings groups.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortSettingsGroups"
+            }
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "interfaces": {
+            "description": "Layer 3 interface settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchInterfaceConfig"
+            }
+          },
+          "links": {
+            "description": "Layer 2 link settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortLinkConfig"
+            }
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "port": {
+            "description": "Layer 1 physical port settings.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchPortConfig"
+              }
+            ]
+          },
+          "routes": {
+            "description": "IP route settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortRouteConfig"
+            }
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vlan_interfaces": {
+            "description": "Vlan interface settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchVlanInterfaceConfig"
+            }
+          }
+        },
+        "required": [
+          "addresses",
+          "bgp_peers",
+          "description",
+          "groups",
+          "id",
+          "interfaces",
+          "links",
+          "name",
+          "port",
+          "routes",
+          "time_created",
+          "time_modified",
+          "vlan_interfaces"
+        ]
+      },
+      "SwitchPortSettingsCreate": {
+        "description": "Parameters for creating switch port settings. Switch port settings are the central data structure for setting up external networking. Switch port settings include link, interface, route, address and dynamic network protocol configuration.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "Addresses indexed by interface name.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressConfig"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peers indexed by interface name.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeerConfig"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "groups": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          "interfaces": {
+            "description": "Interfaces indexed by link name.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchInterfaceConfigCreate"
+            }
+          },
+          "links": {
+            "description": "Links indexed by phy name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinkConfigCreate"
+            }
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "port_config": {
+            "$ref": "#/components/schemas/SwitchPortConfigCreate"
+          },
+          "routes": {
+            "description": "Routes indexed by interface name.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          }
+        },
+        "required": [
+          "addresses",
+          "description",
+          "links",
+          "name",
+          "port_config"
+        ]
+      },
+      "SwitchPortSettingsGroups": {
+        "description": "This structure maps a port settings object to a port settings groups. Port settings objects may inherit settings from groups. This mapping defines the relationship between settings objects and the groups they reference.",
+        "type": "object",
+        "properties": {
+          "port_settings_group_id": {
+            "description": "The id of a port settings group being referenced by a port settings object.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "port_settings_id": {
+            "description": "The id of a port settings object referencing a port settings group.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "port_settings_group_id",
+          "port_settings_id"
+        ]
+      },
+      "SwitchPortSettingsIdentity": {
         "description": "A switch port settings identity whose id may be used to view additional details.",
         "type": "object",
         "properties": {
@@ -23686,94 +23941,7 @@
           "time_modified"
         ]
       },
-      "SwitchPortSettingsCreate": {
-        "description": "Parameters for creating switch port settings. Switch port settings are the central data structure for setting up external networking. Switch port settings include link, interface, route, address and dynamic network protocol configuration.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "description": "Addresses indexed by interface name.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/AddressConfig"
-            }
-          },
-          "bgp_peers": {
-            "description": "BGP peers indexed by interface name.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BgpPeerConfig"
-            }
-          },
-          "description": {
-            "type": "string"
-          },
-          "groups": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          "interfaces": {
-            "description": "Interfaces indexed by link name.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/SwitchInterfaceConfigCreate"
-            }
-          },
-          "links": {
-            "description": "Links indexed by phy name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/LinkConfigCreate"
-            }
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "port_config": {
-            "$ref": "#/components/schemas/SwitchPortConfigCreate"
-          },
-          "routes": {
-            "description": "Routes indexed by interface name.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/RouteConfig"
-            }
-          }
-        },
-        "required": [
-          "addresses",
-          "bgp_peers",
-          "description",
-          "groups",
-          "interfaces",
-          "links",
-          "name",
-          "port_config",
-          "routes"
-        ]
-      },
-      "SwitchPortSettingsGroups": {
-        "description": "This structure maps a port settings object to a port settings groups. Port settings objects may inherit settings from groups. This mapping defines the relationship between settings objects and the groups they reference.",
-        "type": "object",
-        "properties": {
-          "port_settings_group_id": {
-            "description": "The id of a port settings group being referenced by a port settings object.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "port_settings_id": {
-            "description": "The id of a port settings object referencing a port settings group.",
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "port_settings_group_id",
-          "port_settings_id"
-        ]
-      },
-      "SwitchPortSettingsResultsPage": {
+      "SwitchPortSettingsIdentityResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -23781,7 +23949,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SwitchPortSettings"
+              "$ref": "#/components/schemas/SwitchPortSettingsIdentity"
             }
           },
           "next_page": {
@@ -23792,109 +23960,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "SwitchPortSettingsView": {
-        "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "description": "Layer 3 IP address settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortAddressConfig"
-            }
-          },
-          "bgp_peers": {
-            "description": "BGP peer settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BgpPeer"
-            }
-          },
-          "groups": {
-            "description": "Switch port settings included from other switch port settings groups.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortSettingsGroups"
-            }
-          },
-          "interfaces": {
-            "description": "Layer 3 interface settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchInterfaceConfig"
-            }
-          },
-          "link_lldp": {
-            "description": "Link-layer discovery protocol (LLDP) settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/LldpLinkConfig"
-            }
-          },
-          "links": {
-            "description": "Layer 2 link settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortLinkConfig"
-            }
-          },
-          "port": {
-            "description": "Layer 1 physical port settings.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchPortConfig"
-              }
-            ]
-          },
-          "routes": {
-            "description": "IP route settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortRouteConfig"
-            }
-          },
-          "settings": {
-            "description": "The primary switch port settings handle.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchPortSettings"
-              }
-            ]
-          },
-          "tx_eq": {
-            "description": "TX equalization settings.  These are optional, and most links will not need them.",
-            "type": "array",
-            "items": {
-              "nullable": true,
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/TxEqConfig"
-                }
-              ]
-            }
-          },
-          "vlan_interfaces": {
-            "description": "Vlan interface settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchVlanInterfaceConfig"
-            }
-          }
-        },
-        "required": [
-          "addresses",
-          "bgp_peers",
-          "groups",
-          "interfaces",
-          "link_lldp",
-          "links",
-          "port",
-          "routes",
-          "settings",
-          "tx_eq",
-          "vlan_interfaces"
         ]
       },
       "SwitchResultsPage": {
@@ -24150,6 +24215,42 @@
         ]
       },
       "TxEqConfig": {
+        "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
+        "type": "object",
+        "properties": {
+          "main": {
+            "nullable": true,
+            "description": "Main tap",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post1": {
+            "nullable": true,
+            "description": "Post-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post2": {
+            "nullable": true,
+            "description": "Post-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre1": {
+            "nullable": true,
+            "description": "Pre-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre2": {
+            "nullable": true,
+            "description": "Pre-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "TxEqConfig2": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
         "type": "object",
         "properties": {

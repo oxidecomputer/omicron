@@ -59,7 +59,7 @@ impl super::Nexus {
     fn switch_port_settings_validate(
         params: &params::SwitchPortSettingsCreate,
     ) -> CreateResult<()> {
-        for x in params.bgp_peers.values() {
+        for x in &params.bgp_peers {
             for p in x.peers.iter() {
                 if let Some(ref key) = p.md5_auth_key {
                     if key.len() > 80 {

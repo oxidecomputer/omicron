@@ -569,11 +569,11 @@ impl super::Nexus {
                 identity,
                 port_config,
                 groups: vec![],
-                links: HashMap::new(),
-                interfaces: HashMap::new(),
-                routes: HashMap::new(),
-                bgp_peers: HashMap::new(),
-                addresses: HashMap::new(),
+                links: vec![],
+                interfaces: vec![],
+                routes: vec![],
+                bgp_peers: vec![],
+                addresses: vec![],
             };
 
             let addresses: Vec<Address> = uplink_config
@@ -586,9 +586,13 @@ impl super::Nexus {
                 })
                 .collect();
 
-            port_settings_params
-                .addresses
-                .insert("phy0".to_string(), AddressConfig { addresses });
+            let link_name =
+                Name::from_str("phy0").expect("interface name should be valid");
+
+            port_settings_params.addresses.push(AddressConfig {
+                link_name: link_name.clone(),
+                addresses,
+            });
 
             let routes: Vec<Route> = uplink_config
                 .routes
@@ -603,7 +607,7 @@ impl super::Nexus {
 
             port_settings_params
                 .routes
-                .insert("phy0".to_string(), RouteConfig { routes });
+                .push(RouteConfig { link_name: link_name.clone(), routes });
 
             let peers: Vec<BgpPeer> = uplink_config
                 .bgp_peers
@@ -612,7 +616,7 @@ impl super::Nexus {
                     bgp_config: NameOrId::Name(
                         format!("as{}", r.asn).parse().unwrap(),
                     ),
-                    interface_name: "phy0".into(),
+                    interface_name: link_name.to_string(),
                     addr: r.addr.into(),
                     hold_time: r.hold_time() as u32,
                     idle_hold_time: r.idle_hold_time() as u32,
@@ -634,7 +638,7 @@ impl super::Nexus {
 
             port_settings_params
                 .bgp_peers
-                .insert("phy0".to_string(), BgpPeerConfig { peers });
+                .push(BgpPeerConfig { link_name: link_name.clone(), peers });
 
             let lldp = match &uplink_config.lldp {
                 None => LldpLinkConfigCreate {
@@ -656,6 +660,7 @@ impl super::Nexus {
             };
 
             let link = LinkConfigCreate {
+                link_name: link_name.clone(),
                 //TODO https://github.com/oxidecomputer/omicron/issues/2274
                 mtu: 1500,
                 fec: uplink_config.uplink_port_fec.map(|fec| fec.into()),
@@ -665,7 +670,7 @@ impl super::Nexus {
                 tx_eq: uplink_config.tx_eq.map(|t| t.into()),
             };
 
-            port_settings_params.links.insert("phy".to_string(), link);
+            port_settings_params.links.push(link);
 
             match self
                 .db_datastore
