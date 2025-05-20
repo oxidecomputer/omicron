@@ -16,6 +16,7 @@ chrono.workspace = true
 debug-ignore.workspace = true
 derive_more.workspace = true
 dropshot.workspace = true
+either.workspace = true
 futures.workspace = true
 glob.workspace = true
 id-map.workspace = true

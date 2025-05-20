@@ -1139,7 +1139,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fbd1fe9db3ebf71b89060adaf7b0504c2d6a425cf061313099547e382c2e472"
 dependencies = [
  "serde",
- "toml 0.8.20",
+ "toml 0.8.22",
 ]
 
 [[package]]
@@ -1281,9 +1281,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.40"
+version = "0.4.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a7964611d71df112cb1730f2ee67324fcf4d0fc6606acbbe9bfe06df124637c"
+checksum = "c469d952047f47f91b68d1cba3f10d63c11d73e4636f24f08daf0278abf01c4d"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -2018,7 +2018,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tokio-rustls 0.24.1",
- "toml 0.8.20",
+ "toml 0.8.22",
  "twox-hash",
  "uuid",
  "vergen",
@@ -2273,7 +2273,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=872aae7d76493f2a4f59711b24dde55523536b40#872aae7d76493f2a4f59711b24dde55523536b40"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=875ae5b7f8f0e32e9be672a36b5dda109b9b2450#875ae5b7f8f0e32e9be672a36b5dda109b9b2450"
 dependencies = [
  "oxnet",
  "percent-encoding",
@@ -2641,7 +2641,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.20",
+ "toml 0.8.22",
  "uuid",
 ]
 
@@ -2730,9 +2730,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a37c505dad56e0c1fa5ed47e29fab1a1ab2d1a9d93e952024bb47168969705f6"
+checksum = "2b8fc533bd839ebdf1f3170e01d120b4302a60f317d16c384d5eaec3524f6c92"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2772,7 +2772,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tokio-rustls 0.25.0",
- "toml 0.8.20",
+ "toml 0.8.22",
  "usdt",
  "uuid",
  "version_check",
@@ -2781,9 +2781,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot_endpoint"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b1a6db3728f0195e3ad62807649913aaba06d45421e883416e555e51464ef67"
+checksum = "2f3b67d65d510666d55a833ada8d5762ba21c37dd133632284342f164745baa8"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -2974,7 +2974,7 @@ dependencies = [
  "socket2",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.20",
+ "toml 0.8.22",
  "uuid",
 ]
 
@@ -4648,7 +4648,7 @@ dependencies = [
  "smf 0.2.3",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.20",
+ "toml 0.8.22",
  "uuid",
  "whoami",
  "zone 0.3.1",
@@ -5713,7 +5713,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=872aae7d76493f2a4f59711b24dde55523536b40#872aae7d76493f2a4f59711b24dde55523536b40"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=875ae5b7f8f0e32e9be672a36b5dda109b9b2450#875ae5b7f8f0e32e9be672a36b5dda109b9b2450"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5805,9 +5805,9 @@ dependencies = [
 
 [[package]]
 name = "multimap"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "defc4c55412d89136f966bbb339008b474350e5e6e78d2714439c386b3137a03"
+checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 dependencies = [
  "serde",
 ]
@@ -5967,7 +5967,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "tokio-postgres",
- "toml 0.8.20",
+ "toml 0.8.22",
  "uuid",
 ]
 
@@ -6570,6 +6570,7 @@ dependencies = [
 name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "daft",
  "id-map",
  "illumos-utils",
@@ -7055,7 +7056,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-postgres",
- "toml 0.8.20",
+ "toml 0.8.22",
  "url",
 ]
 
@@ -7097,7 +7098,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-postgres",
- "toml 0.8.20",
+ "toml 0.8.22",
  "url",
 ]
 
@@ -7146,7 +7147,7 @@ dependencies = [
  "test-strategy",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.20",
+ "toml 0.8.22",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -7194,7 +7195,7 @@ dependencies = [
  "subprocess",
  "tokio",
  "tokio-postgres",
- "toml 0.8.20",
+ "toml 0.8.22",
 ]
 
 [[package]]
@@ -7251,7 +7252,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
- "toml 0.8.20",
+ "toml 0.8.22",
  "tufaceous-artifact",
  "uuid",
  "zip 2.6.1",
@@ -7308,7 +7309,7 @@ dependencies = [
  "petgraph 0.7.1",
  "serde",
  "subprocess",
- "toml 0.8.20",
+ "toml 0.8.22",
 ]
 
 [[package]]
@@ -7414,6 +7415,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "oxql-types",
+ "parallel-task-set",
  "parse-display",
  "paste",
  "pem",
@@ -7580,7 +7582,7 @@ dependencies = [
  "tar",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.20",
+ "toml 0.8.22",
  "walkdir",
 ]
 
@@ -7612,7 +7614,7 @@ dependencies = [
  "fs-err 3.1.0",
  "omicron-workspace-hack",
  "serde",
- "toml_edit 0.22.24",
+ "toml_edit 0.22.26",
 ]
 
 [[package]]
@@ -7672,7 +7674,7 @@ dependencies = [
  "slog-term",
  "tar",
  "tokio",
- "toml 0.8.20",
+ "toml 0.8.22",
  "tufaceous-artifact",
  "tufaceous-lib",
 ]
@@ -7827,7 +7829,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.20",
+ "toml 0.8.22",
  "tufaceous-artifact",
  "tufaceous-brand-metadata",
  "usdt",
@@ -8018,7 +8020,7 @@ dependencies = [
  "toml 0.7.8",
  "toml_datetime",
  "toml_edit 0.19.15",
- "toml_edit 0.22.24",
+ "toml_edit 0.22.26",
  "tracing",
  "unicode-xid",
  "url",
@@ -8336,7 +8338,7 @@ dependencies = [
  "oximeter-types 0.1.0",
  "prettyplease",
  "syn 2.0.101",
- "toml 0.8.20",
+ "toml 0.8.22",
  "uuid",
 ]
 
@@ -8355,7 +8357,7 @@ dependencies = [
  "oximeter-types 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "prettyplease",
  "syn 2.0.101",
- "toml 0.8.20",
+ "toml 0.8.22",
  "uuid",
 ]
 
@@ -8429,7 +8431,7 @@ dependencies = [
  "subprocess",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.20",
+ "toml 0.8.22",
  "uuid",
 ]
 
@@ -8589,7 +8591,7 @@ dependencies = [
  "serde",
  "slog-error-chain",
  "syn 2.0.101",
- "toml 0.8.20",
+ "toml 0.8.22",
 ]
 
 [[package]]
@@ -8610,7 +8612,7 @@ dependencies = [
  "serde",
  "slog-error-chain",
  "syn 2.0.101",
- "toml 0.8.20",
+ "toml 0.8.22",
 ]
 
 [[package]]
@@ -8823,6 +8825,15 @@ dependencies = [
  "bytecount",
  "fnv",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "parallel-task-set"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "rand 0.8.5",
+ "tokio",
 ]
 
 [[package]]
@@ -9498,9 +9509,9 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.2.30"
+version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1ccf34da56fc294e7d4ccf69a85992b7dfb826b7cf57bac6a70bba3494cc08a"
+checksum = "664ec5419c51e34154eec046ebcba56312d5a2fc3b09a06da188e1ad21afadf6"
 dependencies = [
  "proc-macro2",
  "syn 2.0.101",
@@ -9531,7 +9542,7 @@ version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecf48c7ca261d60b74ab1a7b20da18bede46776b2e55535cb958eb595c5fa7b"
 dependencies = [
- "toml_edit 0.22.24",
+ "toml_edit 0.22.26",
 ]
 
 [[package]]
@@ -11277,9 +11288,9 @@ dependencies = [
 
 [[package]]
 name = "serde_path_to_error"
-version = "0.1.16"
+version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af99884400da37c88f5e9146b7f1fd0fbcae8f6eec4e9da38b67d05486f814a6"
+checksum = "59fab13f937fa393d08645bf3a84bdfe86e296747b506ada67bb15f10f218b2a"
 dependencies = [
  "itoa",
  "serde",
@@ -11610,6 +11621,7 @@ dependencies = [
  "debug-ignore",
  "derive_more",
  "dropshot",
+ "either",
  "expectorate",
  "futures",
  "glob",
@@ -11666,7 +11678,7 @@ dependencies = [
  "slog",
  "strum",
  "thiserror 1.0.69",
- "toml 0.8.20",
+ "toml 0.8.22",
  "uuid",
 ]
 
@@ -11709,6 +11721,7 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "oxlog",
+ "parallel-task-set",
  "rand 0.8.5",
  "schemars",
  "serde",
@@ -12046,7 +12059,7 @@ dependencies = [
  "slog-dtrace",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.20",
+ "toml 0.8.22",
  "uuid",
  "zerocopy 0.8.25",
 ]
@@ -12095,7 +12108,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-rustls 0.26.0",
- "toml 0.8.20",
+ "toml 0.8.22",
  "x509-cert",
  "zeroize",
 ]
@@ -12863,9 +12876,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.43.1"
+version = "1.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "492a604e2fd7f814268a378409e6c92b5525d747d10db9a229723f55a417958c"
+checksum = "2513ca694ef9ede0fb23fe71a4ee4107cb102b9dc1930f6d0fd77aae068ae165"
 dependencies = [
  "backtrace",
  "bytes",
@@ -13022,21 +13035,21 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.20"
+version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd87a5cdd6ffab733b2f74bc4fd7ee5fff6634124999ac278c35fc78c6120148"
+checksum = "05ae329d1f08c4d17a59bed7ff5b5a769d062e64a62d34a3261b219e62cd5aae"
 dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.22.24",
+ "toml_edit 0.22.26",
 ]
 
 [[package]]
 name = "toml_datetime"
-version = "0.6.8"
+version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0dd7358ecb8fc2f8d014bf86f6f638ce72ba252a2c3a2572f2a795f1d23efb41"
+checksum = "3da5db5a963e24bc68be8b17b6fa82814bb22ee8660f192bb182771d498f09a3"
 dependencies = [
  "serde",
 ]
@@ -13056,16 +13069,23 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.22.24"
+version = "0.22.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17b4795ff5edd201c7cd6dca065ae59972ce77d1b80fa0a84d94950ece7d1474"
+checksum = "310068873db2c5b3e7659d2cc35d21855dbafa50d1ce336397c666e3cb08137e"
 dependencies = [
  "indexmap 2.9.0",
  "serde",
  "serde_spanned",
  "toml_datetime",
- "winnow 0.7.3",
+ "toml_write",
+ "winnow 0.7.10",
 ]
+
+[[package]]
+name = "toml_write"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfb942dfe1d8e29a7ee7fcbde5bd2b9a25fb89aa70caea2eba3bee836ff41076"
 
 [[package]]
 name = "topological-sort"
@@ -13315,7 +13335,7 @@ dependencies = [
  "serde_json",
  "target-triple",
  "termcolor",
- "toml 0.8.20",
+ "toml 0.8.22",
 ]
 
 [[package]]
@@ -13402,7 +13422,7 @@ dependencies = [
  "tar",
  "thiserror 2.0.12",
  "tokio",
- "toml 0.8.20",
+ "toml 0.8.22",
  "tough",
  "tufaceous-artifact",
  "tufaceous-brand-metadata",
@@ -14261,8 +14281,8 @@ dependencies = [
  "textwrap",
  "tokio",
  "tokio-util",
- "toml 0.8.20",
- "toml_edit 0.22.24",
+ "toml 0.8.22",
+ "toml_edit 0.22.26",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
  "tufaceous-artifact",
  "tui-tree-widget",
@@ -14294,7 +14314,7 @@ dependencies = [
  "slog",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.20",
+ "toml 0.8.22",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
  "tufaceous-artifact",
  "update-engine",
@@ -14388,7 +14408,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.20",
+ "toml 0.8.22",
  "tough",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
  "tufaceous",
@@ -14805,9 +14825,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.7.3"
+version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e7f4ea97f6f78012141bcdb6a216b2609f0979ada50b20ca5b52dde2eac2bb1"
+checksum = "c06928c8748d81b05c9be96aad92e1b6ff01833332f281e8cfca3be4b35fc9ec"
 dependencies = [
  "memchr",
 ]
@@ -14907,7 +14927,7 @@ dependencies = [
  "swrite",
  "tabled 0.15.0",
  "textwrap",
- "toml 0.8.20",
+ "toml 0.8.22",
  "usdt",
 ]
 

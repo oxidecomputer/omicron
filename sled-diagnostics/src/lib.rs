@@ -4,8 +4,9 @@
 
 //! Diagnostics for an Oxide sled that exposes common support commands.
 
-use std::sync::Arc;
-
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
+use parallel_task_set::ParallelTaskSet;
 use slog::Logger;
 
 #[macro_use]
@@ -22,7 +23,6 @@ cfg_if::cfg_if! {
 
 pub mod logs;
 pub use logs::{LogError, LogsHandle};
-use tokio::{sync::Semaphore, task::JoinSet};
 
 mod queries;
 pub use crate::queries::{
@@ -31,40 +31,8 @@ pub use crate::queries::{
 };
 use queries::*;
 
-/// Max number of commands to run in parallel
-const MAX_PARALLELISM: usize = 50;
-
-struct MultipleCommands<T> {
-    semaphore: Arc<Semaphore>,
-    set: JoinSet<T>,
-}
-
-impl<T: 'static + Send> MultipleCommands<T> {
-    fn new() -> MultipleCommands<T> {
-        let semaphore = Arc::new(Semaphore::new(MAX_PARALLELISM));
-        let set = JoinSet::new();
-
-        Self { semaphore, set }
-    }
-
-    fn add_command<F>(&mut self, command: F)
-    where
-        F: std::future::Future<Output = T> + Send + 'static,
-    {
-        let semaphore = Arc::clone(&self.semaphore);
-        let _abort_handle = self.set.spawn(async move {
-            // Hold onto the permit until the command finishes executing
-            let _permit =
-                semaphore.acquire_owned().await.expect("semaphore acquire");
-            command.await
-        });
-    }
-
-    /// Wait for all commands to execute and return their output.
-    async fn join_all(self) -> Vec<T> {
-        self.set.join_all().await
-    }
-}
+/// Max number of ptool commands to run in parallel
+const MAX_PTOOL_PARALLELISM: usize = 50;
 
 /// List all zones on a sled.
 pub async fn zoneadm_info()
@@ -75,20 +43,27 @@ pub async fn zoneadm_info()
 /// Retrieve various `ipadm` command output for the system.
 pub async fn ipadm_info()
 -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
-    let mut commands = MultipleCommands::new();
+    let mut results = Vec::new();
+    let mut commands = ParallelTaskSet::new();
     for command in
         [ipadm_show_interface(), ipadm_show_addr(), ipadm_show_prop()]
     {
-        commands
-            .add_command(execute_command_with_timeout(command, DEFAULT_TIMEOUT))
+        if let Some(res) = commands
+            .spawn(execute_command_with_timeout(command, DEFAULT_TIMEOUT))
+            .await
+        {
+            results.push(res);
+        }
     }
-    commands.join_all().await
+    results.extend(commands.join_all().await);
+    results
 }
 
 /// Retrieve various `dladm` command output for the system.
 pub async fn dladm_info()
 -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
-    let mut commands = MultipleCommands::new();
+    let mut results = Vec::new();
+    let mut commands = ParallelTaskSet::new();
     for command in [
         dladm_show_phys(),
         dladm_show_ether(),
@@ -96,10 +71,15 @@ pub async fn dladm_info()
         dladm_show_vnic(),
         dladm_show_linkprop(),
     ] {
-        commands
-            .add_command(execute_command_with_timeout(command, DEFAULT_TIMEOUT))
+        if let Some(res) = commands
+            .spawn(execute_command_with_timeout(command, DEFAULT_TIMEOUT))
+            .await
+        {
+            results.push(res);
+        }
     }
-    commands.join_all().await
+    results.extend(commands.join_all().await);
+    results
 }
 
 pub async fn nvmeadm_info()
@@ -118,12 +98,19 @@ pub async fn pargs_oxide_processes(
         Err(e) => return vec![Err(e.into())],
     };
 
-    let mut commands = MultipleCommands::new();
+    let mut results = Vec::new();
+    let mut commands =
+        ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
     for pid in pids {
-        commands.add_command(execute_command_with_timeout(
-            pargs_process(pid),
-            DEFAULT_TIMEOUT,
-        ));
+        if let Some(res) = commands
+            .spawn(execute_command_with_timeout(
+                pargs_process(pid),
+                DEFAULT_TIMEOUT,
+            ))
+            .await
+        {
+            results.push(res);
+        }
     }
     commands.join_all().await
 }
@@ -139,14 +126,22 @@ pub async fn pstack_oxide_processes(
         Err(e) => return vec![Err(e.into())],
     };
 
-    let mut commands = MultipleCommands::new();
+    let mut results = Vec::new();
+    let mut commands =
+        ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
     for pid in pids {
-        commands.add_command(execute_command_with_timeout(
-            pstack_process(pid),
-            DEFAULT_TIMEOUT,
-        ));
+        if let Some(res) = commands
+            .spawn(execute_command_with_timeout(
+                pstack_process(pid),
+                DEFAULT_TIMEOUT,
+            ))
+            .await
+        {
+            results.push(res);
+        }
     }
-    commands.join_all().await
+    results.extend(commands.join_all().await);
+    results
 }
 
 pub async fn pfiles_oxide_processes(
@@ -160,14 +155,22 @@ pub async fn pfiles_oxide_processes(
         Err(e) => return vec![Err(e.into())],
     };
 
-    let mut commands = MultipleCommands::new();
+    let mut results = Vec::new();
+    let mut commands =
+        ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
     for pid in pids {
-        commands.add_command(execute_command_with_timeout(
-            pfiles_process(pid),
-            DEFAULT_TIMEOUT,
-        ));
+        if let Some(res) = commands
+            .spawn(execute_command_with_timeout(
+                pfiles_process(pid),
+                DEFAULT_TIMEOUT,
+            ))
+            .await
+        {
+            results.push(res);
+        }
     }
-    commands.join_all().await
+    results.extend(commands.join_all().await);
+    results
 }
 
 /// Retrieve various `zfs` command output for the system.

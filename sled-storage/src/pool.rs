@@ -21,8 +21,11 @@ impl Pool {
     /// Queries for an existing Zpool by name.
     ///
     /// Returns Ok if the pool exists.
-    pub fn new(name: ZpoolName, parent: DiskIdentity) -> Result<Pool, Error> {
-        let info = Zpool::get_info(&name.to_string())?;
+    pub async fn new(
+        name: ZpoolName,
+        parent: DiskIdentity,
+    ) -> Result<Pool, Error> {
+        let info = Zpool::get_info(&name.to_string()).await?;
         Ok(Pool { name, info, parent })
     }
 

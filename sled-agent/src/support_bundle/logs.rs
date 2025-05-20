@@ -88,15 +88,14 @@ impl<'a> SupportBundleLogs<'a> {
         let log = self.log.clone();
         let zone = zone.into();
 
-        let zip_file = tokio::task::spawn_blocking(move || {
+        let zip_file = {
             let handle = sled_diagnostics::LogsHandle::new(log);
-            match handle.get_zone_logs(&zone, max_rotated, &mut tempfile) {
+            match handle.get_zone_logs(&zone, max_rotated, &mut tempfile).await
+            {
                 Ok(_) => Ok(tempfile),
                 Err(e) => Err(e),
             }
-        })
-        .await
-        .map_err(Error::Join)?
+        }
         .map_err(Error::Logs)?;
 
         // Since we are using a tempfile and the file path has already been

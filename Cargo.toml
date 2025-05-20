@@ -116,6 +116,7 @@ members = [
     "oximeter/timeseries-macro",
     "oximeter/types",
     "package",
+    "parallel-task-set",
     "passwords",
     "range-requests",
     "rpaths",
@@ -267,6 +268,7 @@ default-members = [
     "oximeter/timeseries-macro",
     "oximeter/types",
     "package",
+    "parallel-task-set",
     "passwords",
     "range-requests",
     "rpaths",
@@ -415,7 +417,7 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite" }
-dropshot = { version = "0.16.0", features = [ "usdt-probes" ] }
+dropshot = { version = "0.16.1", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
 either = "1.14.0"
 ereport-types = { path = "ereport/types" }
@@ -459,7 +461,7 @@ hickory-server = "0.24.4"
 highway = "1.3.0"
 hkdf = "0.12.4"
 hmac = "0.12.1"
-http = "1.2.0"
+http = "1.3.1"
 http-body = "1.0.1"
 http-body-util = "0.1.3"
 http-range = "0.1.5"
@@ -504,9 +506,9 @@ lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "prot
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "872aae7d76493f2a4f59711b24dde55523536b40" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "872aae7d76493f2a4f59711b24dde55523536b40" }
-multimap = "0.10.0"
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "875ae5b7f8f0e32e9be672a36b5dda109b9b2450" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "875ae5b7f8f0e32e9be672a36b5dda109b9b2450" }
+multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
 nexus-client = { path = "clients/nexus-client" }
@@ -586,6 +588,7 @@ oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
 oximeter-types = { path = "oximeter/types" }
 oxql-types = { path = "oximeter/oxql-types" }
 p256 = "0.13"
+parallel-task-set = { path = "parallel-task-set" }
 parse-display = "0.10.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.1.0"
@@ -602,7 +605,7 @@ postgres-protocol = "0.6.8"
 predicates = "3.1.3"
 pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
-prettyplease = { version = "0.2.30", features = ["verbatim"] }
+prettyplease = { version = "0.2.32", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.10.0"
 progenitor-client = "0.10.0"

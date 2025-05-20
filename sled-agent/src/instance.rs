@@ -2442,7 +2442,8 @@ mod tests {
             storage_handle,
             nexus_client,
             temp_dir,
-        );
+        )
+        .await;
 
         let metadata = InstanceMetadata {
             silo_id: Uuid::new_v4(),
@@ -2520,7 +2521,7 @@ mod tests {
     // Helper alias for the receive-side of the metrics request queue.
     type MetricsRx = mpsc::Receiver<metrics::Message>;
 
-    fn fake_instance_manager_services(
+    async fn fake_instance_manager_services(
         log: &Logger,
         storage_handle: StorageHandle,
         nexus_client: NexusClient,
@@ -2541,7 +2542,8 @@ mod tests {
             log.new(o!("component" => "ZoneBundler")),
             storage_handle.clone(),
             cleanup_context,
-        );
+        )
+        .await;
 
         let (metrics_queue, rx) = MetricsRequestQueue::for_test();
         let services = InstanceManagerServices {
@@ -2580,7 +2582,8 @@ mod tests {
                 storage_harness.handle().clone(),
                 nexus.nexus_client.clone(),
                 temp_guard.path().as_str(),
-            );
+            )
+            .await;
 
             let InstanceManagerServices {
                 nexus_client,
@@ -3141,7 +3144,8 @@ mod tests {
                 storage_harness.handle().clone(),
                 nexus_client,
                 temp_guard.path().as_str(),
-            );
+            )
+            .await;
             let propolis_id = PropolisUuid::new_v4();
             let propolis_addr = SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::new(127, 0, 0, 1),

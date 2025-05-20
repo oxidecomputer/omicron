@@ -686,10 +686,11 @@ impl Inner {
         log: &Logger,
     ) -> Result<(), BootstrapError> {
         let datasets = zfs::get_all_omicron_datasets_for_delete()
+            .await
             .map_err(BootstrapError::ZfsDatasetsList)?;
         for dataset in &datasets {
             info!(log, "Removing dataset: {dataset}");
-            zfs::Zfs::destroy_dataset(dataset)?;
+            zfs::Zfs::destroy_dataset(dataset).await?;
         }
 
         Ok(())
