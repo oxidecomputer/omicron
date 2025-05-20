@@ -566,27 +566,29 @@ impl BundleCollection {
             report.listed_in_service_sleds = true;
 
             const MAX_CONCURRENT_SLED_REQUESTS: usize = 16;
+            const FAILURE_MESSAGE: &str =
+                "Failed to fully collect support bundle info from sled";
             let mut set = ParallelTaskSet::new_with_parallelism(
                 MAX_CONCURRENT_SLED_REQUESTS,
             );
 
-            for sled in all_sleds.into_iter() {
-                set.spawn({
-                    let collection: Arc<BundleCollection> = self.clone();
-                    let dir = dir.path().to_path_buf();
-                    async move {
-                        collection.collect_data_from_sled(&sled, &dir).await
-                    }
-                });
+            for sled in all_sleds {
+                let prev_result = set
+                    .spawn({
+                        let collection: Arc<BundleCollection> = self.clone();
+                        let dir = dir.path().to_path_buf();
+                        async move {
+                            collection.collect_data_from_sled(&sled, &dir).await
+                        }
+                    })
+                    .await;
+                if let Some(Err(err)) = prev_result {
+                    warn!(&self.log, "{FAILURE_MESSAGE}"; "err" => ?err);
+                }
             }
-
             while let Some(result) = set.join_next().await {
                 if let Err(err) = result {
-                    warn!(
-                        &self.log,
-                        "Failed to fully collect support bundle info from sled";
-                        "err" => ?err
-                    );
+                    warn!(&self.log, "{FAILURE_MESSAGE}"; "err" => ?err);
                 }
             }
         }
