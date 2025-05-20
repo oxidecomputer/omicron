@@ -4230,6 +4230,22 @@
           "request_id"
         ]
       },
+      "ExpectedActiveRotSlot": {
+        "description": "Describes the expected active RoT slot, and the version we expect to find for it",
+        "type": "object",
+        "properties": {
+          "slot": {
+            "$ref": "#/components/schemas/RotSlot"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ArtifactVersion"
+          }
+        },
+        "required": [
+          "slot",
+          "version"
+        ]
+      },
       "ExpectedVersion": {
         "description": "Describes the version that we expect to find in some firmware slot",
         "oneOf": [
@@ -5397,12 +5413,10 @@
                 ]
               },
               "expected_active_slot": {
-                "description": "the slot of the currently running image",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RotSlot"
-                  }
-                ]
+                "$ref": "#/components/schemas/ExpectedActiveRotSlot"
+              },
+              "expected_inactive_version": {
+                "$ref": "#/components/schemas/ExpectedVersion"
               },
               "expected_pending_persistent_boot_preference": {
                 "nullable": true,
@@ -5421,22 +5435,6 @@
                   }
                 ]
               },
-              "expected_slot_a_version": {
-                "description": "expected contents of \"A\" slot",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ExpectedVersion"
-                  }
-                ]
-              },
-              "expected_slot_b_version": {
-                "description": "expected contents of \"B\" slot",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ExpectedVersion"
-                  }
-                ]
-              },
               "expected_transient_boot_preference": {
                 "nullable": true,
                 "description": "override persistent preference selection for a single boot",
@@ -5450,9 +5448,8 @@
             "required": [
               "component",
               "expected_active_slot",
-              "expected_persistent_boot_preference",
-              "expected_slot_a_version",
-              "expected_slot_b_version"
+              "expected_inactive_version",
+              "expected_persistent_boot_preference"
             ]
           }
         ]
