@@ -25265,16 +25265,14 @@
         "type": "object",
         "properties": {
           "rules": {
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
             },
             "maxItems": 1024
           }
-        },
-        "required": [
-          "rules"
-        ]
+        }
       },
       "VpcFirewallRules": {
         "description": "Collection of a Vpc's firewall rules",

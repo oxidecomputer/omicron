@@ -173,7 +173,8 @@ impl NestedDatasetLocation {
         Zfs::ensure_dataset_mounted_and_exists(
             &self.full_name(),
             &Mountpoint(mountpoint.clone()),
-        )?;
+        )
+        .await?;
 
         return Ok(mountpoint);
     }
@@ -995,6 +996,7 @@ impl StorageManager {
                 .as_slice(),
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap_or_default()
         .into_iter()
         .map(|props| (props.name.clone(), props))
@@ -1178,6 +1180,7 @@ impl StorageManager {
             datasets_of_interest.as_slice(),
             WhichDatasets::SelfAndChildren,
         )
+        .await
         .map_err(Error::Other)
     }
 
@@ -1230,7 +1233,7 @@ impl StorageManager {
             return Err(anyhow!(msg).into());
         }
 
-        Zfs::destroy_dataset(&full_name).map_err(|e| anyhow!(e))?;
+        Zfs::destroy_dataset(&full_name).await.map_err(|e| anyhow!(e))?;
         Ok(())
     }
 
@@ -1250,6 +1253,7 @@ impl StorageManager {
             &[full_name],
             WhichDatasets::SelfAndChildren,
         )
+        .await
         .map_err(|e| {
             warn!(
                 log,
@@ -1531,7 +1535,8 @@ impl StorageManager {
             size_details,
             id: dataset_id,
             additional_options: None,
-        })?;
+        })
+        .await?;
 
         Ok(())
     }
@@ -1567,7 +1572,8 @@ impl StorageManager {
             size_details,
             id: request.dataset_id,
             additional_options: None,
-        })?;
+        })
+        .await?;
 
         Ok(())
     }
@@ -2057,6 +2063,7 @@ mod tests {
             &[dataset_name.full_name()],
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap()[0];
         assert_eq!(observed_dataset.id, Some(dataset_id));
 
@@ -2071,6 +2078,7 @@ mod tests {
             &[dataset_name.full_name()],
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap()[0];
         assert_eq!(observed_dataset.id, Some(dataset_id));
 
@@ -2108,6 +2116,7 @@ mod tests {
             &[dataset_name.full_name()],
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap()[0];
         assert_eq!(observed_dataset.id, None);
 
@@ -2122,6 +2131,7 @@ mod tests {
             &[dataset_name.full_name()],
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap()[0];
         assert_eq!(observed_dataset.id, Some(dataset_id));
 

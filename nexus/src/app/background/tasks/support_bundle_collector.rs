@@ -34,6 +34,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use parallel_task_set::ParallelTaskSet;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::future::Future;
@@ -42,7 +43,6 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
-use tokio::task::JoinSet;
 use tufaceous_artifact::ArtifactHash;
 use zip::ZipArchive;
 use zip::ZipWriter;
@@ -566,41 +566,29 @@ impl BundleCollection {
             report.listed_in_service_sleds = true;
 
             const MAX_CONCURRENT_SLED_REQUESTS: usize = 16;
-            let mut sleds_iter = all_sleds.into_iter().peekable();
-            let mut tasks = JoinSet::new();
+            const FAILURE_MESSAGE: &str =
+                "Failed to fully collect support bundle info from sled";
+            let mut set = ParallelTaskSet::new_with_parallelism(
+                MAX_CONCURRENT_SLED_REQUESTS,
+            );
 
-            // While we have incoming work to send to tasks (sleds_iter)
-            // or a task operating on that data (tasks)...
-            while sleds_iter.peek().is_some() || !tasks.is_empty() {
-                // Spawn tasks up to the concurrency limit
-                while tasks.len() < MAX_CONCURRENT_SLED_REQUESTS
-                    && sleds_iter.peek().is_some()
-                {
-                    if let Some(sled) = sleds_iter.next() {
+            for sled in all_sleds {
+                let prev_result = set
+                    .spawn({
                         let collection: Arc<BundleCollection> = self.clone();
                         let dir = dir.path().to_path_buf();
-                        tasks.spawn({
-                            async move {
-                                collection
-                                    .collect_data_from_sled(&sled, &dir)
-                                    .await
-                            }
-                        });
-                    }
+                        async move {
+                            collection.collect_data_from_sled(&sled, &dir).await
+                        }
+                    })
+                    .await;
+                if let Some(Err(err)) = prev_result {
+                    warn!(&self.log, "{FAILURE_MESSAGE}"; "err" => ?err);
                 }
-
-                // Await the completion of ongoing tasks.
-                //
-                // Keep collecting from other sleds, even if one or more of the
-                // sled collection tasks fail.
-                if let Some(result) = tasks.join_next().await {
-                    if let Err(err) = result {
-                        warn!(
-                            &self.log,
-                            "Failed to fully collect support bundle info from sled";
-                            "err" => ?err
-                        );
-                    }
+            }
+            while let Some(result) = set.join_next().await {
+                if let Err(err) = result {
+                    warn!(&self.log, "{FAILURE_MESSAGE}"; "err" => ?err);
                 }
             }
         }

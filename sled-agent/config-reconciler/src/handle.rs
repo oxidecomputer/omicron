@@ -5,6 +5,8 @@
 use camino::Utf8PathBuf;
 use illumos_utils::zpool::PathInPool;
 use key_manager::StorageKeyRequester;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
@@ -48,6 +50,7 @@ use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::dataset_serialization_task::NestedDatasetMountError;
 use crate::dump_setup_task;
 use crate::internal_disks::InternalDisksReceiver;
+use crate::ledger::CurrentSledConfig;
 use crate::ledger::LedgerTaskHandle;
 use crate::raw_disks;
 use crate::raw_disks::RawDisksReceiver;
@@ -56,6 +59,16 @@ use crate::reconciler_task;
 use crate::reconciler_task::CurrentlyManagedZpools;
 use crate::reconciler_task::CurrentlyManagedZpoolsReceiver;
 use crate::reconciler_task::ReconcilerResult;
+
+#[derive(Debug, thiserror::Error)]
+pub enum InventoryError {
+    #[error("ledger contents not yet available")]
+    LedgerContentsNotAvailable,
+    #[error("could not contact dataset task")]
+    DatasetTaskError(#[from] DatasetTaskError),
+    #[error("could not list dataset properties")]
+    ListDatasetProperties(#[source] anyhow::Error),
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum TimeSyncConfig {
@@ -331,8 +344,55 @@ impl ConfigReconcilerHandle {
     }
 
     /// Collect inventory fields relevant to config reconciliation.
-    pub fn inventory(&self) -> ReconcilerInventory {
-        unimplemented!()
+    pub async fn inventory(
+        &self,
+        log: &Logger,
+    ) -> Result<ReconcilerInventory, InventoryError> {
+        let ledgered_sled_config = match self
+            .ledger_task
+            .get()
+            .map(LedgerTaskHandle::current_config)
+        {
+            // If we haven't yet spawned the ledger task, or we have but
+            // it's still waiting on disks, we don't know whether we have a
+            // ledgered sled config. It's not reasonable to report `None` in
+            // this case (since `None` means "we don't have a config"), so
+            // bail out.
+            //
+            // This shouldn't happen in practice: sled-agent should both wait
+            // for the boot disk and spawn the reconciler task before starting
+            // the dropshot server that allows Nexus to collect inventory.
+            None | Some(CurrentSledConfig::WaitingForInternalDisks) => {
+                return Err(InventoryError::LedgerContentsNotAvailable);
+            }
+            Some(CurrentSledConfig::WaitingForInitialConfig) => None,
+            Some(CurrentSledConfig::Ledgered(config)) => Some(config),
+        };
+
+        let zpools = self.currently_managed_zpools_rx.to_inventory(log).await;
+
+        let datasets = self
+            .dataset_task
+            .inventory(zpools.iter().map(|&(name, _)| name).collect())
+            .await??;
+
+        let (reconciler_status, last_reconciliation) =
+            self.reconciler_result_rx.borrow().to_inventory();
+
+        Ok(ReconcilerInventory {
+            disks: self.raw_disks_tx.to_inventory(),
+            zpools: zpools
+                .into_iter()
+                .map(|(name, total_size)| InventoryZpool {
+                    id: name.id(),
+                    total_size,
+                })
+                .collect(),
+            datasets,
+            ledgered_sled_config,
+            reconciler_status,
+            last_reconciliation,
+        })
     }
 }
 
@@ -346,12 +406,20 @@ struct ReconcilerTaskDependencies {
     reconciler_task_log: Logger,
 }
 
+/// Fields of sled-agent inventory reported by the config reconciler subsystem.
+///
+/// Note that much like inventory in general, these fields are not collected
+/// atomically; if there are active changes being made while this struct is
+/// being assembled, different fields may have be populated from different
+/// states of the world.
 #[derive(Debug)]
 pub struct ReconcilerInventory {
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
     pub datasets: Vec<InventoryDataset>,
     pub ledgered_sled_config: Option<OmicronSledConfig>,
+    pub reconciler_status: ConfigReconcilerInventoryStatus,
+    pub last_reconciliation: Option<ConfigReconcilerInventory>,
 }
 
 #[derive(Debug, Clone)]

@@ -26,11 +26,12 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use oximeter::types::ProducerRegistry;
+use parallel_task_set::ParallelTaskSet;
 use sled_agent_client::Client as SledAgentClient;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::future::Future;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
 use uuid::Uuid;
@@ -64,7 +65,7 @@ pub(crate) struct InstanceWatcher {
 /// forgotten about the instances it was supposed to know about.  For now, we
 /// tune this pretty low, choosing safety over low recovery latency for these
 /// relatively rare events.
-const MAX_CONCURRENT_CHECKS: NonZeroU32 = NonZeroU32::new(16).unwrap();
+const MAX_CONCURRENT_CHECKS: usize = 16;
 
 impl InstanceWatcher {
     pub(crate) fn new(
@@ -436,23 +437,11 @@ impl BackgroundTask for InstanceWatcher {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            let mut tasks = tokio::task::JoinSet::new();
-            // We're using the size of the database query page as a simple
-            // mechanism for limiting the number of concurrent health checks: if
-            // we only query for `MAX_CONCURRENT_CHECKS` records at a time, and
-            // we wait until all spawned health checks have completed before
-            // reading the next batch, it follows that there are only ever
-            // `MAX_CONCURRENT_CHECKS` checks in flight at a time.
-            //
-            // This does mean that, unlike using a counting semaphore or
-            // similar, we may have fewer than the limit health checks running
-            // in parallel as we will not query for a new batch until *all*
-            // checks for the current batch have completed.  If that becomes an
-            // issue, we could implement a more sophisticated
-            // concurrency-limiting scheme later.
-            let mut paginator = Paginator::new(MAX_CONCURRENT_CHECKS);
+            let mut paginator = Some(Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE));
+            let mut tasks = ParallelTaskSet::new_with_parallelism(
+                MAX_CONCURRENT_CHECKS,
+            );
 
-            let mut total: usize = 0;
             let mut update_sagas_queued: usize = 0;
             let mut instance_states: BTreeMap<String, usize> =
                 BTreeMap::new();
@@ -467,28 +456,34 @@ impl BackgroundTask for InstanceWatcher {
             // the database query by sled ID, and reuse the same sled-agent
             // client as long as we are talking to the same sled.
             let mut curr_client: Option<(Uuid, SledAgentClient)> = None;
-            while let Some(p) = paginator.next() {
-                let maybe_batch = self
-                    .datastore
-                    .instance_and_vmm_list_by_sled_agent(
-                        opctx,
-                        &p.current_pagparams(),
-                    )
-                    .await;
-                let batch = match maybe_batch {
-                    Ok(batch) => batch,
-                    Err(e) => {
-                        slog::error!(
-                            opctx.log,
-                            "sled instances by sled agent query failed: {e}"
-                        );
-                        return serde_json::json!({ "error": e.to_string() });
+            let mut instances = VecDeque::new();
+            let mut total: usize = 0;
+            loop {
+                if instances.is_empty() {
+                   if let Some(p) = paginator.take().and_then(Paginator::next) {
+                        let maybe_batch = self
+                            .datastore
+                            .instance_and_vmm_list_by_sled_agent(
+                                opctx,
+                                &p.current_pagparams(),
+                            )
+                            .await;
+                        let batch = match maybe_batch {
+                            Ok(batch) => batch,
+                            Err(e) => {
+                                slog::error!(
+                                    opctx.log,
+                                    "sled instances by sled agent query failed: {e}"
+                                );
+                                return serde_json::json!({ "error": e.to_string() });
+                            }
+                        };
+                        paginator = Some(p.found_batch(&batch, &|(sled, _, vmm, _)| (sled.id(), vmm.id)));
+                        instances = batch.into();
                     }
-                };
-                paginator = p.found_batch(&batch, &|(sled, _, vmm, _)| (sled.id(), vmm.id));
+                }
 
-                // Spawn a task to check on each sled in the batch.
-                for (sled, instance, vmm, project) in batch {
+                let completed_check = if let Some((sled, instance, vmm, project)) = instances.pop_front() {
                     let client = match curr_client {
                         // If we are still talking to the same sled, reuse the
                         // existing client and its connection pool.
@@ -507,19 +502,20 @@ impl BackgroundTask for InstanceWatcher {
                     };
 
                     let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
-                    tasks.spawn(self.check_instance(opctx, client, target, vmm, sled));
-                }
+                    tasks.spawn(self.check_instance(opctx, client, target ,vmm ,sled)).await
+                } else {
+                    // If there are no remaining instances to check, wait for
+                    // all previously spawned check to complete.
+                    match tasks.join_next().await {
+                        // The ParallelTaskSet` is empty, and there are no new
+                        // instances to check, so we're done here.
+                        None => break,
+                        Some(check) => Some(check),
+                    }
+                };
 
-                // Now, wait for the check results to come back.
-                while let Some(result) = tasks.join_next().await {
+                if let Some(check) = completed_check {
                     total += 1;
-                    let check = result.expect(
-                        "a `JoinError` is returned if a spawned task \
-                        panics, or if the task is aborted. we never abort \
-                        tasks on this `JoinSet`, and nexus is compiled with \
-                        `panic=\"abort\"`, so neither of these cases should \
-                        ever occur",
-                    );
                     match check.outcome {
                         CheckOutcome::Success(state) => {
                             *instance_states
@@ -539,7 +535,6 @@ impl BackgroundTask for InstanceWatcher {
                         update_sagas_queued += 1;
                     }
                     self.metrics.lock().unwrap().record_check(check);
-
                 }
             }
 
