@@ -43,6 +43,7 @@ use std::fmt::Result as FormatResult;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::num::{NonZeroU16, NonZeroU32};
+use std::ops::RangeInclusive;
 use std::str::FromStr;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -1832,11 +1833,107 @@ pub struct VpcFirewallRuleFilter {
 
 /// The protocols that may be specified in a firewall rule's filter
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "UPPERCASE")]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
 pub enum VpcFirewallRuleProtocol {
     Tcp,
     Udp,
-    Icmp,
+    Icmp(Option<VpcFirewallIcmpFilter>),
+    // TODO: IPv6 not supported by instances.
+    // Icmpv6(Option<VpcFirewallIcmpFilter>),
+    // TODO: OPTE does not yet permit further L4 protocols. (opte#609)
+    // Other(u16),
+}
+
+impl FromStr for VpcFirewallRuleProtocol {
+    type Err = String;
+
+    fn from_str(proto: &str) -> Result<Self, Self::Err> {
+        let (ty_str, content_str) = match proto.split_once(':') {
+            None => (proto, None),
+            Some((lhs, rhs)) => (lhs, Some(rhs)),
+        };
+
+        match (ty_str.to_lowercase().as_str(), content_str) {
+            ("tcp", None) => Ok(Self::Tcp),
+            ("udp", None) => Ok(Self::Udp),
+            ("icmp", None) => Ok(Self::Icmp(None)),
+            ("icmp", Some(rhs)) => Ok(Self::Icmp(Some(rhs.parse()?))),
+            (lhs, None) => Err(format!("unrecognized protocol \"{lhs}\"")),
+            (lhs, Some(_)) => Err(format!(
+                "cannot specify extra filters for protocol \"{lhs}\""
+            )),
+        }
+    }
+}
+
+impl TryFrom<String> for VpcFirewallRuleProtocol {
+    type Error = <VpcFirewallRuleProtocol as FromStr>::Err;
+
+    fn try_from(proto: String) -> Result<Self, Self::Error> {
+        proto.parse()
+    }
+}
+
+impl Display for VpcFirewallRuleProtocol {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        match self {
+            VpcFirewallRuleProtocol::Tcp => write!(f, "tcp"),
+            VpcFirewallRuleProtocol::Udp => write!(f, "udp"),
+            VpcFirewallRuleProtocol::Icmp(None) => write!(f, "icmp"),
+            VpcFirewallRuleProtocol::Icmp(Some(v)) => write!(f, "icmp:{v}"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallIcmpFilter {
+    pub ty: u8,
+    pub code: Option<IcmpParamRange>,
+}
+
+impl Display for VpcFirewallIcmpFilter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        write!(f, "{}", self.ty)?;
+        if let Some(code) = self.code {
+            write!(f, ",{code}")?;
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for VpcFirewallIcmpFilter {
+    type Err = String;
+
+    fn from_str(filter: &str) -> Result<Self, Self::Err> {
+        let (ty_str, code_str) = match filter.split_once(',') {
+            None => (filter, None),
+            Some((lhs, rhs)) => (lhs, Some(rhs)),
+        };
+
+        Ok(Self {
+            ty: ty_str.parse::<u8>().map_err(|e| e.to_string())?,
+            code: code_str.map(|v| v.parse()).transpose()?,
+        })
+    }
+}
+
+impl From<u8> for IcmpParamRange {
+    fn from(value: u8) -> Self {
+        Self { first: value, last: value }
+    }
+}
+
+impl From<RangeInclusive<u8>> for IcmpParamRange {
+    fn from(value: RangeInclusive<u8>) -> Self {
+        Self { first: *value.start(), last: *value.end() }
+    }
+}
+
+impl From<IcmpParamRange> for RangeInclusive<u8> {
+    fn from(value: IcmpParamRange) -> Self {
+        value.first..=value.last
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -2038,6 +2135,94 @@ impl JsonSchema for L4PortRange {
                 min_length: Some(1),
                 pattern: Some(
                     r#"^[0-9]{1,5}(-[0-9]{1,5})?$"#.to_string(),
+                ),
+            })),
+            ..Default::default()
+        }.into()
+    }
+}
+
+/// A range of ICMP(v6) types or codes. This range is inclusive on both ends.
+#[derive(
+    Clone, Copy, Debug, DeserializeFromStr, SerializeDisplay, PartialEq,
+)]
+pub struct IcmpParamRange {
+    /// The first number in the range
+    pub first: u8,
+    /// The last number in the range
+    pub last: u8,
+}
+
+impl FromStr for IcmpParamRange {
+    type Err = String;
+    fn from_str(range: &str) -> Result<Self, Self::Err> {
+        const INVALID_NUMBER_MSG: &str = "invalid 8-bit number";
+
+        match range.split_once('-') {
+            None => {
+                let port = range
+                    .parse::<u8>()
+                    .map_err(|_| INVALID_NUMBER_MSG.to_string())?;
+                Ok(IcmpParamRange { first: port, last: port })
+            }
+            Some((left, right)) => {
+                let first = left
+                    .parse::<u8>()
+                    .map_err(|_| INVALID_NUMBER_MSG.to_string())?;
+                let last = right
+                    .parse::<u8>()
+                    .map_err(|_| INVALID_NUMBER_MSG.to_string())?;
+                Ok(IcmpParamRange { first, last })
+            }
+        }
+    }
+}
+
+impl TryFrom<String> for IcmpParamRange {
+    type Error = <IcmpParamRange as FromStr>::Err;
+
+    fn try_from(range: String) -> Result<Self, Self::Error> {
+        range.parse()
+    }
+}
+
+impl Display for IcmpParamRange {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.first == self.last {
+            write!(f, "{}", self.first)
+        } else {
+            write!(f, "{}-{}", self.first, self.last)
+        }
+    }
+}
+
+impl JsonSchema for IcmpParamRange {
+    fn schema_name() -> String {
+        "IcmpParamRange".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A range of ICMP(v6) types or codes".to_string()),
+                description: Some(
+                    "An inclusive-inclusive range of ICMP(v6) types or codes. \
+                    The second value may be omitted to represent a single parameter."
+                        .to_string(),
+                ),
+                examples: vec!["3".into(), "20-120".into()],
+                ..Default::default()
+            })),
+            instance_type: Some(
+                schemars::schema::InstanceType::String.into()
+            ),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(7),  // 3 digits for each port and the dash
+                min_length: Some(1),
+                pattern: Some(
+                    r#"^[0-9]{1,3}(-[0-9]{1,3})?$"#.to_string(),
                 ),
             })),
             ..Default::default()

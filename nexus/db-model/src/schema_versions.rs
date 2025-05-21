@@ -28,6 +28,7 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(143, "vpc-firewall-icmp"),
         KnownVersion::new(142, "bp-add-remove-mupdate-override"),
         KnownVersion::new(141, "caboose-sign-value"),
         KnownVersion::new(140, "instance-intended-state"),

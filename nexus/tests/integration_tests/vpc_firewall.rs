@@ -90,7 +90,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
             filters: VpcFirewallRuleFilter {
                 hosts: None,
                 ports: None,
-                protocols: Some(vec![VpcFirewallRuleProtocol::Icmp]),
+                protocols: Some(vec![VpcFirewallRuleProtocol::Icmp(None)]),
             },
             direction: VpcFirewallRuleDirection::Inbound,
             priority: VpcFirewallRulePriority(10),
@@ -191,7 +191,7 @@ fn is_default_firewall_rules(
             )],
             filters: VpcFirewallRuleFilter {
                 hosts: None,
-                protocols: Some(vec![VpcFirewallRuleProtocol::Icmp]),
+                protocols: Some(vec![VpcFirewallRuleProtocol::Icmp(None)]),
                 ports: None,
             },
             action: VpcFirewallRuleAction::Allow,

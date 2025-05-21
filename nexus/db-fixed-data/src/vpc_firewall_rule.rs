@@ -4,9 +4,10 @@
 
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{
-    L4PortRange, VpcFirewallRuleAction, VpcFirewallRuleDirection,
-    VpcFirewallRuleFilter, VpcFirewallRulePriority, VpcFirewallRuleProtocol,
-    VpcFirewallRuleStatus, VpcFirewallRuleTarget, VpcFirewallRuleUpdate,
+    L4PortRange, VpcFirewallIcmpFilter, VpcFirewallRuleAction,
+    VpcFirewallRuleDirection, VpcFirewallRuleFilter, VpcFirewallRulePriority,
+    VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
+    VpcFirewallRuleUpdate,
 };
 use std::sync::LazyLock;
 
@@ -65,6 +66,51 @@ pub static NEXUS_VPC_FW_RULE: LazyLock<VpcFirewallRuleUpdate> =
                     last: 443.try_into().unwrap(),
                 },
             ]),
+        },
+        action: VpcFirewallRuleAction::Allow,
+        priority: VpcFirewallRulePriority(65534),
+    });
+
+/// The name for the built-in VPC firewall rule for Nexus.
+pub const NEXUS_ICMP_FW_RULE_NAME: &str = "nexus-icmp";
+
+/// Built-in VPC firewall rule for Nexus.
+///
+/// This rule allows *arbitrary forwarding nodes* on the network to inform the
+/// Nexus zone that packets have been explicitly dropped. This is a key part in
+/// enabling path MTU discovery, such as when customers are accessing Necus
+/// over a VPN.
+///
+/// Note that we currently rely on this being exactly one rule to implement the
+/// system-level enable/disable endpoint. See `nexus/networking/src/firewall_rules.rs`
+/// for more details.
+pub static NEXUS_ICMP_FW_RULE: LazyLock<VpcFirewallRuleUpdate> =
+    LazyLock::new(|| VpcFirewallRuleUpdate {
+        name: NEXUS_VPC_FW_RULE_NAME.parse().unwrap(),
+        description:
+            "allow typical inbound ICMP error codes for outbound flows"
+                .to_string(),
+        status: VpcFirewallRuleStatus::Enabled,
+        direction: VpcFirewallRuleDirection::Inbound,
+        targets: vec![VpcFirewallRuleTarget::Subnet(
+            super::vpc_subnet::NEXUS_VPC_SUBNET.name().clone(),
+        )],
+        filters: VpcFirewallRuleFilter {
+            hosts: None,
+            protocols: Some(vec![
+                VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                    // Type 3 -- Destination Unreachable
+                    ty: 3,
+                    // Code 4 -- Fragmentation needed
+                    code: Some(4.into()),
+                })),
+                VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                    // Type 11 -- Time Exceeded
+                    ty: 11,
+                    code: None,
+                })),
+            ]),
+            ports: None,
         },
         action: VpcFirewallRuleAction::Allow,
         priority: VpcFirewallRulePriority(65534),
