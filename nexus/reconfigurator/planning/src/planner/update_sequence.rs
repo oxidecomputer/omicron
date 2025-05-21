@@ -12,15 +12,11 @@ use nexus_sled_agent_shared::inventory::ZoneKind;
 pub enum OrderedComponent {
     HostOs,
     SpRot,
-    NonNexusOmicronZone,
-    NexusZone,
+    OmicronZone(ZoneKind),
 }
 
 impl From<ZoneKind> for OrderedComponent {
     fn from(zone_kind: ZoneKind) -> Self {
-        match zone_kind {
-            ZoneKind::Nexus => Self::NexusZone,
-            _ => Self::NonNexusOmicronZone,
-        }
+        Self::OmicronZone(zone_kind)
     }
 }

@@ -1947,34 +1947,48 @@ impl<'a> BlueprintBuilder<'a> {
     ) -> BlueprintZoneImageSource {
         let new_repo = self.input.tuf_repo();
         let old_repo = self.input.old_repo();
-        let new_artifact = Self::zone_image_artifact(new_repo, zone_kind);
-        let old_artifact = Self::zone_image_artifact(old_repo, zone_kind);
+        Self::zone_image_artifact(
+            if self.zone_is_ready_for_update(zone_kind, new_repo) {
+                new_repo
+            } else {
+                old_repo
+            },
+            zone_kind,
+        )
+    }
+
+    /// Return `true` iff a zone of the given kind is ready to be updated;
+    /// i.e., its dependencies have been updated, or its data sufficiently
+    /// replicated, etc.
+    fn zone_is_ready_for_update(
+        &self,
+        zone_kind: ZoneKind,
+        new_repo: Option<&TufRepoDescription>,
+    ) -> bool {
         match OrderedComponent::from(zone_kind) {
-            // Nexus can only be updated if all non-Nexus zones have been updated.
-            OrderedComponent::NexusZone => {
-                if self.sled_ids_with_zones().any(|sled_id| {
-                    self.current_sled_zones(
-                        sled_id,
-                        BlueprintZoneDisposition::is_in_service,
-                    )
-                    .filter(|z| {
-                        OrderedComponent::from(z.zone_type.kind())
-                            == OrderedComponent::NonNexusOmicronZone
-                    })
-                    .any(|z| z.image_source != new_artifact)
-                }) {
-                    // Some dependent zone is not up-to-date.
-                    old_artifact
-                } else {
-                    // All dependent zones are up-to-date.
-                    new_artifact
-                }
-            }
-            // It's always safe to use the new artifact for non-Nexus zones.
-            OrderedComponent::NonNexusOmicronZone => new_artifact,
             OrderedComponent::HostOs | OrderedComponent::SpRot => {
-                unreachable!("can't get an OS or SP/RoT image from a zone")
+                todo!("can't yet update Host OS or SP/RoT")
             }
+            OrderedComponent::OmicronZone(kind) => match kind {
+                ZoneKind::Nexus => {
+                    // Nexus can only be updated if all non-Nexus zones have been updated,
+                    // i.e., their image source is an artifact from the new repo.
+                    self.sled_ids_with_zones().all(|sled_id| {
+                        self.current_sled_zones(
+                            sled_id,
+                            BlueprintZoneDisposition::is_in_service,
+                        )
+                        .filter(|z| z.zone_type.kind() != ZoneKind::Nexus)
+                        .all(|z| {
+                            z.image_source
+                                == Self::zone_image_artifact(new_repo, z.kind())
+                        })
+                    })
+                }
+                // <https://github.com/oxidecomputer/omicron/issues/6404>
+                // ZoneKind::CockroachDb => todo!("check cluster status in inventory"),
+                _ => true, // other zone kinds have no special dependencies
+            },
         }
     }
 

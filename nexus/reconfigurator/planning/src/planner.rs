@@ -4548,6 +4548,8 @@ pub(crate) mod test {
         };
     }
 
+    /// Ensure that dependent zones (here just Crucible Pantry) are updated
+    /// before Nexus.
     #[test]
     fn test_update_crucible_pantry() {
         static TEST_NAME: &str = "update_crucible_pantry";
@@ -4653,6 +4655,9 @@ pub(crate) mod test {
                     zone.image_source,
                     BlueprintZoneImageSource::InstallDataset
                 )
+        };
+        let is_up_to_date_nexus = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_nexus() && zone.image_source == image_source
         };
         let is_old_pantry = |zone: &BlueprintZoneConfig| -> bool {
             zone.zone_type.is_crucible_pantry()
@@ -4765,7 +4770,7 @@ pub(crate) mod test {
 
         // One more iteration for the last old zone to be expunged.
         update_collection_from_blueprint(&mut example, &parent);
-        let blueprint = Planner::new_based_on(
+        let blueprint10 = Planner::new_based_on(
             log.clone(),
             &parent,
             &input,
@@ -4777,16 +4782,17 @@ pub(crate) mod test {
         .plan()
         .expect("replan for last blueprint");
 
+        // All old Pantry zones should now be expunged.
         assert_eq!(
-            blueprint
+            blueprint10
                 .all_omicron_zones(BlueprintZoneDisposition::is_expunged)
                 .filter(|(_, z)| is_old_pantry(z))
                 .count(),
             CRUCIBLE_PANTRY_REDUNDANCY
         );
 
-        // We won't be able to update Nexus until *all* of its dependent zones
-        // are updated. Stay tuned for the next test!
+        // Now we can update Nexus, because all of its dependent zones
+        // are up-to-date w/r/t the new repo.
         assert_eq!(
             parent
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
@@ -4794,12 +4800,58 @@ pub(crate) mod test {
                 .count(),
             NEXUS_REDUNDANCY + 1,
         );
+        let mut parent = blueprint10;
+        for i in 11..=17 {
+            let blueprint_name = format!("blueprint_{i}");
+            update_collection_from_blueprint(&mut example, &parent);
+
+            let blueprint = Planner::new_based_on(
+                log.clone(),
+                &parent,
+                &input,
+                &blueprint_name,
+                &example.collection,
+            )
+            .expect("can't create planner")
+            .with_rng(PlannerRng::from_seed((TEST_NAME, &blueprint_name)))
+            .plan()
+            .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
+
+            let summary = blueprint.diff_since_blueprint(&parent);
+            eprintln!("{}", summary.display());
+            for sled in summary.diff.sleds.modified_values_diff() {
+                if i % 2 == 0 {
+                    assert!(sled.zones.added.is_empty());
+                    assert!(sled.zones.removed.is_empty());
+                } else {
+                    assert!(sled.zones.removed.is_empty());
+                    assert_eq!(sled.zones.added.len(), 1);
+                    let added = sled.zones.added.values().next().unwrap();
+                    assert!(matches!(
+                        &added.zone_type,
+                        BlueprintZoneType::Nexus(_)
+                    ));
+                    assert_eq!(added.image_source, image_source);
+                }
+            }
+
+            parent = blueprint;
+        }
 
         // Everything's up-to-date in Kansas City!
-        update_collection_from_blueprint(&mut example, &blueprint);
+        let blueprint17 = parent;
+        assert_eq!(
+            blueprint17
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .filter(|(_, z)| is_up_to_date_nexus(z))
+                .count(),
+            NEXUS_REDUNDANCY + 1,
+        );
+
+        update_collection_from_blueprint(&mut example, &blueprint17);
         assert_planning_makes_no_changes(
             &logctx.log,
-            &blueprint,
+            &blueprint17,
             &input,
             &example.collection,
             TEST_NAME,
@@ -4808,6 +4860,7 @@ pub(crate) mod test {
         logctx.cleanup_successful();
     }
 
+    /// Ensure that planning to update all zones terminates.
     #[test]
     fn test_update_all_zones() {
         static TEST_NAME: &str = "update_all_zones";
@@ -4871,9 +4924,17 @@ pub(crate) mod test {
         input_builder.policy_mut().tuf_repo = Some(tuf_repo);
         let input = input_builder.build();
 
-        let mut comp = OrderedComponent::NonNexusOmicronZone;
-        let mut parent = blueprint1;
+        /// Expected number of planner iterations required to converge.
+        /// If incidental planner work changes this value occasionally,
+        /// that's fine; but if we find we're changing it all the time,
+        /// we should probably drop it and keep just the maximum below.
+        const EXP_PLANNING_ITERATIONS: usize = 57;
+
+        /// Planning must not take more than this number of iterations.
         const MAX_PLANNING_ITERATIONS: usize = 100;
+        assert!(EXP_PLANNING_ITERATIONS < MAX_PLANNING_ITERATIONS);
+
+        let mut parent = blueprint1;
         for i in 2..=MAX_PLANNING_ITERATIONS {
             let blueprint_name = format!("blueprint_{i}");
             update_collection_from_blueprint(&mut example, &parent);
@@ -4894,62 +4955,28 @@ pub(crate) mod test {
                 && summary.total_zones_removed() == 0
                 && summary.total_zones_modified() == 0
             {
-                println!("planning converged after {i} iterations");
                 assert!(
                     blueprint
                         .all_omicron_zones(
                             BlueprintZoneDisposition::is_in_service
                         )
-                        .all(|(_, zone)| zone.image_source == image_source)
+                        .all(|(_, zone)| zone.image_source == image_source),
+                    "failed to update all zones"
                 );
+
+                assert_eq!(
+                    i, EXP_PLANNING_ITERATIONS,
+                    "expected {EXP_PLANNING_ITERATIONS} iterations but converged in {i}"
+                );
+                println!("planning converged after {i} iterations");
+
                 logctx.cleanup_successful();
                 return;
             }
 
-            match comp {
-                OrderedComponent::HostOs | OrderedComponent::SpRot => {
-                    unreachable!("can only update zones")
-                }
-                OrderedComponent::NonNexusOmicronZone => {
-                    assert!(
-                        blueprint
-                            .all_omicron_zones(
-                                BlueprintZoneDisposition::is_in_service
-                            )
-                            .all(|(_, zone)| match zone.zone_type.kind() {
-                                ZoneKind::Nexus => {
-                                    if zone.image_source == image_source {
-                                        comp = OrderedComponent::NexusZone;
-                                        true
-                                    } else {
-                                        zone.image_source
-                                            == BlueprintZoneImageSource::InstallDataset
-                                    }
-                                }
-                                _ => zone.image_source
-                                    == BlueprintZoneImageSource::InstallDataset
-                                    || zone.image_source == image_source,
-                            })
-                    );
-                }
-                OrderedComponent::NexusZone => {
-                    assert!(
-                        blueprint
-                            .all_omicron_zones(
-                                BlueprintZoneDisposition::is_in_service
-                            )
-                            .all(|(_, zone)| match zone.zone_type.kind() {
-                                ZoneKind::Nexus => zone.image_source
-                                    == BlueprintZoneImageSource::InstallDataset
-                                    || zone.image_source == image_source,
-                                _ => zone.image_source == image_source,
-                            })
-                    );
-                }
-            }
-
             parent = blueprint;
         }
+
         panic!("did not converge after {MAX_PLANNING_ITERATIONS} iterations");
     }
 }
