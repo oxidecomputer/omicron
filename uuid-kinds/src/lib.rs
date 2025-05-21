@@ -52,6 +52,8 @@ macro_rules! impl_typed_uuid_kind {
 
 impl_typed_uuid_kind! {
     AffinityGroup => "affinity_group",
+    Alert => "alert",
+    AlertReceiver => "alert_receiver",
     AntiAffinityGroup => "anti_affinity_group",
     Blueprint => "blueprint",
     Collection => "collection",
@@ -87,8 +89,6 @@ impl_typed_uuid_kind! {
     UpstairsSession => "upstairs_session",
     Vnic => "vnic",
     Volume => "volume",
-    WebhookEvent => "webhook_event",
-    WebhookReceiver => "webhook_receiver",
     WebhookDelivery => "webhook_delivery",
     WebhookDeliveryAttempt => "webhook_delivery_attempt",
     WebhookSecret => "webhook_secret",

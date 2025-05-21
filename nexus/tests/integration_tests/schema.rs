@@ -2055,7 +2055,7 @@ fn after_134_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 
 fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async {
-        let probe_event_id: Uuid =
+        let probe_alert_id: Uuid =
             "001de000-7768-4000-8000-000000000001".parse().unwrap();
         let rows = ctx
             .client
@@ -2091,7 +2091,7 @@ fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         assert_eq!(
             records[0].values,
             vec![
-                ColumnValue::new("id", probe_event_id),
+                ColumnValue::new("id", probe_alert_id),
                 ColumnValue::new(
                     "event_class",
                     SqlEnum::from(("webhook_event_class", "probe")),

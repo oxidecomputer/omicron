@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::Alert;
+use crate::AlertClass;
+use crate::AlertDeliveryState;
+use crate::AlertDeliveryTrigger;
 use crate::SqlU8;
 use crate::SqlU16;
 use crate::WebhookDeliveryAttemptResult;
-use crate::WebhookDeliveryState;
-use crate::WebhookDeliveryTrigger;
-use crate::WebhookEvent;
-use crate::WebhookEventClass;
 use crate::serde_time_delta::optional_time_delta;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, TimeDelta, Utc};
@@ -16,9 +16,9 @@ use nexus_db_schema::schema::{webhook_delivery, webhook_delivery_attempt};
 use nexus_types::external_api::views;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::{
+    AlertKind, AlertReceiverKind, AlertReceiverUuid, AlertUuid,
     OmicronZoneKind, OmicronZoneUuid, WebhookDeliveryAttemptKind,
-    WebhookDeliveryKind, WebhookDeliveryUuid, WebhookEventKind,
-    WebhookEventUuid, WebhookReceiverKind, WebhookReceiverUuid,
+    WebhookDeliveryKind, WebhookDeliveryUuid,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -40,15 +40,16 @@ pub struct WebhookDelivery {
     pub id: DbTypedUuid<WebhookDeliveryKind>,
 
     /// ID of the event dispatched to this receiver (foreign key into
-    /// `webhook_event`).
-    pub event_id: DbTypedUuid<WebhookEventKind>,
+    /// `alert`).
+    #[diesel(column_name = alert_id)]
+    pub alert_id: DbTypedUuid<AlertKind>,
 
     /// ID of the receiver to which this event is dispatched (foreign key into
     /// `webhook_rx`).
-    pub rx_id: DbTypedUuid<WebhookReceiverKind>,
+    pub rx_id: DbTypedUuid<AlertReceiverKind>,
 
     /// Describes why this delivery was triggered.
-    pub triggered_by: WebhookDeliveryTrigger,
+    pub triggered_by: AlertDeliveryTrigger,
 
     /// Attempt count
     pub attempts: SqlU8,
@@ -60,7 +61,7 @@ pub struct WebhookDelivery {
     /// or permanently failed.
     pub time_completed: Option<DateTime<Utc>>,
 
-    pub state: WebhookDeliveryState,
+    pub state: AlertDeliveryState,
 
     pub deliverator_id: Option<DbTypedUuid<OmicronZoneKind>>,
 
@@ -69,26 +70,26 @@ pub struct WebhookDelivery {
 
 impl WebhookDelivery {
     pub fn new(
-        event_id: &WebhookEventUuid,
-        rx_id: &WebhookReceiverUuid,
-        trigger: WebhookDeliveryTrigger,
+        alert_id: &AlertUuid,
+        rx_id: &AlertReceiverUuid,
+        triggered_by: AlertDeliveryTrigger,
     ) -> Self {
         Self {
             id: WebhookDeliveryUuid::new_v4().into(),
-            event_id: (*event_id).into(),
+            alert_id: (*alert_id).into(),
             rx_id: (*rx_id).into(),
-            triggered_by: trigger,
+            triggered_by,
             attempts: SqlU8::new(0),
             time_created: Utc::now(),
             time_completed: None,
             deliverator_id: None,
             time_leased: None,
-            state: WebhookDeliveryState::Pending,
+            state: AlertDeliveryState::Pending,
         }
     }
 
     pub fn new_probe(
-        rx_id: &WebhookReceiverUuid,
+        rx_id: &AlertReceiverUuid,
         deliverator_id: &OmicronZoneUuid,
     ) -> Self {
         Self {
@@ -97,13 +98,11 @@ impl WebhookDelivery {
             // There's a singleton entry in the `webhook_event` table for
             // probes, so that we can reference a real event ID but need not
             // create a bunch of duplicate empty events every time a probe is sent.
-            event_id: WebhookEventUuid::from_untyped_uuid(
-                WebhookEvent::PROBE_EVENT_ID,
-            )
-            .into(),
+            alert_id: AlertUuid::from_untyped_uuid(Alert::PROBE_ALERT_ID)
+                .into(),
             rx_id: (*rx_id).into(),
-            triggered_by: WebhookDeliveryTrigger::Probe,
-            state: WebhookDeliveryState::Pending,
+            triggered_by: AlertDeliveryTrigger::Probe,
+            state: AlertDeliveryState::Pending,
             attempts: SqlU8::new(0),
             time_created: Utc::now(),
             time_completed: None,
@@ -114,28 +113,26 @@ impl WebhookDelivery {
 
     pub fn to_api_delivery(
         &self,
-        event_class: WebhookEventClass,
+        alert_class: AlertClass,
         attempts: &[WebhookDeliveryAttempt],
-    ) -> views::WebhookDelivery {
-        let mut view = views::WebhookDelivery {
-            id: self.id.into_untyped_uuid(),
-            webhook_id: self.rx_id.into(),
-            event_class: event_class.as_str().to_owned(),
-            event_id: self.event_id.into(),
-            state: self.state.into(),
-            trigger: self.triggered_by.into(),
-            attempts: attempts
-                .iter()
-                .map(views::WebhookDeliveryAttempt::from)
-                .collect(),
-            time_started: self.time_created,
-        };
+    ) -> views::AlertDelivery {
+        let mut attempts: Vec<_> =
+            attempts.iter().map(views::WebhookDeliveryAttempt::from).collect();
         // Make sure attempts are in order; each attempt entry also includes an
         // attempt number, which should be used authoritatively to determine the
         // ordering of attempts, but it seems nice to also sort the list,
         // because we can...
-        view.attempts.sort_by_key(|a| a.attempt);
-        view
+        attempts.sort_by_key(|a| a.attempt);
+        views::AlertDelivery {
+            id: self.id.into_untyped_uuid(),
+            receiver_id: self.rx_id.into(),
+            alert_class: alert_class.as_str().to_owned(),
+            alert_id: self.alert_id.into(),
+            state: self.state.into(),
+            trigger: self.triggered_by.into(),
+            attempts: views::AlertDeliveryAttempts::Webhook(attempts),
+            time_started: self.time_created,
+        }
     }
 }
 
@@ -160,9 +157,9 @@ pub struct WebhookDeliveryAttempt {
     /// Attempt number (retry count).
     pub attempt: SqlU8,
 
-    /// ID of the receiver to which this event is dispatched (foreign key into
+    /// ID of the receiver to which this alert is dispatched (foreign key into
     /// `webhook_rx`).
-    pub rx_id: DbTypedUuid<WebhookReceiverKind>,
+    pub rx_id: DbTypedUuid<AlertReceiverKind>,
 
     pub result: WebhookDeliveryAttemptResult,
 

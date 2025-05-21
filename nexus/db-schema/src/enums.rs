@@ -22,6 +22,9 @@ define_enums! {
     // Please keep this list in alphabetical order.
     AddressLotKindEnum => "address_lot_kind",
     AffinityPolicyEnum => "affinity_policy",
+    AlertClassEnum => "alert_class",
+    AlertDeliveryTriggerEnum => "alert_delivery_trigger",
+    AlertDeliveryStateEnum => "alert_delivery_state",
     AuthenticationModeEnum => "authentication_mode",
     BfdModeEnum => "bfd_mode",
     BlockSizeEnum => "block_size",
@@ -87,9 +90,6 @@ define_enums! {
     VpcFirewallRuleProtocolEnum => "vpc_firewall_rule_protocol",
     VpcFirewallRuleStatusEnum => "vpc_firewall_rule_status",
     VpcRouterKindEnum => "vpc_router_kind",
-    WebhookEventClassEnum => "webhook_event_class",
     WebhookDeliveryAttemptResultEnum => "webhook_delivery_attempt_result",
-    WebhookDeliveryTriggerEnum => "webhook_delivery_trigger",
-    WebhookDeliveryStateEnum => "webhook_delivery_state",
     ZoneTypeEnum => "zone_type",
 }
