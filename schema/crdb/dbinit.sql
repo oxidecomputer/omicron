@@ -1865,9 +1865,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_firewall_rule (
     /* Also an array of targets */
     filter_hosts STRING(128)[],
     filter_ports STRING(11)[],
-    filter_protocols STRING(32)[],
     action omicron.public.vpc_firewall_rule_action NOT NULL,
-    priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
+    priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL,
+    filter_protocols STRING(32)[]
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_firewall_by_vpc ON omicron.public.vpc_firewall_rule (

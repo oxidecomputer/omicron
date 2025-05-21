@@ -2,5 +2,9 @@
 -- (e.g., optional ICMP code/type specifiers). Move to have Nexus
 -- parse/deparse these. This also opens the door for matches by IpProtocol
 -- ID (numeric) in future.
+--
+-- However, ALTER COLUMN type from ENUM[] to STRING[] is 'experimental', given
+-- the error messages. So we'll be roundtripping through a new column.
+
 ALTER TABLE omicron.public.vpc_firewall_rule
-  ALTER COLUMN filter_protocols TYPE STRING(32)[];
+  ADD COLUMN IF NOT EXISTS filter_protocols_2 STRING(32)[];
