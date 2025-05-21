@@ -7581,33 +7581,41 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
+            // this is unique among the hundreds of calls to this function in
+            // that we are not using ? to return early on error
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await;
-            let token = cookies.get(session_cookie::SESSION_COOKIE_COOKIE_NAME);
+            let session_cookie =
+                cookies.get(session_cookie::SESSION_COOKIE_COOKIE_NAME);
 
+            // Look up session and delete it if present. Noop on any errors.
+            // This is the ONE spot where we do the hard delete by token and we
+            // haven't already looked up the session by token. Looking up the
+            // token first works, but it would be nice to avoid it.
             if let Ok(opctx) = opctx {
-                if let Some(token) = token {
-                    // TODO: This is the ONE spot where we do the hard delete
-                    // by token and we haven't already looked up the session
-                    // by token. Looking up the token first works but it would
-                    // be nice to avoid it
-
-                    // look up session and delete it if present. noop on any errors
-                    let session = nexus
-                        .session_fetch(&opctx, token.value().to_string())
-                        .await;
-                    if let Ok(session) = session {
-                        let session_id = session.console_session.id();
-                        let _ =
-                            nexus.session_hard_delete(&opctx, session_id).await;
-                    }
+                if let Some(cookie) = session_cookie {
+                    let token = cookie.value().to_string();
+                    match nexus.session_fetch(&opctx, token).await {
+                        Ok(session) => {
+                            let id = session.console_session.id();
+                            // ? here because if this fails, we did not delete the
+                            // session when we meant to
+                            nexus.session_hard_delete(&opctx, id).await?;
+                        }
+                        // blow up only on errors other than not found, because not
+                        // found is fine: nothing to delete
+                        Err(Error::ObjectNotFound { .. }) => {} // noop
+                        Err(e) => return Err(e.into()),
+                    };
                 }
             }
 
-            // If user's session was already expired, they failed auth and their
-            // session was automatically deleted by the auth scheme. If they have no
-            // session (e.g., they cleared their cookies while sitting on the page)
-            // they will also fail auth.
+            // If user's session was already expired, they fail auth and their
+            // session is automatically deleted by the auth scheme. If they
+            // have no session at all (because, e.g., they cleared their cookies
+            // while sitting on the page) they will also fail auth, but nothing
+            // is deleted and the above lookup by token fails (but doesn't early
+            // return).
 
             // Even if the user failed auth, we don't want to send them back a 401
             // like we would for a normal request. They are in fact logged out like
