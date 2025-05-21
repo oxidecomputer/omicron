@@ -420,23 +420,37 @@ impl<'a> Planner<'a> {
             .blueprint
             .current_sled_zones(sled_id, BlueprintZoneDisposition::is_expunged)
         {
-            match zone.disposition {
+            // If this is a zone still waiting for cleanup, what generation of
+            // sled config was it expunged?
+            let as_of_generation = match zone.disposition {
                 BlueprintZoneDisposition::Expunged {
                     as_of_generation,
                     ready_for_cleanup,
-                } if !ready_for_cleanup => {
-                    if let Some(reconciled) = &sled_inv.last_reconciliation {
-                        if reconciled.last_reconciled_config.generation
-                            >= as_of_generation
-                            && !reconciled.zones.contains_key(&zone.id)
-                        {
-                            zones_ready_for_cleanup.push(zone.id);
-                        }
-                    }
-                }
+                } if !ready_for_cleanup => as_of_generation,
                 BlueprintZoneDisposition::InService
                 | BlueprintZoneDisposition::Expunged { .. } => continue,
+            };
+
+            // If the sled hasn't done any reconciliation, wait until it has.
+            let Some(reconciliation) = &sled_inv.last_reconciliation else {
+                continue;
+            };
+
+            // If the sled hasn't reconciled a new-enough generation, wait until
+            // it has.
+            if reconciliation.last_reconciled_config.generation
+                < as_of_generation
+            {
+                continue;
             }
+
+            // If the sled hasn't shut down the zone, wait until it has.
+            if reconciliation.zones.contains_key(&zone.id) {
+                continue;
+            }
+
+            // All checks passed: we can mark this zone as ready for cleanup.
+            zones_ready_for_cleanup.push(zone.id);
         }
 
         if !zones_ready_for_cleanup.is_empty() {
@@ -1011,6 +1025,8 @@ pub(crate) mod test {
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
+    use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+    use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -2133,9 +2149,10 @@ pub(crate) mod test {
             .sled_agents
             .get_mut(&sled_id)
             .unwrap()
-            .ledgered_sled_config
+            .last_reconciliation
             .as_mut()
             .unwrap()
+            .last_reconciled_config
             .generation = Generation::from_u32(3);
 
         let blueprint3 = Planner::new_based_on(
@@ -4005,6 +4022,14 @@ pub(crate) mod test {
         // Use our example system.
         let (mut collection, input, blueprint1) = example(&log, TEST_NAME);
 
+        // Don't start more internal DNS zones (which the planner would, as a
+        // side effect of our test details).
+        let input = {
+            let mut builder = input.into_builder();
+            builder.policy_mut().target_internal_dns_zone_count = 0;
+            builder.build()
+        };
+
         // Find a Nexus zone we'll use for our test.
         let (sled_id, nexus_config) = blueprint1
             .sleds
@@ -4037,7 +4062,7 @@ pub(crate) mod test {
         // Run the planner. It should expunge all zones on the disk we just
         // expunged, including our Nexus zone, but not mark them as ready for
         // cleanup yet.
-        let blueprint2 = Planner::new_based_on(
+        let mut blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
             &input,
@@ -4049,6 +4074,27 @@ pub(crate) mod test {
         .plan()
         .expect("planned");
 
+        // Mark the disk we expected as "ready for cleanup"; this isn't what
+        // we're testing, and failing to do this will interfere with some of the
+        // checks we do below.
+        for mut disk in
+            blueprint2.sleds.get_mut(&sled_id).unwrap().disks.iter_mut()
+        {
+            match disk.disposition {
+                BlueprintPhysicalDiskDisposition::InService => (),
+                BlueprintPhysicalDiskDisposition::Expunged {
+                    as_of_generation,
+                    ..
+                } => {
+                    disk.disposition =
+                        BlueprintPhysicalDiskDisposition::Expunged {
+                            as_of_generation,
+                            ready_for_cleanup: true,
+                        };
+                }
+            }
+        }
+
         // Helper to extract the Nexus zone's disposition in a blueprint.
         let get_nexus_disposition = |bp: &Blueprint| {
             bp.sleds.get(&sled_id).unwrap().zones.iter().find_map(|z| {
@@ -4057,8 +4103,8 @@ pub(crate) mod test {
         };
 
         // This sled's config generation should have been bumped...
-        let bp2_generation =
-            blueprint2.sleds.get(&sled_id).unwrap().sled_agent_generation;
+        let bp2_config = blueprint2.sleds.get(&sled_id).unwrap().clone();
+        let bp2_sled_config = bp2_config.clone().into_in_service_sled_config();
         assert_eq!(
             blueprint1
                 .sleds
@@ -4066,24 +4112,25 @@ pub(crate) mod test {
                 .unwrap()
                 .sled_agent_generation
                 .next(),
-            bp2_generation
+            bp2_sled_config.generation
         );
         // ... and the Nexus should should have the disposition we expect.
         assert_eq!(
             get_nexus_disposition(&blueprint2),
             Some(BlueprintZoneDisposition::Expunged {
-                as_of_generation: bp2_generation,
+                as_of_generation: bp2_sled_config.generation,
                 ready_for_cleanup: false,
             })
         );
 
         // Running the planner again should make no changes until the inventory
-        // reports that the zone is not running and that the sled has seen a
-        // new-enough generation. Try three variants that should do nothing:
+        // reports that the zone is not running and that the sled has reconciled
+        // a new-enough generation. Try these variants:
         //
-        // * same inventory as above
-        // * inventory reports a new generation (but zone still running)
-        // * inventory reports zone not running (but still the old generation)
+        // * same inventory as above (expect no changes)
+        // * new config is ledgered but not reconciled (expect no changes)
+        // * new config is reconciled, but zone is in an error state (expect
+        //   no changes)
         eprintln!("planning with no inventory change...");
         assert_planning_makes_no_changes(
             &logctx.log,
@@ -4092,15 +4139,7 @@ pub(crate) mod test {
             &collection,
             TEST_NAME,
         );
-        // TODO-cleanup These checks depend on `last_reconciled_config`, which
-        // is not yet populated; uncomment these and check them by mutating
-        // `last_reconciled_config` once
-        // https://github.com/oxidecomputer/omicron/pull/8064 lands. We could
-        // just mutate `ledgered_sled_config` in the meantime (as this
-        // commented-out code does below), but that's not really checking what
-        // we care about.
-        /*
-        eprintln!("planning with generation bump but zone still running...");
+        eprintln!("planning with config ledgered but not reconciled...");
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint2,
@@ -4111,15 +4150,15 @@ pub(crate) mod test {
                     .sled_agents
                     .get_mut(&sled_id)
                     .unwrap()
-                    .ledgered_sled_config
-                    .as_mut()
-                    .unwrap()
-                    .generation = bp2_generation;
+                    .ledgered_sled_config = Some(bp2_sled_config.clone());
                 collection
             },
             TEST_NAME,
         );
-        eprintln!("planning with zone gone but generation not bumped...");
+        eprintln!(
+            "planning with config ledgered but \
+             zones failed to shut down..."
+        );
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint2,
@@ -4130,28 +4169,42 @@ pub(crate) mod test {
                     .sled_agents
                     .get_mut(&sled_id)
                     .unwrap()
-                    .ledgered_sled_config
-                    .as_mut()
+                    .ledgered_sled_config = Some(bp2_sled_config.clone());
+                let mut reconciliation =
+                    ConfigReconcilerInventory::debug_assume_success(
+                        bp2_sled_config.clone(),
+                    );
+                // For all the zones that are in bp2_config but not
+                // bp2_sled_config (i.e., zones that should have been shut
+                // down), insert an error result in the reconciliation.
+                for zone_id in bp2_config.zones.keys() {
+                    if !reconciliation.zones.contains_key(zone_id) {
+                        reconciliation.zones.insert(
+                            *zone_id,
+                            ConfigReconcilerInventoryResult::Err {
+                                message: "failed to shut down".to_string(),
+                            },
+                        );
+                    }
+                }
+                collection
+                    .sled_agents
+                    .get_mut(&sled_id)
                     .unwrap()
-                    .zones
-                    .retain(|z| z.id != nexus_config.id);
+                    .last_reconciliation = Some(reconciliation);
                 collection
             },
             TEST_NAME,
         );
-        */
 
         // Now make both changes to the inventory.
         {
-            let config = &mut collection
-                .sled_agents
-                .get_mut(&sled_id)
-                .unwrap()
-                .ledgered_sled_config
-                .as_mut()
-                .unwrap();
-            config.generation = bp2_generation;
-            config.zones.retain(|z| z.id != nexus_config.id);
+            let config = collection.sled_agents.get_mut(&sled_id).unwrap();
+            config.ledgered_sled_config = Some(bp2_sled_config.clone());
+            config.last_reconciliation =
+                Some(ConfigReconcilerInventory::debug_assume_success(
+                    bp2_sled_config.clone(),
+                ));
         }
 
         // Run the planner. It mark our Nexus zone as ready for cleanup now that
@@ -4171,7 +4224,7 @@ pub(crate) mod test {
         assert_eq!(
             get_nexus_disposition(&blueprint3),
             Some(BlueprintZoneDisposition::Expunged {
-                as_of_generation: bp2_generation,
+                as_of_generation: bp2_sled_config.generation,
                 ready_for_cleanup: true,
             })
         );
@@ -4180,7 +4233,7 @@ pub(crate) mod test {
         // since it doesn't affect what's sent to sled-agent.
         assert_eq!(
             blueprint3.sleds.get(&sled_id).unwrap().sled_agent_generation,
-            bp2_generation
+            bp2_sled_config.generation
         );
 
         assert_planning_makes_no_changes(
@@ -4260,8 +4313,12 @@ pub(crate) mod test {
         };
 
         // This sled's config generation should have been bumped...
-        let bp2_generation =
-            blueprint2.sleds.get(&sled_id).unwrap().sled_agent_generation;
+        let bp2_config = blueprint2
+            .sleds
+            .get(&sled_id)
+            .unwrap()
+            .clone()
+            .into_in_service_sled_config();
         assert_eq!(
             blueprint1
                 .sleds
@@ -4269,13 +4326,13 @@ pub(crate) mod test {
                 .unwrap()
                 .sled_agent_generation
                 .next(),
-            bp2_generation
+            bp2_config.generation
         );
         // ... and the DNS zone should should have the disposition we expect.
         assert_eq!(
             get_dns_disposition(&blueprint2),
             Some(BlueprintZoneDisposition::Expunged {
-                as_of_generation: bp2_generation,
+                as_of_generation: bp2_config.generation,
                 ready_for_cleanup: false,
             })
         );
@@ -4293,15 +4350,12 @@ pub(crate) mod test {
 
         // Make the inventory changes necessary for cleanup to proceed.
         {
-            let config = &mut collection
-                .sled_agents
-                .get_mut(&sled_id)
-                .unwrap()
-                .ledgered_sled_config
-                .as_mut()
-                .unwrap();
-            config.generation = bp2_generation;
-            config.zones.retain(|z| z.id != internal_dns_config.id);
+            let config = &mut collection.sled_agents.get_mut(&sled_id).unwrap();
+            config.ledgered_sled_config = Some(bp2_config.clone());
+            config.last_reconciliation =
+                Some(ConfigReconcilerInventory::debug_assume_success(
+                    bp2_config.clone(),
+                ));
         }
 
         // Run the planner. It should mark our internal DNS zone as ready for
@@ -4323,7 +4377,7 @@ pub(crate) mod test {
         assert_eq!(
             get_dns_disposition(&blueprint3),
             Some(BlueprintZoneDisposition::Expunged {
-                as_of_generation: bp2_generation,
+                as_of_generation: bp2_config.generation,
                 ready_for_cleanup: true,
             })
         );
