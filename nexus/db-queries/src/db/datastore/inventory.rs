@@ -1162,34 +1162,6 @@ impl DataStore {
                     .await?;
             }
 
-            /*
-            // Insert all the Omicron zones that we found.
-            {
-                use nexus_db_schema::schema::inv_sled_omicron_zones::dsl as sled_zones;
-                let _ = diesel::insert_into(sled_zones::inv_sled_omicron_zones)
-                    .values(sled_omicron_zones)
-                    .execute_async(&conn)
-                    .await?;
-            }
-
-            {
-                use nexus_db_schema::schema::inv_omicron_zone::dsl as omicron_zone;
-                let _ = diesel::insert_into(omicron_zone::inv_omicron_zone)
-                    .values(omicron_zones)
-                    .execute_async(&conn)
-                    .await?;
-            }
-
-            {
-                use nexus_db_schema::schema::inv_omicron_zone_nic::dsl as omicron_zone_nic;
-                let _ =
-                    diesel::insert_into(omicron_zone_nic::inv_omicron_zone_nic)
-                        .values(omicron_zone_nics)
-                        .execute_async(&conn)
-                        .await?;
-            }
-            */
-
             // Insert the clickhouse keeper memberships we've received
             {
                 use nexus_db_schema::schema::inv_clickhouse_keeper_membership::dsl;
