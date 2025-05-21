@@ -9,6 +9,7 @@ use anyhow::Context;
 use base64::Engine;
 use camino::Utf8DirEntry;
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use camino_tempfile::tempdir_in;
 use camino_tempfile::tempfile_in;
@@ -610,13 +611,10 @@ impl BundleCollection {
             }
         }
 
-        let sp_dumps_dir = dir.path().join("sp_task_dumps");
-        tokio::fs::create_dir_all(&sp_dumps_dir).await.with_context(|| {
-            format!("failed to create SP task dump directory {sp_dumps_dir}")
-        })?;
-
         if let Err(e) = sp_dumps_fut.await {
             error!(log, "failed to capture SP task dumps"; "error" => InlineErrorChain::new(e.as_ref()));
+        } else {
+            report.listed_sps = true;
         };
 
         Ok(report)
@@ -1016,19 +1014,20 @@ async fn save_all_sp_dumps(
         .context("failed to get list of SPs from MGS")?
         .into_inner();
 
-    let mut futures = futures::stream::iter(all_sps.into_iter())
-        .map(|sp| {
-            let mgs_client = mgs_client.clone();
+    let mut tasks = ParallelTaskSet::new();
+    for sp in all_sps {
+        let mgs_client = mgs_client.clone();
+        let sp_dumps_dir = sp_dumps_dir.to_owned();
 
-            async move {
-                save_sp_dumps(mgs_client, sp, &sp_dumps_dir)
+        tasks
+            .spawn(async move {
+                save_sp_dumps(mgs_client, sp, sp_dumps_dir)
                     .await
                     .with_context(|| format!("SP {} {}", sp.type_, sp.slot))
-            }
-        })
-        .buffer_unordered(10);
-
-    while let Some(result) = futures.next().await {
+            })
+            .await;
+    }
+    for result in tasks.join_all().await {
         if let Err(e) = result {
             error!(
                 log,
@@ -1045,7 +1044,7 @@ async fn save_all_sp_dumps(
 async fn save_sp_dumps(
     mgs_client: MgsClient,
     sp: SpIdentifier,
-    sp_dumps_dir: &Utf8Path,
+    sp_dumps_dir: Utf8PathBuf,
 ) -> anyhow::Result<()> {
     let dump_count = mgs_client
         .sp_task_dump_count(sp.type_, sp.slot)
@@ -1366,6 +1365,7 @@ mod test {
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle.id.into());
         assert!(report.listed_in_service_sleds);
+        assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
 
         let observed_bundle = datastore
@@ -1424,6 +1424,7 @@ mod test {
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle1.id.into());
         assert!(report.listed_in_service_sleds);
+        assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
 
         // This is observable by checking the state of bundle1 and bundle2:
@@ -1446,6 +1447,7 @@ mod test {
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle2.id.into());
         assert!(report.listed_in_service_sleds);
+        assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
 
         // After another collection request, we'll see that both bundles have
@@ -1560,6 +1562,7 @@ mod test {
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle.id.into());
         assert!(report.listed_in_service_sleds);
+        assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
 
         // Cancel the bundle after collection has completed

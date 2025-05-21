@@ -2347,6 +2347,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
             if let Some(SupportBundleCollectionReport {
                 bundle,
                 listed_in_service_sleds,
+                listed_sps,
                 activated_in_db_ok,
             }) = collection_report
             {
@@ -2354,6 +2355,9 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!("      Bundle ID: {bundle}");
                 println!(
                     "      Bundle was able to list in-service sleds: {listed_in_service_sleds}"
+                );
+                println!(
+                    "      Bundle was able to list service processors: {listed_sps}"
                 );
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
