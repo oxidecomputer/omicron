@@ -1,7 +1,7 @@
-CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_disk_result (
     inv_collection_id UUID NOT NULL,
-    id UUID NOT NULL,
-    generation INT8 NOT NULL,
-    remove_mupdate_override UUID,
-    PRIMARY KEY (inv_collection_id, id)
+    sled_id UUID NOT NULL,
+    disk_id UUID NOT NULL,
+    error_message TEXT,
+    PRIMARY KEY (inv_collection_id, sled_id, disk_id)
 );

@@ -3633,18 +3633,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
         (reconciler_status_kind != 'running'
             AND reconciler_status_sled_config IS NULL)
     ),
-    CONSTRAINT reconciler_status_timestamp_present_unless_not_yet_run CHECK (
+    CONSTRAINT reconciler_status_timing_present_unless_not_yet_run CHECK (
         (reconciler_status_kind = 'not-yet-run'
-            AND reconciler_status_timestamp IS NULL)
-        OR
-        (reconciler_status_kind != 'not-yet-run'
-            AND reconciler_status_timestamp IS NOT NULL)
-    ),
-    CONSTRAINT reconciler_status_duration_present_unless_not_yet_run CHECK (
-        (reconciler_status_kind = 'not-yet-run'
+            AND reconciler_status_timestamp IS NULL
             AND reconciler_status_duration_secs IS NULL)
         OR
         (reconciler_status_kind != 'not-yet-run'
+            AND reconciler_status_timestamp IS NOT NULL
             AND reconciler_status_duration_secs IS NOT NULL)
     ),
 

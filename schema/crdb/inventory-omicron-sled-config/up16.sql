@@ -1,9 +1,7 @@
-ALTER TABLE omicron.public.inv_sled_agent
-    ADD CONSTRAINT IF NOT EXISTS
-    reconciler_status_duration_present_unless_not_yet_run CHECK (
-        (reconciler_status_kind = 'not-yet-run'
-            AND reconciler_status_duration_secs IS NULL)
-        OR
-        (reconciler_status_kind != 'not-yet-run'
-            AND reconciler_status_duration_secs IS NOT NULL)
-    );
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
+    inv_collection_id UUID NOT NULL,
+    id UUID NOT NULL,
+    generation INT8 NOT NULL,
+    remove_mupdate_override UUID,
+    PRIMARY KEY (inv_collection_id, id)
+);
