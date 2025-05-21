@@ -53,16 +53,16 @@ impl super::Nexus {
         opctx: &OpContext,
         token: String,
     ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
-        let db_console_session =
+        let (.., db_session) =
             self.db_datastore.session_lookup_by_token(&opctx, token).await?;
 
         let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(db_console_session.silo_user_id)
+            .silo_user_id(db_session.silo_user_id)
             .fetch()
             .await?;
 
         Ok(authn::ConsoleSessionWithSiloId {
-            console_session: db_console_session,
+            console_session: db_session,
             silo_id: db_silo_user.silo_id,
         })
     }
