@@ -152,6 +152,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -7442,16 +7443,16 @@ fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct DiskRow {
-            id: Uuid,
-            zpool_id: Uuid,
+            id: PhysicalDiskUuid,
+            zpool_id: ZpoolUuid,
             vendor: String,
             model: String,
             serial: String,
         }
 
         let rows = disks.iter().map(|d| DiskRow {
-            id: d.id.into_untyped_uuid(),
-            zpool_id: d.pool_id.into_untyped_uuid(),
+            id: d.id,
+            zpool_id: d.pool_id,
             vendor: d.identity.vendor.clone(),
             model: d.identity.model.clone(),
             serial: d.identity.serial.clone(),
@@ -7470,7 +7471,7 @@ fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct DatasetRow {
-            id: Uuid,
+            id: DatasetUuid,
             name: String,
             compression: String,
             quota: String,
@@ -7478,7 +7479,7 @@ fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
         }
 
         let rows = datasets.iter().map(|d| DatasetRow {
-            id: d.id.into_untyped_uuid(),
+            id: d.id,
             name: d.name.full_name(),
             compression: d.inner.compression.to_string(),
             quota: d
@@ -7506,13 +7507,13 @@ fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
         struct ZoneRow {
-            id: Uuid,
+            id: OmicronZoneUuid,
             kind: &'static str,
             image_source: String,
         }
 
         let rows = zones.iter().map(|z| ZoneRow {
-            id: z.id.into_untyped_uuid(),
+            id: z.id,
             kind: z.zone_type.kind().report_str(),
             image_source: match &z.image_source {
                 OmicronZoneImageSource::InstallDataset => {
