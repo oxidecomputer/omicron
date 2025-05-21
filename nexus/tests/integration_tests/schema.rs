@@ -2187,6 +2187,14 @@ fn after_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn before_143_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    todo!()
+}
+
+fn after_143_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    todo!()
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -2250,6 +2258,10 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(140, 0, 0),
         DataMigrationFns::new().before(before_140_0_0).after(after_140_0_0),
+    );
+    map.insert(
+        Version::new(143, 0, 0),
+        DataMigrationFns::new().before(before_143_0_0).after(after_143_0_0),
     );
 
     map
