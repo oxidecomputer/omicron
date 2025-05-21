@@ -627,7 +627,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
     let mock = server
         .mock_async(|when, then| {
             when.method(POST)
-                .header("x-oxide-receiver-id", "test.foo")
+                .header("x-oxide-alert-class", "test.foo")
                 .header("x-oxide-alert-id", id.to_string())
                 .and(is_valid_for_webhook(&webhook))
                 // There should be a signature header present for all three
