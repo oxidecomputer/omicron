@@ -45,6 +45,7 @@ use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, NvmeFirmware, PowerState, RotPage,
     RotSlot,
 };
+use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
@@ -55,6 +56,7 @@ use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideKind;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
@@ -1413,15 +1415,14 @@ impl InvOmicronSledConfig {
     pub fn new(
         inv_collection_id: CollectionUuid,
         id: Uuid,
-        config: &OmicronSledConfig,
+        generation: external::Generation,
+        remove_mupdate_override: Option<MupdateOverrideUuid>,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
             id,
-            generation: Generation(config.generation),
-            remove_mupdate_override: config
-                .remove_mupdate_override
-                .map(From::from),
+            generation: Generation(generation),
+            remove_mupdate_override: remove_mupdate_override.map(From::from),
         }
     }
 }

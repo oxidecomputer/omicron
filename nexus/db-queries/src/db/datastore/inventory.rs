@@ -3063,7 +3063,8 @@ impl ConfigReconcilerRows {
         self.sled_configs.push(InvOmicronSledConfig::new(
             collection_id,
             sled_config_id,
-            config,
+            config.generation,
+            config.remove_mupdate_override,
         ));
         self.disks.extend(config.disks.iter().map(|disk| {
             InvOmicronSledConfigDisk::new(
