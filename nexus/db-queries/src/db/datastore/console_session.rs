@@ -29,9 +29,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         token: String,
-    ) -> LookupResult<ConsoleSession> {
-        // TODO: some special system authz because the presence of the token _is_ the authz
-        console_session::table
+    ) -> LookupResult<(authz::ConsoleSession, ConsoleSession)> {
+        let db_session = console_session::table
             .filter(console_session::token.eq(token))
             .select(ConsoleSession::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
@@ -39,7 +38,22 @@ impl DataStore {
             .map_err(|_e| Error::ObjectNotFound {
                 type_name: ResourceType::ConsoleSession,
                 lookup_type: LookupType::ByOther("session token".to_string()),
-            })
+            })?;
+
+        // we have to construct the authz resource after the lookup because we don't
+        // have its ID on hand until then
+        let authz_session = authz::ConsoleSession::new(
+            authz::FLEET,
+            db_session.id(),
+            LookupType::ById(db_session.id().into_untyped_uuid()),
+        );
+
+        // This check might seem superfluous, but (for now at least) only the
+        // fleet external authenticator user can read a session, so this is
+        // essentially checking that the opctx comes from that user.
+        opctx.authorize(authz::Action::Read, &authz_session).await?;
+
+        Ok((authz_session, db_session))
     }
 
     // TODO-correctness: fix session method errors. the map_errs turn all errors

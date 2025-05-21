@@ -166,7 +166,7 @@ impl super::Nexus {
         opctx: &OpContext,
         token: String,
     ) -> Result<Actor, Reason> {
-        let db_access_token = self
+        let (.., db_access_token) = self
             .db_datastore
             .device_token_lookup_by_token(opctx, token)
             .await

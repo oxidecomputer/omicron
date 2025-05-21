@@ -613,7 +613,7 @@ mod test {
         assert_eq!(DEFAULT_SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
-        let fetched = datastore
+        let (.., fetched) = datastore
             .session_lookup_by_token(&authn_opctx, token.clone())
             .await
             .unwrap();
@@ -655,7 +655,7 @@ mod test {
         // right thing between opctx or authn_opctx
 
         // time_last_used change persists in DB
-        let fetched = datastore
+        let (.., fetched) = datastore
             .session_lookup_by_token(&opctx, token.clone())
             .await
             .unwrap();
