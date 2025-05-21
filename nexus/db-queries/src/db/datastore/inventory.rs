@@ -2916,11 +2916,11 @@ impl ConfigReconcilerRows {
         collection_id: CollectionUuid,
         collection: &Collection,
     ) -> anyhow::Result<Self> {
-        let mut slf = Self::default();
+        let mut this = Self::default();
         for (sled_id, sled_agent) in &collection.sled_agents {
-            slf.accumulate(collection_id, *sled_id, sled_agent)?;
+            this.accumulate(collection_id, *sled_id, sled_agent)?;
         }
-        Ok(slf)
+        Ok(this)
     }
 
     fn accumulate(
