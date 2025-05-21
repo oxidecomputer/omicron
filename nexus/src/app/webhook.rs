@@ -400,7 +400,7 @@ impl<'a> ReceiverClient<'a> {
         #[derive(serde::Serialize, Debug)]
         struct DeliveryMetadata<'a> {
             id: WebhookDeliveryUuid,
-            webhook_id: AlertReceiverUuid,
+            receiver_id: AlertReceiverUuid,
             sent_at: &'a str,
             trigger: views::AlertDeliveryTrigger,
         }
@@ -414,7 +414,7 @@ impl<'a> ReceiverClient<'a> {
             data,
             delivery: DeliveryMetadata {
                 id: delivery.id.into(),
-                webhook_id: self.rx.id(),
+                receiver_id: self.rx.id(),
                 sent_at: &sent_at,
                 trigger: delivery.triggered_by.into(),
             },
