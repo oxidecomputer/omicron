@@ -13,9 +13,11 @@ use clap::Subcommand;
 use futures::StreamExt;
 use gateway_client::types::SpIgnition;
 use gateway_client::types::SpType;
+use gateway_types::rot::RotSlot;
 use internal_dns_types::names::ServiceName;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
+use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -377,6 +379,28 @@ enum Component {
         expected_active_version: ArtifactVersion,
         expected_inactive_version: ExpectedVersion,
     },
+    Rot {
+        /// whether we expect the "A" or "B" slot to be active
+        expected_active_slot: RotSlot,
+        /// expected version of the "A" or "B" slot (as per the
+        /// active slot specified in expected_active_slot)
+        expected_active_version: ArtifactVersion,
+        /// expected version of the "A" or "B" slot (opposite to
+        /// the active slot as specified in expected_active_slot)
+        expected_inactive_version: ExpectedVersion,
+        /// the expected persistent boot preference written into the current
+        /// authoritative CFPA page (ping or pong)
+        expected_persistent_boot_preference: RotSlot,
+        /// the expected persistent boot preference written into the CFPA scratch
+        /// page that will become the persistent boot preference in the authoritative
+        /// CFPA page upon reboot, unless CFPA update of the authoritative page fails
+        /// for some reason.
+        expected_pending_persistent_boot_preference: Option<RotSlot>,
+        // this field is not in use yet.
+        //
+        /// override persistent preference selection for a single boot
+        expected_transient_boot_preference: Option<RotSlot>,
+    },
 }
 
 fn cmd_set(
@@ -396,6 +420,23 @@ fn cmd_set(
             } => PendingMgsUpdateDetails::Sp {
                 expected_active_version,
                 expected_inactive_version,
+            },
+            Component::Rot {
+                expected_active_slot,
+                expected_active_version,
+                expected_inactive_version,
+                expected_persistent_boot_preference,
+                expected_pending_persistent_boot_preference,
+                expected_transient_boot_preference,
+            } => PendingMgsUpdateDetails::Rot {
+                expected_active_slot: ExpectedActiveRotSlot {
+                    slot: expected_active_slot,
+                    version: expected_active_version,
+                },
+                expected_inactive_version,
+                expected_persistent_boot_preference,
+                expected_pending_persistent_boot_preference,
+                expected_transient_boot_preference,
             },
         },
         artifact_hash: args.artifact_hash,

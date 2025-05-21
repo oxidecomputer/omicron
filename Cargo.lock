@@ -10298,6 +10298,7 @@ dependencies = [
  "dropshot",
  "futures",
  "gateway-client",
+ "gateway-types",
  "humantime",
  "internal-dns-resolver",
  "internal-dns-types",
