@@ -9,7 +9,7 @@ use serde::ser::{Serialize, Serializer};
 use std::fmt;
 
 impl_enum_type!(
-    WebhookEventClassEnum:
+    AlertClassEnum:
 
     #[derive(
         Copy,
@@ -22,7 +22,7 @@ impl_enum_type!(
         FromSqlRow,
         strum::VariantArray,
     )]
-    pub enum WebhookEventClass;
+    pub enum AlertClass;
 
     Probe => b"probe"
     TestFoo => b"test.foo"
@@ -32,7 +32,7 @@ impl_enum_type!(
     TestQuuxBarBaz => b"test.quux.bar.baz"
 );
 
-impl WebhookEventClass {
+impl AlertClass {
     pub fn as_str(&self) -> &'static str {
         // TODO(eliza): it would be really nice if these strings were all
         // declared a single time, rather than twice (in both `impl_enum_type!`
@@ -84,13 +84,13 @@ impl WebhookEventClass {
         <Self as strum::VariantArray>::VARIANTS;
 }
 
-impl fmt::Display for WebhookEventClass {
+impl fmt::Display for AlertClass {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
 
-impl Serialize for WebhookEventClass {
+impl Serialize for AlertClass {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -99,19 +99,19 @@ impl Serialize for WebhookEventClass {
     }
 }
 
-impl<'de> Deserialize<'de> for WebhookEventClass {
+impl<'de> Deserialize<'de> for AlertClass {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         <&'de str>::deserialize(deserializer)?
-            .parse::<WebhookEventClass>()
+            .parse::<AlertClass>()
             .map_err(de::Error::custom)
     }
 }
 
-impl std::str::FromStr for WebhookEventClass {
-    type Err = EventClassParseError;
+impl std::str::FromStr for AlertClass {
+    type Err = AlertClassParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         for &class in Self::ALL_CLASSES {
             if s == class.as_str() {
@@ -119,12 +119,12 @@ impl std::str::FromStr for WebhookEventClass {
             }
         }
 
-        Err(EventClassParseError(()))
+        Err(AlertClassParseError(()))
     }
 }
 
-impl From<WebhookEventClass> for views::EventClass {
-    fn from(class: WebhookEventClass) -> Self {
+impl From<AlertClass> for views::AlertClass {
+    fn from(class: AlertClass) -> Self {
         Self {
             name: class.to_string(),
             description: class.description().to_string(),
@@ -133,12 +133,12 @@ impl From<WebhookEventClass> for views::EventClass {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct EventClassParseError(());
+pub struct AlertClassParseError(());
 
-impl fmt::Display for EventClassParseError {
+impl fmt::Display for AlertClassParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "expected one of [")?;
-        let mut variants = WebhookEventClass::ALL_CLASSES.iter();
+        let mut variants = AlertClass::ALL_CLASSES.iter();
         if let Some(v) = variants.next() {
             write!(f, "{v}")?;
             for v in variants {
@@ -149,7 +149,7 @@ impl fmt::Display for EventClassParseError {
     }
 }
 
-impl std::error::Error for EventClassParseError {}
+impl std::error::Error for AlertClassParseError {}
 
 #[cfg(test)]
 mod tests {
@@ -157,17 +157,17 @@ mod tests {
 
     #[test]
     fn test_from_str_roundtrips() {
-        for &variant in WebhookEventClass::ALL_CLASSES {
+        for &variant in AlertClass::ALL_CLASSES {
             assert_eq!(Ok(dbg!(variant)), dbg!(variant.to_string().parse()));
         }
     }
 
     // This is mainly a regression test to ensure that, should anyone add new
-    // `test.` variants in future, the `WebhookEventClass::is_test()` method
+    // `test.` variants in future, the `AlertClass::is_test()` method
     // returns `true` for them.
     #[test]
     fn test_is_test() {
-        let problematic_variants = WebhookEventClass::ALL_CLASSES
+        let problematic_variants = AlertClass::ALL_CLASSES
             .iter()
             .copied()
             .filter(|variant| {
@@ -176,10 +176,10 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             problematic_variants,
-            Vec::<WebhookEventClass>::new(),
+            Vec::<AlertClass>::new(),
             "you have added one or more new `test.*` webhook event class \
              variant(s), but you seem to have not updated the \
-             `WebhookEventClass::is_test()` method!\nthe problematic \
+             `AlertClass::is_test()` method!\nthe problematic \
              variant(s) are: {problematic_variants:?}",
         );
     }

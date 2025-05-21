@@ -1126,8 +1126,8 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "tuf_artifact_replication" => {
             print_task_tuf_artifact_replication(details);
         }
-        "webhook_dispatcher" => {
-            print_task_webhook_dispatcher(details);
+        "alert_dispatcher" => {
+            print_task_alert_dispatcher(details);
         }
         "webhook_deliverator" => {
             print_task_webhook_deliverator(details);
@@ -2429,19 +2429,18 @@ fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
     }
 }
 
-fn print_task_webhook_dispatcher(details: &serde_json::Value) {
-    use nexus_types::internal_api::background::WebhookDispatched;
-    use nexus_types::internal_api::background::WebhookDispatcherStatus;
-    use nexus_types::internal_api::background::WebhookGlobStatus;
+fn print_task_alert_dispatcher(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::AlertDispatched;
+    use nexus_types::internal_api::background::AlertDispatcherStatus;
+    use nexus_types::internal_api::background::AlertGlobStatus;
 
-    let WebhookDispatcherStatus {
+    let AlertDispatcherStatus {
         globs_reprocessed,
         glob_version,
         errors,
         dispatched,
         no_receivers,
-    } = match serde_json::from_value::<WebhookDispatcherStatus>(details.clone())
-    {
+    } = match serde_json::from_value::<AlertDispatcherStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
@@ -2462,8 +2461,8 @@ fn print_task_webhook_dispatcher(details: &serde_json::Value) {
         }
     }
 
-    const DISPATCHED: &str = "events dispatched:";
-    const NO_RECEIVERS: &str = "events with no receivers subscribed:";
+    const DISPATCHED: &str = "alerts dispatched:";
+    const NO_RECEIVERS: &str = "alerts with no receivers subscribed:";
     const OUTDATED_GLOBS: &str = "outdated glob subscriptions:";
     const GLOBS_REPROCESSED: &str = "glob subscriptions reprocessed:";
     const ALREADY_REPROCESSED: &str =
@@ -2491,9 +2490,9 @@ fn print_task_webhook_dispatcher(details: &serde_json::Value) {
             dispatched: usize,
         }
         let table_rows = dispatched.iter().map(
-            |&WebhookDispatched { event_id, subscribed, dispatched }| {
+            |&AlertDispatched { alert_id, subscribed, dispatched }| {
                 DispatchedRow {
-                    event: event_id.into_untyped_uuid(),
+                    event: alert_id.into_untyped_uuid(),
                     subscribed,
                     dispatched,
                 }
@@ -2526,11 +2525,11 @@ fn print_task_webhook_dispatcher(details: &serde_json::Value) {
             println!("      receiver {rx_id:?}:");
             for (glob, status) in globs {
                 match status {
-                    Ok(WebhookGlobStatus::AlreadyReprocessed) => {
+                    Ok(AlertGlobStatus::AlreadyReprocessed) => {
                         println!("      > {glob:?}: already reprocessed");
                         already_reprocessed += 1;
                     }
-                    Ok(WebhookGlobStatus::Reprocessed {
+                    Ok(AlertGlobStatus::Reprocessed {
                         created,
                         deleted,
                         prev_version,
@@ -2661,7 +2660,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
             let table_rows = failed_deliveries.into_iter().map(
                 |WebhookDeliveryFailure {
                      delivery_id,
-                     event_id,
+                     alert_id,
                      attempt,
                      result,
                      response_status,
@@ -2670,7 +2669,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
                     // Turn these into untyped `Uuid`s so that the Display impl
                     // doesn't include the UUID kind in the table.
                     delivery: delivery_id.into_untyped_uuid(),
-                    event: event_id.into_untyped_uuid(),
+                    event: alert_id.into_untyped_uuid(),
                     attempt,
                     result,
                     status: response_status,
