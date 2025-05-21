@@ -264,7 +264,7 @@ fn is_valid_for_webhook(
     let id = webhook.identity.id.to_string();
     move |when| {
         when.path(path)
-            .header("x-oxide-webhook-id", id)
+            .header("x-oxide-receiver-id", id)
             .header_exists("x-oxide-delivery-id")
             .header_exists("x-oxide-signature")
             .header("content-type", "application/json")
@@ -514,8 +514,8 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
                 })
                 .to_string();
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo")
-                    .header("x-oxide-event-id", id.to_string())
+                    .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -627,8 +627,8 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
     let mock = server
         .mock_async(|when, then| {
             when.method(POST)
-                .header("x-oxide-event-class", "test.foo")
-                .header("x-oxide-event-id", id.to_string())
+                .header("x-oxide-receiver-id", "test.foo")
+                .header("x-oxide-alert-id", id.to_string())
                 .and(is_valid_for_webhook(&webhook))
                 // There should be a signature header present for all three
                 // secrets, and they should all verify the contents of the
@@ -716,8 +716,8 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
         srv_bar
             .mock_async(move |when, then| {
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo.bar")
-                    .header("x-oxide-event-id", bar_alert_id.to_string())
+                    .header("x-oxide-alert-class", "test.foo.bar")
+                    .header("x-oxide-alert-id", bar_alert_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -757,8 +757,8 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
         srv_baz
             .mock_async(move |when, then| {
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo.baz")
-                    .header("x-oxide-event-id", baz_alert_id.to_string())
+                    .header("x-oxide-alert-class", "test.foo.baz")
+                    .header("x-oxide-alert-id", baz_alert_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -800,10 +800,10 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
             .mock_async(move |when, then| {
                 when.method(POST)
                     .header_matches(
-                        "x-oxide-event-class",
+                        "x-oxide-alert-class",
                         "test\\.foo\\.ba[rz]",
                     )
-                    .header_exists("x-oxide-event-id")
+                    .header_exists("x-oxide-alert-id")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -883,8 +883,8 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                 })
                 .to_string();
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo")
-                    .header("x-oxide-event-id", id.to_string())
+                    .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -962,8 +962,8 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                 })
                 .to_string();
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo")
-                    .header("x-oxide-event-id", id.to_string())
+                    .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -1032,8 +1032,8 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                 })
                 .to_string();
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo")
-                    .header("x-oxide-event-id", id.to_string())
+                    .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -1116,7 +1116,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
         server
             .mock_async(move |when, then| {
                 when.method(POST)
-                    .header("x-oxide-event-class", "probe")
+                    .header("x-oxide-alert-class", "probe")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -1170,7 +1170,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
         server
             .mock_async(move |when, then| {
                 when.method(POST)
-                    .header("x-oxide-event-class", "probe")
+                    .header("x-oxide-alert-class", "probe")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -1219,7 +1219,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
         server
             .mock_async(move |when, then| {
                 when.method(POST)
-                    .header("x-oxide-event-class", "probe")
+                    .header("x-oxide-alert-class", "probe")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -1289,10 +1289,10 @@ async fn test_probe_resends_failed_deliveries(
         server
             .mock_async(move |when, then| {
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo")
+                    .header("x-oxide-alert-class", "test.foo")
                     // either event
                     .header_matches(
-                        "x-oxide-event-id",
+                        "x-oxide-alert-id",
                         format!("({event1_id})|({event2_id})"),
                     )
                     .and(is_valid_for_webhook(&webhook))
@@ -1363,7 +1363,7 @@ async fn test_probe_resends_failed_deliveries(
                 })
                 .to_string();
                 when.method(POST)
-                    .header("x-oxide-event-class", "probe")
+                    .header("x-oxide-alert-class", "probe")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -1381,10 +1381,10 @@ async fn test_probe_resends_failed_deliveries(
         server
             .mock_async(move |when, then| {
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo")
+                    .header("x-oxide-alert-class", "test.foo")
                     // either event
                     .header_matches(
-                        "x-oxide-event-id",
+                        "x-oxide-alert-id",
                         format!("({event1_id})|({event2_id})"),
                     )
                     .and(is_valid_for_webhook(&webhook))
@@ -1453,8 +1453,8 @@ async fn test_api_resends_failed_deliveries(
         server
             .mock_async(move |when, then| {
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo")
-                    .header("x-oxide-event-id", event1_id.to_string())
+                    .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-id", event1_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -1513,8 +1513,8 @@ async fn test_api_resends_failed_deliveries(
         server
             .mock_async(move |when, then| {
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo")
-                    .header("x-oxide-event-id", event1_id.to_string())
+                    .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-id", event1_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -1592,8 +1592,8 @@ async fn subscription_add_test(
                 })
                 .to_string();
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo.bar")
-                    .header("x-oxide-event-id", id2.to_string())
+                    .header("x-oxide-alert-class", "test.foo.bar")
+                    .header("x-oxide-alert-id", id2.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -1724,8 +1724,8 @@ async fn subscription_remove_test(
                 })
                 .to_string();
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo.bar")
-                    .header("x-oxide-event-id", id1.to_string())
+                    .header("x-oxide-alert-class", "test.foo.bar")
+                    .header("x-oxide-alert-id", id1.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
@@ -1805,8 +1805,8 @@ async fn subscription_remove_test(
                 })
                 .to_string();
                 when.method(POST)
-                    .header("x-oxide-event-class", "test.foo")
-                    .header("x-oxide-event-id", id3.to_string())
+                    .header("x-oxide-alert-class", "test.foo")
+                    .header("x-oxide-alert-id", id3.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.config.secrets[0].id,
