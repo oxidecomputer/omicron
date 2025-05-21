@@ -3913,9 +3913,9 @@ fn support_bundle_download_ranges(
     // but we won't keep a single connection to Nexus open for longer than a 100
     // MiB download.
     const CHUNK_SIZE: u64 = 100 * (1 << 20);
-    futures::stream::try_unfold((start, start + CHUNK_SIZE - 1), move |range| {
-        let id = id.clone();
-        async move {
+    futures::stream::try_unfold(
+        (start, start + CHUNK_SIZE - 1),
+        move |range| async move {
             if end <= range.0 {
                 return Ok(None);
             }
@@ -3924,8 +3924,8 @@ fn support_bundle_download_ranges(
                 support_bundle_download_range(client, id, range).await?;
             let next_range = (range.0 + CHUNK_SIZE, range.1 + CHUNK_SIZE);
             Ok::<_, anyhow::Error>(Some((stream, next_range)))
-        }
-    })
+        },
+    )
     .try_flatten()
 }
 
