@@ -139,7 +139,7 @@ impl PotentialRange {
 
     /// Parse the range request as a UTF-8 string.
     ///
-    /// This makes no other attempts to validate the range -- use [Self::Parse]
+    /// This makes no other attempts to validate the range -- use [Self::parse]
     /// to accomplish that.
     ///
     /// This can be useful when attempting to proxy the range request
