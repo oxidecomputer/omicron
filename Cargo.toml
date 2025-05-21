@@ -116,6 +116,7 @@ members = [
     "oximeter/timeseries-macro",
     "oximeter/types",
     "package",
+    "parallel-task-set",
     "passwords",
     "range-requests",
     "rpaths",
@@ -267,6 +268,7 @@ default-members = [
     "oximeter/timeseries-macro",
     "oximeter/types",
     "package",
+    "parallel-task-set",
     "passwords",
     "range-requests",
     "rpaths",
@@ -586,6 +588,7 @@ oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
 oximeter-types = { path = "oximeter/types" }
 oxql-types = { path = "oximeter/oxql-types" }
 p256 = "0.13"
+parallel-task-set = { path = "parallel-task-set" }
 parse-display = "0.10.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.1.0"

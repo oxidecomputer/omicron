@@ -69,6 +69,7 @@ oximeter-client.workspace = true
 oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
 oxnet.workspace = true
 oxql-types.workspace = true
+parallel-task-set.workspace = true
 parse-display.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
