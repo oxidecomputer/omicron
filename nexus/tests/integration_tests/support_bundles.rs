@@ -235,7 +235,6 @@ async fn bundle_download_range(
     let body = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, &url)
             .header(http::header::RANGE, value)
-            // TODO: expect_response_header?
             .expect_status(Some(StatusCode::PARTIAL_CONTENT))
             .expect_response_header(
                 http::header::CONTENT_RANGE,

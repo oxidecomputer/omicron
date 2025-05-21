@@ -417,9 +417,7 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite" }
-# TODO: Pull in a new rev of dropshot when it exists
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "header-null" }
-# dropshot = { version = "0.16.1", features = [ "usdt-probes" ] }
+dropshot = { version = "0.16.2", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
 either = "1.14.0"
 ereport-types = { path = "ereport/types" }
