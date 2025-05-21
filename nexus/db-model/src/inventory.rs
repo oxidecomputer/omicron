@@ -57,6 +57,8 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideKind;
 use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_uuid_kinds::OmicronSledConfigKind;
+use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
@@ -811,11 +813,12 @@ pub struct InvSledAgent {
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
     // Soft foreign key to an `InvOmicronSledConfig`
-    pub ledgered_sled_config: Option<Uuid>,
+    pub ledgered_sled_config: Option<DbTypedUuid<OmicronSledConfigKind>>,
 
     // Soft foreign key to an `InvOmicronSledConfig`. May or may not be the same
     // as `ledgered_sled_config`.
-    pub last_reconciliation_sled_config: Option<Uuid>,
+    pub last_reconciliation_sled_config:
+        Option<DbTypedUuid<OmicronSledConfigKind>>,
 
     #[diesel(embed)]
     pub reconciler_status: InvConfigReconcilerStatus,
@@ -829,7 +832,8 @@ pub struct InvConfigReconcilerStatus {
     // Soft foreign key to an `InvOmicronSledConfig`. May or may not be the same
     // as either of the other sled config keys above. Only populated if
     // `reconciler_status_kind` is `Running`.
-    pub reconciler_status_sled_config: Option<Uuid>,
+    pub reconciler_status_sled_config:
+        Option<DbTypedUuid<OmicronSledConfigKind>>,
     // Interpretation varies based on `reconciler_status_kind`:
     //
     // * `NotYetRun` - always `None`
@@ -856,7 +860,7 @@ impl InvConfigReconcilerStatus {
         get_config: F,
     ) -> anyhow::Result<ConfigReconcilerInventoryStatus>
     where
-        F: FnOnce(&Uuid) -> Option<OmicronSledConfig>,
+        F: FnOnce(&OmicronSledConfigUuid) -> Option<OmicronSledConfig>,
     {
         let status = match self.reconciler_status_kind {
             InvConfigReconcilerStatusKind::NotYetRun => {
@@ -866,7 +870,7 @@ impl InvConfigReconcilerStatus {
                 let config_id = self.reconciler_status_sled_config.context(
                     "missing reconciler status sled config for kind 'running'",
                 )?;
-                let config = get_config(&config_id)
+                let config = get_config(&config_id.into())
                     .context("missing sled config we should have fetched")?;
                 ConfigReconcilerInventoryStatus::Running {
                     config,
@@ -918,8 +922,8 @@ impl InvSledAgent {
     pub fn new_without_baseboard(
         collection_id: CollectionUuid,
         sled_agent: &nexus_types::inventory::SledAgent,
-        ledgered_sled_config: Option<Uuid>,
-        last_reconciliation_sled_config: Option<Uuid>,
+        ledgered_sled_config: Option<OmicronSledConfigUuid>,
+        last_reconciliation_sled_config: Option<OmicronSledConfigUuid>,
         reconciler_status: InvConfigReconcilerStatus,
     ) -> Result<InvSledAgent, anyhow::Error> {
         // It's irritating to have to check this case at runtime.  The challenge
@@ -958,8 +962,9 @@ impl InvSledAgent {
                     sled_agent.usable_physical_ram,
                 ),
                 reservoir_size: ByteCount::from(sled_agent.reservoir_size),
-                ledgered_sled_config,
-                last_reconciliation_sled_config,
+                ledgered_sled_config: ledgered_sled_config.map(From::from),
+                last_reconciliation_sled_config:
+                    last_reconciliation_sled_config.map(From::from),
                 reconciler_status,
             })
         }
@@ -1406,7 +1411,7 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
 #[diesel(table_name = inv_omicron_sled_config)]
 pub struct InvOmicronSledConfig {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub id: Uuid,
+    pub id: DbTypedUuid<OmicronSledConfigKind>,
     pub generation: Generation,
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
 }
@@ -1414,13 +1419,13 @@ pub struct InvOmicronSledConfig {
 impl InvOmicronSledConfig {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        id: Uuid,
+        id: OmicronSledConfigUuid,
         generation: external::Generation,
         remove_mupdate_override: Option<MupdateOverrideUuid>,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
-            id,
+            id: id.into(),
             generation: Generation(generation),
             remove_mupdate_override: remove_mupdate_override.map(From::from),
         }
@@ -1513,7 +1518,7 @@ impl From<nexus_sled_agent_shared::inventory::ZoneKind> for ZoneType {
 #[diesel(table_name = inv_omicron_sled_config_disk)]
 pub struct InvOmicronSledConfigDisk {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub sled_config_id: Uuid,
+    pub sled_config_id: DbTypedUuid<OmicronSledConfigKind>,
     pub id: DbTypedUuid<omicron_uuid_kinds::PhysicalDiskKind>,
 
     pub vendor: String,
@@ -1526,12 +1531,12 @@ pub struct InvOmicronSledConfigDisk {
 impl InvOmicronSledConfigDisk {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        sled_config_id: Uuid,
+        sled_config_id: OmicronSledConfigUuid,
         disk_config: OmicronPhysicalDiskConfig,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
-            sled_config_id,
+            sled_config_id: sled_config_id.into(),
             id: disk_config.id.into(),
             vendor: disk_config.identity.vendor,
             serial: disk_config.identity.serial,
@@ -1560,7 +1565,7 @@ impl From<InvOmicronSledConfigDisk> for OmicronPhysicalDiskConfig {
 #[diesel(table_name = inv_omicron_sled_config_dataset)]
 pub struct InvOmicronSledConfigDataset {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub sled_config_id: Uuid,
+    pub sled_config_id: DbTypedUuid<OmicronSledConfigKind>,
     pub id: DbTypedUuid<omicron_uuid_kinds::DatasetKind>,
 
     pub pool_id: DbTypedUuid<ZpoolKind>,
@@ -1575,12 +1580,12 @@ pub struct InvOmicronSledConfigDataset {
 impl InvOmicronSledConfigDataset {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        sled_config_id: Uuid,
+        sled_config_id: OmicronSledConfigUuid,
         dataset_config: &DatasetConfig,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
-            sled_config_id,
+            sled_config_id: sled_config_id.into(),
             id: dataset_config.id.into(),
             pool_id: dataset_config.name.pool().id().into(),
             kind: dataset_config.name.kind().into(),
@@ -1632,7 +1637,7 @@ impl_enum_type!(
 #[diesel(table_name = inv_omicron_sled_config_zone)]
 pub struct InvOmicronSledConfigZone {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub sled_config_id: Uuid,
+    pub sled_config_id: DbTypedUuid<OmicronSledConfigKind>,
     pub id: DbTypedUuid<OmicronZoneKind>,
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
@@ -1659,7 +1664,7 @@ pub struct InvOmicronSledConfigZone {
 impl InvOmicronSledConfigZone {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        sled_config_id: Uuid,
+        sled_config_id: OmicronSledConfigUuid,
         zone: &OmicronZoneConfig,
     ) -> Result<InvOmicronSledConfigZone, anyhow::Error> {
         let (image_source, image_artifact_sha256) = match &zone.image_source {
@@ -1677,7 +1682,7 @@ impl InvOmicronSledConfigZone {
             // Fill in the known fields that don't require inspecting
             // `zone.zone_type`
             inv_collection_id: inv_collection_id.into(),
-            sled_config_id,
+            sled_config_id: sled_config_id.into(),
             id: zone.id.into(),
             filesystem_pool: zone
                 .filesystem_pool
@@ -2027,7 +2032,7 @@ impl InvOmicronSledConfigZone {
 #[diesel(table_name = inv_omicron_sled_config_zone_nic)]
 pub struct InvOmicronSledConfigZoneNic {
     inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub sled_config_id: Uuid,
+    pub sled_config_id: DbTypedUuid<OmicronSledConfigKind>,
     pub id: Uuid,
     name: Name,
     ip: IpNetwork,
@@ -2056,7 +2061,7 @@ impl From<InvOmicronSledConfigZoneNic> for OmicronZoneNic {
 impl InvOmicronSledConfigZoneNic {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        sled_config_id: Uuid,
+        sled_config_id: OmicronSledConfigUuid,
         zone: &OmicronZoneConfig,
     ) -> Result<Option<InvOmicronSledConfigZoneNic>, anyhow::Error> {
         let Some(nic) = zone.zone_type.service_vnic() else {
@@ -2065,7 +2070,7 @@ impl InvOmicronSledConfigZoneNic {
         let nic = OmicronZoneNic::new(zone.id, nic)?;
         Ok(Some(Self {
             inv_collection_id: inv_collection_id.into(),
-            sled_config_id,
+            sled_config_id: sled_config_id.into(),
             id: nic.id,
             name: nic.name,
             ip: nic.ip,
