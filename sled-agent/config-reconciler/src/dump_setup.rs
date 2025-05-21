@@ -272,6 +272,7 @@ impl DumpSetup {
                     let name = disk.zpool_name();
                     if let Ok(info) =
                         illumos_utils::zpool::Zpool::get_info(&name.to_string())
+                            .await
                     {
                         if info.health() == ZpoolHealth::Online {
                             m2_core_datasets.push(CoreZpool {
@@ -290,6 +291,7 @@ impl DumpSetup {
                     let name = disk.zpool_name();
                     if let Ok(info) =
                         illumos_utils::zpool::Zpool::get_info(&name.to_string())
+                            .await
                     {
                         if info.health() == ZpoolHealth::Online {
                             u2_debug_datasets.push(DebugZpool {

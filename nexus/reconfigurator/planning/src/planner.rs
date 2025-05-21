@@ -990,8 +990,7 @@ pub(crate) mod test {
     use crate::example::SimRngState;
     use crate::example::example;
     use crate::system::SledBuilder;
-    use chrono::NaiveDateTime;
-    use chrono::TimeZone;
+    use chrono::DateTime;
     use chrono::Utc;
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
@@ -2639,8 +2638,7 @@ pub(crate) mod test {
         .expect("failed to plan");
 
         // Define a time_created for consistent output across runs.
-        blueprint2.time_created =
-            Utc.from_utc_datetime(&NaiveDateTime::UNIX_EPOCH);
+        blueprint2.time_created = DateTime::<Utc>::UNIX_EPOCH;
 
         assert_contents(
             "tests/output/planner_nonprovisionable_bp2.txt",
@@ -2887,8 +2885,7 @@ pub(crate) mod test {
         .expect("failed to plan");
 
         // Define a time_created for consistent output across runs.
-        blueprint2.time_created =
-            Utc.from_utc_datetime(&NaiveDateTime::UNIX_EPOCH);
+        blueprint2.time_created = DateTime::<Utc>::UNIX_EPOCH;
 
         assert_contents(
             "tests/output/planner_decommissions_sleds_bp2.txt",

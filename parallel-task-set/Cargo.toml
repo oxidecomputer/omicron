@@ -1,0 +1,15 @@
+[package]
+name = "parallel-task-set"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+tokio.workspace = true
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
+
+[lints]
+workspace = true

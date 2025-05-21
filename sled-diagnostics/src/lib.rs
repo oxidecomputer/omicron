@@ -4,7 +4,9 @@
 
 //! Diagnostics for an Oxide sled that exposes common support commands.
 
-use futures::{StreamExt, stream::FuturesUnordered};
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
+use parallel_task_set::ParallelTaskSet;
 use slog::Logger;
 
 #[macro_use]
@@ -29,6 +31,9 @@ pub use crate::queries::{
 };
 use queries::*;
 
+/// Max number of ptool commands to run in parallel
+const MAX_PTOOL_PARALLELISM: usize = 50;
+
 /// List all zones on a sled.
 pub async fn zoneadm_info()
 -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
@@ -38,33 +43,43 @@ pub async fn zoneadm_info()
 /// Retrieve various `ipadm` command output for the system.
 pub async fn ipadm_info()
 -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
-    [ipadm_show_interface(), ipadm_show_addr(), ipadm_show_prop()]
-        .into_iter()
-        .map(|c| async move {
-            execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
-        })
-        .collect::<FuturesUnordered<_>>()
-        .collect::<Vec<Result<_, _>>>()
-        .await
+    let mut results = Vec::new();
+    let mut commands = ParallelTaskSet::new();
+    for command in
+        [ipadm_show_interface(), ipadm_show_addr(), ipadm_show_prop()]
+    {
+        if let Some(res) = commands
+            .spawn(execute_command_with_timeout(command, DEFAULT_TIMEOUT))
+            .await
+        {
+            results.push(res);
+        }
+    }
+    results.extend(commands.join_all().await);
+    results
 }
 
 /// Retrieve various `dladm` command output for the system.
 pub async fn dladm_info()
 -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
-    [
+    let mut results = Vec::new();
+    let mut commands = ParallelTaskSet::new();
+    for command in [
         dladm_show_phys(),
         dladm_show_ether(),
         dladm_show_link(),
         dladm_show_vnic(),
         dladm_show_linkprop(),
-    ]
-        .into_iter()
-        .map(|c| async move {
-            execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
-        })
-        .collect::<FuturesUnordered<_>>()
-        .collect::<Vec<Result<_, _>>>()
-        .await
+    ] {
+        if let Some(res) = commands
+            .spawn(execute_command_with_timeout(command, DEFAULT_TIMEOUT))
+            .await
+        {
+            results.push(res);
+        }
+    }
+    results.extend(commands.join_all().await);
+    results
 }
 
 pub async fn nvmeadm_info()
@@ -83,14 +98,23 @@ pub async fn pargs_oxide_processes(
         Err(e) => return vec![Err(e.into())],
     };
 
-    pids.iter()
-        .map(|pid| pargs_process(*pid))
-        .map(|c| async move {
-            execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
-        })
-        .collect::<FuturesUnordered<_>>()
-        .collect::<Vec<Result<_, _>>>()
-        .await
+    let mut results = Vec::with_capacity(pids.len());
+    let mut commands =
+        ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
+    for pid in pids {
+        if let Some(res) = commands
+            .spawn(execute_command_with_timeout(
+                pargs_process(pid),
+                DEFAULT_TIMEOUT,
+            ))
+            .await
+        {
+            results.push(res);
+        }
+    }
+
+    results.extend(commands.join_all().await);
+    results
 }
 
 pub async fn pstack_oxide_processes(
@@ -104,14 +128,22 @@ pub async fn pstack_oxide_processes(
         Err(e) => return vec![Err(e.into())],
     };
 
-    pids.iter()
-        .map(|pid| pstack_process(*pid))
-        .map(|c| async move {
-            execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
-        })
-        .collect::<FuturesUnordered<_>>()
-        .collect::<Vec<Result<_, _>>>()
-        .await
+    let mut results = Vec::with_capacity(pids.len());
+    let mut commands =
+        ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
+    for pid in pids {
+        if let Some(res) = commands
+            .spawn(execute_command_with_timeout(
+                pstack_process(pid),
+                DEFAULT_TIMEOUT,
+            ))
+            .await
+        {
+            results.push(res);
+        }
+    }
+    results.extend(commands.join_all().await);
+    results
 }
 
 pub async fn pfiles_oxide_processes(
@@ -125,14 +157,22 @@ pub async fn pfiles_oxide_processes(
         Err(e) => return vec![Err(e.into())],
     };
 
-    pids.iter()
-        .map(|pid| pfiles_process(*pid))
-        .map(|c| async move {
-            execute_command_with_timeout(c, DEFAULT_TIMEOUT).await
-        })
-        .collect::<FuturesUnordered<_>>()
-        .collect::<Vec<Result<_, _>>>()
-        .await
+    let mut results = Vec::with_capacity(pids.len());
+    let mut commands =
+        ParallelTaskSet::new_with_parallelism(MAX_PTOOL_PARALLELISM);
+    for pid in pids {
+        if let Some(res) = commands
+            .spawn(execute_command_with_timeout(
+                pfiles_process(pid),
+                DEFAULT_TIMEOUT,
+            ))
+            .await
+        {
+            results.push(res);
+        }
+    }
+    results.extend(commands.join_all().await);
+    results
 }
 
 /// Retrieve various `zfs` command output for the system.

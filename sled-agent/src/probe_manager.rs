@@ -405,7 +405,7 @@ impl ProbeManagerInner {
                 // TODO-correctness: There are no physical links in the zone, is
                 // this intended to delete the control VNIC?
                 for l in running_zone.links_mut() {
-                    if let Err(e) = l.delete() {
+                    if let Err(e) = l.delete().await {
                         error!(self.log, "delete probe link {}: {e}", l.name());
                     }
                 }

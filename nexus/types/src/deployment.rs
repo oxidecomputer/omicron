@@ -1262,12 +1262,12 @@ pub enum PendingMgsUpdateDetails {
     Rot {
         // implicit: component = ROT
         // implicit: firmware slot id will be the inactive slot
-        /// expected contents of "A" slot
-        expected_slot_a_version: ExpectedVersion,
-        /// expected contents of "B" slot
-        expected_slot_b_version: ExpectedVersion,
-        /// the slot of the currently running image
-        expected_active_slot: RotSlot,
+        // whether we expect the "A" or "B" slot to be active
+        // and its expected version
+        expected_active_slot: ExpectedActiveRotSlot,
+        // expected version of the "A" or "B" slot (opposite to
+        // the active slot as specified above)
+        expected_inactive_version: ExpectedVersion,
         // under normal operation, this should always match the active slot.
         // if this field changed without the active slot changing, that might
         // reflect a bad update.
@@ -1312,21 +1312,16 @@ impl slog::KV for PendingMgsUpdateDetails {
                 )
             }
             PendingMgsUpdateDetails::Rot {
-                expected_slot_a_version,
-                expected_slot_b_version,
                 expected_active_slot,
+                expected_inactive_version,
                 expected_persistent_boot_preference,
                 expected_pending_persistent_boot_preference,
                 expected_transient_boot_preference,
             } => {
                 serializer.emit_str(Key::from("component"), "rot")?;
                 serializer.emit_str(
-                    Key::from("expected_slot_a_version"),
-                    &format!("{:?}", expected_slot_a_version),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_slot_b_version"),
-                    &format!("{:?}", expected_slot_b_version),
+                    Key::from("expected_inactive_version"),
+                    &format!("{:?}", expected_inactive_version),
                 )?;
                 serializer.emit_str(
                     Key::from("expected_active_slot"),
@@ -1373,6 +1368,25 @@ impl FromStr for ExpectedVersion {
         } else {
             Ok(ExpectedVersion::Version(s.parse()?))
         }
+    }
+}
+
+/// Describes the expected active RoT slot, and the version we expect to find for it
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+pub struct ExpectedActiveRotSlot {
+    pub slot: RotSlot,
+    pub version: ArtifactVersion,
+}
+
+impl ExpectedActiveRotSlot {
+    pub fn slot(&self) -> &RotSlot {
+        &self.slot
+    }
+
+    pub fn version(&self) -> ArtifactVersion {
+        self.version.clone()
     }
 }
 

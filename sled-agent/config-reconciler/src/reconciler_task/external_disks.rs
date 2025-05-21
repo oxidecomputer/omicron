@@ -10,8 +10,11 @@
 use futures::future;
 use id_map::IdMap;
 use id_map::IdMappable;
+use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DiskManagementError;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
@@ -26,6 +29,7 @@ use slog::Logger;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::future::Future;
@@ -158,6 +162,56 @@ impl CurrentlyManagedZpoolsReceiver {
             }
         }
     }
+
+    // This returns a tuple that can be converted into an `InventoryZpool`. It
+    // doesn't return an `InventoryZpool` directly because the latter only
+    // contains the zpool's ID, not the full name, and our caller wants the
+    // names too.
+    pub(crate) async fn to_inventory(
+        &self,
+        log: &Logger,
+    ) -> Vec<(ZpoolName, ByteCount)> {
+        let current_zpools = self.current();
+
+        let zpool_futs =
+            current_zpools.0.iter().map(|&zpool_name| async move {
+                let info_result =
+                    Zpool::get_info(&zpool_name.to_string()).await;
+
+                (zpool_name, info_result)
+            });
+
+        future::join_all(zpool_futs)
+            .await
+            .into_iter()
+            .filter_map(|(zpool_name, info_result)| {
+                let info = match info_result {
+                    Ok(info) => info,
+                    Err(err) => {
+                        warn!(
+                            log, "Failed to access zpool info";
+                            "zpool" => %zpool_name,
+                            InlineErrorChain::new(&err),
+                        );
+                        return None;
+                    }
+                };
+                let total_size = match ByteCount::try_from(info.size()) {
+                    Ok(n) => n,
+                    Err(err) => {
+                        warn!(
+                            log, "Failed to parse zpool size";
+                            "zpool" => %zpool_name,
+                            "raw_size" => info.size(),
+                            InlineErrorChain::new(&err),
+                        );
+                        return None;
+                    }
+                };
+                Some((zpool_name, total_size))
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug)]
@@ -187,6 +241,38 @@ impl ExternalDisks {
             currently_managed_zpools_tx,
             external_disks_tx,
         }
+    }
+
+    pub(crate) fn has_retryable_error(&self) -> bool {
+        self.disks.iter().any(|disk| match &disk.state {
+            DiskState::Managed(_) => false,
+            DiskState::FailedToManage(err) => err.retryable(),
+        })
+    }
+
+    pub(crate) fn to_inventory(
+        &self,
+    ) -> BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult> {
+        self.disks
+            .iter()
+            .map(|disk| match &disk.state {
+                DiskState::Managed(_) => {
+                    (disk.config.id, ConfigReconcilerInventoryResult::Ok)
+                }
+                DiskState::FailedToManage(err) => (
+                    disk.config.id,
+                    ConfigReconcilerInventoryResult::Err {
+                        message: InlineErrorChain::new(err).to_string(),
+                    },
+                ),
+            })
+            .collect()
+    }
+
+    pub(super) fn currently_managed_zpools(
+        &self,
+    ) -> Arc<CurrentlyManagedZpools> {
+        Arc::clone(&*self.currently_managed_zpools_tx.borrow())
     }
 
     fn update_output_watch_channels(&self) {

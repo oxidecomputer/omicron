@@ -541,7 +541,8 @@ impl RunningZone {
                 err,
             })?;
         let network =
-            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)
+                .await?;
         Ok(network)
     }
 
@@ -567,7 +568,8 @@ impl RunningZone {
         let zone = Some(self.inner.name.as_ref());
         if let IpAddr::V4(gateway) = port.gateway().ip() {
             let addr =
-                Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)?;
+                Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)
+                    .await?;
             // TODO-remove(#2931): OPTE's DHCP "server" returns the list of routes
             // to add via option 121 (Classless Static Route). The illumos DHCP
             // client currently does not support this option, so we add the routes
@@ -595,12 +597,12 @@ impl RunningZone {
         } else {
             // If the port is using IPv6 addressing we still want it to use
             // DHCP(v6) which requires first creating a link-local address.
-            Zones::ensure_has_link_local_v6_address(zone, &addrobj).map_err(
-                |err| EnsureAddressError::LinkLocal {
+            Zones::ensure_has_link_local_v6_address(zone, &addrobj)
+                .await
+                .map_err(|err| EnsureAddressError::LinkLocal {
                     zone: self.inner.name.clone(),
                     err,
-                },
-            )?;
+                })?;
 
             // Unlike DHCPv4, there's no blocking `ipadm` call we can
             // make as it just happens in the background. So we just poll
@@ -611,6 +613,7 @@ impl RunningZone {
                     // Grab all the address on the addrobj. There should
                     // always be at least one (the link-local we added)
                     let addrs = Zones::get_all_addresses(zone, &addrobj)
+                        .await
                         .map_err(|e| {
                             backoff::BackoffError::permanent(
                                 EnsureAddressError::from(e),
@@ -1192,7 +1195,7 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     // (used in unit tests)
-    fn fake_install(mut self) -> Result<InstalledZone, InstallZoneError> {
+    async fn fake_install(mut self) -> Result<InstalledZone, InstallZoneError> {
         let zones_api = self.zones_api.take().unwrap();
         let zone = self
             .zone_type
@@ -1202,6 +1205,7 @@ impl<'a> ZoneBuilder<'a> {
             .underlay_vnic_allocator
             .ok_or(InstallZoneError::IncompleteBuilder)?
             .new_control(None)
+            .await
             .map_err(move |err| InstallZoneError::CreateVnic { zone, err })?;
         let fake_cfg = self.fake_cfg.unwrap();
         let temp_dir = fake_cfg.temp_dir;
@@ -1239,7 +1243,7 @@ impl<'a> ZoneBuilder<'a> {
     /// parameter was not provided.
     pub async fn install(mut self) -> Result<InstalledZone, InstallZoneError> {
         if self.fake_cfg.is_some() {
-            return self.fake_install();
+            return self.fake_install().await;
         }
 
         let Self {
@@ -1264,12 +1268,12 @@ impl<'a> ZoneBuilder<'a> {
             return Err(InstallZoneError::IncompleteBuilder);
         };
 
-        let control_vnic =
-            underlay_vnic_allocator.new_control(None).map_err(|err| {
-                InstallZoneError::CreateVnic {
-                    zone: zone_type.to_string(),
-                    err,
-                }
+        let control_vnic = underlay_vnic_allocator
+            .new_control(None)
+            .await
+            .map_err(|err| InstallZoneError::CreateVnic {
+                zone: zone_type.to_string(),
+                err,
             })?;
 
         let full_zone_name =
