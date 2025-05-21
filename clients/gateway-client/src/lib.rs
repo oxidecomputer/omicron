@@ -64,7 +64,6 @@ progenitor::generate_api!(
         ImageVersion = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotImageDetails = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotImageError = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        RotSlot = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpComponentCaboose = { derives = [PartialEq, Eq] },
         SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },
@@ -75,6 +74,7 @@ progenitor::generate_api!(
         SpUpdateStatus = { derives = [PartialEq, Hash, Eq] },
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
+    replace = { RotSlot = gateway_types::rot::RotSlot },
 );
 
 // Override the impl of Ord for SpIdentifier because the default one orders the
