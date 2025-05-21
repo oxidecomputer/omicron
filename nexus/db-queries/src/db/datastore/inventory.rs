@@ -213,10 +213,25 @@ impl DataStore {
             })
             .collect();
 
-        // Build up a list of `OmicronSledConfig`s we need to insert (each sled
-        // has 0-3), all of their zones, zone NICs, datasets, and disks, and
-        // also collect the config reconciler properties for each sled. We need
-        // these to construct `InvSledAgent` instances below.
+        // Build up a list of `OmicronSledConfig`s we need to insert. Each sled
+        // has 0-3:
+        //
+        // * The ledgered sled config (if the sled has gotten a config from RSS
+        //   or Nexus)
+        // * The most-recently-reconciled config (if the sled-agent's config
+        //   reconciler has run since the last time it started)
+        // * The currently-being-reconciled config (if the sled-agent's config
+        //   reconciler was actively running when inventory was collected)
+        //
+        // If more than one of these are present, they may be equal or distinct;
+        // for any that are equal, we'll only insert one copy and reuse the
+        // foreign key ID for subsequent instances.
+        //
+        // For each of these configs, we need to insert the top-level scalar
+        // data (held in an `InvOmicronSledConfig`), plus all of their zones,
+        // zone NICs, datasets, and disks, and we need collect the config
+        // reconciler properties for each sled. We need all of this to construct
+        // `InvSledAgent` instances below.
         let ConfigReconcilerRows {
             sled_configs: omicron_sled_configs,
             disks: omicron_sled_config_disks,
