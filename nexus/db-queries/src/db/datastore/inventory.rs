@@ -1430,7 +1430,32 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         let db_collection_id = to_db_typed_uuid(collection_id);
 
-        let (
+        // Helper to pack and unpack all the counts of rows we delete in the
+        // transaction below (exclusively used for logging).
+        struct NumRowsDeleted {
+            ncollections: usize,
+            nsps: usize,
+            nrots: usize,
+            ncabooses: usize,
+            nrot_pages: usize,
+            nsled_agents: usize,
+            ndatasets: usize,
+            nphysical_disks: usize,
+            nnvme_disk_firmware: usize,
+            nlast_reconciliation_disk_results: usize,
+            nlast_reconciliation_dataset_results: usize,
+            nlast_reconciliation_zone_results: usize,
+            nomicron_sled_configs: usize,
+            nomicron_sled_config_disks: usize,
+            nomicron_sled_config_datasets: usize,
+            nomicron_sled_config_zones: usize,
+            nomicron_sled_config_zone_nics: usize,
+            nzpools: usize,
+            nerrors: usize,
+            nclickhouse_keeper_membership: usize,
+        }
+
+        let NumRowsDeleted {
             ncollections,
             nsps,
             nrots,
@@ -1439,7 +1464,7 @@ impl DataStore {
             nsled_agents,
             ndatasets,
             nphysical_disks,
-            nnvme_disk_disk_firmware,
+            nnvme_disk_firmware,
             nlast_reconciliation_disk_results,
             nlast_reconciliation_dataset_results,
             nlast_reconciliation_zone_results,
@@ -1451,7 +1476,7 @@ impl DataStore {
             nzpools,
             nerrors,
             nclickhouse_keeper_membership,
-        ) =
+        } =
             self.transaction_retry_wrapper("inventory_delete_collection")
                 .transaction(&conn, |conn| async move {
                     // Remove the record describing the collection itself.
@@ -1536,7 +1561,7 @@ impl DataStore {
                     };
 
                     // Remove rows for NVMe physical disk firmware found.
-                    let nnvme_disk_firwmare = {
+                    let nnvme_disk_firmware = {
                         use nexus_db_schema::schema::inv_nvme_disk_firmware::dsl;
                         diesel::delete(dsl::inv_nvme_disk_firmware.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
@@ -1645,7 +1670,7 @@ impl DataStore {
                         .await?
                     };
 
-                    Ok((
+                    Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
                         nrots,
@@ -1654,7 +1679,7 @@ impl DataStore {
                         nsled_agents,
                         ndatasets,
                         nphysical_disks,
-                        nnvme_disk_firwmare,
+                        nnvme_disk_firmware,
                         nlast_reconciliation_disk_results,
                         nlast_reconciliation_dataset_results,
                         nlast_reconciliation_zone_results,
@@ -1666,7 +1691,7 @@ impl DataStore {
                         nzpools,
                         nerrors,
                         nclickhouse_keeper_membership,
-                    ))
+                    })
                 })
                 .await
                 .map_err(|error| {
@@ -1683,7 +1708,7 @@ impl DataStore {
             "nsled_agents" => nsled_agents,
             "ndatasets" => ndatasets,
             "nphysical_disks" => nphysical_disks,
-            "nnvme_disk_firmware" => nnvme_disk_disk_firmware,
+            "nnvme_disk_firmware" => nnvme_disk_firmware,
             "nlast_reconciliation_disk_results" =>
                 nlast_reconciliation_disk_results,
             "nlast_reconciliation_dataset_results" =>
