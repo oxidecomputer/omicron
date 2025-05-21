@@ -3940,14 +3940,11 @@ async fn cmd_nexus_support_bundles_download(
         .content_length()
         .ok_or_else(|| anyhow::anyhow!("No content length"))?;
 
-    let start = if let Some(output) = &args.output {
-        if output.exists() && args.resume {
+    let start = match &args.output {
+        Some(output) if output.exists() && args.resume => {
             output.metadata()?.len()
-        } else {
-            0
         }
-    } else {
-        0
+        _ => 0,
     };
 
     let stream =
