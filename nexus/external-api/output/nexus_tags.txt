@@ -160,6 +160,23 @@ snapshot_delete                          DELETE   /v1/snapshots/{snapshot}
 snapshot_list                            GET      /v1/snapshots
 snapshot_view                            GET      /v1/snapshots/{snapshot}
 
+API operations found with tag "system/alerts"
+OPERATION ID                             METHOD   URL PATH
+alert_class_list                         GET      /v1/alert-classes
+alert_delivery_list                      GET      /v1/alert-receivers/{receiver}/deliveries
+alert_delivery_resend                    POST     /v1/alerts/{alert_id}/resend
+alert_receiver_delete                    DELETE   /v1/alert-receivers/{receiver}
+alert_receiver_list                      GET      /v1/alert-receivers
+alert_receiver_probe                     POST     /v1/alert-receivers/{receiver}/probe
+alert_receiver_subscription_add          POST     /v1/alert-receivers/{receiver}/subscriptions
+alert_receiver_subscription_remove       DELETE   /v1/alert-receivers/{receiver}/subscriptions/{subscription}
+alert_receiver_view                      GET      /v1/alert-receivers/{receiver}
+webhook_receiver_create                  POST     /v1/webhook-receivers
+webhook_receiver_update                  PUT      /v1/webhook-receivers/{receiver}
+webhook_secrets_add                      POST     /v1/webhook-secrets
+webhook_secrets_delete                   DELETE   /v1/webhook-secrets/{secret_id}
+webhook_secrets_list                     GET      /v1/webhook-secrets
+
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
@@ -267,23 +284,6 @@ user_builtin_view                        GET      /v1/system/users-builtin/{user
 API operations found with tag "system/status"
 OPERATION ID                             METHOD   URL PATH
 ping                                     GET      /v1/ping
-
-API operations found with tag "system/webhooks"
-OPERATION ID                             METHOD   URL PATH
-webhook_delivery_list                    GET      /v1/webhooks/deliveries
-webhook_delivery_resend                  POST     /v1/webhooks/deliveries/{event_id}/resend
-webhook_event_class_list                 GET      /v1/webhooks/event-classes
-webhook_receiver_create                  POST     /v1/webhooks/receivers
-webhook_receiver_delete                  DELETE   /v1/webhooks/receivers/{receiver}
-webhook_receiver_list                    GET      /v1/webhooks/receivers
-webhook_receiver_probe                   POST     /v1/webhooks/receivers/{receiver}/probe
-webhook_receiver_subscription_add        POST     /v1/webhooks/receivers/{receiver}/subscriptions
-webhook_receiver_subscription_remove     DELETE   /v1/webhooks/receivers/{receiver}/subscriptions/{subscription}
-webhook_receiver_update                  PUT      /v1/webhooks/receivers/{receiver}
-webhook_receiver_view                    GET      /v1/webhooks/receivers/{receiver}
-webhook_secrets_add                      POST     /v1/webhooks/secrets
-webhook_secrets_delete                   DELETE   /v1/webhooks/secrets/{secret_id}
-webhook_secrets_list                     GET      /v1/webhooks/secrets
 
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH

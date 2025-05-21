@@ -53,6 +53,7 @@ use uuid::Uuid;
 // by resource.
 mod address_lot;
 mod affinity;
+mod alert;
 mod allow_list;
 pub(crate) mod background;
 mod bfd;
