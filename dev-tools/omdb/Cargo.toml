@@ -44,6 +44,7 @@ nexus-db-schema.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-saga-recovery.workspace = true
+nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true

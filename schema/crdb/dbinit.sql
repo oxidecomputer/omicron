@@ -3569,6 +3569,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_role AS ENUM (
     'gimlet'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.inv_config_reconciler_status_kind
+AS ENUM (
+    'not-yet-run',
+    'running',
+    'idle'
+);
+
 -- observations from and about sled agents
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- where this observation came from
@@ -3599,8 +3606,42 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     usable_physical_ram INT8 NOT NULL,
     reservoir_size INT8 CHECK (reservoir_size < usable_physical_ram) NOT NULL,
 
-    -- The last generation of OmicronPhysicalDisksConfig seen by the sled-agent
-    omicron_physical_disks_generation INT8 NOT NULL,
+    -- Currently-ledgered `OmicronSledConfig`
+    -- (foreign key into `inv_omicron_sled_config` table)
+    -- This is optional because newly-added sleds don't yet have a config.
+    ledgered_sled_config UUID,
+
+    -- Most-recently-reconciled `OmicronSledConfig`
+    -- (foreign key into `inv_omicron_sled_config` table)
+    -- This is optional because the reconciler may not have run yet
+    last_reconciliation_sled_config UUID,
+
+    -- Columns making up the status of the config reconciler.
+    reconciler_status_kind omicron.public.inv_config_reconciler_status_kind NOT NULL,
+    -- (foreign key into `inv_omicron_sled_config` table)
+    -- only present if `reconciler_status_kind = 'running'`
+    reconciler_status_sled_config UUID,
+    -- only present if `reconciler_status_kind != 'not-yet-run'`
+    reconciler_status_timestamp TIMESTAMPTZ,
+    -- only present if `reconciler_status_kind != 'not-yet-run'`
+    reconciler_status_duration_secs FLOAT,
+
+    CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
+        (reconciler_status_kind = 'running'
+            AND reconciler_status_sled_config IS NOT NULL)
+        OR
+        (reconciler_status_kind != 'running'
+            AND reconciler_status_sled_config IS NULL)
+    ),
+    CONSTRAINT reconciler_status_timing_present_unless_not_yet_run CHECK (
+        (reconciler_status_kind = 'not-yet-run'
+            AND reconciler_status_timestamp IS NULL
+            AND reconciler_status_duration_secs IS NULL)
+        OR
+        (reconciler_status_kind != 'not-yet-run'
+            AND reconciler_status_timestamp IS NOT NULL
+            AND reconciler_status_duration_secs IS NOT NULL)
+    ),
 
     PRIMARY KEY (inv_collection_id, sled_id)
 );
@@ -3705,25 +3746,77 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     PRIMARY KEY (inv_collection_id, sled_id, name)
 );
 
--- TODO: This table is vestigial and can be combined with `inv_sled_agent`. See
--- https://github.com/oxidecomputer/omicron/issues/6770.
-CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
-    -- when this observation was made
-    time_collected TIMESTAMPTZ NOT NULL,
-    -- URL of the sled agent that reported this data
-    source TEXT NOT NULL,
+
+    -- ID of this sled config. A given inventory report from a sled agent may
+    -- contain 0-3 sled configs, so we generate these IDs on insertion and
+    -- record them as the foreign keys in `inv_sled_agent`.
+    id UUID NOT NULL,
+
+    -- config generation
+    generation INT8 NOT NULL,
+
+    -- remove mupdate override ID, if set
+    remove_mupdate_override UUID,
+
+    PRIMARY KEY (inv_collection_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_disk_result (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
 
     -- unique id for this sled (should be foreign keys into `sled` table, though
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
 
-    -- OmicronZonesConfig generation reporting these zones
-    generation INT8 NOT NULL,
+    -- unique id for this physical disk
+    disk_id UUID NOT NULL,
 
-    PRIMARY KEY (inv_collection_id, sled_id)
+    -- error message; if NULL, an "ok" result
+    error_message TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id, disk_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_dataset_result (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique id for this dataset
+    dataset_id UUID NOT NULL,
+
+    -- error message; if NULL, an "ok" result
+    error_message TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id, dataset_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_zone_result (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique id for this zone
+    zone_id UUID NOT NULL,
+
+    -- error message; if NULL, an "ok" result
+    error_message TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id, zone_id)
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
@@ -3741,15 +3834,18 @@ CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
   'oximeter'
 );
 
--- observations from sled agents about Omicron-managed zones
-CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
+CREATE TYPE IF NOT EXISTS omicron.public.inv_zone_image_source AS ENUM (
+    'install_dataset',
+    'artifact'
+);
+
+-- `zones` portion of an `OmicronSledConfig` observed from sled-agent
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     -- where this observation came from
-    -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
 
-    -- unique id for this sled (should be foreign keys into `sled` table, though
-    -- it's conceivable a sled will report an id that we don't know about)
-    sled_id UUID NOT NULL,
+    -- (foreign key into `inv_omicron_sled_config` table)
+    sled_config_id UUID NOT NULL,
 
     -- unique id for this zone
     id UUID NOT NULL,
@@ -3781,7 +3877,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     dataset_zpool_name TEXT,
 
     -- Zones with external IPs have an associated NIC and sockaddr for listening
-    -- (first is a foreign key into `inv_omicron_zone_nic`)
+    -- (first is a foreign key into `inv_omicron_sled_config_zone_nic`)
     nic_id UUID,
 
     -- Properties for internal DNS servers
@@ -3810,14 +3906,34 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     -- Eventually, that nullability should be removed.
     filesystem_pool UUID,
 
-    PRIMARY KEY (inv_collection_id, id)
+    -- zone image source
+    image_source omicron.public.inv_zone_image_source NOT NULL,
+    image_artifact_sha256 STRING(64),
+
+    CONSTRAINT zone_image_source_artifact_hash_present CHECK (
+        (image_source = 'artifact'
+            AND image_artifact_sha256 IS NOT NULL)
+        OR
+        (image_source != 'artifact'
+            AND image_artifact_sha256 IS NULL)
+    ),
+
+    PRIMARY KEY (inv_collection_id, sled_config_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS inv_omicron_zone_nic_id ON omicron.public.inv_omicron_zone
-    (nic_id) STORING (sled_id, primary_service_ip, second_service_ip, snat_ip);
+CREATE INDEX IF NOT EXISTS inv_omicron_sled_config_zone_nic_id
+    ON omicron.public.inv_omicron_sled_config_zone (nic_id)
+    STORING (
+        primary_service_ip,
+        second_service_ip,
+        snat_ip
+    );
 
-CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_nic (
+    -- where this observation came from
     inv_collection_id UUID NOT NULL,
+
+    sled_config_id UUID NOT NULL,
     id UUID NOT NULL,
     name TEXT NOT NULL,
     ip INET NOT NULL,
@@ -3827,7 +3943,49 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
     is_primary BOOLEAN NOT NULL,
     slot INT2 NOT NULL,
 
-    PRIMARY KEY (inv_collection_id, id)
+    PRIMARY KEY (inv_collection_id, sled_config_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_dataset (
+    -- where this observation came from
+    inv_collection_id UUID NOT NULL,
+
+    -- foreign key into the `inv_omicron_sled_config` table
+    sled_config_id UUID NOT NULL,
+    id UUID NOT NULL,
+
+    pool_id UUID NOT NULL,
+    kind omicron.public.dataset_kind NOT NULL,
+    -- Only valid if kind = zone
+    zone_name TEXT,
+
+    quota INT8,
+    reservation INT8,
+    compression TEXT NOT NULL,
+
+    CONSTRAINT zone_name_for_zone_kind CHECK (
+      (kind != 'zone') OR
+      (kind = 'zone' AND zone_name IS NOT NULL)
+    ),
+
+    PRIMARY KEY (inv_collection_id, sled_config_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_disk (
+    -- where this observation came from
+    inv_collection_id UUID NOT NULL,
+
+    -- foreign key into the `inv_omicron_sled_config` table
+    sled_config_id UUID NOT NULL,
+    id UUID NOT NULL,
+
+    vendor TEXT NOT NULL,
+    serial TEXT NOT NULL,
+    model TEXT NOT NULL,
+
+    pool_id UUID NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_config_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
@@ -4033,11 +4191,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_image_source AS ENUM (
 );
 
 -- description of omicron zones specified in a blueprint
---
--- This is currently identical to `inv_omicron_zone`, except that the foreign
--- keys reference other blueprint tables intead of inventory tables. We expect
--- their sameness to diverge over time as either inventory or blueprints (or
--- both) grow context-specific properties.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- foreign key into the `blueprint` table
     blueprint_id UUID NOT NULL,
@@ -5518,7 +5671,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '143.0.0', NULL)
+    (TRUE, NOW(), NOW(), '144.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

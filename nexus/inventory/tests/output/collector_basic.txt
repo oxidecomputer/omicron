@@ -89,13 +89,19 @@ rot pages found:
 sled agents found:
   sled 03265caf-da7d-46c7-b1c2-39fa90ce5c65 (Scrimlet)
     baseboard Some(BaseboardId { part_number: "sim-gimlet", serial_number: "sim-03265caf-da7d-46c7-b1c2-39fa90ce5c65" })
-    zone generation: Generation(3)
-    zones found:
+    ledgered sled config:
+        generation: 3
+        remove_mupdate_override: None
         zone 8b88a56f-3eb6-4d80-ba42-75d867bc427d type oximeter
+    no completed reconciliation
+    reconciler task not yet run
   sled 9cb9b78f-5614-440c-b66d-e8e81fab69b0 (Scrimlet)
     baseboard Some(BaseboardId { part_number: "sim-gimlet", serial_number: "sim-9cb9b78f-5614-440c-b66d-e8e81fab69b0" })
-    zone generation: Generation(3)
-    zones found:
+    ledgered sled config:
+        generation: 3
+        remove_mupdate_override: None
         zone 5125277f-0988-490b-ac01-3bba20cc8f07 type oximeter
+    no completed reconciliation
+    reconciler task not yet run
 
 errors:
