@@ -2,9 +2,12 @@ load-example
 
 blueprint-show 3f00b694-1b16-4aaa-8f78-e6b3a527b434
 blueprint-edit 3f00b694-1b16-4aaa-8f78-e6b3a527b434 expunge-zone 9995de32-dd52-4eb1-b0eb-141eb84bc739
+blueprint-diff 3f00b694-1b16-4aaa-8f78-e6b3a527b434 366b0b68-d80e-4bc1-abd3-dc69837847e0
 
 blueprint-show 366b0b68-d80e-4bc1-abd3-dc69837847e0
 blueprint-plan 366b0b68-d80e-4bc1-abd3-dc69837847e0
+blueprint-diff 366b0b68-d80e-4bc1-abd3-dc69837847e0 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
 
 blueprint-show 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
 blueprint-edit 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 expunge-zone d786ef4a-5acb-4f5d-a732-a00addf986b5
+blueprint-diff 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 2ac8c740-444d-42ff-8d66-9812a7e51288
