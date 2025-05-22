@@ -168,12 +168,7 @@ impl ConfigReconcilerInventory {
             .iter()
             .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
             .collect();
-        Self {
-            last_reconciled_config: config,
-            external_disks,
-            datasets,
-            zones,
-        }
+        Self { last_reconciled_config: config, external_disks, datasets, zones }
     }
 }
 
