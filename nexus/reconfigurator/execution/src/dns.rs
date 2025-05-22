@@ -1737,7 +1737,7 @@ mod test {
                 assert_eq!(
                     new_records, prior_records,
                     "new silo ({new_name}) DNS records differ from \
-                    another silo ({prior_name})"
+                    another silo ({prior_record_name})"
                 );
             }
         }
