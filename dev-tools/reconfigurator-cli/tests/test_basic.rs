@@ -113,7 +113,6 @@ fn test_expunge_newly_added_internal_dns() {
     );
 }
 
-
 // Run tests that exercise the ability to set zone image sources.
 #[test]
 fn test_set_zone_images() {
