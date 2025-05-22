@@ -2825,6 +2825,18 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                     ),
                 ],
             },
+            // User-facing services inbound ICMP allow/block
+            VerifyEndpoint {
+                url: "/v1/system/networking/inbound-icmp",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(true).unwrap(),
+                    ),
+                ],
+            },
             // Alerts
             VerifyEndpoint {
                 url: &WEBHOOK_RECEIVERS_URL,
