@@ -325,9 +325,9 @@ impl InternalDisks {
         &self.mount_config
     }
 
-    pub fn boot_disk_zpool(&self) -> Option<&ZpoolName> {
+    pub fn boot_disk_zpool(&self) -> Option<ZpoolName> {
         self.disks.iter().find_map(|d| {
-            if d.is_boot_disk() { Some(&d.zpool_name) } else { None }
+            if d.is_boot_disk() { Some(d.zpool_name) } else { None }
         })
     }
 

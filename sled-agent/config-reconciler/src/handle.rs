@@ -475,7 +475,7 @@ impl AvailableDatasetsReceiver {
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
                 .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(pool.clone()),
+                    pool: ZpoolOrRamdisk::Zpool(*pool),
                     path: path.join(U2_DEBUG_DATASET),
                 })
                 .collect(),
@@ -498,7 +498,7 @@ impl AvailableDatasetsReceiver {
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
                 .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(pool.clone()),
+                    pool: ZpoolOrRamdisk::Zpool(*pool),
                     path: path.join(ZONE_DATASET),
                 })
                 .collect(),

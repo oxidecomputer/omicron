@@ -848,7 +848,9 @@ impl ServiceManager {
     /// - `sidecar_revision`: Rev of attached sidecar, if present.
     /// - `switch_zone_maghemite_links`: List of physical links on which
     ///    maghemite should listen.
+    /// - `zone_image_resolver`: how to find Omicron zone images
     /// - `internal_disks_rx`: watch channel for changes to internal disks
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         log: &Logger,
         ddm_reconciler: DdmReconciler,

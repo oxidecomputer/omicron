@@ -428,8 +428,7 @@ impl SledAgent {
             .internal_disks_rx()
             .current()
             .boot_disk_zpool()
-            .ok_or_else(|| Error::BootDiskNotFound)?
-            .clone();
+            .ok_or_else(|| Error::BootDiskNotFound)?;
 
         // Configure a swap device of the configured size before other system setup.
         match config.swap_device_size_gb {
