@@ -2142,6 +2142,19 @@ impl JsonSchema for L4PortRange {
     }
 }
 
+impl From<L4Port> for L4PortRange {
+    fn from(value: L4Port) -> Self {
+        Self { first: value, last: value }
+    }
+}
+
+impl From<RangeInclusive<L4Port>> for L4PortRange {
+    fn from(value: RangeInclusive<L4Port>) -> Self {
+        let (first, last) = value.into_inner();
+        Self { first, last }
+    }
+}
+
 /// A range of ICMP(v6) types or codes. This range is inclusive on both ends.
 #[derive(
     Clone, Copy, Debug, DeserializeFromStr, SerializeDisplay, PartialEq,
