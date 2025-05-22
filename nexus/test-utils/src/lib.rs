@@ -945,7 +945,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config.generation,
                 external_dns_version: Generation::new(),
-                target_release_minimum_generation: None,
+                target_release_minimum_generation: Generation::new(),
                 cockroachdb_fingerprint: String::new(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,

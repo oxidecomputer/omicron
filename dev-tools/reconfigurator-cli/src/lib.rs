@@ -448,7 +448,7 @@ enum BlueprintEditCommands {
     #[clap(visible_alias = "set-release-min-gen")]
     SetTargetReleaseMinimumGeneration {
         /// the minimum target release generation
-        generation: GenerationOpt,
+        generation: Generation,
     },
     /// expunge a zone
     ExpungeZone { zone_id: OmicronZoneUuid },
@@ -1155,18 +1155,9 @@ fn cmd_blueprint_edit(
             generation,
         } => {
             builder
-                .set_target_release_minimum_generation(generation.into())
+                .set_target_release_minimum_generation(generation)
                 .context("failed to set target release minimum generation")?;
-            match generation {
-                GenerationOpt::Unset => {
-                    "unset target release minimum generation".to_owned()
-                }
-                GenerationOpt::Set(generation) => {
-                    format!(
-                        "set target release minimum generation to {generation}"
-                    )
-                }
-            }
+            format!("set target release minimum generation to {generation}")
         }
         BlueprintEditCommands::SetZoneImage { zone_id, image_source } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;

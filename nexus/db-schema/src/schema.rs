@@ -1792,7 +1792,7 @@ table! {
 
         cockroachdb_setting_preserve_downgrade -> Nullable<Text>,
 
-        target_release_minimum_generation -> Nullable<Int8>,
+        target_release_minimum_generation -> Int8,
     }
 }
 

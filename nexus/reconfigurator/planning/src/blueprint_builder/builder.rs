@@ -404,7 +404,7 @@ pub struct BlueprintBuilder<'a> {
     // corresponding fields in `Blueprint`.
     sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
-    target_release_minimum_generation: Option<Generation>,
+    target_release_minimum_generation: Generation,
 
     creator: String,
     operations: Vec<Operation>,
@@ -466,7 +466,7 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
-            target_release_minimum_generation: None,
+            target_release_minimum_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -1890,7 +1890,7 @@ impl<'a> BlueprintBuilder<'a> {
     /// Set the `target_release_minimum_generation` field for this blueprint.
     pub fn set_target_release_minimum_generation(
         &mut self,
-        target_release_minimum_generation: Option<Generation>,
+        target_release_minimum_generation: Generation,
     ) -> Result<(), Error> {
         // May need to do some validation here in the future.
         self.target_release_minimum_generation =

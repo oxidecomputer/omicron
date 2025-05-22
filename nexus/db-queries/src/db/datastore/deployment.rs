@@ -468,7 +468,7 @@ impl DataStore {
                 blueprint.parent_blueprint_id.map(From::from),
                 *blueprint.internal_dns_version,
                 *blueprint.external_dns_version,
-                blueprint.target_release_minimum_generation.map(From::from),
+                *blueprint.target_release_minimum_generation,
                 blueprint.cockroachdb_fingerprint,
                 blueprint.cockroachdb_setting_preserve_downgrade,
                 blueprint.time_created,

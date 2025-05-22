@@ -1772,8 +1772,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
                     diff_row!(external_dns_version, EXTERNAL_DNS_VERSION),
                     diff_row!(
                         target_release_minimum_generation,
-                        TARGET_RELEASE_MIN_GEN,
-                        display_option
+                        TARGET_RELEASE_MIN_GEN
                     ),
                 ],
             ),
@@ -2108,12 +2107,5 @@ fn display_optional_preserve_downgrade(
     match value {
         Some(v) => v.to_string(),
         None => INVALID_VALUE_PARENS.to_string(),
-    }
-}
-
-fn display_option<T: fmt::Display>(value: &Option<T>) -> &dyn fmt::Display {
-    match value {
-        Some(v) => v,
-        None => &NONE_PARENS,
     }
 }

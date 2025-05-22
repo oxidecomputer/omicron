@@ -175,9 +175,9 @@ pub struct Blueprint {
     // See blueprint execution for more on this.
     pub external_dns_version: Generation,
 
-    /// The minimum release generation to use for target release configuration.
-    /// If specified, target release configuration with a generation less than
-    /// or equal to this number will be ignored.
+    /// The minimum release generation to accept for target release
+    /// configuration. Target release configuration with a generation less than
+    /// this number will be ignored.
     ///
     /// For example, let's say that the current target release generation is 5.
     /// Then, when reconfigurator detects a MUPdate:
@@ -188,7 +188,7 @@ pub struct Blueprint {
     /// Once the target release generation is updated to 6 or higher,
     /// Reconfigurator knows that it is back in charge of driving the system to
     /// the target release.
-    pub target_release_minimum_generation: Option<Generation>,
+    pub target_release_minimum_generation: Generation,
 
     /// CockroachDB state fingerprint when this blueprint was created
     // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
@@ -514,10 +514,7 @@ impl BlueprintDisplay<'_> {
                     TARGET_RELEASE_MIN_GEN,
                     self.blueprint
                         .target_release_minimum_generation
-                        .map_or_else(
-                            || NONE_PARENS.to_string(),
-                            |g| g.to_string(),
-                        ),
+                        .to_string(),
                 ),
             ],
         )
@@ -1695,7 +1692,7 @@ pub struct BlueprintMetadata {
     /// The minimum generation for the target release.
     ///
     /// See [`Blueprint::target_release_minimum_generation`].
-    pub target_release_minimum_generation: Option<Generation>,
+    pub target_release_minimum_generation: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to
