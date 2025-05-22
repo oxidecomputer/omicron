@@ -205,10 +205,8 @@ impl FromStr for RotSlot {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "a" => Ok(RotSlot::A),
-            "A" => Ok(RotSlot::A),
-            "b" => Ok(RotSlot::B),
-            "B" => Ok(RotSlot::B),
+            "a" | "A" => Ok(RotSlot::A),
+            "b" | "B" => Ok(RotSlot::B),
             _ => Err(format!(
                 "unrecognized value {} for RoT slot. \
                 Must be one of `a`, `A`, `b`, or `B`",
