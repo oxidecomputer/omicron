@@ -285,7 +285,8 @@ impl super::Nexus {
         opctx: &OpContext,
         enabled: bool,
     ) -> Result<bool, Error> {
-        let out = self.datastore().nexus_inbound_icmp_update(opctx, enabled).await?;
+        let out =
+            self.datastore().nexus_inbound_icmp_update(opctx, enabled).await?;
 
         // Notify the sled-agents of the updated firewall rules.
         //

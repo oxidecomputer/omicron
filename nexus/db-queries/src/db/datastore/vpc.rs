@@ -79,8 +79,8 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::VpcFirewallRuleStatus;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
@@ -784,7 +784,9 @@ impl DataStore {
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let status = nexus_db_model::VpcFirewallRuleStatus(if enabled {VpcFirewallRuleStatus::Enabled} else {
+        let status = nexus_db_model::VpcFirewallRuleStatus(if enabled {
+            VpcFirewallRuleStatus::Enabled
+        } else {
             VpcFirewallRuleStatus::Disabled
         });
 
