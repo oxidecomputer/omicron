@@ -388,6 +388,8 @@ impl<'a> ReceiverClient<'a> {
             HeaderName::from_static("x-oxide-alert-class");
         const HDR_SIG: HeaderName =
             HeaderName::from_static("x-oxide-signature");
+        const HDR_TIMESTAMP: HeaderName =
+            HeaderName::from_static("x-oxide-timestamp");
 
         #[derive(serde::Serialize, Debug)]
         struct Payload<'a> {
@@ -459,6 +461,7 @@ impl<'a> ReceiverClient<'a> {
             .header(HDR_DELIVERY_ID, delivery.id.to_string())
             .header(HDR_ALERT_ID, delivery.alert_id.to_string())
             .header(HDR_ALERT_CLASS, alert_class.to_string())
+            .header(HDR_TIMESTAMP, sent_at)
             .header(http::header::CONTENT_TYPE, "application/json");
 
         // For each secret assigned to this webhook, calculate the HMAC and add a signature header.
