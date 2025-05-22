@@ -175,4 +175,25 @@ impl DataStore {
                 ))
             })
     }
+
+    pub async fn session_hard_delete_by_token(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> DeleteResult {
+        // we don't do an authz check here because the possession of
+        // the token is the check
+        use nexus_db_schema::schema::console_session;
+        diesel::delete(console_session::table)
+            .filter(console_session::token.eq(token))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map(|_rows_deleted| ())
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error deleting session by token: {:?}",
+                    e
+                ))
+            })
+    }
 }

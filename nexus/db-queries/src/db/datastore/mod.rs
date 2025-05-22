@@ -700,6 +700,10 @@ mod test {
             datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete_again, Ok(()));
 
+        let delete_again =
+            datastore.session_hard_delete_by_token(&opctx, token.clone()).await;
+        assert_eq!(delete_again, Ok(()));
+
         db.terminate().await;
         logctx.cleanup_successful();
     }

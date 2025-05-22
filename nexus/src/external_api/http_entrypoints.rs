@@ -7581,33 +7581,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            // this is unique among the hundreds of calls to this function in
-            // that we are not using ? to return early on error
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await;
+            // this is kind of a weird one, but we're only doing things here
+            // that are authorized directly by the possession of the token,
+            // which makes it somewhat like a login
+            let opctx = nexus.opctx_external_authn();
             let session_cookie =
                 cookies.get(session_cookie::SESSION_COOKIE_COOKIE_NAME);
 
-            // Look up session and delete it if present. Noop on any errors.
-            // This is the ONE spot where we do the hard delete by token and we
-            // haven't already looked up the session by token. Looking up the
-            // token first works, but it would be nice to avoid it.
-            if let Ok(opctx) = opctx {
-                if let Some(cookie) = session_cookie {
-                    let token = cookie.value().to_string();
-                    match nexus.session_fetch(&opctx, token).await {
-                        Ok(session) => {
-                            let id = session.console_session.id();
-                            // ? here because if this fails, we did not delete the
-                            // session when we meant to
-                            nexus.session_hard_delete(&opctx, id).await?;
-                        }
-                        // blow up only on errors other than not found, because not
-                        // found is fine: nothing to delete
-                        Err(Error::ObjectNotFound { .. }) => {} // noop
-                        Err(e) => return Err(e.into()),
-                    };
-                }
+            // Look up session and delete it if present
+            if let Some(cookie) = session_cookie {
+                let token = cookie.value().to_string();
+                nexus.session_hard_delete_by_token(&opctx, token).await?;
             }
 
             // If user's session was already expired, they fail auth and their
