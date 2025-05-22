@@ -25,6 +25,7 @@ dropshot.workspace = true
 futures.workspace = true
 hex.workspace = true
 http.workspace = true
+iddqd.workspace = true
 id-map.workspace = true
 ipnetwork.workspace = true
 lldp_protocol.workspace = true

@@ -5,9 +5,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dropshot::{
-    Body, HttpError, HttpResponseCreated, HttpResponseDeleted, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, ResultsPage,
-    TypedBody,
+    Body, Header, HttpError, HttpResponseCreated, HttpResponseDeleted,
+    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
+    ResultsPage, TypedBody,
 };
 use http::Response;
 use nexus_types::{
@@ -16,6 +16,7 @@ use nexus_types::{
         ClickhousePolicy, OximeterReadPolicy,
     },
     external_api::{
+        headers::RangeRequest,
         params::{self, PhysicalDiskPath, SledSelector, UninitializedSledId},
         shared::{self, ProbeInfo, UninitializedSled},
         views::Ping,
@@ -579,6 +580,7 @@ pub trait NexusInternalApi {
     }]
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 

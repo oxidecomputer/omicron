@@ -124,7 +124,7 @@ resource: authz::TargetReleaseConfig
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: authz::WebhookEventClassList
+resource: authz::AlertClassList
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
@@ -1258,7 +1258,7 @@ resource: LoopbackAddress id "9efbf1b1-16f9-45ab-864a-f7ebe501ae5b"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: WebhookEvent id "31cb17da-4164-4cbf-b9a3-b3e4a687c08b"
+resource: Alert id "31cb17da-4164-4cbf-b9a3-b3e4a687c08b"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
@@ -1272,7 +1272,7 @@ resource: WebhookEvent id "31cb17da-4164-4cbf-b9a3-b3e4a687c08b"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: WebhookReceiver "webhooked-on-phonics"
+resource: AlertReceiver "webhooked-on-phonics"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔

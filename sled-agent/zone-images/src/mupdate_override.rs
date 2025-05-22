@@ -8,6 +8,7 @@
 
 use std::fs;
 use std::fs::FileType;
+use std::io;
 use std::sync::Arc;
 
 use crate::ZoneImageZpools;
@@ -177,7 +178,7 @@ fn read_mupdate_override(
             fs::symlink_metadata(dataset_dir).map_err(|error| {
                 MupdateOverrideReadError::DatasetDirMetadata {
                     dataset_dir: dataset_dir.to_owned(),
-                    error: Arc::new(error),
+                    error: ArcIoError::new(error),
                 }
             })?;
         if !dir_metadata.is_dir() {
@@ -193,7 +194,7 @@ fn read_mupdate_override(
                     .map_err(|error| {
                     MupdateOverrideReadError::Deserialize {
                         path: override_path.to_owned(),
-                        error: Arc::new(error),
+                        error: ArcSerdeJsonError::new(error),
                         contents: data,
                     }
                 })?;
@@ -210,7 +211,7 @@ fn read_mupdate_override(
                 } else {
                     return Err(MupdateOverrideReadError::Read {
                         path: override_path.to_owned(),
-                        error: Arc::new(error),
+                        error: ArcIoError::new(error),
                     });
                 }
             }
@@ -398,7 +399,7 @@ impl MupdateOverrideNonBootMismatch {
     }
 }
 
-#[derive(Clone, Debug, Error)]
+#[derive(Clone, Debug, Error, PartialEq)]
 enum MupdateOverrideReadError {
     #[error(
         "error retrieving metadata for install dataset directory \
@@ -407,7 +408,7 @@ enum MupdateOverrideReadError {
     DatasetDirMetadata {
         dataset_dir: Utf8PathBuf,
         #[source]
-        error: Arc<std::io::Error>,
+        error: ArcIoError,
     },
 
     #[error(
@@ -420,7 +421,7 @@ enum MupdateOverrideReadError {
     Read {
         path: Utf8PathBuf,
         #[source]
-        error: Arc<std::io::Error>,
+        error: ArcIoError,
     },
 
     #[error(
@@ -431,67 +432,47 @@ enum MupdateOverrideReadError {
         path: Utf8PathBuf,
         contents: String,
         #[source]
-        error: Arc<serde_json::Error>,
+        error: ArcSerdeJsonError,
     },
 }
 
-/// This aids tremendously in testing.
-///
-/// `MupdateOverrideReadError` forms an equivalence class (i.e. it satisfies the
-/// reflexive property `a == a`), so it should in principle be okay to implement
-/// `Eq` for it as well. But this algorithm doesn't fully compare for equality,
-/// just enough for tests, so we don't implement `Eq`.
-///
-/// (But if there's a use case for `Eq` in the future, we should consider
-/// implementing it.)
-impl PartialEq for MupdateOverrideReadError {
+/// An `io::Error` wrapper that implements `Clone` and `PartialEq`.
+#[derive(Clone, Debug, Error)]
+#[error(transparent)]
+struct ArcIoError(Arc<io::Error>);
+
+impl ArcIoError {
+    fn new(error: io::Error) -> Self {
+        Self(Arc::new(error))
+    }
+}
+
+/// Testing aid.
+impl PartialEq for ArcIoError {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::DatasetDirMetadata { dataset_dir: dir1, error: error1 },
-                Self::DatasetDirMetadata { dataset_dir: dir2, error: error2 },
-            ) => {
-                // Simply comparing io::ErrorKind is good enough for tests.
-                dir1 == dir2 && error1.kind() == error2.kind()
-            }
-            (
-                Self::DatasetNotDirectory {
-                    dataset_dir: dir1,
-                    file_type: type1,
-                },
-                Self::DatasetNotDirectory {
-                    dataset_dir: dir2,
-                    file_type: type2,
-                },
-            ) => dir1 == dir2 && type1 == type2,
-            (
-                Self::Read { path: path1, error: error1 },
-                Self::Read { path: path2, error: error2 },
-            ) => {
-                // Simply comparing io::ErrorKind is good enough for tests.
-                path1 == path2 && error1.kind() == error2.kind()
-            }
-            (
-                Self::Deserialize {
-                    path: path1,
-                    contents: contents1,
-                    error: error1,
-                },
-                Self::Deserialize {
-                    path: path2,
-                    contents: contents2,
-                    error: error2,
-                },
-            ) => {
-                // Comparing error line/column/category is enough for tests.
-                path1 == path2
-                    && contents1 == contents2
-                    && error1.line() == error2.line()
-                    && error1.column() == error2.column()
-                    && error1.classify() == error2.classify()
-            }
-            _ => false,
-        }
+        // Simply comparing io::ErrorKind is good enough for tests.
+        self.0.kind() == other.0.kind()
+    }
+}
+
+/// A `serde_json::Error` that implements `Clone` and `PartialEq`.
+#[derive(Clone, Debug, Error)]
+#[error(transparent)]
+struct ArcSerdeJsonError(Arc<serde_json::Error>);
+
+impl ArcSerdeJsonError {
+    fn new(error: serde_json::Error) -> Self {
+        Self(Arc::new(error))
+    }
+}
+
+/// Testing aid.
+impl PartialEq for ArcSerdeJsonError {
+    fn eq(&self, other: &Self) -> bool {
+        // Simply comparing line/column/category is good enough for tests.
+        self.0.line() == other.0.line()
+            && self.0.column() == other.0.column()
+            && self.0.classify() == other.0.classify()
     }
 }
 
@@ -502,6 +483,7 @@ mod tests {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use dropshot::test_util::LogContext;
+    use iddqd::IdOrdMap;
     use omicron_uuid_kinds::MupdateOverrideUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
@@ -970,7 +952,7 @@ mod tests {
         MupdateOverrideInfo {
             mupdate_uuid: OVERRIDE_UUID,
             hash_ids: BTreeSet::new(),
-            zones: IdMap::new(),
+            zones: IdOrdMap::new(),
         }
     }
 
@@ -978,14 +960,16 @@ mod tests {
         MupdateOverrideInfo {
             mupdate_uuid: OVERRIDE_2_UUID,
             hash_ids: BTreeSet::new(),
-            zones: IdMap::new(),
+            zones: IdOrdMap::new(),
         }
     }
 
     fn dataset_missing_error(dir_path: &Utf8Path) -> MupdateOverrideReadError {
         MupdateOverrideReadError::DatasetDirMetadata {
             dataset_dir: dir_path.to_owned(),
-            error: Arc::new(io::Error::from(io::ErrorKind::NotFound)),
+            error: ArcIoError(Arc::new(io::Error::from(
+                io::ErrorKind::NotFound,
+            ))),
         }
     }
 
@@ -1009,10 +993,10 @@ mod tests {
         MupdateOverrideReadError::Deserialize {
             path: dir_path.join(json_path),
             contents: contents.to_owned(),
-            error: Arc::new(
+            error: ArcSerdeJsonError(Arc::new(
                 serde_json::from_str::<MupdateOverrideInfo>(contents)
                     .unwrap_err(),
-            ),
+            )),
         }
     }
 }

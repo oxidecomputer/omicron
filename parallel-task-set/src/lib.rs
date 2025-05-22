@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, TryAcquireError};
 use tokio::task::JoinSet;
 
 /// The default number of parallel tasks used by [ParallelTaskSet].
@@ -60,19 +61,45 @@ impl<T: 'static + Send> ParallelTaskSet<T> {
         Self { semaphore, set }
     }
 
-    /// Spawn a task immediately, but only allow it to execute if the task
-    /// set is within the maximum parallelism constraint.
-    pub fn spawn<F>(&mut self, command: F)
+    /// Spawn the provided `next_future`, potentially waiting until a previously
+    /// spawned task completes if the `ParallelTaskSet` is at its concurrency
+    /// limit.
+    ///
+    /// Note that, *unlike* [`join_next()`], this method returning `None` does
+    /// NOT indicate that the set is empty, just that it was not necessary to
+    /// wait for a previous task to complete in order to spawn the existing one.
+    /// Therefore, callers wishing to ensure all tasks spawned on this
+    /// [`ParallelTaskSet`] have completed should consider using [`join_next()`]
+    /// once all tasks have been spawned.
+    ///
+    /// [`join_next()`]: Self::join_next
+    pub async fn spawn<F>(&mut self, future: F) -> Option<T>
     where
-        F: std::future::Future<Output = T> + Send + 'static,
+        F: Future<Output = T> + Send + 'static,
     {
-        let semaphore = Arc::clone(&self.semaphore);
-        let _abort_handle = self.set.spawn(async move {
-            // Hold onto the permit until the command finishes executing
-            let _permit =
-                semaphore.acquire_owned().await.expect("semaphore acquire");
-            command.await
+        let (permit, output) =
+            match Arc::clone(&self.semaphore).try_acquire_owned() {
+                Ok(permit) => (permit, None),
+                Err(TryAcquireError::Closed) => {
+                    unreachable!("we never close the semaphore")
+                }
+                Err(TryAcquireError::NoPermits) => {
+                    let joined = self.join_next().await;
+                    let permit = Arc::clone(&self.semaphore)
+                        .acquire_owned()
+                        .await
+                        .expect("we never close the semaphore");
+                    (permit, joined)
+                }
+            };
+
+        self.set.spawn(async move {
+            let output = future.await;
+            drop(permit);
+            output
         });
+
+        output
     }
 
     /// Waits for the next task to complete and return its output.
@@ -108,39 +135,51 @@ mod test {
 
         let task_limit = 16;
         let mut set = ParallelTaskSet::new_with_parallelism(task_limit);
+        let mut i = 0;
 
-        for _ in 0..task_limit * 10 {
-            set.spawn({
-                let count = count.clone();
-                async move {
-                    // How many tasks - including our own - are running right
-                    // now?
-                    let watermark = count.fetch_add(1, Ordering::SeqCst) + 1;
-
-                    // The tasks should all execute for a short but variable
-                    // amount of time.
-                    let duration_ms = rand::thread_rng().gen_range(0..10);
-                    tokio::time::sleep(tokio::time::Duration::from_millis(
-                        duration_ms,
-                    ))
-                    .await;
-
-                    count.fetch_sub(1, Ordering::SeqCst);
-
-                    watermark
-                }
-            });
-        }
-
-        let watermarks = set.join_all().await;
-
-        for (i, watermark) in watermarks.into_iter().enumerate() {
+        let mut check_watermark = |watermark: usize| {
             println!("task {i} saw {watermark} concurrent tasks");
 
             assert!(
                 watermark <= task_limit,
                 "Observed simultaneous task execution of {watermark} tasks on the {i}-th worker"
             );
+
+            i += 1;
+        };
+
+        for _ in 0..task_limit * 10 {
+            let prev = set
+                .spawn({
+                    let count = count.clone();
+                    async move {
+                        // How many tasks - including our own - are running right
+                        // now?
+                        let watermark =
+                            count.fetch_add(1, Ordering::SeqCst) + 1;
+
+                        // The tasks should all execute for a short but variable
+                        // amount of time.
+                        let duration_ms = rand::thread_rng().gen_range(0..10);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            duration_ms,
+                        ))
+                        .await;
+
+                        count.fetch_sub(1, Ordering::SeqCst);
+
+                        watermark
+                    }
+                })
+                .await;
+            if let Some(watermark) = prev {
+                check_watermark(watermark);
+            }
+        }
+
+        let watermarks = set.join_all().await;
+        for watermark in watermarks {
+            check_watermark(watermark);
         }
     }
 }
