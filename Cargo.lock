@@ -3028,9 +3028,9 @@ dependencies = [
 
 [[package]]
 name = "equivalent"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
+checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "ereport-types"
@@ -4554,13 +4554,14 @@ dependencies = [
 
 [[package]]
 name = "iddqd"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5391430430a8b81eb452d964dfeaee8466099c943049f1cf8cd148a6c2fd88e4"
+checksum = "8129594fa2dd41828ac3a1f3080037c24b7588fff5422b0dba0ace331b95a7b2"
 dependencies = [
  "daft",
  "debug-ignore",
  "derive-where",
+ "equivalent",
  "hashbrown 0.15.3",
  "ref-cast",
  "rustc-hash 2.1.1",
