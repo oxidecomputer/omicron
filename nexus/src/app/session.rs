@@ -94,6 +94,14 @@ impl super::Nexus {
         self.db_datastore.session_hard_delete(opctx, &authz_session).await
     }
 
+    pub(crate) async fn session_hard_delete_by_token(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> DeleteResult {
+        self.db_datastore.session_hard_delete_by_token(opctx, token).await
+    }
+
     pub(crate) async fn lookup_silo_for_authn(
         &self,
         opctx: &OpContext,
