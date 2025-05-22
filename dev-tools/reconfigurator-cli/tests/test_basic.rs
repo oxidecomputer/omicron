@@ -68,7 +68,7 @@ fn test_example() {
 #[test]
 fn test_expunge_newly_added_external_dns() {
     let (exit_status, stdout_text, stderr_text) = run_cli(
-        "tests/input/cmds-expunge-newly-added.txt",
+        "tests/input/cmds-expunge-newly-added-external-dns.txt",
         &["--seed", "test_expunge_newly_added_external_dns"],
     );
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
@@ -78,14 +78,41 @@ fn test_expunge_newly_added_external_dns() {
     // convenient for everyone if they aren't redacted.
     let stdout_text = Redactor::default().uuids(false).do_redact(&stdout_text);
     assert_contents(
-        "tests/output/cmd-expunge-newly-added-stdout",
+        "tests/output/cmd-expunge-newly-added-external-dns-stdout",
         &stdout_text,
     );
     assert_contents(
-        "tests/output/cmd-expunge-newly-added-stderr",
+        "tests/output/cmd-expunge-newly-added-external-dns-stderr",
         &stderr_text,
     );
 }
+
+// Run tests to expunge an internal DNS zone, plan (which should add it again),
+// then expunge the newly-added zone. This is mechanically similar to the above
+// test about external DNS zones, but is particularly useful to ensure that DNS
+// record maintenance is handled correctly for external zones as well.
+#[test]
+fn test_expunge_newly_added_internal_dns() {
+    let (exit_status, stdout_text, stderr_text) = run_cli(
+        "tests/input/cmds-expunge-newly-added-internal-dns.txt",
+        &["--seed", "test_expunge_newly_added_internal_dns"],
+    );
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    // The example system uses a fixed seed, which means that UUIDs are
+    // deterministic. Some of the test commands also use those UUIDs, and it's
+    // convenient for everyone if they aren't redacted.
+    let stdout_text = Redactor::default().uuids(false).do_redact(&stdout_text);
+    assert_contents(
+        "tests/output/cmd-expunge-newly-added-internal-dns-stdout",
+        &stdout_text,
+    );
+    assert_contents(
+        "tests/output/cmd-expunge-newly-added-internal-dns-stderr",
+        &stderr_text,
+    );
+}
+
 
 // Run tests that exercise the ability to set zone image sources.
 #[test]
