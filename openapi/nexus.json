@@ -13519,16 +13519,32 @@
         "description": "The possible alert delivery mechanisms for an alert receiver.",
         "oneOf": [
           {
+            "description": "Webhook-specific alert receiver configuration.",
             "type": "object",
             "properties": {
-              "webhook": {
-                "$ref": "#/components/schemas/WebhookReceiverConfig"
+              "endpoint": {
+                "description": "The URL that webhook notification requests are sent to.",
+                "type": "string",
+                "format": "uri"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "webhook"
+                ]
+              },
+              "secrets": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WebhookSecret"
+                }
               }
             },
             "required": [
-              "webhook"
-            ],
-            "additionalProperties": false
+              "endpoint",
+              "kind",
+              "secrets"
+            ]
           }
         ]
       },
@@ -26135,27 +26151,6 @@
           "subscriptions",
           "time_created",
           "time_modified"
-        ]
-      },
-      "WebhookReceiverConfig": {
-        "description": "Webhook-specific alert receiver configuration.",
-        "type": "object",
-        "properties": {
-          "endpoint": {
-            "description": "The URL that webhook notification requests are sent to.",
-            "type": "string",
-            "format": "uri"
-          },
-          "secrets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WebhookSecret"
-            }
-          }
-        },
-        "required": [
-          "endpoint",
-          "secrets"
         ]
       },
       "WebhookReceiverUpdate": {
