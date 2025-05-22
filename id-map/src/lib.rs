@@ -289,6 +289,7 @@ impl<T: IdMappable + Debug + Eq> Diffable for IdMap<T> {
 
 /// Wrapper around a `&'a mut T` that panics when dropped if the borrowed
 /// value's `id()` has changed since the wrapper was created.
+#[derive(Debug)]
 pub struct RefMut<'a, T: IdMappable> {
     original_id: T::Id,
     // Always `Some(_)` until the `RefMut` is consumed by `into_ref()`.

@@ -8,13 +8,13 @@ use super::DataStore;
 use crate::context::OpContext;
 use crate::db::IncompleteOnConflictExt;
 use crate::db::datastore::RunnableQuery;
+use crate::db::model::Alert;
+use crate::db::model::AlertClass;
+use crate::db::model::AlertDeliveryState;
+use crate::db::model::AlertDeliveryTrigger;
 use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookDeliveryAttempt;
 use crate::db::model::WebhookDeliveryAttemptResult;
-use crate::db::model::WebhookDeliveryState;
-use crate::db::model::WebhookDeliveryTrigger;
-use crate::db::model::WebhookEvent;
-use crate::db::model::WebhookEventClass;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
@@ -26,16 +26,16 @@ use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema;
+use nexus_db_schema::schema::alert::dsl as alert_dsl;
 use nexus_db_schema::schema::webhook_delivery::dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as attempt_dsl;
-use nexus_db_schema::schema::webhook_event::dsl as event_dsl;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::WebhookReceiverUuid;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -53,11 +53,11 @@ pub struct DeliveryConfig {
 }
 
 /// A record from the [`WebhookDelivery`] table along with the event class and
-/// data of the corresponding [`WebhookEvent`] record.
+/// data of the corresponding [`Alert`] record.
 #[derive(Debug, Clone)]
 pub struct DeliveryAndEvent {
     pub delivery: WebhookDelivery,
-    pub event_class: WebhookEventClass,
+    pub alert_class: AlertClass,
     pub event: serde_json::Value,
 }
 
@@ -70,14 +70,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         diesel::insert_into(dsl::webhook_delivery)
             .values(deliveries)
-            // N.B. that this is intended to ignore conflicts on the
-            // "one_webhook_event_dispatch_per_rx" index, but ON CONFLICT ... DO
-            // NOTHING can't be used with the names of indices, only actual
-            // UNIQUE CONSTRAINTs. So we just do a blanket ON CONFLICT DO
-            // NOTHING, which is fine, becausse the only other uniqueness
-            // constraint is the UUID primary key, and we kind of assume UUID
-            // collisions don't happen. Oh well.
-            .on_conflict((dsl::event_id, dsl::rx_id))
+            .on_conflict((dsl::alert_id, dsl::rx_id))
             .as_partial_index()
             .do_nothing()
             .execute_async(&*conn)
@@ -90,8 +83,8 @@ impl DataStore {
     pub async fn webhook_rx_list_resendable_events(
         &self,
         opctx: &OpContext,
-        rx_id: &WebhookReceiverUuid,
-    ) -> ListResultVec<WebhookEvent> {
+        rx_id: &AlertReceiverUuid,
+    ) -> ListResultVec<Alert> {
         Self::rx_list_resendable_events_query(*rx_id)
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -99,37 +92,37 @@ impl DataStore {
     }
 
     fn rx_list_resendable_events_query(
-        rx_id: WebhookReceiverUuid,
-    ) -> impl RunnableQuery<WebhookEvent> {
+        rx_id: AlertReceiverUuid,
+    ) -> impl RunnableQuery<Alert> {
         use diesel::dsl::*;
         let (delivery, also_delivery) = diesel::alias!(
             schema::webhook_delivery as delivery,
-            schema::webhook_delivery as also_delivey
+            schema::webhook_delivery as also_delivery
         );
-        event_dsl::webhook_event
-            .filter(event_dsl::event_class.ne(WebhookEventClass::Probe))
+        alert_dsl::alert
+            .filter(alert_dsl::alert_class.ne(AlertClass::Probe))
             .inner_join(
-                delivery.on(delivery.field(dsl::event_id).eq(event_dsl::id)),
+                delivery.on(delivery.field(dsl::alert_id).eq(alert_dsl::id)),
             )
             .filter(delivery.field(dsl::rx_id).eq(rx_id.into_untyped_uuid()))
             .filter(not(exists(
                 also_delivery
                     .select(also_delivery.field(dsl::id))
                     .filter(
-                        also_delivery.field(dsl::event_id).eq(event_dsl::id),
+                        also_delivery.field(dsl::alert_id).eq(alert_dsl::id),
                     )
                     .filter(
                         also_delivery
                             .field(dsl::state)
-                            .ne(WebhookDeliveryState::Failed),
+                            .ne(AlertDeliveryState::Failed),
                     )
                     .filter(
                         also_delivery
                             .field(dsl::triggered_by)
-                            .ne(WebhookDeliveryTrigger::Probe),
+                            .ne(AlertDeliveryTrigger::Probe),
                     ),
             )))
-            .select(WebhookEvent::as_select())
+            .select(Alert::as_select())
             // the inner join means we may return the same event multiple times,
             // so only return distinct events.
             .distinct()
@@ -138,15 +131,12 @@ impl DataStore {
     pub async fn webhook_rx_delivery_list(
         &self,
         opctx: &OpContext,
-        rx_id: &WebhookReceiverUuid,
-        triggers: &'static [WebhookDeliveryTrigger],
-        only_states: Vec<WebhookDeliveryState>,
+        rx_id: &AlertReceiverUuid,
+        triggers: &'static [AlertDeliveryTrigger],
+        only_states: Vec<AlertDeliveryState>,
         pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
-    ) -> ListResultVec<(
-        WebhookDelivery,
-        WebhookEventClass,
-        Vec<WebhookDeliveryAttempt>,
-    )> {
+    ) -> ListResultVec<(WebhookDelivery, AlertClass, Vec<WebhookDeliveryAttempt>)>
+    {
         let conn = self.pool_connection_authorized(opctx).await?;
         // Paginate the query, ordered by delivery UUID.
         let mut query = paginated_multicolumn(
@@ -164,16 +154,14 @@ impl DataStore {
         // Join with the event table on the delivery's event ID,
         // so that we can grab the event class of the event that initiated
         // this delivery.
-        .inner_join(
-            event_dsl::webhook_event.on(dsl::event_id.eq(event_dsl::id)),
-        );
+        .inner_join(alert_dsl::alert.on(dsl::alert_id.eq(alert_dsl::id)));
         if !only_states.is_empty() {
             query = query.filter(dsl::state.eq_any(only_states));
         }
 
         let deliveries = query
-            .select((WebhookDelivery::as_select(), event_dsl::event_class))
-            .load_async::<(WebhookDelivery, WebhookEventClass)>(&*conn)
+            .select((WebhookDelivery::as_select(), alert_dsl::alert_class))
+            .load_async::<(WebhookDelivery, AlertClass)>(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -201,7 +189,7 @@ impl DataStore {
     pub async fn webhook_rx_delivery_list_ready(
         &self,
         opctx: &OpContext,
-        rx_id: &WebhookReceiverUuid,
+        rx_id: &AlertReceiverUuid,
         cfg: &DeliveryConfig,
     ) -> Result<impl ExactSizeIterator<Item = DeliveryAndEvent> + 'static, Error>
     {
@@ -212,12 +200,12 @@ impl DataStore {
             // Filter out deliveries triggered by probe requests, as those are
             // executed synchronously by the probe endpoint, rather than by the
             // webhook deliverator.
-            .filter(dsl::triggered_by.ne(WebhookDeliveryTrigger::Probe))
+            .filter(dsl::triggered_by.ne(AlertDeliveryTrigger::Probe))
             // Only select deliveries that are still in progress.
             .filter(
                 dsl::time_completed
                     .is_null()
-                    .and(dsl::state.eq(WebhookDeliveryState::Pending)),
+                    .and(dsl::state.eq(AlertDeliveryState::Pending)),
             )
             .filter(dsl::rx_id.eq(rx_id.into_untyped_uuid()))
             .filter((dsl::deliverator_id.is_null()).or(
@@ -246,19 +234,17 @@ impl DataStore {
             .order_by(dsl::time_created.asc())
             // Join with the `webhook_event` table to get the event class, which
             // is necessary to construct delivery requests.
-            .inner_join(
-                event_dsl::webhook_event.on(event_dsl::id.eq(dsl::event_id)),
-            )
+            .inner_join(alert_dsl::alert.on(alert_dsl::id.eq(dsl::alert_id)))
             .select((
                 WebhookDelivery::as_select(),
-                event_dsl::event_class,
-                event_dsl::event,
+                alert_dsl::alert_class,
+                alert_dsl::payload,
             ))
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(rows.into_iter().map(|(delivery, event_class, event)| {
-            DeliveryAndEvent { delivery, event_class, event }
+        Ok(rows.into_iter().map(|(delivery, alert_class, event)| {
+            DeliveryAndEvent { delivery, alert_class, event }
         }))
     }
 
@@ -278,7 +264,7 @@ impl DataStore {
                 .filter(
                     dsl::time_completed
                         .is_null()
-                        .and(dsl::state.eq(WebhookDeliveryState::Pending)),
+                        .and(dsl::state.eq(AlertDeliveryState::Pending)),
                 )
                 .filter(dsl::id.eq(id))
                 .filter(dsl::deliverator_id.is_null().or(
@@ -328,7 +314,7 @@ impl DataStore {
                     opctx.log,
                     "couldn't start delivery attempt: {MSG}";
                     "delivery_id" => %id,
-                    "event_id" => %delivery.event_id,
+                    "alert_id" => %delivery.alert_id,
                     "nexus_id" => %nexus_id,
                     "found_deliverator_id" => ?found.deliverator_id,
                     "found_time_leased" => ?found.time_leased,
@@ -356,18 +342,18 @@ impl DataStore {
         let new_state =
             if attempt.result == WebhookDeliveryAttemptResult::Succeeded {
                 // The delivery has completed successfully.
-                WebhookDeliveryState::Delivered
+                AlertDeliveryState::Delivered
             } else if *attempt.attempt >= MAX_ATTEMPTS {
                 // The delivery attempt failed, and we are out of retries. This
                 // delivery has failed permanently.
-                WebhookDeliveryState::Failed
+                AlertDeliveryState::Failed
             } else {
                 // This delivery attempt failed, but we still have retries
                 // remaining, so the delivery remains pending.
-                WebhookDeliveryState::Pending
+                AlertDeliveryState::Pending
             };
         let (completed, new_nexus_id) =
-            if new_state != WebhookDeliveryState::Pending {
+            if new_state != AlertDeliveryState::Pending {
                 // If the delivery has succeeded or failed permanently, set the
                 // "time_completed" timestamp to mark it as finished. Also, leave
                 // the delivering Nexus ID in place to maintain a record of who
@@ -399,7 +385,7 @@ impl DataStore {
                 .filter(
                     dsl::time_completed
                         .is_null()
-                        .and(dsl::state.eq(WebhookDeliveryState::Pending)),
+                        .and(dsl::state.eq(AlertDeliveryState::Pending)),
                 )
                 .set((
                     dsl::state.eq(new_state),
@@ -419,7 +405,7 @@ impl DataStore {
         }
 
         if found.time_completed.is_some()
-            || found.state != WebhookDeliveryState::Pending
+            || found.state != AlertDeliveryState::Pending
         {
             return Err(Error::conflict(
                 "delivery was already marked as completed",
@@ -443,7 +429,7 @@ impl DataStore {
             opctx.log,
             "{MSG}";
             "delivery_id" => %delivery.id,
-            "event_id" => %delivery.event_id,
+            "alert_id" => %delivery.alert_id,
             "nexus_id" => %nexus_id,
             "found_deliverator_id" => ?found.deliverator_id,
             "found_time_leased" => ?found.time_leased,
@@ -460,14 +446,13 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::explain::ExplainableAsync;
-    use crate::db::model::WebhookDeliveryTrigger;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use nexus_types::external_api::params;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::WebhookEventUuid;
+    use omicron_uuid_kinds::AlertUuid;
 
     #[tokio::test]
     async fn test_dispatched_deliveries_are_unique_per_rx() {
@@ -497,12 +482,12 @@ mod test {
             .await
             .unwrap();
         let rx_id = rx.rx.identity.id.into();
-        let event_id = WebhookEventUuid::new_v4();
+        let alert_id = AlertUuid::new_v4();
         datastore
-            .webhook_event_create(
+            .alert_create(
                 &opctx,
-                event_id,
-                WebhookEventClass::TestFoo,
+                alert_id,
+                AlertClass::TestFoo,
                 serde_json::json!({
                     "answer": 42,
                 }),
@@ -511,9 +496,9 @@ mod test {
             .expect("can't create ye event");
 
         let dispatch1 = WebhookDelivery::new(
-            &event_id,
+            &alert_id,
             &rx_id,
-            WebhookDeliveryTrigger::Event,
+            AlertDeliveryTrigger::Alert,
         );
         let inserted = datastore
             .webhook_delivery_create_batch(&opctx, vec![dispatch1.clone()])
@@ -522,9 +507,9 @@ mod test {
         assert_eq!(inserted, 1, "first dispatched delivery should be created");
 
         let dispatch2 = WebhookDelivery::new(
-            &event_id,
+            &alert_id,
             &rx_id,
-            WebhookDeliveryTrigger::Event,
+            AlertDeliveryTrigger::Alert,
         );
         let inserted = datastore
             .webhook_delivery_create_batch(opctx, vec![dispatch2.clone()])
@@ -536,9 +521,9 @@ mod test {
         );
 
         let resend1 = WebhookDelivery::new(
-            &event_id,
+            &alert_id,
             &rx_id,
-            WebhookDeliveryTrigger::Resend,
+            AlertDeliveryTrigger::Resend,
         );
         let inserted = datastore
             .webhook_delivery_create_batch(opctx, vec![resend1.clone()])
@@ -550,9 +535,9 @@ mod test {
         );
 
         let resend2 = WebhookDelivery::new(
-            &event_id,
+            &alert_id,
             &rx_id,
-            WebhookDeliveryTrigger::Resend,
+            AlertDeliveryTrigger::Resend,
         );
         let inserted = datastore
             .webhook_delivery_create_batch(opctx, vec![resend2.clone()])
@@ -571,7 +556,7 @@ mod test {
                 .webhook_rx_delivery_list(
                     &opctx,
                     &rx_id,
-                    WebhookDeliveryTrigger::ALL,
+                    AlertDeliveryTrigger::ALL,
                     Vec::new(),
                     &p.current_pagparams(),
                 )
@@ -596,7 +581,7 @@ mod test {
     #[tokio::test]
     async fn expectorate_rx_list_resendable() {
         let query = DataStore::rx_list_resendable_events_query(
-            WebhookReceiverUuid::nil(),
+            AlertReceiverUuid::nil(),
         );
 
         expectorate_query_contents(
@@ -614,7 +599,7 @@ mod test {
         let conn = pool.claim().await.unwrap();
 
         let query = DataStore::rx_list_resendable_events_query(
-            WebhookReceiverUuid::nil(),
+            AlertReceiverUuid::nil(),
         );
         let explanation = query
             .explain_async(&conn)
