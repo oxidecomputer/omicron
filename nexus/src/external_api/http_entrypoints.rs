@@ -7146,6 +7146,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<params::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -7155,7 +7156,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let head = false;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(
