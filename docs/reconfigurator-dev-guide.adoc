@@ -1,0 +1,264 @@
+:showtitle:
+:numbered:
+:toc: left
+
+= Reconfigurator Developer Guide
+
+This document covers practical tips for working on Reconfigurator.  For principles and design, see xref:reconfigurator.adoc[Reconfigurator Overview].
+
+== Introduction
+
+Reconfigurator is a control plane subsystem that's responsible for runtime changes to the control plane.  It's used to add, remove, and upgrade components.  It's divided into two big pieces:
+
+* The **planner** generates **blueprints**, which are complete descriptions of how the system _should_ look (in terms of what components exist, at what versions, etc.)
+* The **executor** takes a given blueprint and attempts to make reality match it.
+
+Blueprints are stored in CockroachDB (the control plane database).  This makes them available to all Nexus instances.  It also ensures strong consistency in what the system's current blueprint is supposed to be.
+
+Reconfigurator is designed to run autonomously as part of **Nexus** (see xref:control-plane-architecture.adoc[]).  But as much as possible, the pieces are factored into self-contained packages that don't know about most of Nexus.  As a concrete example:
+
+* Autonomous blueprint execution in real systems is driven by the Nexus `blueprint_execution` background task.  But that task essentially just invokes `nexus_reconfigurator_execution::realize_blueprint`.
+* Execution itself is encapsulated within this `nexus_reconfigurator_execution` package.
+
+This has some big benefits:
+
+* When working on blueprint execution, you usually only need to run `cargo check` and `cargo test` on the `nexus_reconfigurator_execution` package.  You don't need to build and link Nexus (which involves a lot more code and takes a lot more time).
+* It's possible to build developer tools like `reconfigurator-exec-unsafe`, which directly uses the `nexus_reconfigurator_execution` package.  This gives developers finer control over blueprint execution and more direct visibility, while still using the exact same interfaces that the autonomous system in Nexus is using.
+
+It does mean there are lots of layers, though.  Here's a conceptual map of components involved in blueprint execution:
+
+```mermaid
+graph TD
+    Executor["Executor"]
+    MgsUpdateDriver["MgsUpdateDriver<br />(updates SPs, RoTs, etc.)"]
+    LiveSystem["Live System<br />(rack/racklette/a4x2/simulated))"]
+
+    subgraph Nexus ["Nexus (real systems)"]
+        NexusUsesExecutor["Executor<br/>(background task)"]
+    end
+
+    %% Dev tools - right side: Executor tools
+    subgraph ExecutorTools ["Execution Tools (dev/test)"]
+        ExecUnsafe(["reconfigurator-exec-unsafe<br/>(execute blueprints manually)"])
+        SPUpdater(["reconfigurator-sp-updater<br/>(updates SPs, RoTs, etc.)"])
+    end
+
+    NexusUsesExecutor --> |blueprint from database| Executor
+    ExecUnsafe -->|blueprint from file| Executor
+
+    Executor -->|Modifies| LiveSystem
+    Executor --> |input: from blueprint| MgsUpdateDriver
+    MgsUpdateDriver --> |Modifies| LiveSystem
+    SPUpdater --> |input: REPL| MgsUpdateDriver
+
+    %% Styling
+    style Nexus fill:#c8e6c9,stroke:#388e3c
+    style ExecutorTools fill:#f3e5f5,stroke:#8e24aa
+    style Executor fill:#ffe0b2,stroke:#fb8c00
+    style MgsUpdateDriver fill:#ffe0b2,stroke:#fb8c00
+```
+
+// XXX-dap fix diagrams not working well in dark mode
+
+== Key Rust packages
+
+Below are some of the most important Rust packages to know about.  This is not a complete list.
+
+.Key Rust packages used in Reconfigurator
+[cols="1,1,3",options="header"]
+|===
+h|Area
+|Omicron repo path (Rust package)
+|Description
+
+.2+|Not Reconfigurator-specific
+
+|`nexus/types` (`nexus_types`)
+|Very widely-used package containing types common to many parts of Nexus (shared with lots of components that are used within Nexus, but aren't generally aware of the rest of Nexus).  (Not Reconfigurator-specific.)
+
+|`nexus/db-model`/`nexus/db-queries` (`nexus_db_model`, `nexus_db_queries`)
+|Everything related to the control plane database: Rust types representing the database schema itself, types that model the various tables in the database, and implementations of database queries that fetch/insert/update/delete data in the database.  (Not Reconfigurator-specific.)
+
+.4+|Reconfigurator (and Reconfigurator-adjacent)
+
+|`nexus/inventory` (`nexus_inventory`)
+|Inventory subsystem.  Collects information from the whole system about its current state, stores it in the database, and makes it available to the rest of Nexus.  Inventory collection is driven periodically and on-demand by a Nexus background task that just calls into this package.
+
+|`nexus/reconfigurator/planning` (`nexus_reconfigurator_planning`)
+|Implementation of the planner.  Currently, this is driven only by explicit calls to the Nexus internal API, which in turn come from a person running `omdb`.  In the medium term, this will be driven periodically and on-demand by a Nexus background task.
+
+|`nexus/reconfigurator/execution` (`nexus_reconfigurator_execution`)
+|Implementation of blueprint execution.  Blueprint execution is driven periodically and on-demand by a Nexus background task that just calls into this package.
+
+|`nexus/mgs-updates` (`nexus_mgs_updates`)
+a|Implementation of software update for components that are updated through Management Gateway Service (MGS) and the service processor (SP).  This includes the service processor Hubris image, the root of trust Hubris image, the root of trust bootloader, and phase 1 of the host operating system (the part that's stored in flash).
+
+This is used as part of execution.
+|===
+
+== Developer tools
+
+.Key developer tools for working on Reconfigurator
+[cols="1,1,1,3",options="header"]
+|===
+h|Area
+|Tool
+|Omicron repo path
+|Description
+
+.4+|Reconfigurator-specific
+|`reconfigurator-cli`
+|`dev-tools/reconfigurator-cli`
+|Directly edit blueprints or run the planner in-memory.  Can import state from real systems and export blueprints back to real systems.  Essential tool for observing and testing planner behavior and for generating blueprints that a real system might not otherwise do.  This in turn is useful for development and for operational emergencies.
+
+|`reconfigurator-exec-unsafe`
+|`dev-tools/reconfigurator-exec-unsafe`
+|Directly execute blueprints against a live system (outside the context of Nexus).  The main use of this tool is to be able to precisely control blueprint execution (usually for testing) and to be able to execute blueprints whose JSON representation does not match the database representation (common while features are under development, but never expected in a real system).
+
+|`reconfigurator-sp-updater`
+|`dev-tools/reconfigurator-sp-updater`
+|Directly runs Reconfigurator-style updates of MGS/SP-managed software.  This is used for development and testing of `nexus_mgs_updates` without having to create blueprints or go through real blueprint execution.
+
+|`repo-depot-standalone`
+|`dev-tools/repo-depot-standalone`
+a|Standalone command line tool for serving the Repo Depot API (which serves TUF repo artifacts over HTTP) from any TUF repository in your local filesystem.
++
+This is especially useful with `reconfigurator-sp-updater`.
+
+.2+|Non-Reconfigurator-specific (general tools)
+|`omdb`
+|`dev-tools/omdb`
+a|`omdb` is a general tool for inspecting and controlling various Omicron components.
+
+* You can control blueprint planning and execution with `omdb nexus blueprints`.
+* You can monitor blueprint execution with `omdb nexus background-tasks show blueprint_executor`.
+* You can view database state with `omdb db` (e.g., `omdb db inventory collections show latest`).
+
+|`cargo xtask omicron-dev run-all`
+|`dev-tools/omicron-dev`
+|Stands up a whole control plane using simulated sled agents.  This is by far the quickest and simplest way to test quite a lot of the system, but of course has limitations on what it's able to simulate.
+
+|===
+
+Here's a conceptual map of components involved in planning and execution and the tools you can use to work on them directly:
+
+```mermaid
+graph TD
+    Planner["Planner / Blueprint Editor"]
+    subgraph Nexus ["Nexus (real systems)"]
+        NexusUsesPlanner["Planner<br/>(background task)<br/>(eventually)"]
+        NexusUsesExecutor["Executor<br/>(background task)"]
+    end
+
+    NexusUsesPlanner -->|blueprint: <br />from database| Planner
+
+    subgraph PlannerTools ["Planner Tools (dev/test/support)"]
+        CLI(["reconfigurator-cli<br />(dev/test/support tool)"])
+    end
+    CLI -->|"blueprint: synthetic (REPL) or loaded from a real system"| Planner
+
+    style Nexus fill:#c8e6c9,stroke:#388e3c
+    style Planner fill:#ffe0b2,stroke:#fb8c00
+    style PlannerTools fill:#f3e5f5,stroke:#8e24aa
+
+    Executor["Executor"]
+    MgsUpdateDriver["MgsUpdateDriver<br />(updates SPs, RoTs, etc.)"]
+    LiveSystem["Live System<br />(rack/racklette/a4x2/simulated))"]
+
+    %% Dev tools - right side: Executor tools
+    subgraph ExecutorTools ["Execution Tools (dev/test)"]
+        ExecUnsafe(["reconfigurator-exec-unsafe<br/>(execute blueprints manually)"])
+        SPUpdater(["reconfigurator-sp-updater<br/>(updates SPs, RoTs, etc.)"])
+    end
+
+    NexusUsesExecutor --> |blueprint: from database| Executor
+    ExecUnsafe -->|blueprint: from file| Executor
+
+    Executor -->|Modifies| LiveSystem
+    Executor --> |input: from blueprint| MgsUpdateDriver
+    MgsUpdateDriver --> |Modifies| LiveSystem
+    SPUpdater --> |input: REPL| MgsUpdateDriver
+
+
+    %% Styling
+    style Nexus fill:#c8e6c9,stroke:#388e3c
+    style ExecutorTools fill:#f3e5f5,stroke:#8e24aa
+    style Executor fill:#ffe0b2,stroke:#fb8c00
+    style MgsUpdateDriver fill:#ffe0b2,stroke:#fb8c00
+
+```
+
+== Nexus background tasks
+
+Background operations in the control plane are driven by Nexus **background tasks**.  See xref:../nexus/src/app/background/mod.rs[] for important background on the design of background tasks.  Most importantly, the system has been designed to streamline writing background activities that:
+
+* correctly handle crashing in the middle of execution
+* correctly handle being executed concurrently (in other Nexus instances)
+* make their status observable
+* can be activated on-demand by a developer or support technician
+
+Again, there's a lot more about this in the comment in the file linked above.
+
+**In general, the Rust module that implements the background task does almost nothing except call into an implementation that's in some other Rust package.**  Generally, this approach:
+
+* Makes it easier to write comprehensive tests for the background task.  That's because the background task abstraction itself is intentionally very opaque.  It just has one `activate()` function.  So to test it exhaustively, it's helpful to put the bulk of the implementation into something with a richer interface for control and observability.
+* Makes it faster to iterate on the implementation because you need only run `cargo check`, `cargo nextest`, etc. on your implementation package, which usually won't require building and linking the rest of Nexus.  By contrast, the background tasks themselves are part of Nexus so rebuilding them takes more time.
+
+Each background task has a fixed name (e.g., `blueprint_executor`).  You can use `omdb nexus background-tasks` to list, activate, observe the status of background tasks.
+
+Here are the most important background tasks related to Reconfigurator:
+
+// XXX-dap working here
+
+.Key Reconfigurator-related background tasks
+[cols="1h,4",options="header"]
+|===
+|Task name
+|Description
+
+|`inventory_collection`
+|Fetches information about the current state of all hardware and software in the system (the whole rack)
+
+|`blueprint_executor`
+|Executes the most recently loaded blueprint
+
+|`blueprint_loader`
+|Loads the latest target blueprint from the database
+
+|`blueprint_rendezvous`
+|Updates rendezvous tables based on the most recent target blueprint
+
+|`dns_config_internal`, `dns_servers_internal`, `dns_propagation_internal`,
+`dns_config_external`, `dns_servers_external`, `dns_propagation_external`
+|Drives the propagation of internal and external DNS.  Configuration changes start in Nexus and get written to the database.  Then these background tasks load the configuration (`dns_config_*`), load the list of servers to propagate it to (`dns_servers_*`), and propagate the config to the servers (`dns_propagation_*`).
+
+|`tuf_artifact_replication`
+|Distributes all artifact files in all user-uploaded TUF repositories to all sleds
+
+|===
+
+Many other tasks work with Reconfigurator, too (e.g., region replacement and region snapshot replacement).
+
+Notably absent from this list is anything related to planning.  This has not been automated as a background task yet.
+
+== Testing and developer workflow
+
+// XXX-dap talk about developer workflow: "inner loop", etc.
+// XXX-dap talk about testing and test environments, live tests, etc.
+
+
+
+// XXX-dap task: generate a new blueprint using the planner
+// XXX-dap task: export reconfigurator state
+// XXX-dap task: generate a new blueprint using reconfigurator-cli
+// XXX-dap task: import blueprint
+// XXX-dap task: execute blueprint (via Nexus)
+// XXX-dap task: monitor blueprint execution
+// XXX-dap task: previewing what changes a blueprint will make
+
+
+
+// XXX-dap diagram showing:
+// - planner creates blueprints and stores them into database
+// - user can import blueprints with reconfigurator-cli
+// - execution reads blueprints
