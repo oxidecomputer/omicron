@@ -11,7 +11,7 @@ use serde::Serialize;
 pub struct RangeRequest {
     /// A request to access a portion of the resource, such as:
     ///
-    /// ```
+    /// ```text
     /// bytes=0-499
     /// ```
     ///
