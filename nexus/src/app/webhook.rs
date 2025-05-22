@@ -381,11 +381,11 @@ impl<'a> ReceiverClient<'a> {
         const HDR_DELIVERY_ID: HeaderName =
             HeaderName::from_static("x-oxide-delivery-id");
         const HDR_RX_ID: HeaderName =
-            HeaderName::from_static("x-oxide-webhook-id");
-        const HDR_EVENT_ID: HeaderName =
-            HeaderName::from_static("x-oxide-event-id");
-        const HDR_EVENT_CLASS: HeaderName =
-            HeaderName::from_static("x-oxide-event-class");
+            HeaderName::from_static("x-oxide-receiver-id");
+        const HDR_ALERT_ID: HeaderName =
+            HeaderName::from_static("x-oxide-alert-id");
+        const HDR_ALERT_CLASS: HeaderName =
+            HeaderName::from_static("x-oxide-alert-class");
         const HDR_SIG: HeaderName =
             HeaderName::from_static("x-oxide-signature");
 
@@ -400,7 +400,7 @@ impl<'a> ReceiverClient<'a> {
         #[derive(serde::Serialize, Debug)]
         struct DeliveryMetadata<'a> {
             id: WebhookDeliveryUuid,
-            webhook_id: AlertReceiverUuid,
+            receiver_id: AlertReceiverUuid,
             sent_at: &'a str,
             trigger: views::AlertDeliveryTrigger,
         }
@@ -414,7 +414,7 @@ impl<'a> ReceiverClient<'a> {
             data,
             delivery: DeliveryMetadata {
                 id: delivery.id.into(),
-                webhook_id: self.rx.id(),
+                receiver_id: self.rx.id(),
                 sent_at: &sent_at,
                 trigger: delivery.triggered_by.into(),
             },
@@ -427,7 +427,7 @@ impl<'a> ReceiverClient<'a> {
             Ok(body) => body,
             Err(e) => {
                 const MSG: &'static str =
-                    "event payload could not be serialized";
+                    "alert payload could not be serialized";
                 slog::error!(
                     &opctx.log,
                     "webhook {MSG}";
@@ -438,10 +438,10 @@ impl<'a> ReceiverClient<'a> {
                     "error" => %e,
                 );
 
-                // This really shouldn't happen --- we expect the event
+                // This really shouldn't happen --- we expect the alert
                 // payload will always be valid JSON. We could *probably*
                 // just panic here unconditionally, but it seems nicer to
-                // try and do the other events. But, if there's ever a bug
+                // try and do the other alerts. But, if there's ever a bug
                 // that breaks serialization for *all* webhook payloads,
                 // I'd like the tests to fail in a more obvious way than
                 // eventually timing out waiting for the event to be
@@ -457,8 +457,8 @@ impl<'a> ReceiverClient<'a> {
             .post(&self.rx.endpoint)
             .header(HDR_RX_ID, self.hdr_rx_id.clone())
             .header(HDR_DELIVERY_ID, delivery.id.to_string())
-            .header(HDR_EVENT_ID, delivery.alert_id.to_string())
-            .header(HDR_EVENT_CLASS, alert_class.to_string())
+            .header(HDR_ALERT_ID, delivery.alert_id.to_string())
+            .header(HDR_ALERT_CLASS, alert_class.to_string())
             .header(http::header::CONTENT_TYPE, "application/json");
 
         // For each secret assigned to this webhook, calculate the HMAC and add a signature header.

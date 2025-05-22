@@ -1469,11 +1469,12 @@ parent:    <none>
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   nexus-test-utils
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   initial test blueprint
-    internal DNS version:   1
-    external DNS version:   2
+    created by:::::::::::::   nexus-test-utils
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   initial test blueprint
+    internal DNS version:::   1
+    external DNS version:::   2
+    target release min gen:   (none)
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1570,11 +1571,12 @@ parent:    <none>
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   nexus-test-utils
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   initial test blueprint
-    internal DNS version:   1
-    external DNS version:   2
+    created by:::::::::::::   nexus-test-utils
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   initial test blueprint
+    internal DNS version:::   1
+    external DNS version:::   2
+    target release min gen:   (none)
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1656,8 +1658,9 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
     cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED> (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   2 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   2 (unchanged)
+    target release min gen:   (none) (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)

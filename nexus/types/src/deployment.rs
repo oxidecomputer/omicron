@@ -176,14 +176,14 @@ pub struct Blueprint {
     pub external_dns_version: Generation,
 
     /// The minimum release generation to use for target release configuration.
-    /// If unspecified, then target release configuration with a generation less
-    /// than this number will be ignored.
+    /// If specified, target release configuration with a generation less than
+    /// or equal to this number will be ignored.
     ///
     /// For example, let's say that the current target release generation is 5.
     /// Then, when reconfigurator detects a MUPdate:
     ///
     /// * the target release is ignored in favor of the install dataset
-    /// * this field is set to Some(5)
+    /// * this field is set to Some(6)
     ///
     /// Once the target release generation is updated to 6 or higher,
     /// Reconfigurator knows that it is back in charge of driving the system to
