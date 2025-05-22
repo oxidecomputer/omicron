@@ -192,7 +192,7 @@ pub fn blueprint_external_dns_config<'a>(
     blueprint: &Blueprint,
     silos: impl IntoIterator<Item = &'a Name>,
     external_dns_zone_name: String,
-) -> DnsConfigZone {
+) -> anyhow::Result<DnsConfigZone> {
     let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
     let dns_external_ips = blueprint_external_dns_nameserver_ips(blueprint);
 
@@ -241,9 +241,9 @@ pub fn blueprint_external_dns_config<'a>(
         .collect::<HashMap<String, Vec<DnsRecord>>>();
 
     if !zone_records.is_empty() {
-        let prior_records =
-            records.insert(ZONE_APEX_NAME.to_string(), zone_records);
-        assert!(prior_records.is_none());
+        records.entry(ZONE_APEX_NAME.to_string())
+            .or_insert(Vec::new())
+            .extend(zone_records.into_iter());
     }
 
     DnsConfigZone {
