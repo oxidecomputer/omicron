@@ -9647,6 +9647,72 @@
         }
       }
     },
+    "/v1/system/networking/inbound-icmp": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Return whether API services can receive limited ICMP traffic",
+        "operationId": "networking_inbound_icmp_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Boolean",
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Set whether API services can receive limited ICMP traffic",
+        "description": "When enabled, Nexus is able to receive ICMP Destination Unreachable (type 4, fragmentation needed) and Time Exceeded messages. These enable Nexus to perform Path MTU discovery and better cope with fragmentation issues. Otherwise all ICMP traffic will be dropped.",
+        "operationId": "networking_inbound_icmp_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Boolean",
+                "type": "boolean"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Boolean",
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/loopback-address": {
       "get": {
         "tags": [

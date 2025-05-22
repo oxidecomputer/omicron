@@ -1971,6 +1971,32 @@ pub trait NexusExternalApi {
         params: TypedBody<params::AllowListUpdate>,
     ) -> Result<HttpResponseOk<views::AllowList>, HttpError>;
 
+    /// Return whether API services can receive limited ICMP traffic
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/inbound-icmp",
+        tags = ["system/networking"],
+    }]
+    async fn networking_inbound_icmp_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<bool>, HttpError>;
+
+    /// Set whether API services can receive limited ICMP traffic
+    ///
+    /// When enabled, Nexus is able to receive ICMP Destination Unreachable
+    /// (type 4, fragmentation needed) and Time Exceeded messages. These
+    /// enable Nexus to perform Path MTU discovery and better cope with
+    /// fragmentation issues. Otherwise all ICMP traffic will be dropped.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/inbound-icmp",
+        tags = ["system/networking"],
+    }]
+    async fn networking_inbound_icmp_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<bool>,
+    ) -> Result<HttpResponseOk<bool>, HttpError>;
+
     // Images
 
     /// List images

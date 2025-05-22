@@ -13,4 +13,4 @@ However, as with many other well-intentioned schema type changes, we need to go 
 . Drop the now unused `vpc_firewall_rule_protocol` enum type. (`up07.sql`)
 
 Finally, we add in a new builtin firewall rule to the services VPC to enable Path MTU discovery in Nexus (`up08.sql`).
-The presence of this rule is replied upon by the `/v1/system/xxx/xxx` edpoints to enable/disable it.
+The presence of this rule is replied upon by the `/v1/system/networking/inbound-icmp` endpoint to enable/disable this access.

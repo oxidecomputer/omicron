@@ -55,6 +55,7 @@ use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
+use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_ICMP_FW_RULE_NAME;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DbBpZoneDisposition;
 use nexus_db_model::ExternalIp;
@@ -79,6 +80,7 @@ use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::VpcFirewallRuleStatus;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
@@ -748,6 +750,56 @@ impl DataStore {
                     )
                 }
             })
+    }
+
+    pub async fn nexus_inbound_icmp_view(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<bool, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use nexus_db_schema::schema::vpc_firewall_rule::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let rule = dsl::vpc_firewall_rule
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*SERVICES_VPC_ID))
+            .filter(dsl::name.eq(NEXUS_ICMP_FW_RULE_NAME.to_string()))
+            .limit(1)
+            .select(VpcFirewallRule::as_select())
+            .get_result_async::<VpcFirewallRule>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(rule.status.0 == VpcFirewallRuleStatus::Enabled)
+    }
+
+    pub async fn nexus_inbound_icmp_update(
+        &self,
+        opctx: &OpContext,
+        enabled: bool,
+    ) -> Result<bool, Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use nexus_db_schema::schema::vpc_firewall_rule::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let status = nexus_db_model::VpcFirewallRuleStatus(if enabled {VpcFirewallRuleStatus::Enabled} else {
+            VpcFirewallRuleStatus::Disabled
+        });
+
+        let now = Utc::now();
+        let rule = diesel::update(dsl::vpc_firewall_rule)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*SERVICES_VPC_ID))
+            .filter(dsl::name.eq(NEXUS_ICMP_FW_RULE_NAME.to_string()))
+            .set((dsl::time_modified.eq(now), dsl::status.eq(status)))
+            .returning(VpcFirewallRule::as_returning())
+            .get_result_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(rule.status.0 == VpcFirewallRuleStatus::Enabled)
     }
 
     /// Return the list of `Sled`s hosting instances or control plane services

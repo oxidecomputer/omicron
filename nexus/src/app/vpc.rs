@@ -272,4 +272,57 @@ impl super::Nexus {
         )
         .await
     }
+
+    pub async fn nexus_firewall_inbound_icmp_view(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<bool, Error> {
+        self.datastore().nexus_inbound_icmp_view(opctx).await
+    }
+
+    pub async fn nexus_firewall_inbound_icmp_update(
+        &self,
+        opctx: &OpContext,
+        enabled: bool,
+    ) -> Result<bool, Error> {
+        let out = self.datastore().nexus_inbound_icmp_update(opctx, enabled).await?;
+
+        // Notify the sled-agents of the updated firewall rules.
+        //
+        // This code comes directly from `Nexus::allow_list_upsert`, where
+        // there is substantial commentary on the impact of changing the logger,
+        // actor, etc.
+        info!(
+            opctx.log,
+            "updated user-facing services ICMP status, switching to \
+            internal opcontext to plumb rules to sled-agents";
+            "icmp-allowed" => ?enabled,
+        );
+        let new_opctx = self.opctx_for_internal_api();
+        match nexus_networking::plumb_service_firewall_rules(
+            self.datastore(),
+            &new_opctx,
+            &[],
+            &new_opctx,
+            &new_opctx.log,
+        )
+        .await
+        {
+            Ok(_) => {
+                info!(self.log, "plumbed updated ICMP status to sled-agents");
+                Ok(out)
+            }
+            Err(e) => {
+                error!(
+                    self.log,
+                    "failed to update sled-agents with new ICMP status";
+                    "error" => ?e
+                );
+                let message = "Failed to plumb ICMP status as firewall rules \
+                to relevant sled agents. The request must be retried for them \
+                to take effect.";
+                Err(Error::unavail(message))
+            }
+        }
+    }
 }

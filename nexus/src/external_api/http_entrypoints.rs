@@ -4243,6 +4243,50 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn networking_inbound_icmp_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<bool>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus
+                .nexus_firewall_inbound_icmp_view(&opctx)
+                .await
+                .map(HttpResponseOk)
+                .map_err(HttpError::from)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_inbound_icmp_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<bool>,
+    ) -> Result<HttpResponseOk<bool>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let params = params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus
+                .nexus_firewall_inbound_icmp_update(&opctx, params)
+                .await
+                .map(HttpResponseOk)
+                .map_err(HttpError::from)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Images
 
     async fn image_list(
