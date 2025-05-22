@@ -9,9 +9,9 @@ use crate::rack_setup::service::SetupServiceError;
 use bootstore::schemes::v0 as bootstore;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
+use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::rack_init::RackInitializeRequest;
 use sled_agent_types::rack_ops::{RackOperationStatus, RssStep};
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
 use std::mem;
@@ -146,7 +146,7 @@ impl RssAccess {
         parent_log: &Logger,
         sprockets: SprocketsConfig,
         global_zone_bootstrap_ip: Ipv6Addr,
-        storage_manager: &StorageHandle,
+        internal_disks_rx: &InternalDisksReceiver,
         bootstore_node_handle: &bootstore::NodeHandle,
         request: RackInitializeRequest,
     ) -> Result<RackInitUuid, RssAccessError> {
@@ -182,7 +182,7 @@ impl RssAccess {
                 *status = RssStatus::Initializing { id, completion, step_rx };
                 mem::drop(status);
                 let parent_log = parent_log.clone();
-                let storage_manager = storage_manager.clone();
+                let internal_disks_rx = internal_disks_rx.clone();
                 let bootstore_node_handle = bootstore_node_handle.clone();
                 let status = Arc::clone(&self.status);
                 tokio::spawn(async move {
@@ -190,7 +190,7 @@ impl RssAccess {
                         &parent_log,
                         sprockets,
                         global_zone_bootstrap_ip,
-                        storage_manager,
+                        internal_disks_rx,
                         bootstore_node_handle,
                         request,
                         step_tx,
@@ -328,7 +328,7 @@ async fn rack_initialize(
     parent_log: &Logger,
     sprockets: SprocketsConfig,
     global_zone_bootstrap_ip: Ipv6Addr,
-    storage_manager: StorageHandle,
+    internal_disks_rx: InternalDisksReceiver,
     bootstore_node_handle: bootstore::NodeHandle,
     request: RackInitializeRequest,
     step_tx: watch::Sender<RssStep>,
@@ -338,7 +338,7 @@ async fn rack_initialize(
         sprockets,
         request,
         global_zone_bootstrap_ip,
-        storage_manager,
+        internal_disks_rx,
         bootstore_node_handle,
         step_tx,
     )

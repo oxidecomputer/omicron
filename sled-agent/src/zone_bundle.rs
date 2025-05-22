@@ -27,9 +27,9 @@ use illumos_utils::zfs::Snapshot;
 use illumos_utils::zfs::ZFS;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zone::AdmError;
+use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::zone_bundle::*;
-use sled_storage::dataset::U2_DEBUG_DATASET;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -139,7 +139,8 @@ pub struct ZoneBundler {
 // State shared between tasks, e.g., used when creating a bundle in different
 // tasks or between a creation and cleanup.
 struct Inner {
-    storage_handle: StorageHandle,
+    internal_disks_rx: InternalDisksReceiver,
+    available_datasets_rx: AvailableDatasetsReceiver,
     cleanup_context: CleanupContext,
     last_cleanup_at: Instant,
 }
@@ -167,11 +168,11 @@ impl Inner {
     // that can exist but do not, i.e., those whose parent datasets already
     // exist; and returns those.
     async fn bundle_directories(&self) -> Vec<Utf8PathBuf> {
-        let resources = self.storage_handle.get_latest_disks().await;
         // NOTE: These bundle directories are always stored on M.2s, so we don't
         // need to worry about synchronizing with U.2 disk expungement at the
         // callsite.
-        let expected = resources.all_zone_bundle_directories();
+        let internal_disks = self.internal_disks_rx.current();
+        let expected = internal_disks.all_zone_bundle_directories();
         let mut out = Vec::with_capacity(expected.len());
         for each in expected.into_iter() {
             if tokio::fs::create_dir_all(&each).await.is_ok() {
@@ -236,7 +237,8 @@ impl ZoneBundler {
     /// to clean them up to free up space.
     pub async fn new(
         log: Logger,
-        storage_handle: StorageHandle,
+        internal_disks_rx: InternalDisksReceiver,
+        available_datasets_rx: AvailableDatasetsReceiver,
         cleanup_context: CleanupContext,
     ) -> Self {
         // This is compiled out in tests because there's no way to set our
@@ -255,7 +257,8 @@ impl ZoneBundler {
             .expect("Failed to initialize existing ZFS resources");
         let notify_cleanup = Arc::new(Notify::new());
         let inner = Arc::new(Mutex::new(Inner {
-            storage_handle,
+            internal_disks_rx,
+            available_datasets_rx,
             cleanup_context,
             last_cleanup_at: Instant::now(),
         }));
@@ -356,9 +359,9 @@ impl ZoneBundler {
         // prior bundles have completed.
         let inner = self.inner.lock().await;
         let storage_dirs = inner.bundle_directories().await;
-        let resources = inner.storage_handle.get_latest_disks().await;
-        let extra_log_dirs = resources
-            .all_u2_mountpoints(U2_DEBUG_DATASET)
+        let extra_log_dirs = inner
+            .available_datasets_rx
+            .all_mounted_debug_datasets()
             .into_iter()
             .map(|pool_path| pool_path.path)
             .collect();
@@ -1766,7 +1769,10 @@ mod illumos_tests {
     use chrono::TimeZone;
     use chrono::Timelike;
     use chrono::Utc;
+    use omicron_common::disk::DiskIdentity;
     use rand::RngCore;
+    use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+    use sled_agent_config_reconciler::InternalDisksReceiver;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use slog::Drain;
     use slog::Logger;
@@ -1891,9 +1897,38 @@ mod illumos_tests {
         let log = test_logger();
         let context = CleanupContext::default();
         let resource_wrapper = ResourceWrapper::new(&log).await;
+        let handle = resource_wrapper.storage_test_harness.handle();
+        let all_disks = handle.get_latest_disks().await;
+
+        // Convert from StorageManagerTestHarness to config-reconciler channels.
+        // Do we want to expand config-reconciler test support and not use
+        // StorageManagerTestHarness?
+        let internal_disks_rx = InternalDisksReceiver::fake_static(
+            Arc::new(all_disks.mount_config().clone()),
+            all_disks.all_m2_zpools().into_iter().enumerate().map(
+                |(i, zpool)| {
+                    (
+                        DiskIdentity {
+                            vendor: format!("test-vendor-{i}"),
+                            model: format!("test-model-{i}"),
+                            serial: format!("test-serial-{i}"),
+                        },
+                        zpool,
+                    )
+                },
+            ),
+        );
+        let available_datasets_rx = AvailableDatasetsReceiver::fake_static(
+            all_disks
+                .all_m2_zpools()
+                .into_iter()
+                .zip(all_disks.all_m2_mountpoints(".")),
+        );
+
         let bundler = ZoneBundler::new(
             log,
-            resource_wrapper.storage_test_harness.handle().clone(),
+            internal_disks_rx,
+            available_datasets_rx,
             context,
         )
         .await;

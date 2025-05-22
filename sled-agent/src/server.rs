@@ -12,6 +12,7 @@ use crate::nexus::make_nexus_client;
 use crate::services::ServiceManager;
 use internal_dns_resolver::Resolver;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use std::net::SocketAddr;
@@ -39,6 +40,7 @@ impl Server {
         log: Logger,
         request: StartSledAgentRequest,
         long_running_tasks_handles: LongRunningTaskHandles,
+        config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
         services: ServiceManager,
     ) -> Result<Server, String> {
         info!(log, "setting up sled agent server");
@@ -61,6 +63,7 @@ impl Server {
             request,
             services,
             long_running_tasks_handles,
+            config_reconciler_spawn_token,
         )
         .await
         .map_err(|e| e.to_string())?;
