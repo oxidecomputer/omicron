@@ -3878,7 +3878,7 @@ mod test {
                 "status": "disabled",
                 "direction": "outbound",
                 "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": {"ports": [ "22-25", "27" ], "protocols": [ "UDP" ]},
+                "filters": {"ports": [ "22-25", "27" ], "protocols": [ { "type": "udp" } ]},
                 "action": "deny",
                 "priority": 65533,
                 "description": "second rule"

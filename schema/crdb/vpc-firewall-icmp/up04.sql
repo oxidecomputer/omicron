@@ -1,2 +1,2 @@
 ALTER TABLE omicron.public.vpc_firewall_rule
-  RENAME COLUMN filter_protocols_2 TO filter_protocols;
+  ADD COLUMN IF NOT EXISTS filter_protocols STRING(32)[];
