@@ -461,7 +461,7 @@ impl<'a> ReceiverClient<'a> {
             .header(HDR_DELIVERY_ID, delivery.id.to_string())
             .header(HDR_ALERT_ID, delivery.alert_id.to_string())
             .header(HDR_ALERT_CLASS, alert_class.to_string())
-            .header(HDR_TIMESTAMP, sent_at)
+            .header(HDR_TIMESTAMP, &sent_at)
             .header(http::header::CONTENT_TYPE, "application/json");
 
         // For each secret assigned to this webhook, calculate the HMAC and add a signature header.
