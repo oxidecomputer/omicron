@@ -37,6 +37,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
 use slog::{Logger, info, warn};
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 
@@ -45,11 +46,9 @@ use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 pub use self::rng::PlannerRng;
 pub use self::rng::SledPlannerRng;
-pub(crate) use self::update_sequence::OrderedComponent;
 
 mod omicron_zone_placement;
 pub(crate) mod rng;
-mod update_sequence;
 
 pub struct Planner<'a> {
     log: Logger,
@@ -905,15 +904,12 @@ impl<'a> Planner<'a> {
             .map(|(id, _details)| id)
             .collect::<Vec<_>>();
 
-        // Wait for all current zones to appear in the inventory.
-        // TODO-correctness: We should check their image source,
-        // but the inventory doesn't report that yet; see
-        // <https://github.com/oxidecomputer/omicron/issues/8084>.
+        // Wait for zones to appear up-to-date in the inventory.
         let inventory_zones = self
             .inventory
-            .all_omicron_zones()
-            .map(|z| z.id)
-            .collect::<BTreeSet<_>>();
+            .all_ledgered_omicron_zones()
+            .map(|z| (z.id, z.image_source.clone()))
+            .collect::<BTreeMap<_, _>>();
         for &sled_id in &sleds {
             if !self
                 .blueprint
@@ -921,18 +917,21 @@ impl<'a> Planner<'a> {
                     sled_id,
                     BlueprintZoneDisposition::is_in_service,
                 )
-                .all(|zone| inventory_zones.contains(&zone.id))
+                .all(|zone| {
+                    let image_source = zone.image_source.clone().into();
+                    inventory_zones.get(&zone.id) == Some(&image_source)
+                })
             {
                 info!(
-                    self.log, "zones not yet up-to-date";
+                    self.log, "some zones not yet up-to-date";
                     "sled_id" => %sled_id,
                 );
                 return Ok(());
             }
         }
 
-        // Choose among the out-of-date zones one with the fewest dependencies.
-        let mut out_of_date_zones = sleds
+        // Update the first out-of-date zone.
+        let out_of_date_zones = sleds
             .into_iter()
             .flat_map(|sled_id| {
                 let blueprint = &self.blueprint;
@@ -949,8 +948,6 @@ impl<'a> Planner<'a> {
                     })
             })
             .collect::<Vec<(SledUuid, BlueprintZoneConfig)>>();
-
-        sort_zones_by_deps(&mut out_of_date_zones);
         if let Some((sled_id, zone)) = out_of_date_zones.first() {
             return self.update_or_expunge_zone(*sled_id, zone);
         }
@@ -1111,15 +1108,6 @@ impl<'a> Planner<'a> {
         //
         // https://www.cockroachlabs.com/docs/stable/cluster-settings#change-a-cluster-setting
     }
-}
-
-/// Sort in place a vector of sled-specific zone configurations by API
-/// dependencies (RFD 565 §6).
-fn sort_zones_by_deps(zones: &mut Vec<(SledUuid, BlueprintZoneConfig)>) {
-    zones.sort_by(|a, b| {
-        OrderedComponent::from(a.1.zone_type.kind())
-            .cmp(&OrderedComponent::from(b.1.zone_type.kind()))
-    })
 }
 
 /// The reason a sled's zones need to be expunged.
@@ -4511,37 +4499,6 @@ pub(crate) mod test {
         logctx.cleanup_successful();
     }
 
-    #[test]
-    fn test_sort_zones_by_deps() {
-        static TEST_NAME: &str = "sort_zones_by_deps";
-        let logctx = test_setup_log(TEST_NAME);
-        let log = logctx.log.clone();
-
-        // Collect zone configs from our example system.
-        let (_collection, _input, blueprint) = example(&log, TEST_NAME);
-        let mut zones = blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .map(|(sled_id, z)| (sled_id, z.clone()))
-            .collect::<Vec<(SledUuid, BlueprintZoneConfig)>>();
-
-        // Sort them and verify the ordering constraints.
-        sort_zones_by_deps(&mut zones);
-        let mut nexus = false;
-        for kind in zones.iter().map(|(_, z)| z.zone_type.kind()) {
-            match kind {
-                ZoneKind::Nexus => {
-                    nexus = true;
-                }
-                _ => {
-                    assert!(!nexus);
-                }
-            }
-        }
-        assert!(nexus);
-
-        logctx.cleanup_successful();
-    }
-
     /// Manually update the example system's inventory collection's zones
     /// from a blueprint.
     fn update_collection_from_blueprint(
@@ -4549,15 +4506,13 @@ pub(crate) mod test {
         blueprint: &Blueprint,
     ) {
         for (&sled_id, config) in blueprint.sleds.iter() {
-            let sled_config = config.clone().into_in_service_sled_config();
-            let zones_config = OmicronZonesConfig {
-                generation: sled_config.generation,
-                zones: sled_config.zones.into_iter().collect(),
-            };
             example
                 .system
-                .sled_set_omicron_zones(sled_id, zones_config)
-                .expect("can't set omicron zones for sled");
+                .sled_set_omicron_config(
+                    sled_id,
+                    config.clone().into_in_service_sled_config(),
+                )
+                .expect("can't set sled config");
         }
         example.collection =
             example.system.to_collection_builder().unwrap().build();
@@ -4787,33 +4742,20 @@ pub(crate) mod test {
 
             parent = blueprint;
         }
+        let blueprint9 = parent;
 
         // All Crucible Pantries should now be updated.
         assert_eq!(
-            parent
+            blueprint9
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, z)| is_up_to_date_pantry(z))
                 .count(),
             CRUCIBLE_PANTRY_REDUNDANCY
         );
 
-        // One more iteration for the last old zone to be expunged.
-        update_collection_from_blueprint(&mut example, &parent);
-        let blueprint10 = Planner::new_based_on(
-            log.clone(),
-            &parent,
-            &input,
-            "last_blueprint",
-            &example.collection,
-        )
-        .expect("can't create planner")
-        .with_rng(PlannerRng::from_seed((TEST_NAME, "last_bp")))
-        .plan()
-        .expect("replan for last blueprint");
-
         // All old Pantry zones should now be expunged.
         assert_eq!(
-            blueprint10
+            blueprint9
                 .all_omicron_zones(BlueprintZoneDisposition::is_expunged)
                 .filter(|(_, z)| is_old_pantry(z))
                 .count(),
@@ -4823,17 +4765,17 @@ pub(crate) mod test {
         // Now we can update Nexus, because all of its dependent zones
         // are up-to-date w/r/t the new repo.
         assert_eq!(
-            parent
+            blueprint9
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, z)| is_old_nexus(z))
                 .count(),
             NEXUS_REDUNDANCY + 1,
         );
-        let mut parent = blueprint10;
-        for i in 11..=17 {
-            let blueprint_name = format!("blueprint_{i}");
+        let mut parent = blueprint9;
+        for i in 10..=17 {
             update_collection_from_blueprint(&mut example, &parent);
 
+            let blueprint_name = format!("blueprint{i}");
             let blueprint = Planner::new_based_on(
                 log.clone(),
                 &parent,
@@ -4847,7 +4789,6 @@ pub(crate) mod test {
             .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
 
             let summary = blueprint.diff_since_blueprint(&parent);
-            eprintln!("{}", summary.display());
             for sled in summary.diff.sleds.modified_values_diff() {
                 if i % 2 == 0 {
                     assert!(sled.zones.added.is_empty());
@@ -4965,8 +4906,9 @@ pub(crate) mod test {
 
         let mut parent = blueprint1;
         for i in 2..=MAX_PLANNING_ITERATIONS {
-            let blueprint_name = format!("blueprint_{i}");
             update_collection_from_blueprint(&mut example, &parent);
+
+            let blueprint_name = format!("blueprint{i}");
             let blueprint = Planner::new_based_on(
                 log.clone(),
                 &parent,

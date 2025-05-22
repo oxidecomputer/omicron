@@ -14,7 +14,6 @@ use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
-use crate::planner::OrderedComponent;
 use crate::planner::ZoneExpungeReason;
 use crate::planner::rng::PlannerRng;
 use anyhow::Context as _;
@@ -1965,30 +1964,25 @@ impl<'a> BlueprintBuilder<'a> {
         zone_kind: ZoneKind,
         new_repo: Option<&TufRepoDescription>,
     ) -> bool {
-        match OrderedComponent::from(zone_kind) {
-            OrderedComponent::HostOs | OrderedComponent::SpRot => {
-                todo!("can't yet update Host OS or SP/RoT")
-            }
-            OrderedComponent::OmicronZone(kind) => match kind {
-                ZoneKind::Nexus => {
-                    // Nexus can only be updated if all non-Nexus zones have been updated,
-                    // i.e., their image source is an artifact from the new repo.
-                    self.sled_ids_with_zones().all(|sled_id| {
-                        self.current_sled_zones(
-                            sled_id,
-                            BlueprintZoneDisposition::is_in_service,
-                        )
-                        .filter(|z| z.zone_type.kind() != ZoneKind::Nexus)
-                        .all(|z| {
-                            z.image_source
-                                == Self::zone_image_artifact(new_repo, z.kind())
-                        })
+        match zone_kind {
+            ZoneKind::Nexus => {
+                // Nexus can only be updated if all non-Nexus zones have been updated,
+                // i.e., their image source is an artifact from the new repo.
+                self.sled_ids_with_zones().all(|sled_id| {
+                    self.current_sled_zones(
+                        sled_id,
+                        BlueprintZoneDisposition::is_in_service,
+                    )
+                    .filter(|z| z.zone_type.kind() != ZoneKind::Nexus)
+                    .all(|z| {
+                        z.image_source
+                            == Self::zone_image_artifact(new_repo, z.kind())
                     })
-                }
-                // <https://github.com/oxidecomputer/omicron/issues/6404>
-                // ZoneKind::CockroachDb => todo!("check cluster status in inventory"),
-                _ => true, // other zone kinds have no special dependencies
-            },
+                })
+            }
+            // <https://github.com/oxidecomputer/omicron/issues/6404>
+            // ZoneKind::CockroachDb => todo!("check cluster status in inventory"),
+            _ => true, // other zone kinds have no special dependencies
         }
     }
 
