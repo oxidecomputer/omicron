@@ -123,6 +123,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -142,6 +143,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -151,6 +153,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -161,6 +164,7 @@ impl super::Nexus {
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
                         &file_path,
+                        range,
                     )
                     .await
             }
@@ -171,6 +175,7 @@ impl super::Nexus {
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
                         &file_path,
+                        range,
                     )
                     .await
             }

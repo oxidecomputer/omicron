@@ -3935,7 +3935,7 @@ async fn cmd_nexus_support_bundles_download(
     args: &SupportBundleDownloadArgs,
 ) -> Result<(), anyhow::Error> {
     let total_length = client
-        .support_bundle_head(args.id.as_untyped_uuid())
+        .support_bundle_head(args.id.as_untyped_uuid(), None)
         .await?
         .content_length()
         .ok_or_else(|| anyhow::anyhow!("No content length"))?;
@@ -3973,7 +3973,7 @@ async fn cmd_nexus_support_bundles_get_index(
     args: &SupportBundleIndexArgs,
 ) -> Result<(), anyhow::Error> {
     let stream = client
-        .support_bundle_index(args.id.as_untyped_uuid())
+        .support_bundle_index(args.id.as_untyped_uuid(), None)
         .await
         .with_context(|| {
             format!("downloading support bundle index {}", args.id)
@@ -3996,6 +3996,7 @@ async fn cmd_nexus_support_bundles_get_file(
         .support_bundle_download_file(
             args.id.as_untyped_uuid(),
             args.path.as_str(),
+            None,
         )
         .await
         .with_context(|| {

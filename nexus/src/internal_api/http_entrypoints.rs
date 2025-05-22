@@ -66,7 +66,6 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use range_requests::PotentialRange;
-use range_requests::RequestContextEx;
 use std::collections::BTreeMap;
 
 type NexusApiDescription = ApiDescription<ApiContext>;

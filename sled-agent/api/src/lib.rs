@@ -201,6 +201,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
@@ -211,6 +212,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
@@ -221,6 +223,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
@@ -231,6 +234,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
@@ -241,6 +245,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_head_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
