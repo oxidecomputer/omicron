@@ -1726,15 +1726,15 @@ mod test {
         let (new_name, new_records) = added[0];
         assert_eq!(new_name, silo_dns_name(&silo.identity.name));
         // And it should have the same IP addresses as all of the other Silos.
-        for (prior_silo_name, prior_silo_records) in
+        for (prior_record_name, prior_records) in
             old_external.zones[0].records.iter()
         {
             // Only some records in the external zone are for Silos, though.
-            if prior_silo_name.ends_with(".sys") {
+            if prior_record_name.ends_with(".sys") {
                 assert_eq!(
-                    new_records, prior_silo_records,
+                    new_records, prior_records,
                     "new silo ({new_name}) DNS records differ from \
-                    another silo ({prior_silo_name})"
+                    another silo ({prior_name})"
                 );
             }
         }
