@@ -357,7 +357,7 @@ impl Store {
                 hickory_proto::rr::rdata::SOA::new(
                     preferred_nameserver,
                     rname,
-                    answer.generation,
+                    answer.serial,
                     3600,
                     600,
                     1800,
@@ -728,18 +728,17 @@ impl Store {
         let mut answer = Answer {
             zone: zone_name.clone(),
             name: if key == ZONE_APEX_NAME { None } else { Some(key.clone()) },
-            // TODO: make generation a u32
-            generation: config.generation.as_u64() as u32,
+            serial: config.serial,
             records: None,
         };
 
-        let bits = tree
+        let record_json = tree
             .get(key.as_bytes())
             .with_context(|| format!("query tree {:?}", tree_name))
             .map_err(QueryError::QueryFail)?;
 
-        if let Some(bits) = bits {
-            let records: Vec<DnsRecord> = serde_json::from_slice(&bits)
+        if let Some(record_json) = record_json {
+            let records: Vec<DnsRecord> = serde_json::from_slice(&record_json)
                 .with_context(|| {
                     format!("deserialize record for key {:?}", key)
                 })
@@ -781,9 +780,13 @@ pub(crate) enum QueryError {
 #[derive(Debug)]
 pub(crate) struct Answer {
     zone: String,
-    /// The name in `zone` that this answer describes. `None` if the query is for the zone apex.
+    /// The name in `zone` that this answer describes. `None` if the query is
+    /// for the zone apex.
     pub name: Option<String>,
-    generation: u32,
+    /// The serial number for the zone which provided this answer. While this
+    /// currently matches the DNS config generation that provided this answer,
+    /// they may differ in the future.
+    serial: u32,
     pub records: Option<Vec<DnsRecord>>,
 }
 
