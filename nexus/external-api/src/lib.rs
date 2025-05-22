@@ -168,10 +168,10 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                     url = "http://docs.oxide.computer/api/vpcs"
                 }
             },
-            "system/webhooks" = {
-                description = "Webhooks deliver notifications for audit log events and fault management alerts.",
+            "system/alerts" = {
+                description = "Alerts deliver notifications for events that occur on the Oxide rack",
                 external_docs = {
-                    url = "http://docs.oxide.computer/api/webhooks"
+                    url = "http://docs.oxide.computer/api/alerts"
                 }
             },
             "system/probes" = {
@@ -3543,49 +3543,150 @@ pub trait NexusExternalApi {
         params: TypedBody<params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError>;
 
-    // Webhooks
+    // Alerts
 
-    /// List webhook event classes
+    /// List alert classes
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/event-classes",
-        tags = ["system/webhooks"],
+        path = "/v1/alert-classes",
+        tags = ["system/alerts"],
     }]
-    async fn webhook_event_class_list(
+    async fn alert_class_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<
-            PaginationParams<EmptyScanParams, params::EventClassPage>,
+            PaginationParams<EmptyScanParams, params::AlertClassPage>,
         >,
-        filter: Query<params::EventClassFilter>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError>;
+        filter: Query<params::AlertClassFilter>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertClass>>, HttpError>;
 
-    /// List webhook receivers
+    /// List alert receivers
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/receivers",
-        tags = ["system/webhooks"],
+        path = "/v1/alert-receivers",
+        tags = ["system/alerts"],
     }]
-    async fn webhook_receiver_list(
+    async fn alert_receiver_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookReceiver>>, HttpError>;
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertReceiver>>, HttpError>;
 
-    /// Fetch webhook receiver
+    /// Fetch alert receiver
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/receivers/{receiver}",
-        tags = ["system/webhooks"],
+        path = "/v1/alert-receivers/{receiver}",
+        tags = ["system/alerts"],
     }]
-    async fn webhook_receiver_view(
+    async fn alert_receiver_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-    ) -> Result<HttpResponseOk<views::WebhookReceiver>, HttpError>;
+        path_params: Path<params::AlertReceiverSelector>,
+    ) -> Result<HttpResponseOk<views::AlertReceiver>, HttpError>;
+
+    /// Delete alert receiver
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/alert-receivers/{receiver}",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertReceiverSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Add alert receiver subscription
+    #[endpoint {
+        method = POST,
+        path = "/v1/alert-receivers/{receiver}/subscriptions",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_subscription_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertReceiverSelector>,
+        params: TypedBody<params::AlertSubscriptionCreate>,
+    ) -> Result<HttpResponseCreated<views::AlertSubscriptionCreated>, HttpError>;
+
+    /// Remove alert receiver subscription
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/alert-receivers/{receiver}/subscriptions/{subscription}",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_subscription_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertSubscriptionSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List delivery attempts to alert receiver
+    ///
+    /// Optional query parameters to this endpoint may be used to filter
+    /// deliveries by state. If none of the `failed`, `pending` or `delivered`
+    /// query parameters are present, all deliveries are returned. If one or
+    /// more of these parameters are provided, only those which are set to
+    /// "true" are included in the response.
+    #[endpoint {
+        method = GET,
+        path = "/v1/alert-receivers/{receiver}/deliveries",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_delivery_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertReceiverSelector>,
+        state_filter: Query<params::AlertDeliveryStateFilter>,
+        pagination: Query<PaginatedByTimeAndId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertDelivery>>, HttpError>;
+
+    /// Send liveness probe to alert receiver
+    ///
+    /// This endpoint synchronously sends a liveness probe to the selected alert
+    /// receiver. The response message describes the outcome of the probe:
+    /// either the successful response (as appropriate), or indication of why
+    /// the probe failed.
+    ///
+    /// The result of the probe is represented as an `AlertDelivery` model.
+    /// Details relating to the status of the probe depend on the alert delivery
+    /// mechanism, and are included in the `AlertDeliveryAttempts` model. For
+    /// example, webhook receiver liveness probes include the HTTP status code
+    /// returned by the receiver endpoint.
+    ///
+    /// Note that the response status is `200 OK` as long as a probe request was
+    /// able to be sent to the receiver endpoint. If an HTTP-based receiver,
+    /// such as a webhook, responds to the another status code, including an
+    /// error, this will be indicated by the response body, *not* the status of
+    /// the response.
+    ///
+    /// The `resend` query parameter can be used to request re-delivery of
+    /// failed events if the liveness probe succeeds. If it is set to true and
+    /// the liveness probe succeeds, any alerts for which delivery to this
+    /// receiver has failed will be queued for re-delivery.
+    #[endpoint {
+        method = POST,
+        path = "/v1/alert-receivers/{receiver}/probe",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_probe(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertReceiverSelector>,
+        query_params: Query<params::AlertReceiverProbe>,
+    ) -> Result<HttpResponseOk<views::AlertProbeResult>, HttpError>;
+
+    /// Request re-delivery of alert
+    #[endpoint {
+        method = POST,
+        path = "/v1/alerts/{alert_id}/resend",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_delivery_resend(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertSelector>,
+        receiver: Query<params::AlertReceiverSelector>,
+    ) -> Result<HttpResponseCreated<views::AlertDeliveryId>, HttpError>;
+
+    // ALERTS: WEBHOOKS
 
     /// Create webhook receiver
     #[endpoint {
         method = POST,
-        path = "/v1/webhooks/receivers",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-receivers",
+        tags = ["system/alerts"],
     }]
     async fn webhook_receiver_create(
         rqctx: RequestContext<Self::Context>,
@@ -3599,141 +3700,48 @@ pub trait NexusExternalApi {
     /// to add and remove secrets.
     #[endpoint {
         method = PUT,
-        path = "/v1/webhooks/receivers/{receiver}",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-receivers/{receiver}",
+        tags = ["system/alerts"],
     }]
     async fn webhook_receiver_update(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
+        path_params: Path<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Delete webhook receiver
-    #[endpoint {
-        method = DELETE,
-        path = "/v1/webhooks/receivers/{receiver}",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_receiver_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
-
-    /// Add webhook receiver subscription
-    #[endpoint {
-        method = POST,
-        path = "/v1/webhooks/receivers/{receiver}/subscriptions",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_receiver_subscription_add(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-        params: TypedBody<params::WebhookSubscriptionCreate>,
-    ) -> Result<HttpResponseCreated<views::WebhookSubscriptionCreated>, HttpError>;
-
-    /// Remove webhook receiver subscription
-    #[endpoint {
-        method = DELETE,
-        path = "/v1/webhooks/receivers/{receiver}/subscriptions/{subscription}",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_receiver_subscription_remove(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookSubscriptionSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
-
-    /// Send liveness probe to webhook receiver
-    ///
-    /// This endpoint synchronously sends a liveness probe request to the
-    /// selected webhook receiver. The response message describes the outcome of
-    /// the probe request: either the response from the receiver endpoint, or an
-    /// indication of why the probe failed.
-    ///
-    /// Note that the response status is `200 OK` as long as a probe request was
-    /// able to be sent to the receiver endpoint. If the receiver responds with
-    /// another status code, including an error, this will be indicated by the
-    /// response body, *not* the status of the response.
-    ///
-    /// The `resend` query parameter can be used to request re-delivery of
-    /// failed events if the liveness probe succeeds. If it is set to true and
-    /// the webhook receiver responds to the probe request with a `2xx` status
-    /// code, any events for which delivery to this receiver has failed will be
-    /// queued for re-delivery.
-    #[endpoint {
-        method = POST,
-        path = "/v1/webhooks/receivers/{receiver}/probe",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_receiver_probe(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-        query_params: Query<params::WebhookProbe>,
-    ) -> Result<HttpResponseOk<views::WebhookProbeResult>, HttpError>;
 
     /// List webhook receiver secret IDs
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/secrets",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-secrets",
+        tags = ["system/alerts"],
     }]
     async fn webhook_secrets_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::WebhookReceiverSelector>,
+        query_params: Query<params::AlertReceiverSelector>,
     ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError>;
 
     /// Add secret to webhook receiver
     #[endpoint {
         method = POST,
-        path = "/v1/webhooks/secrets",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-secrets",
+        tags = ["system/alerts"],
     }]
     async fn webhook_secrets_add(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::WebhookReceiverSelector>,
+        query_params: Query<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookSecret>, HttpError>;
 
     /// Remove secret from webhook receiver
     #[endpoint {
         method = DELETE,
-        path = "/v1/webhooks/secrets/{secret_id}",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-secrets/{secret_id}",
+        tags = ["system/alerts"],
     }]
     async fn webhook_secrets_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookSecretSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
-
-    /// List delivery attempts to webhook receiver
-    ///
-    /// Optional query parameters to this endpoint may be used to filter
-    /// deliveries by state. If none of the `failed`, `pending` or `delivered`
-    /// query parameters are present, all deliveries are returned. If one or
-    /// more of these parameters are provided, only those which are set to
-    /// "true" are included in the response.
-    #[endpoint {
-        method = GET,
-        path = "/v1/webhooks/deliveries",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_delivery_list(
-        rqctx: RequestContext<Self::Context>,
-        receiver: Query<params::WebhookReceiverSelector>,
-        state_filter: Query<params::WebhookDeliveryStateFilter>,
-        pagination: Query<PaginatedByTimeAndId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
-
-    /// Request re-delivery of webhook event
-    #[endpoint {
-        method = POST,
-        path = "/v1/webhooks/deliveries/{event_id}/resend",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_delivery_resend(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookEventSelector>,
-        receiver: Query<params::WebhookReceiverSelector>,
-    ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError>;
 }
 
 /// Perform extra validations on the OpenAPI spec.

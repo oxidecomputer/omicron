@@ -52,6 +52,8 @@ macro_rules! impl_typed_uuid_kind {
 
 impl_typed_uuid_kind! {
     AffinityGroup => "affinity_group",
+    Alert => "alert",
+    AlertReceiver => "alert_receiver",
     AntiAffinityGroup => "anti_affinity_group",
     Blueprint => "blueprint",
     Collection => "collection",
@@ -64,6 +66,11 @@ impl_typed_uuid_kind! {
     Instance => "instance",
     LoopbackAddress => "loopback_address",
     MupdateOverride => "mupdate_override",
+    // `OmicronSledConfig`s do not themselves contain IDs, but we generate IDs
+    // for them when they're serialized to the database during inventory
+    // collection. This ID type is therefore only used by nexus-db-model and
+    // nexus-db-queries.
+    OmicronSledConfig => "omicron_sled_config",
     OmicronZone => "service",
     PhysicalDisk => "physical_disk",
     Propolis => "propolis",
@@ -82,8 +89,6 @@ impl_typed_uuid_kind! {
     UpstairsSession => "upstairs_session",
     Vnic => "vnic",
     Volume => "volume",
-    WebhookEvent => "webhook_event",
-    WebhookReceiver => "webhook_receiver",
     WebhookDelivery => "webhook_delivery",
     WebhookDeliveryAttempt => "webhook_delivery_attempt",
     WebhookSecret => "webhook_secret",

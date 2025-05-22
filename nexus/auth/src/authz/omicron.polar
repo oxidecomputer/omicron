@@ -596,21 +596,21 @@ has_role(USER_INTERNAL_API: AuthenticatedActor, "admin", _silo: Silo);
 
 resource WebhookSecret {
 	permissions = [ "read", "modify" ];
-	relations = { parent_webhook_receiver: WebhookReceiver };
+	relations = { parent_alert_receiver: AlertReceiver };
 
-	"read" if "read" on "parent_webhook_receiver";
-	"modify" if "modify" on "parent_webhook_receiver";
+	"read" if "read" on "parent_alert_receiver";
+	"modify" if "modify" on "parent_alert_receiver";
 }
 
-has_relation(rx: WebhookReceiver, "parent_webhook_receiver", secret: WebhookSecret)
-	if secret.webhook_receiver = rx;
+has_relation(rx: AlertReceiver, "parent_alert_receiver", secret: WebhookSecret)
+	if secret.alert_receiver = rx;
 
-resource WebhookEventClassList {
+resource AlertClassList {
 	permissions = [ "list_children" ];
 	relations = { parent_fleet: Fleet };
 
 	"list_children" if "viewer" on "parent_fleet";
 }
 
-has_relation(fleet: Fleet, "parent_fleet", collection: WebhookEventClassList)
+has_relation(fleet: Fleet, "parent_fleet", collection: AlertClassList)
 	if collection.fleet = fleet;

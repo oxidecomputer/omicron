@@ -5,31 +5,45 @@
 //! Example collections used for testing
 
 use crate::CollectionBuilder;
+use crate::now_db_precision;
 use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use clickhouse_admin_types::KeeperId;
 use gateway_client::types::PowerState;
-use gateway_client::types::RotSlot;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use gateway_types::rot::RotSlot;
 use nexus_sled_agent_shared::inventory::Baseboard;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use nexus_types::inventory::ZpoolName;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
+use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetKind;
+use omicron_common::disk::DatasetName;
 use omicron_common::disk::DiskVariant;
+use omicron_common::disk::OmicronPhysicalDiskConfig;
+use omicron_common::disk::SharedDatasetConfig;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use std::sync::Arc;
+use std::time::Duration;
 use strum::IntoEnumIterator;
+use uuid::Uuid;
 
 /// Returns an example Collection used for testing
 ///
@@ -295,6 +309,54 @@ pub fn representative() -> Representative {
     let sled16: OmicronZonesConfig = serde_json::from_str(sled16_data).unwrap();
     let sled17: OmicronZonesConfig = serde_json::from_str(sled17_data).unwrap();
 
+    // Convert these to `OmicronSledConfig`s. We'll start with empty disks and
+    // datasets for now, and add to them below for sled14.
+    let mut sled14 = OmicronSledConfig {
+        generation: sled14.generation,
+        disks: Default::default(),
+        datasets: Default::default(),
+        zones: sled14.zones.into_iter().collect(),
+        remove_mupdate_override: None,
+    };
+    let sled16 = OmicronSledConfig {
+        generation: sled16.generation,
+        disks: Default::default(),
+        datasets: Default::default(),
+        zones: sled16.zones.into_iter().collect(),
+        remove_mupdate_override: None,
+    };
+    let sled17 = OmicronSledConfig {
+        generation: sled17.generation,
+        disks: Default::default(),
+        datasets: Default::default(),
+        zones: sled17.zones.into_iter().collect(),
+        remove_mupdate_override: None,
+    };
+
+    // Create iterator producing fixed IDs.
+    let mut disk_id_iter = std::iter::from_fn({
+        //              "physicaldisk"
+        let mut value = "70687973-6963-616c-6469-736b00000000"
+            .parse::<Uuid>()
+            .unwrap()
+            .as_u128();
+        move || {
+            value += 1;
+            Some(PhysicalDiskUuid::from_u128(value))
+        }
+    });
+    let mut zpool_id_iter = std::iter::from_fn({
+        //              "zpool"
+        let mut value = "7a706f6f-6c00-0000-0000-000000000000"
+            .parse::<Uuid>()
+            .unwrap()
+            .as_u128();
+        move || {
+            value += 1;
+            Some(ZpoolUuid::from_u128(value))
+        }
+    });
+
     // Report some sled agents.
     //
     // This first one will match "sled1_bb"'s baseboard information.
@@ -362,19 +424,41 @@ pub fn representative() -> Representative {
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
     ];
-    let zpools = vec![InventoryZpool {
-        id: "283f5475-2606-4e83-b001-9a025dbcb8a0".parse().unwrap(),
-        total_size: ByteCount::from(4096),
-    }];
+    let mut zpools = Vec::new();
+    for disk in &disks {
+        let pool_id = zpool_id_iter.next().unwrap();
+        sled14.disks.insert(OmicronPhysicalDiskConfig {
+            identity: disk.identity.clone(),
+            id: disk_id_iter.next().unwrap(),
+            pool_id,
+        });
+        zpools.push(InventoryZpool {
+            id: pool_id,
+            total_size: ByteCount::from(4096),
+        });
+    }
+    let dataset_name = DatasetName::new(
+        ZpoolName::new_external(zpools[0].id),
+        DatasetKind::Debug,
+    );
     let datasets = vec![InventoryDataset {
         id: Some("afc00483-0d7b-4181-87d5-0def937d3cd7".parse().unwrap()),
-        name: "mydataset".to_string(),
+        name: dataset_name.full_name(),
         available: ByteCount::from(1024),
         used: ByteCount::from(0),
         quota: None,
         reservation: None,
         compression: "lz4".to_string(),
     }];
+    sled14.datasets.insert(DatasetConfig {
+        id: datasets[0].id.unwrap(),
+        name: dataset_name,
+        inner: SharedDatasetConfig {
+            compression: datasets[0].compression.parse().unwrap(),
+            quota: datasets[0].quota,
+            reservation: datasets[0].reservation,
+        },
+    });
 
     builder
         .found_sled_inventory(
@@ -387,10 +471,10 @@ pub fn representative() -> Representative {
                     revision: 0,
                 },
                 SledRole::Gimlet,
-                sled14,
                 disks,
                 zpools,
                 datasets,
+                Some(sled14),
             ),
         )
         .unwrap();
@@ -415,10 +499,10 @@ pub fn representative() -> Representative {
                     revision: 0,
                 },
                 SledRole::Scrimlet,
-                sled16,
                 vec![],
                 vec![],
                 vec![],
+                Some(sled16),
             ),
         )
         .unwrap();
@@ -438,10 +522,10 @@ pub fn representative() -> Representative {
                     model: String::from("fellofftruck"),
                 },
                 SledRole::Gimlet,
-                sled17,
                 vec![],
                 vec![],
                 vec![],
+                Some(sled17),
             ),
         )
         .unwrap();
@@ -459,15 +543,12 @@ pub fn representative() -> Representative {
                 sled_agent_id_unknown,
                 Baseboard::Unknown,
                 SledRole::Gimlet,
-                // We only have omicron zones for three sleds so use empty zone
-                // info here.
-                OmicronZonesConfig {
-                    generation: Generation::new(),
-                    zones: Vec::new(),
-                },
                 vec![],
                 vec![],
                 vec![],
+                // We only have omicron zones for three sleds so report no sled
+                // config here.
+                None,
             ),
         )
         .unwrap();
@@ -556,11 +637,45 @@ pub fn sled_agent(
     sled_id: SledUuid,
     baseboard: Baseboard,
     sled_role: SledRole,
-    omicron_zones: OmicronZonesConfig,
     disks: Vec<InventoryDisk>,
     zpools: Vec<InventoryZpool>,
     datasets: Vec<InventoryDataset>,
+    ledgered_sled_config: Option<OmicronSledConfig>,
 ) -> Inventory {
+    // Assume the `ledgered_sled_config` was reconciled successfully.
+    let last_reconciliation = ledgered_sled_config.clone().map(|config| {
+        let external_disks = config
+            .disks
+            .iter()
+            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        let datasets = config
+            .datasets
+            .iter()
+            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        let zones = config
+            .zones
+            .iter()
+            .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        ConfigReconcilerInventory {
+            last_reconciled_config: config,
+            external_disks,
+            datasets,
+            zones,
+        }
+    });
+
+    let reconciler_status = if last_reconciliation.is_some() {
+        ConfigReconcilerInventoryStatus::Idle {
+            completed_at: now_db_precision(),
+            ran_for: Duration::from_secs(5),
+        }
+    } else {
+        ConfigReconcilerInventoryStatus::NotYetRun
+    };
+
     Inventory {
         baseboard,
         reservoir_size: ByteCount::from(1024),
@@ -569,10 +684,11 @@ pub fn sled_agent(
         sled_id,
         usable_hardware_threads: 10,
         usable_physical_ram: ByteCount::from(1024 * 1024),
-        omicron_zones,
         disks,
         zpools,
         datasets,
-        omicron_physical_disks_generation: Generation::new(),
+        ledgered_sled_config,
+        reconciler_status,
+        last_reconciliation,
     }
 }
