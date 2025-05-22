@@ -573,8 +573,13 @@ impl BundleCollection {
         tokio::fs::create_dir_all(&sp_dumps_dir).await.with_context(|| {
             format!("failed to create SP task dump directory {sp_dumps_dir}")
         })?;
-        let sp_dumps_fut =
-            save_all_sp_dumps(log, &self.resolver, &sp_dumps_dir);
+        if let Err(e) =
+            save_all_sp_dumps(log, &self.resolver, &sp_dumps_dir).await
+        {
+            error!(log, "failed to capture SP task dumps"; "error" => InlineErrorChain::new(e.as_ref()));
+        } else {
+            report.listed_sps = true;
+        };
 
         if let Ok(all_sleds) = self
             .datastore
@@ -610,12 +615,6 @@ impl BundleCollection {
                 }
             }
         }
-
-        if let Err(e) = sp_dumps_fut.await {
-            error!(log, "failed to capture SP task dumps"; "error" => InlineErrorChain::new(e.as_ref()));
-        } else {
-            report.listed_sps = true;
-        };
 
         Ok(report)
     }
