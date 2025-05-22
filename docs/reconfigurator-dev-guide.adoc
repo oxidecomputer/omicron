@@ -208,8 +208,6 @@ Each background task has a fixed name (e.g., `blueprint_executor`).  You can use
 
 Here are the most important background tasks related to Reconfigurator:
 
-// XXX-dap working here
-
 .Key Reconfigurator-related background tasks
 [cols="1h,4",options="header"]
 |===
@@ -243,9 +241,206 @@ Notably absent from this list is anything related to planning.  This has not bee
 
 == Testing and developer workflow
 
-// XXX-dap talk about developer workflow: "inner loop", etc.
-// XXX-dap talk about testing and test environments, live tests, etc.
+There are a bunch of different environments that you can set up and use to test Omicron.
 
+.Kinds of Omicron test environments
+[cols="1,2,2a,2a,2a",options="header"]
+|===
+|Name
+|Summary
+|Pros
+|Good for
+|Limitations
+
+|xref:how-to-run-simulated.adoc[`cargo xtask omicron-dev run-all`]
+|Command-line tool that stands up real instances of much of the control plane locally (in-process and child processes): Nexus, CockroachDB, Clickhouse, Management Gateway Service, Oximeter, Crucible Pantry.  Limitations result from using simulated sled agent, simulated service processors, and loopback networking.
+* Easy (one command), quick (starts in ~10s)
+* Fast to iterate (rebuilds in a minute or two, depending on what component you're changing)
+* Exactly matches the environment provided to Nexus integration tests (so it can be useful for developing and debugging these tests).
+|
+* Nexus internal/external API changes
+* Most of development for anything that can be simulated (e.g., inventory, most parts of execution)
+* `omdb`-only changes
+|
+* Simulated sled agent has many limitations: cannot run VMs, does not simulate the actual control plane components that it pretends to run, no simulation of Crucible storage, etc.
+* Simulated SPs have limited fidelity to the real thing (e.g., resetting SP will not simulate reset of the sled, even though a real one would)
+* No Wicket, no full RSS path
+* No meaningful simulation of networking (so can't be used to test behavior of underlay connectivity, external connectivity, configuring Dendrite, etc.)
+
+|https://github.com/oxidecomputer/testbed/tree/main/a4x2[`a4x2`]
+|Uses VMs, fancy local networking config, and a software-based switch (https://github.com/oxidecomputer/softnpu[softnpu]) to create a multi-sled environment that looks much more realistic to the control plane than `omicron-dev run-all`.
+|
+* Much higher fidelity to real systems than `omicron-dev run-all`:
+** most components' environments look largely like a real system (e.g., run in a zone, using the SMF start methods)
+** softnpu implements the same (runtime-configurable) networking behavior that real switches do
+** real sled agent runs real instances of all components except simulated networking (which is full-fidelity) and simulated service processors
+|
+* More time required up front to get started (may need beefier dev machine)
+* Somewhat bumpy developer experience (see README)
+* Longer iteration time (rebuild and redeploy takes ~30-60 minutes)
+* Limitations in fidelity:
+** Cannot run instances (sleds are running in VMs and we don't support nested virt)
+** Service processors are simulated (just like `omicron-dev run-all`)
+
+|xref:how-to-run.adoc[`Running non-simulated Omicron on a single system`]
+|Runs real Sled Agent and all other components directly on your dev system the same way they'd run on a real system
+|
+* Moderate iteration time (rebuild and redeploy could take minutes, depending on what you're changing)
+* Could support running VMs
+| ?
+|
+* "Takes over" your dev system -- does not clearly delineate what global state it's responsible for and have a way to clean it all up
+* Somewhat brittle (e.g., after reboot, SMF service for sled agent may start but not find the files it needs)
+* Limitations in fidelity:
+** Only one sled
+** No service processors
+** Networking simulation is incomplete (connectivity depends on how your dev system is set up)
+
+|Racklette
+|Real Oxide hardware (sleds and switches), essentially indistinguishable from a real Oxide rack
+|Everything.  Worthwhile for:
+* any testing involving real "customer" VMs
+* final smoke testing for work developed with simulated components
+|
+* Very limited, shared resource
+|===
+
+https://github.com/oxidecomputer/omicron/pull/7424[Work is ongoing] to add `cargo xtask` commands for launching an a4x2 environment.  This would significantly streamline the process of using a4x2 and also make it possible to use a4x2 in CI.
+
+A common development workflow is:
+
+* "inner loop" as you work on code: run `cargo check`
+* some combination of:
+** use `cargo xtask omicron-dev run-all` and various developer tools to test it out
+** add unit tests run with `cargo nextest run`
+* once things are working, test end-to-end on a4x2 (if that's faithful enough) or a racklette
+
+== Automated testing
+
+Broadly, we have several kinds of tests:
+
+* Various levels of unit test and small-scale integration tests for most components, including the planner, execution, etc.  The integration tests use an environment identical to `cargo xtask omicron-dev run-all`.
+* For testing the planner and blueprint builder: we have `reconfigurator-cli` _scripts_ that run a bunch of commands print the contents of blueprints and diffs between blueprints and verify that these look like we expect.
+* Omicron CI runs xref:../end-to-end-tests["end-to-end"] tests in the "Running non-simulated Omicron on a single system" environment.
+* We have a small number of xref:../live-tests["live tests"] that can be run on-demand in a4x2 or a racklette that exercise behavior that can't currently be tested in CI.
+
+The https://github.com/oxidecomputer/omicron/pull/7424[ongoing work mentioned above] will make it possible to run the live tests in a4x2 in CI.
+
+== Updates for SPs, RoTs, etc.
+
+Updates for the following components get lumped together:
+
+* service processor Hubris image
+* root of trust Hubris image
+* root of trust bootloader Hubris image
+* host OS phase 1 image
+
+That's because all of these are managed by the service processor (SP).  They all follow a similar flow.  The control plane talks to SPs through Management Gateway Service, so we often call these MGS-managed updates or just "MGS Updates" (or sometimes "SP-managed updates").
+
+There are a few ways to update SPs and their associated components:
+
+* via Wicket, which uses MGS to deploy an artifact from the TUF repo.  This is the way we update most systems in development and production today.  Since you're supplying the TUF repo, Wicket is doing the work to figure out which artifact is appropriate for the hardware being updated.
+* via `faux-mgs`, which talks directly to the SP and deploys an image directly from a file you give it.  Since you're giving it the specific file to use, you do the work of figuring out what that should be (e.g., picking which artifact from a TUF repo is appropriate for the hardware you're updating).  Updating with `faux-mgs` is outside the scope of this document but there's some information and links below on how to do this.
+* via `humility` or other low-level tools (outside the scope of this document)
+* "Reconfigurator-driven": what this section is about.
+
+"Reconfigurator-driven" means that we're using `nexus_mgs_updates` to perform the update.  That implementation is designed to support:
+
+* updating to software images stored in a TUF repository
+* resuming after crashing at any point
+* executing concurrently (in different Nexus instances)
+
+The easiest way to test Reconfigurator-driven updates is using `reconfigurator-sp-updater` (more on this below).  You can also use `reconfigurator-cli` to generate a blueprint that specifies an MGS-managed update and then use `reconfigurator-exec-unsafe` to execute it.  This is more cumbersome but tests the integration of `nexus_mgs_updates` into blueprint execution.  (That's pretty simple and tested at this point so this is probably not a very useful flow unless something is broken.)  Eventually, you'll be able to test these updates through normal, Nexus-driven blueprint execution.  This is blocked on database support for the parts of blueprints that specify MGS-managed updates.
+
+Regardless of how you perform updates, it's useful to use `faux-mgs` to read the ground truth state from the SP about its configuration (what versions are in each slot and which slots are active).  More on this below.
+
+=== Task: manually performing Reconfigurator-driven update of SPs and RoTs
+
+. Decide what software you want to deploy.  This must be packaged in a TUF repository.
++
+If you're just testing update and don't care what you're deploying, you can use one generated by the CI process from any commit on "main".
+2. Figure out which artifact within the TUF repository you need to use for your hardware.
++
+In all cases, you can either look at the metadata in the unpacked TUF repo (`jq < repo/targets/*.artifacts.json`) or just look at the filenames of the artifacts (`ls repo/targets`).
+** For service processors: the image should reflect the type of board you're updating (`kind` should include `switch` or `gimlet` or `psc`)
+3. Use `repo-depot-standalone` to serve the TUF repo depot API backed by the TUF repo you want to use.
+4. Use `reconfigurator-sp-updater` to perform the update.
+
+// XXX-dap working here
+// XXX-dap create separate task sections for the different pieces here
+
+=== Setting up `faux-mgs`
+
+https://github.com/oxidecomputer/management-gateway-service/tree/main/faux-mgs[`faux-mgs`] is a command-line tool that talks directly to SPs (without using MGS).  For Omicron developers, it's the lowest level tool we usually need to directly inspect SP state and issue commands to the SP.
+
+This tool is most useful for:
+
+* directly inspecting the current SP state (while debugging or learning)
+* manually performing SP-managed updates as part of understanding how they work
+
+To use: first clone the above repo and build with `cargo build --bin=faux-mgs`.
+
+For racklettes: copy this binary to the switch zone and run it from there.  Use `faux-mgs --interface gimlet14 ...` to use it against the SP for sled 14 (just as an example).  Use `dladm show-vlan` in the switch zone to see what other interfaces exist to talk to switches, PSCs, etc.
+
+For a4x2: copy this binary to the switch zone and run it from there.  You'll need to find the IP and ports of the simulated SPs running in this zone.  TODO how do you do that?
+
+For `omicron-dev run-all`, you can run this command from the same system where you're running `omicron-dev`.  Instead of `--interface`, you need to use the `--sp-sim-addr IPV6_ADDR:PORT` option to point `faux-mgs` at the simulated SP.  Unfortunately, the easiest way to find the address and port of the simulated SP is in the log file whose path is printed out by `omicron-dev run-all`.
+
+---
+
+However you get `faux-mgs` running, you can use it to inspect state and https://github.com/oxidecomputer/meta/blob/master/engineering/mupdate/manual-rot-sp-updates.adoc[perform updates by hand].  (If you follow those linked instructions, note that they use `pilot sp exec -e CMD SERIAL`.  This is a thin wrapper that finds the right interface for the host with serial `SERIAL` and then runs `faux-mgs --interface INTERFACE CMD`.  You can just do this transformation yourself.)
+
+The most useful commands for inspecting state are:
+
+* `faux-mgs ... state`: summarizes the SP and RoT information
+* `faux-mgs ... update-status`: reports whether any SP-managed update is in progress
+* `faux-mgs ... read-component-caboose`: reports one piece of metadata about the software in a particular firmware slot.  You need to specify the component (e.g., `sp` or `rot`), the slot (e.g., `0` or `1`), and the key (`VERS` for version, `SIGN` for a hash of the signing key, etc.)
+
+Also useful are:
+
+* `faux-mgs ... reset`: resets a componnet (SP, RoT, etc.)
+* `faux-mgs ... update`: uploads a new software image for a particular component (SP, RoT, etc.) slot
+
+=== Using `omdb` to read inventory
+
+The system inventory includes all the information we need about SPs and what software they're running.  You can print this with:
+
+```
+$ omdb db inventory collections show latest sp
+...
+
+Sled SimGimlet00
+    part number: i86pc
+    power:    A2
+    revision: 0
+    MGS slot: Sled 0 (cubby 0)
+    found at: 2025-05-22 21:49:54.267308 UTC from http://[::1]:63421
+    cabooses:
+        SLOT       BOARD        NAME         VERSION GIT_COMMIT
+        SpSlot0    SimGimletSp  SimGimlet    0.0.2   ffffffff
+        SpSlot1    SimGimletSp  SimGimlet    0.0.1   fefefefe
+        RotSlotA   SimRot       SimGimletRot 0.0.4   eeeeeeee
+        RotSlotB   SimRot       SimGimletRot 0.0.3   edededed
+        Stage0     SimRotStage0 SimGimletRot 0.0.200 ddddddddd
+        Stage0Next SimRotStage0 SimGimletRot 0.0.200 dadadadad
+    RoT pages:
+        SLOT         DATA_BASE64
+        Cmpa         Z2ltbGV0LWNtcGEAAAAAAAAAAAAAAAAA...
+        CfpaActive   Z2ltbGV0LWNmcGEtYWN0aXZlAAAAAAAA...
+        CfpaInactive Z2ltbGV0LWNmcGEtaW5hY3RpdmUAAAAA...
+        CfpaScratch  Z2ltbGV0LWNmcGEtc2NyYXRjaAAAAAAA...
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    RoT: slot B SHA3-256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+...
+```
+
+// XXX-dap link to section showing how to trigger an inventory collection, which itself should link to a section on waiting for it to complete.
+This is a handy summary, but it only gets updated when inventory is collected.  This is more cumbersome than `faux-mgs` when you only need to get one piece of information and need it to be up-to-date.
 
 
 // XXX-dap task: generate a new blueprint using the planner
@@ -255,8 +450,12 @@ Notably absent from this list is anything related to planning.  This has not bee
 // XXX-dap task: execute blueprint (via Nexus)
 // XXX-dap task: monitor blueprint execution
 // XXX-dap task: previewing what changes a blueprint will make
-
-
+// XXX-dap task: trigger inventory collection
+// XXX-dap task: wait for inventory collection to complete
+// XXX-dap task: download a TUF repo from CI (and link this where we do it above)
+// XXX-dap task: figure out which SP image you need
+// XXX-dap task: figure out which RoT image you need from a TUF repo
+// XXX-dap task: serve a local, unpacked TUF repo via repo-depot-API
 
 // XXX-dap diagram showing:
 // - planner creates blueprints and stores them into database
