@@ -86,7 +86,7 @@ pub const NEXUS_ICMP_FW_RULE_NAME: &str = "nexus-icmp";
 /// for more details.
 pub static NEXUS_ICMP_FW_RULE: LazyLock<VpcFirewallRuleUpdate> =
     LazyLock::new(|| VpcFirewallRuleUpdate {
-        name: NEXUS_VPC_FW_RULE_NAME.parse().unwrap(),
+        name: NEXUS_ICMP_FW_RULE_NAME.parse().unwrap(),
         description:
             "allow typical inbound ICMP error codes for outbound flows"
                 .to_string(),

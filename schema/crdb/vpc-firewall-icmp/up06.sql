@@ -1,6 +1,6 @@
 -- Add a well-known rule to services VPC to allow limited forms
 -- of ICMP traffic. Inserting this rule is conditional on the
--- '' VPC existing.
+-- 'oxide-services' VPC existing.
 INSERT INTO omicron.public.vpc_firewall_rule (
   id,
   name, description,
