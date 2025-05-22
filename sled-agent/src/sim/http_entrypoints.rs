@@ -10,6 +10,7 @@ use camino::Utf8PathBuf;
 use dropshot::ApiDescription;
 use dropshot::ErrorStatusCode;
 use dropshot::FreeformBody;
+use dropshot::Header;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
@@ -37,6 +38,7 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
+use range_requests::PotentialRange;
 use range_requests::RequestContextEx;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
@@ -425,13 +427,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,

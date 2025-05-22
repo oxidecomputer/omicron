@@ -19,6 +19,7 @@ use crate::context::ApiContext;
 use crate::external_api::shared;
 use dropshot::Body;
 use dropshot::EmptyScanParams;
+use dropshot::Header;
 use dropshot::HttpError;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
@@ -49,6 +50,7 @@ use nexus_external_api::*;
 use nexus_types::{
     authn::cookies::Cookies,
     external_api::{
+        headers::RangeRequest,
         params::SystemMetricsPathParam,
         shared::{BfdStatus, ProbeInfo},
     },
@@ -108,6 +110,7 @@ use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::{
     CloseFrame, Role as WebSocketRole,
 };
+use range_requests::PotentialRange;
 use range_requests::RequestContextEx;
 use ref_cast::RefCast;
 
@@ -7107,6 +7110,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -7117,7 +7121,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
             let head = false;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(

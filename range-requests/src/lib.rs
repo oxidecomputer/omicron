@@ -137,6 +137,22 @@ impl PotentialRange {
         Self(Vec::from(bytes))
     }
 
+    /// Parse the range request as a UTF-8 string.
+    ///
+    /// This makes no other attempts to validate the range -- use [Self::parse]
+    /// to accomplish that.
+    ///
+    /// This can be useful when attempting to proxy the range request
+    /// without interpreting the contents - e.g., when the total length of the
+    /// underlying object is not known.
+    ///
+    /// Will only return an [Error::Parse] error on failure.
+    pub fn try_into_str(&self) -> Result<&str, Error> {
+        str::from_utf8(&self.0).map_err(|_err| {
+            Error::Parse(http_range::HttpRangeParseError::InvalidRange)
+        })
+    }
+
     /// Parses a single range request out of the range request.
     ///
     /// `len` is the total length of the document, for the range request being made.
@@ -313,6 +329,26 @@ mod test {
             let _ = range.to_content_range();
             let _ = range.to_range();
         }
+    }
+
+    #[test]
+    fn range_into_str() {
+        let s = "not actually a range; we're just testing UTF-8 parsing";
+        let ok_range = PotentialRange::new(s.as_bytes());
+        assert_eq!(
+            ok_range
+                .try_into_str()
+                .expect("Should have been able to parse string"),
+            s
+        );
+
+        let bad_range = PotentialRange::new(&[0xff, 0xff, 0xff, 0xff]);
+        assert!(matches!(
+            bad_range
+                .try_into_str()
+                .expect_err("Should not parse invalid UTF-8"),
+            Error::Parse(http_range::HttpRangeParseError::InvalidRange)
+        ));
     }
 
     #[test]

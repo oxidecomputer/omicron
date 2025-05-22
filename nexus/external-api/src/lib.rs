@@ -3,18 +3,18 @@ use std::collections::BTreeMap;
 use anyhow::anyhow;
 use dropshot::Body;
 use dropshot::{
-    EmptyScanParams, EndpointTagPolicy, HttpError, HttpResponseAccepted,
-    HttpResponseCreated, HttpResponseDeleted, HttpResponseFound,
-    HttpResponseHeaders, HttpResponseOk, HttpResponseSeeOther,
-    HttpResponseUpdatedNoContent, PaginationParams, Path, Query,
-    RequestContext, ResultsPage, StreamingBody, TypedBody,
+    EmptyScanParams, EndpointTagPolicy, Header, HttpError,
+    HttpResponseAccepted, HttpResponseCreated, HttpResponseDeleted,
+    HttpResponseFound, HttpResponseHeaders, HttpResponseOk,
+    HttpResponseSeeOther, HttpResponseUpdatedNoContent, PaginationParams, Path,
+    Query, RequestContext, ResultsPage, StreamingBody, TypedBody,
     WebsocketChannelResult, WebsocketConnection,
 };
 use http::Response;
 use ipnetwork::IpNetwork;
 use nexus_types::{
     authn::cookies::Cookies,
-    external_api::{params, shared, views},
+    external_api::{headers, params, shared, views},
 };
 use omicron_common::api::external::{
     http_pagination::{
@@ -3168,6 +3168,7 @@ pub trait NexusExternalApi {
     }]
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<headers::RangeRequest>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
