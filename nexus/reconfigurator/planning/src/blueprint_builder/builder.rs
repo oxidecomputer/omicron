@@ -1725,6 +1725,25 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
+    pub fn sled_mark_expunged_zone_ready_for_cleanup(
+        &mut self,
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+    ) -> Result<SledEditCounts, Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to mark expunged zone ready for cleanup on unknown sled {sled_id}"
+            ))
+        })?;
+        let initial_counts = editor.edit_counts();
+        editor
+            .mark_expunged_zone_ready_for_cleanup(&zone_id)
+            .map_err(|err| Error::SledEditError { sled_id, err })?;
+        let final_counts = editor.edit_counts();
+
+        Ok(final_counts.difference_since(initial_counts))
+    }
+
     pub fn sled_set_zone_source(
         &mut self,
         sled_id: SledUuid,

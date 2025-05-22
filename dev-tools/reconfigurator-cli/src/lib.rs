@@ -374,6 +374,12 @@ enum BlueprintEditCommands {
     },
     /// expunge a zone
     ExpungeZone { zone_id: OmicronZoneUuid },
+    /// mark an expunged zone ready for cleanup
+    ///
+    /// this typically does not mean anything different than any other expunged
+    /// zone, except that internal DNS zones are not replaced until they are
+    /// definitively marked "ready for cleanup".
+    MarkForCleanup { zone_id: OmicronZoneUuid },
     /// configure an SP update
     SetSpUpdate {
         /// serial number to update
@@ -901,6 +907,13 @@ fn cmd_blueprint_edit(
                 .sled_expunge_zone(sled_id, zone_id)
                 .context("failed to expunge zone")?;
             format!("expunged zone {zone_id} from sled {sled_id}")
+        }
+        BlueprintEditCommands::MarkForCleanup { zone_id } => {
+            let sled_id = sled_with_zone(&builder, &zone_id)?;
+            builder
+                .sled_mark_expunged_zone_ready_for_cleanup(sled_id, zone_id)
+                .context("failed to mark zone ready for cleanup")?;
+            format!("marked zone {zone_id} ready for cleanup")
         }
         BlueprintEditCommands::SetSpUpdate {
             serial,
