@@ -207,7 +207,7 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
-    target release min gen:   (none)
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -286,7 +286,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
  METADATA:
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
-    target release min gen:   (none) (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -326,7 +326,7 @@ external DNS:
 
 
 > # Set the target release minimum generation for the blueprint.
-> blueprint-edit latest set-release-min-gen 2
+> blueprint-edit latest set-target-release-min-gen 2
 blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 created from latest blueprint (afb09faf-a586-4483-9289-04d4f1d8ba23): set target release minimum generation to 2
 
 > blueprint-show latest
@@ -535,7 +535,7 @@ to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
  METADATA:
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
-*   target release min gen:   (none) -> 2
+*   target release min gen:   1 -> 2
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)

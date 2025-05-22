@@ -295,7 +295,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
  METADATA:
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
-    target release min gen:   (none) (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)

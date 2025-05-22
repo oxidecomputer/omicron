@@ -180,7 +180,7 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
     comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
-    target release min gen:   (none)
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -364,7 +364,7 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
     comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
-    target release min gen:   (none)
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 1
     Pending MGS-managed updates (all baseboards):
@@ -541,7 +541,7 @@ to:   blueprint cca24b71-09b5-4042-9185-b33e9f2ebba0
  METADATA:
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
-    target release min gen:   (none) (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -841,7 +841,7 @@ to:   blueprint ad97e762-7bf1-45a6-a98f-60afb7e491c0
  METADATA:
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
-    target release min gen:   (none) (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1154,7 +1154,7 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
     comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
-    target release min gen:   (none)
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 1
     Pending MGS-managed updates (all baseboards):
@@ -1331,7 +1331,7 @@ to:   blueprint 5bf974f3-81f9-455b-b24e-3099f765664c
  METADATA:
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
-    target release min gen:   (none) (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1632,7 +1632,7 @@ to:   blueprint cca24b71-09b5-4042-9185-b33e9f2ebba0
  METADATA:
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
-    target release min gen:   (none) (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1947,7 +1947,7 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
     comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
-    target release min gen:   (none)
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 2
     Pending MGS-managed updates (all baseboards):
@@ -2125,7 +2125,7 @@ to:   blueprint 1b837a27-3be1-4fcb-8499-a921c839e1d0
  METADATA:
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
-    target release min gen:   (none) (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -2437,7 +2437,7 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
     comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
-    target release min gen:   (none)
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 1
     Pending MGS-managed updates (all baseboards):
@@ -2614,7 +2614,7 @@ to:   blueprint 3682a71b-c6ca-4b7e-8f84-16df80c85960
  METADATA:
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
-    target release min gen:   (none) (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -2766,7 +2766,7 @@ Commands:
           set the remove_mupdate_override field for a sled
   set-target-release-minimum-generation
           set the minimum generation for which target releases are accepted [aliases:
-          set-release-min-gen]
+          set-target-release-min-gen]
   expunge-zone
           expunge a zone
   set-sp-update

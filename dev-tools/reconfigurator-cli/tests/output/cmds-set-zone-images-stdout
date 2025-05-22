@@ -98,7 +98,7 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
-    target release min gen:   (none)
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -205,7 +205,7 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
-    target release min gen:   (none)
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -298,7 +298,7 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
  METADATA:
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
-    target release min gen:   (none) (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -488,7 +488,7 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
     comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
-    target release min gen:   (none)
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -581,7 +581,7 @@ to:   blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9
  METADATA:
     internal DNS version:::   1 (unchanged)
     external DNS version:::   1 (unchanged)
-    target release min gen:   (none) (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -688,7 +688,7 @@ Commands:
           set the remove_mupdate_override field for a sled
   set-target-release-minimum-generation
           set the minimum generation for which target releases are accepted [aliases:
-          set-release-min-gen]
+          set-target-release-min-gen]
   expunge-zone
           expunge a zone
   set-sp-update

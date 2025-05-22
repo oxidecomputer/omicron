@@ -490,6 +490,6 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
     comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
-    target release min gen:   (none)
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0

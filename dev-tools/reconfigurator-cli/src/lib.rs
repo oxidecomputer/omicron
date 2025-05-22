@@ -445,7 +445,7 @@ enum BlueprintEditCommands {
     /// At the moment, this just sets the field to the given value. In the
     /// future, we'll likely want to set this based on the current target
     /// release generation.
-    #[clap(visible_alias = "set-release-min-gen")]
+    #[clap(visible_alias = "set-target-release-min-gen")]
     SetTargetReleaseMinimumGeneration {
         /// the minimum target release generation
         generation: Generation,

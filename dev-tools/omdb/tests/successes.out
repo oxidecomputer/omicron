@@ -1474,7 +1474,7 @@ parent:    <none>
     comment::::::::::::::::   initial test blueprint
     internal DNS version:::   1
     external DNS version:::   2
-    target release min gen:   (none)
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1576,7 +1576,7 @@ parent:    <none>
     comment::::::::::::::::   initial test blueprint
     internal DNS version:::   1
     external DNS version:::   2
-    target release min gen:   (none)
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1660,7 +1660,7 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
  METADATA:
     internal DNS version:::   1 (unchanged)
     external DNS version:::   2 (unchanged)
-    target release min gen:   (none) (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)

@@ -41,6 +41,6 @@ blueprint-edit latest set-remove-mupdate-override 00320471-945d-413c-85e7-03e091
 blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba latest
 
 # Set the target release minimum generation for the blueprint.
-blueprint-edit latest set-release-min-gen 2
+blueprint-edit latest set-target-release-min-gen 2
 blueprint-show latest
 blueprint-diff afb09faf-a586-4483-9289-04d4f1d8ba23 latest
