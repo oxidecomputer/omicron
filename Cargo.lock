@@ -4554,9 +4554,9 @@ dependencies = [
 
 [[package]]
 name = "iddqd"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e18cd99a6c2901f5fe0e16cf3a350a0e79cc36c2b7bbc5e55849abe16029846e"
+checksum = "5391430430a8b81eb452d964dfeaee8466099c943049f1cf8cd148a6c2fd88e4"
 dependencies = [
  "daft",
  "debug-ignore",
@@ -8013,6 +8013,7 @@ dependencies = [
  "regex-syntax 0.8.5",
  "reqwest",
  "rsa",
+ "rustc-hash 2.1.1",
  "rustix 0.38.37",
  "rustls 0.23.19",
  "rustls-webpki 0.102.8",
