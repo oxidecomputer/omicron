@@ -89,7 +89,8 @@ use nexus_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
 use nexus_sled_agent_shared::inventory::{
-    OmicronSledConfig, OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
+    ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
+    OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
@@ -199,6 +200,9 @@ pub enum SetupServiceError {
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
+
+    #[error("Sled config not yet reconciled: {0}")]
+    ConfigNotYetReconciled(String),
 
     #[error("Error making HTTP request to Nexus: {0}")]
     NexusApi(#[from] NexusError<NexusTypes::Error>),
@@ -427,10 +431,124 @@ impl ServiceInner {
     // reconciled the config at `generation`.
     async fn wait_for_config_reconciliation_on_sled(
         &self,
-        _sled_address: SocketAddrV6,
-        _generation: Generation,
+        sled_address: SocketAddrV6,
+        generation: Generation,
     ) -> Result<(), SetupServiceError> {
-        unimplemented!("needs updated inventory")
+        let dur = std::time::Duration::from_secs(60);
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
+        let log = self.log.new(o!("sled_address" => sled_address.to_string()));
+        let client = SledAgentClient::new_with_client(
+            &format!("http://{}", sled_address),
+            client,
+            log.clone(),
+        );
+
+        let inv_check = || async {
+            info!(log, "attempting to read sled's inventory");
+            let inventory = match client.inventory().await {
+                Ok(response) => response.into_inner(),
+                Err(error) => {
+                    // TODO Many other codes here should not be retried.  See
+                    // omicron#4578.
+                    return Err(BackoffError::transient(
+                        SetupServiceError::SledApi(error),
+                    ));
+                }
+            };
+
+            // Has this sled's reconciler run at all?
+            let Some(last_reconciliation) = inventory.last_reconciliation
+            else {
+                return Err(BackoffError::transient(
+                    SetupServiceError::ConfigNotYetReconciled(
+                        "no reconcilation state available".to_string(),
+                    ),
+                ));
+            };
+
+            // Has it attempted to reconcile our target generation?
+            let reconciled_gen =
+                last_reconciliation.last_reconciled_config.generation;
+
+            if reconciled_gen < generation {
+                return Err(BackoffError::transient(
+                    SetupServiceError::ConfigNotYetReconciled(format!(
+                        "reconciled generation {reconciled_gen} lower than \
+                         desired generation {generation}",
+                    )),
+                ));
+            }
+
+            // Were there any errors during reconciliation? Check for disk,
+            // dataset, and zone errors.
+            let mut errors = Vec::new();
+
+            for (disk_id, result) in &last_reconciliation.external_disks {
+                match result {
+                    ConfigReconcilerInventoryResult::Ok => (),
+                    ConfigReconcilerInventoryResult::Err { message } => {
+                        errors.push(format!(
+                            "reconcilation for disk {disk_id} failed: {message}"
+                        ));
+                    }
+                }
+            }
+            for (dataset_id, result) in &last_reconciliation.datasets {
+                match result {
+                    ConfigReconcilerInventoryResult::Ok => (),
+                    ConfigReconcilerInventoryResult::Err { message } => {
+                        errors.push(format!(
+                            "reconcilation for dataset {dataset_id} failed: \
+                             {message}"
+                        ));
+                    }
+                }
+            }
+            for (zone_id, result) in &last_reconciliation.zones {
+                match result {
+                    ConfigReconcilerInventoryResult::Ok => (),
+                    ConfigReconcilerInventoryResult::Err { message } => {
+                        errors.push(format!(
+                            "reconcilation for zone {zone_id} failed: {message}"
+                        ));
+                    }
+                }
+            }
+
+            if errors.is_empty() {
+                Ok(())
+            } else {
+                // We treat all of these as transient (although it's possible
+                // some are permanent - we have no means for recovering from
+                // permanent errors during RSS other than clean-slating and
+                // starting over, so it's safer to treat these as transient and
+                // let operators investigate if things are stuck).
+                Err(BackoffError::transient(
+                    SetupServiceError::ConfigNotYetReconciled(
+                        errors.join(", "),
+                    ),
+                ))
+            }
+        };
+        let log_failure = |error, delay| {
+            warn!(
+                log,
+                "sled config not yet reconciled";
+                "error" => #%error,
+                "retry_after" => ?delay,
+            );
+        };
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            inv_check,
+            log_failure,
+        )
+        .await?;
+
+        Ok(())
     }
 
     // Ensure that the desired sled configuration for a particular zone version
