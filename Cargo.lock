@@ -7516,6 +7516,7 @@ dependencies = [
  "nexus-inventory",
  "nexus-reconfigurator-preparation",
  "nexus-saga-recovery",
+ "nexus-sled-agent-shared",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",

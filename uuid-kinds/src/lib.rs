@@ -66,6 +66,11 @@ impl_typed_uuid_kind! {
     Instance => "instance",
     LoopbackAddress => "loopback_address",
     MupdateOverride => "mupdate_override",
+    // `OmicronSledConfig`s do not themselves contain IDs, but we generate IDs
+    // for them when they're serialized to the database during inventory
+    // collection. This ID type is therefore only used by nexus-db-model and
+    // nexus-db-queries.
+    OmicronSledConfig => "omicron_sled_config",
     OmicronZone => "service",
     PhysicalDisk => "physical_disk",
     Propolis => "propolis",

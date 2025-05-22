@@ -3513,6 +3513,147 @@
           }
         ]
       },
+      "ConfigReconcilerInventory": {
+        "description": "Describes the last attempt made by the sled-agent-config-reconciler to reconcile the current sled config against the actual state of the sled.",
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          },
+          "external_disks": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          },
+          "last_reconciled_config": {
+            "$ref": "#/components/schemas/OmicronSledConfig"
+          },
+          "zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          }
+        },
+        "required": [
+          "datasets",
+          "external_disks",
+          "last_reconciled_config",
+          "zones"
+        ]
+      },
+      "ConfigReconcilerInventoryResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              }
+            },
+            "required": [
+              "result"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "result"
+            ]
+          }
+        ]
+      },
+      "ConfigReconcilerInventoryStatus": {
+        "description": "Status of the sled-agent-config-reconciler task.",
+        "oneOf": [
+          {
+            "description": "The reconciler task has not yet run for the first time since sled-agent started.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "not_yet_run"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The reconciler task is actively running.",
+            "type": "object",
+            "properties": {
+              "config": {
+                "$ref": "#/components/schemas/OmicronSledConfig"
+              },
+              "running_for": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "started_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "config",
+              "running_for",
+              "started_at",
+              "status"
+            ]
+          },
+          {
+            "description": "The reconciler task is currently idle, but previously did complete a reconciliation attempt.\n\nThis variant does not include the `OmicronSledConfig` used in the last attempt, because that's always available via [`ConfigReconcilerInventory::last_reconciled_config`].",
+            "type": "object",
+            "properties": {
+              "completed_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "ran_for": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "idle"
+                ]
+              }
+            },
+            "required": [
+              "completed_at",
+              "ran_for",
+              "status"
+            ]
+          }
+        ]
+      },
       "Cpuid": {
         "description": "A set of CPUID values to expose to a guest.",
         "type": "object",
@@ -4898,11 +5039,24 @@
               "$ref": "#/components/schemas/InventoryDisk"
             }
           },
-          "omicron_physical_disks_generation": {
-            "$ref": "#/components/schemas/Generation"
+          "last_reconciliation": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConfigReconcilerInventory"
+              }
+            ]
           },
-          "omicron_zones": {
-            "$ref": "#/components/schemas/OmicronZonesConfig"
+          "ledgered_sled_config": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronSledConfig"
+              }
+            ]
+          },
+          "reconciler_status": {
+            "$ref": "#/components/schemas/ConfigReconcilerInventoryStatus"
           },
           "reservoir_size": {
             "$ref": "#/components/schemas/ByteCount"
@@ -4935,8 +5089,7 @@
           "baseboard",
           "datasets",
           "disks",
-          "omicron_physical_disks_generation",
-          "omicron_zones",
+          "reconciler_status",
           "reservoir_size",
           "sled_agent_address",
           "sled_id",
@@ -5998,31 +6151,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "OmicronZonesConfig": {
-        "description": "Describes the set of Omicron-managed zones running on a sled",
-        "type": "object",
-        "properties": {
-          "generation": {
-            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "zones": {
-            "description": "list of running zones",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OmicronZoneConfig"
-            }
-          }
-        },
-        "required": [
-          "generation",
-          "zones"
         ]
       },
       "P9fs": {

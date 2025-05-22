@@ -1582,7 +1582,45 @@ table! {
         usable_hardware_threads -> Int8,
         usable_physical_ram -> Int8,
         reservoir_size -> Int8,
-        omicron_physical_disks_generation -> Int8,
+
+        ledgered_sled_config -> Nullable<Uuid>,
+        last_reconciliation_sled_config -> Nullable<Uuid>,
+        reconciler_status_kind -> crate::enums::InvConfigReconcilerStatusKindEnum,
+        reconciler_status_sled_config -> Nullable<Uuid>,
+        reconciler_status_timestamp -> Nullable<Timestamptz>,
+        reconciler_status_duration_secs -> Nullable<Float8>,
+    }
+}
+
+table! {
+    inv_last_reconciliation_disk_result (inv_collection_id, sled_id, disk_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        disk_id -> Uuid,
+
+        error_message -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_last_reconciliation_dataset_result
+        (inv_collection_id, sled_id, dataset_id)
+    {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        dataset_id -> Uuid,
+
+        error_message -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_last_reconciliation_zone_result (inv_collection_id, sled_id, zone_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        zone_id -> Uuid,
+
+        error_message -> Nullable<Text>,
     }
 }
 
@@ -1640,20 +1678,19 @@ table! {
 }
 
 table! {
-    inv_sled_omicron_zones (inv_collection_id, sled_id) {
+    inv_omicron_sled_config (inv_collection_id, id) {
         inv_collection_id -> Uuid,
-        time_collected -> Timestamptz,
-        source -> Text,
-        sled_id -> Uuid,
+        id -> Uuid,
 
         generation -> Int8,
+        remove_mupdate_override -> Nullable<Uuid>,
     }
 }
 
 table! {
-    inv_omicron_zone (inv_collection_id, id) {
+    inv_omicron_sled_config_zone (inv_collection_id, sled_config_id, id) {
         inv_collection_id -> Uuid,
-        sled_id -> Uuid,
+        sled_config_id -> Uuid,
 
         id -> Uuid,
         zone_type -> crate::enums::ZoneTypeEnum,
@@ -1675,12 +1712,16 @@ table! {
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
         filesystem_pool -> Nullable<Uuid>,
+
+        image_source -> crate::enums::InvZoneImageSourceEnum,
+        image_artifact_sha256 -> Nullable<Text>,
     }
 }
 
 table! {
-    inv_omicron_zone_nic (inv_collection_id, id) {
+    inv_omicron_sled_config_zone_nic (inv_collection_id, sled_config_id, id) {
         inv_collection_id -> Uuid,
+        sled_config_id -> Uuid,
         id -> Uuid,
         name -> Text,
         ip -> Inet,
@@ -1689,6 +1730,38 @@ table! {
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+    }
+}
+
+table! {
+    inv_omicron_sled_config_dataset (inv_collection_id, sled_config_id, id) {
+        inv_collection_id -> Uuid,
+        sled_config_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+
+        pool_id -> Uuid,
+        kind -> crate::enums::DatasetKindEnum,
+        zone_name -> Nullable<Text>,
+
+        quota -> Nullable<Int8>,
+        reservation -> Nullable<Int8>,
+        compression -> Text,
+    }
+}
+
+table! {
+    inv_omicron_sled_config_disk (inv_collection_id, sled_config_id, id) {
+        inv_collection_id -> Uuid,
+        sled_config_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+
+        vendor -> Text,
+        serial -> Text,
+        model -> Text,
+
+        pool_id -> Uuid,
     }
 }
 
@@ -2152,14 +2225,35 @@ allow_tables_to_appear_in_same_query!(external_ip, project);
 allow_tables_to_appear_in_same_query!(external_ip, ip_pool_resource);
 allow_tables_to_appear_in_same_query!(external_ip, vmm);
 allow_tables_to_appear_in_same_query!(external_ip, network_interface);
-allow_tables_to_appear_in_same_query!(external_ip, inv_omicron_zone);
-allow_tables_to_appear_in_same_query!(external_ip, inv_omicron_zone_nic);
-allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_omicron_zone_nic);
-allow_tables_to_appear_in_same_query!(network_interface, inv_omicron_zone);
-allow_tables_to_appear_in_same_query!(network_interface, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(
+    external_ip,
+    inv_omicron_sled_config_zone
+);
+allow_tables_to_appear_in_same_query!(
+    external_ip,
+    inv_omicron_sled_config_zone_nic
+);
+allow_tables_to_appear_in_same_query!(
+    inv_omicron_sled_config_zone,
+    inv_omicron_sled_config_zone_nic
+);
+allow_tables_to_appear_in_same_query!(
+    network_interface,
+    inv_omicron_sled_config_zone
+);
+allow_tables_to_appear_in_same_query!(
+    network_interface,
+    inv_omicron_sled_config_zone_nic
+);
 allow_tables_to_appear_in_same_query!(network_interface, inv_collection);
-allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_collection);
-allow_tables_to_appear_in_same_query!(inv_omicron_zone_nic, inv_collection);
+allow_tables_to_appear_in_same_query!(
+    inv_omicron_sled_config_zone,
+    inv_collection
+);
+allow_tables_to_appear_in_same_query!(
+    inv_omicron_sled_config_zone_nic,
+    inv_collection
+);
 allow_tables_to_appear_in_same_query!(external_ip, inv_collection);
 allow_tables_to_appear_in_same_query!(external_ip, internet_gateway);
 allow_tables_to_appear_in_same_query!(external_ip, internet_gateway_ip_pool);

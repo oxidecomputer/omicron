@@ -218,7 +218,13 @@ impl<'a> Planner<'a> {
             .inventory
             .sled_agents
             .get(&sled_id)
-            .map(|sa| sa.omicron_physical_disks_generation)
+            // TODO-correctness For now this is correct, because sled-agent
+            // doesn't ledger a config until it's applied it. However, once
+            // https://github.com/oxidecomputer/omicron/pull/8064 lands,
+            // sled-agent will ledger a config and then later reconcile it; do
+            // we need to wait for that reconciliation to decommission disks?
+            .and_then(|sa| sa.ledgered_sled_config.as_ref())
+            .map(|config| config.generation)
         else {
             // There is no current inventory for the sled agent, so we cannot
             // decommission any disks.
@@ -418,14 +424,18 @@ impl<'a> Planner<'a> {
                     as_of_generation,
                     ready_for_cleanup,
                 } if !ready_for_cleanup => {
-                    if sled_inv.omicron_zones.generation >= as_of_generation
-                        && !sled_inv
-                            .omicron_zones
-                            .zones
-                            .iter()
-                            .any(|z| z.id == zone.id)
-                    {
-                        zones_ready_for_cleanup.push(zone.id);
+                    // TODO-correctness For now this is correct, because
+                    // sled-agent doesn't ledger a config until it's applied it.
+                    // However, as a part of landing
+                    // https://github.com/oxidecomputer/omicron/pull/8064,
+                    // this needs to change to check the last reconciled config
+                    // instead of just the ledgered config.
+                    if let Some(config) = &sled_inv.ledgered_sled_config {
+                        if config.generation >= as_of_generation
+                            && !config.zones.contains_key(&zone.id)
+                        {
+                            zones_ready_for_cleanup.push(zone.id);
+                        }
                     }
                 }
                 BlueprintZoneDisposition::InService
@@ -558,16 +568,25 @@ impl<'a> Planner<'a> {
             // the NTP zone or switching between an internal NTP vs. boundary
             // NTP zone), we'll need to be careful how we do it to avoid a
             // problem here.
+            //
+            // TODO-cleanup Once
+            // https://github.com/oxidecomputer/omicron/pull/8064 lands, the
+            // above comment will be overly conservative; sled-agent won't
+            // reject configs just because time isn't sync'd yet. We may be able
+            // to remove this check entirely. (It's probably also fine to keep
+            // it for now; removing it just saves us an extra planning iteration
+            // when adding a new sled.)
             let has_ntp_inventory = self
                 .inventory
                 .sled_agents
                 .get(&sled_id)
                 .map(|sled_agent| {
-                    sled_agent
-                        .omicron_zones
-                        .zones
-                        .iter()
-                        .any(|z| z.zone_type.is_ntp())
+                    sled_agent.ledgered_sled_config.as_ref().map_or(
+                        false,
+                        |config| {
+                            config.zones.iter().any(|z| z.zone_type.is_ntp())
+                        },
+                    )
                 })
                 .unwrap_or(false);
             if !has_ntp_inventory {
@@ -995,7 +1014,6 @@ pub(crate) mod test {
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
-    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -1180,18 +1198,15 @@ pub(crate) mod test {
         // example.collection -- this should be addressed via API improvements.
         example
             .system
-            .sled_set_omicron_zones(new_sled_id, {
-                let sled_cfg = blueprint4
+            .sled_set_omicron_config(
+                new_sled_id,
+                blueprint4
                     .sleds
                     .get(&new_sled_id)
                     .expect("blueprint should contain zones for new sled")
                     .clone()
-                    .into_in_service_sled_config();
-                OmicronZonesConfig {
-                    generation: sled_cfg.generation,
-                    zones: sled_cfg.zones.into_iter().collect(),
-                }
-            })
+                    .into_in_service_sled_config(),
+            )
             .unwrap();
         let collection =
             example.system.to_collection_builder().unwrap().build();
@@ -2033,19 +2048,10 @@ pub(crate) mod test {
         let mut collection = example.collection;
         let input = example.input;
 
-        // The initial collection configuration has generation 1
         // The initial blueprint configuration has generation 2
         let (sled_id, sled_config) =
             blueprint1.sleds.first_key_value().unwrap();
         assert_eq!(sled_config.sled_agent_generation, Generation::from_u32(2));
-        assert_eq!(
-            collection
-                .sled_agents
-                .get(&sled_id)
-                .unwrap()
-                .omicron_physical_disks_generation,
-            Generation::new()
-        );
 
         // All disks should have an `InService` disposition and `Active` state
         for disk in &sled_config.disks {
@@ -2130,7 +2136,10 @@ pub(crate) mod test {
             .sled_agents
             .get_mut(&sled_id)
             .unwrap()
-            .omicron_physical_disks_generation = Generation::from_u32(3);
+            .ledgered_sled_config
+            .as_mut()
+            .unwrap()
+            .generation = Generation::from_u32(3);
 
         let blueprint3 = Planner::new_based_on(
             logctx.log.clone(),
@@ -4078,6 +4087,7 @@ pub(crate) mod test {
         // * same inventory as above
         // * inventory reports a new generation (but zone still running)
         // * inventory reports zone not running (but still the old generation)
+        eprintln!("planning with no inventory change...");
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint2,
@@ -4085,6 +4095,15 @@ pub(crate) mod test {
             &collection,
             TEST_NAME,
         );
+        // TODO-cleanup These checks depend on `last_reconciled_config`, which
+        // is not yet populated; uncomment these and check them by mutating
+        // `last_reconciled_config` once
+        // https://github.com/oxidecomputer/omicron/pull/8064 lands. We could
+        // just mutate `ledgered_sled_config` in the meantime (as this
+        // commented-out code does below), but that's not really checking what
+        // we care about.
+        /*
+        eprintln!("planning with generation bump but zone still running...");
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint2,
@@ -4095,12 +4114,15 @@ pub(crate) mod test {
                     .sled_agents
                     .get_mut(&sled_id)
                     .unwrap()
-                    .omicron_zones
+                    .ledgered_sled_config
+                    .as_mut()
+                    .unwrap()
                     .generation = bp2_generation;
                 collection
             },
             TEST_NAME,
         );
+        eprintln!("planning with zone gone but generation not bumped...");
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint2,
@@ -4111,23 +4133,28 @@ pub(crate) mod test {
                     .sled_agents
                     .get_mut(&sled_id)
                     .unwrap()
-                    .omicron_zones
+                    .ledgered_sled_config
+                    .as_mut()
+                    .unwrap()
                     .zones
                     .retain(|z| z.id != nexus_config.id);
                 collection
             },
             TEST_NAME,
         );
+        */
 
         // Now make both changes to the inventory.
         {
-            let zones = &mut collection
+            let config = &mut collection
                 .sled_agents
                 .get_mut(&sled_id)
                 .unwrap()
-                .omicron_zones;
-            zones.generation = bp2_generation;
-            zones.zones.retain(|z| z.id != nexus_config.id);
+                .ledgered_sled_config
+                .as_mut()
+                .unwrap();
+            config.generation = bp2_generation;
+            config.zones.retain(|z| z.id != nexus_config.id);
         }
 
         // Run the planner. It mark our Nexus zone as ready for cleanup now that
@@ -4269,13 +4296,15 @@ pub(crate) mod test {
 
         // Make the inventory changes necessary for cleanup to proceed.
         {
-            let zones = &mut collection
+            let config = &mut collection
                 .sled_agents
                 .get_mut(&sled_id)
                 .unwrap()
-                .omicron_zones;
-            zones.generation = bp2_generation;
-            zones.zones.retain(|z| z.id != internal_dns_config.id);
+                .ledgered_sled_config
+                .as_mut()
+                .unwrap();
+            config.generation = bp2_generation;
+            config.zones.retain(|z| z.id != internal_dns_config.id);
         }
 
         // Run the planner. It should mark our internal DNS zone as ready for
