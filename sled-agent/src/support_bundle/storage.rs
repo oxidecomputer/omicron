@@ -981,7 +981,7 @@ mod tests {
             self.datasets_config_list().await.map_err(|err| err.into())
         }
 
-        fn dyn_dataset_get(
+        async fn dyn_dataset_get(
             &self,
             dataset_name: &String,
         ) -> Result<DatasetProperties, Error> {
@@ -990,6 +990,7 @@ mod tests {
                     &[dataset_name.clone()],
                     illumos_utils::zfs::WhichDatasets::SelfOnly,
                 )
+                .await
                 .map_err(|err| Error::DatasetLookup(err))?
                 .pop()
             else {
