@@ -822,7 +822,7 @@ pub struct SupportBundleMetadata {
 pub struct RangeRequestHeaders {
     /// A request to access a portion of the resource, such as:
     ///
-    /// ```
+    /// ```text
     /// bytes=0-499
     /// ```
     ///
