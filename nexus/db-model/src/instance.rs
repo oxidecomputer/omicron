@@ -2,11 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::InstanceIntendedState as IntendedState;
 use super::{
     ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
     InstanceCpuCount, InstanceState, Vmm, VmmState,
 };
 use crate::collection::DatastoreAttachTargetConfig;
+use crate::serde_time_delta::optional_time_delta;
 use chrono::{DateTime, TimeDelta, Utc};
 use db_macros::Resource;
 use diesel::expression::{ValidGrouping, is_aggregate};
@@ -69,6 +71,15 @@ pub struct Instance {
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
 
+    /// The most recently requested state of the instance.
+    ///
+    /// This is used to determine whether the instance should be automatically
+    /// restarted when it fails. Instances that were requested to stop should
+    /// not be automatically restarted if they have transitioned to the `Failed`
+    /// state.
+    #[diesel(column_name = intended_state)]
+    pub intended_state: IntendedState,
+
     /// A UUID identifying the saga currently holding the update lock on this
     /// instance. If this is [`None`] the instance is not locked. Otherwise, if
     /// this is [`Some`], the instance is locked by the saga owning this UUID.
@@ -111,6 +122,12 @@ impl Instance {
             cooldown: None,
         };
 
+        let intended_state = if params.start {
+            IntendedState::Running
+        } else {
+            IntendedState::Stopped
+        };
+
         Self {
             identity,
             project_id,
@@ -124,6 +141,7 @@ impl Instance {
             boot_disk_id: None,
 
             runtime_state,
+            intended_state,
 
             updater_gen: Generation::new(),
             updater_id: None,
@@ -132,6 +150,47 @@ impl Instance {
 
     pub fn runtime(&self) -> &InstanceRuntimeState {
         &self.runtime_state
+    }
+
+    /// Returns an instance's karmic status.
+    pub fn auto_restart_status(
+        &self,
+        active_vmm: Option<&Vmm>,
+    ) -> InstanceKarmicStatus {
+        let state = &self.runtime_state;
+        // Instances only need to be automatically restarted if they are in the
+        // `Failed` state, or if their active VMM is in the `SagaUnwound` state.
+        //
+        // If the instance's intended state is not Running, it should
+        // not be reincarnated, even if it has failed.
+        let needs_reincarnation =
+            match (self.intended_state, state.nexus_state, active_vmm) {
+                (IntendedState::Running, InstanceState::Failed, _vmm) => {
+                    debug_assert!(
+                        _vmm.is_none(),
+                        "a Failed instance will never have an active VMM!"
+                    );
+                    true
+                }
+                (IntendedState::Running, InstanceState::Vmm, Some(ref vmm)) => {
+                    debug_assert_eq!(
+                        state.propolis_id,
+                        Some(vmm.id),
+                        "don't call `Instance::auto_restart_status` with a VMM \
+                         that isn't this instance's active VMM!?!?"
+                    );
+                    // Note that we *don't* reincarnate instances with `Failed` active
+                    // VMMs; in that case, an instance-update saga must first run to
+                    // move the *instance* record to the `Failed` state.
+                    vmm.runtime.state == VmmState::SagaUnwound
+                }
+                _ => false,
+            };
+
+        InstanceKarmicStatus {
+            needs_reincarnation,
+            can_reincarnate: self.auto_restart.can_reincarnate(&state),
+        }
     }
 }
 
@@ -319,43 +378,6 @@ impl InstanceAutoRestart {
     pub const DEFAULT_POLICY: InstanceAutoRestartPolicy =
         InstanceAutoRestartPolicy::BestEffort;
 
-    /// Returns an instance's karmic status.
-    pub fn status(
-        &self,
-        state: &InstanceRuntimeState,
-        active_vmm: Option<&Vmm>,
-    ) -> InstanceKarmicStatus {
-        // Instances only need to be automatically restarted if they are in the
-        // `Failed` state, or if their active VMM is in the `SagaUnwound` state.
-        let needs_reincarnation = match (state.nexus_state, active_vmm) {
-            (InstanceState::Failed, _vmm) => {
-                debug_assert!(
-                    _vmm.is_none(),
-                    "a Failed instance will never have an active VMM!"
-                );
-                true
-            }
-            (InstanceState::Vmm, Some(ref vmm)) => {
-                debug_assert_eq!(
-                    state.propolis_id,
-                    Some(vmm.id),
-                    "don't call `InstanceAutoRestart::status with a VMM \
-                     that isn't this instance's active VMM!?!?"
-                );
-                // Note that we *don't* reincarnate instances with `Failed` active
-                // VMMs; in that case, an instance-update saga must first run to
-                // move the *instance* record to the `Failed` state.
-                vmm.runtime.state == VmmState::SagaUnwound
-            }
-            _ => false,
-        };
-
-        InstanceKarmicStatus {
-            needs_reincarnation,
-            can_reincarnate: self.can_reincarnate(&state),
-        }
-    }
-
     /// Returns whether or not this auto-restart configuration will permit an
     /// instance with the provided `InstanceRuntimeState` to reincarnate.
     ///
@@ -424,10 +446,13 @@ impl InstanceAutoRestart {
             // If the auto-restart policy is null, then it should
             // default to "best effort".
             .or(dsl::auto_restart_policy.is_null()))
-        // An instance whose last reincarnation was within the cooldown
-        // interval from now must remain in _bardo_ --- the liminal
-        // state between death and rebirth --- before its next
-        // reincarnation.
+        // An instance should only be automatically restarted if it is intended
+        // to be in the `Running` state. Instances which were requested to stop
+        // should not be automatically restarted, even if they have failed.
+        .and(dsl::intended_state.eq(IntendedState::Running))
+        // instance whose last reincarnation was within the cooldown interval
+        // from now must remain in _bardo_ --- the liminal state between death
+        // and rebirth --- before its next reincarnation.
         .and(
             // If the instance has never previously been reincarnated, then
             // it's allowed to reincarnate.
@@ -453,86 +478,6 @@ impl InstanceAutoRestart {
         .and(dsl::updater_id.is_null())
     }
 }
-
-/// It's just a type with the same representation as a `TimeDelta` that
-/// implements `Serialize` and `Deserialize`, because `chrono`'s `Deserialize`
-/// implementation for this type is not actually for `TimeDelta`, but for the
-/// `rkyv::Archived` wrapper type (see [here]). While `chrono` *does* provide a
-/// `Serialize` implementation that we could use with this type, it's preferable
-/// to provide our own `Serialize` as well as `Deserialize`, since a future
-/// semver-compatible change in `chrono` could change the struct's internal
-/// representation, quietly breaking our ability to round-trip it. So, let's
-/// just derive both traits for this thing, which we control.
-///
-/// If you feel like this is unfortunate...yeah, I do too.
-///
-/// [here]: https://docs.rs/chrono/latest/chrono/struct.TimeDelta.html#impl-Deserialize%3CTimeDelta,+__D%3E-for-%3CTimeDelta+as+Archive%3E::Archived
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
-struct SerdeTimeDelta {
-    secs: i64,
-    nanos: i32,
-}
-
-impl From<TimeDelta> for SerdeTimeDelta {
-    fn from(delta: TimeDelta) -> Self {
-        Self { secs: delta.num_seconds(), nanos: delta.subsec_nanos() }
-    }
-}
-
-impl TryFrom<SerdeTimeDelta> for TimeDelta {
-    type Error = &'static str;
-    fn try_from(
-        SerdeTimeDelta { secs, nanos }: SerdeTimeDelta,
-    ) -> Result<Self, Self::Error> {
-        // This is a bit weird: `chrono::TimeDelta`'s getter for
-        // nanoseconds (`TimeDelta::subsec_nanos`) returns them as an i32,
-        // with the sign coming from the seconds part, but when constructing
-        // a `TimeDelta`, it takes them as a `u32` and panics if they're too
-        // big. So, we take the absolute value here, because what the serialize
-        // impl saw may have had its sign bit set, but the constructor will get
-        // mad if we give it something with that bit set. Hopefully that made
-        // sense?
-        let nanos = nanos.unsigned_abs();
-        TimeDelta::new(secs, nanos).ok_or("time delta out of range")
-    }
-}
-mod optional_time_delta {
-    use super::*;
-    use serde::{Deserializer, Serializer};
-
-    pub(super) fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<Option<TimeDelta>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let val = Option::<SerdeTimeDelta>::deserialize(deserializer)?;
-        match val {
-            None => return Ok(None),
-            Some(delta) => delta
-                .try_into()
-                .map_err(|e| {
-                    <D::Error as serde::de::Error>::custom(format!(
-                        "{e}: {val:?}"
-                    ))
-                })
-                .map(Some),
-        }
-    }
-
-    pub(super) fn serialize<S>(
-        td: &Option<TimeDelta>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        td.as_ref()
-            .map(|&delta| SerdeTimeDelta::from(delta))
-            .serialize(serializer)
-    }
-}
-
 /// The parts of an Instance that can be directly updated after creation.
 #[derive(Clone, Debug, AsChangeset, Serialize, Deserialize)]
 #[diesel(table_name = instance, treat_none_as_null = true)]

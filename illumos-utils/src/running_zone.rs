@@ -508,6 +508,12 @@ impl RunningZone {
         Ok(running_zone)
     }
 
+    /// Create a fake running zone for use in tests.
+    #[cfg(feature = "testing")]
+    pub fn fake_boot(zone_id: i32, zone: InstalledZone) -> Self {
+        RunningZone { id: Some(zone_id), inner: zone }
+    }
+
     pub async fn ensure_address(
         &self,
         addrtype: AddressRequest,
@@ -535,7 +541,8 @@ impl RunningZone {
                 err,
             })?;
         let network =
-            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)
+                .await?;
         Ok(network)
     }
 
@@ -561,7 +568,8 @@ impl RunningZone {
         let zone = Some(self.inner.name.as_ref());
         if let IpAddr::V4(gateway) = port.gateway().ip() {
             let addr =
-                Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)?;
+                Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)
+                    .await?;
             // TODO-remove(#2931): OPTE's DHCP "server" returns the list of routes
             // to add via option 121 (Classless Static Route). The illumos DHCP
             // client currently does not support this option, so we add the routes
@@ -589,12 +597,12 @@ impl RunningZone {
         } else {
             // If the port is using IPv6 addressing we still want it to use
             // DHCP(v6) which requires first creating a link-local address.
-            Zones::ensure_has_link_local_v6_address(zone, &addrobj).map_err(
-                |err| EnsureAddressError::LinkLocal {
+            Zones::ensure_has_link_local_v6_address(zone, &addrobj)
+                .await
+                .map_err(|err| EnsureAddressError::LinkLocal {
                     zone: self.inner.name.clone(),
                     err,
-                },
-            )?;
+                })?;
 
             // Unlike DHCPv4, there's no blocking `ipadm` call we can
             // make as it just happens in the background. So we just poll
@@ -605,6 +613,7 @@ impl RunningZone {
                     // Grab all the address on the addrobj. There should
                     // always be at least one (the link-local we added)
                     let addrs = Zones::get_all_addresses(zone, &addrobj)
+                        .await
                         .map_err(|e| {
                             backoff::BackoffError::permanent(
                                 EnsureAddressError::from(e),
@@ -1002,7 +1011,7 @@ impl ZoneBuilderFactory {
 
     /// For use in unit tests that don't require actual zone creation to occur.
     pub fn fake(
-        temp_dir: Option<&String>,
+        temp_dir: Option<&str>,
         zones_api: Arc<dyn crate::zone::Api>,
     ) -> Self {
         let temp_dir = match temp_dir {
@@ -1044,6 +1053,9 @@ pub struct ZoneBuilder<'a> {
     /// The directories that will be searched for the image tarball for the
     /// provided zone type ([`Self::with_zone_type`]).
     zone_image_paths: Option<&'a [Utf8PathBuf]>,
+    /// The file name of the zone image to search for in [`Self::zone_image_paths`].
+    /// If unset, defaults to `{zone_type}.tar.gz`.
+    zone_image_file_name: Option<&'a str>,
     /// The name of the type of zone being created (e.g. "propolis-server")
     zone_type: Option<&'a str>,
     /// Unique ID of the instance of the zone being created. (optional)
@@ -1110,6 +1122,17 @@ impl<'a> ZoneBuilder<'a> {
         self
     }
 
+    /// The file name of the zone image to search for in the zone image
+    /// paths ([`Self::with_zone_image_paths`]). If unset, defaults to
+    /// `{zone_type}.tar.gz`.
+    pub fn with_zone_image_file_name(
+        mut self,
+        image_file_name: &'a str,
+    ) -> Self {
+        self.zone_image_file_name = Some(image_file_name);
+        self
+    }
+
     /// The name of the type of zone being created (e.g. "propolis-server")
     pub fn with_zone_type(mut self, zone_type: &'a str) -> Self {
         self.zone_type = Some(zone_type);
@@ -1172,7 +1195,7 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     // (used in unit tests)
-    fn fake_install(mut self) -> Result<InstalledZone, InstallZoneError> {
+    async fn fake_install(mut self) -> Result<InstalledZone, InstallZoneError> {
         let zones_api = self.zones_api.take().unwrap();
         let zone = self
             .zone_type
@@ -1182,6 +1205,7 @@ impl<'a> ZoneBuilder<'a> {
             .underlay_vnic_allocator
             .ok_or(InstallZoneError::IncompleteBuilder)?
             .new_control(None)
+            .await
             .map_err(move |err| InstallZoneError::CreateVnic { zone, err })?;
         let fake_cfg = self.fake_cfg.unwrap();
         let temp_dir = fake_cfg.temp_dir;
@@ -1219,7 +1243,7 @@ impl<'a> ZoneBuilder<'a> {
     /// parameter was not provided.
     pub async fn install(mut self) -> Result<InstalledZone, InstallZoneError> {
         if self.fake_cfg.is_some() {
-            return self.fake_install();
+            return self.fake_install().await;
         }
 
         let Self {
@@ -1227,6 +1251,7 @@ impl<'a> ZoneBuilder<'a> {
             underlay_vnic_allocator: Some(underlay_vnic_allocator),
             zone_root_path: Some(mut zone_root_path),
             zone_image_paths: Some(zone_image_paths),
+            zone_image_file_name,
             zone_type: Some(zone_type),
             unique_name,
             datasets: Some(datasets),
@@ -1243,27 +1268,30 @@ impl<'a> ZoneBuilder<'a> {
             return Err(InstallZoneError::IncompleteBuilder);
         };
 
-        let control_vnic =
-            underlay_vnic_allocator.new_control(None).map_err(|err| {
-                InstallZoneError::CreateVnic {
-                    zone: zone_type.to_string(),
-                    err,
-                }
+        let control_vnic = underlay_vnic_allocator
+            .new_control(None)
+            .await
+            .map_err(|err| InstallZoneError::CreateVnic {
+                zone: zone_type.to_string(),
+                err,
             })?;
 
         let full_zone_name =
             InstalledZone::get_zone_name(zone_type, unique_name);
 
         // Looks for the image within `zone_image_path`, in order.
-        let image = format!("{}.tar.gz", zone_type);
+        let image_file_name = match zone_image_file_name {
+            Some(image) => image,
+            None => &format!("{}.tar.gz", zone_type),
+        };
         let zone_image_path = zone_image_paths
             .iter()
             .find_map(|image_path| {
-                let path = image_path.join(&image);
+                let path = image_path.join(image_file_name);
                 if path.exists() { Some(path) } else { None }
             })
             .ok_or_else(|| InstallZoneError::ImageNotFound {
-                image: image.to_string(),
+                image: image_file_name.to_string(),
                 paths: zone_image_paths
                     .iter()
                     .map(|p| p.to_path_buf())

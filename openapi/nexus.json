@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20250409.0.0"
+    "version": "20250604.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -385,7 +385,7 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}": {
+    "/experimental/v1/system/support-bundles/{bundle_id}": {
       "get": {
         "tags": [
           "hidden"
@@ -395,7 +395,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -433,7 +433,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -455,7 +455,7 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/download": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/download": {
       "get": {
         "tags": [
           "hidden"
@@ -465,7 +465,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -494,7 +494,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -515,7 +515,7 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}": {
       "get": {
         "tags": [
           "hidden"
@@ -525,21 +525,21 @@
         "parameters": [
           {
             "in": "path",
-            "name": "file",
-            "description": "The file within the bundle to download",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -563,21 +563,21 @@
         "parameters": [
           {
             "in": "path",
-            "name": "file",
-            "description": "The file within the bundle to download",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -593,7 +593,7 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/index": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/index": {
       "get": {
         "tags": [
           "hidden"
@@ -603,7 +603,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -1149,6 +1149,471 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/alert-classes": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "List alert classes",
+        "operationId": "alert_class_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filter",
+            "description": "An optional glob pattern for filtering alert class names.\n\nIf provided, only alert classes which match this glob pattern will be included in the response.",
+            "schema": {
+              "$ref": "#/components/schemas/AlertSubscription"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertClassResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/alert-receivers": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "List alert receivers",
+        "operationId": "alert_receiver_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertReceiverResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/alert-receivers/{receiver}": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Fetch alert receiver",
+        "operationId": "alert_receiver_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertReceiver"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Delete alert receiver",
+        "operationId": "alert_receiver_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/alert-receivers/{receiver}/deliveries": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "List delivery attempts to alert receiver",
+        "description": "Optional query parameters to this endpoint may be used to filter deliveries by state. If none of the `failed`, `pending` or `delivered` query parameters are present, all deliveries are returned. If one or more of these parameters are provided, only those which are set to \"true\" are included in the response.",
+        "operationId": "alert_delivery_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delivered",
+            "description": "If true, include deliveries which have succeeded.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "failed",
+            "description": "If true, include deliveries which have failed permanently.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.\n\nA delivery fails permanently when the retry limit of three total attempts is reached without a successful delivery.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pending",
+            "description": "If true, include deliveries which are currently in progress.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.\n\nA delivery is considered \"pending\" if it has not yet been sent at all, or if a delivery attempt has failed but the delivery has retries remaining.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertDeliveryResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/alert-receivers/{receiver}/probe": {
+      "post": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Send liveness probe to alert receiver",
+        "description": "This endpoint synchronously sends a liveness probe to the selected alert receiver. The response message describes the outcome of the probe: either the successful response (as appropriate), or indication of why the probe failed.\n\nThe result of the probe is represented as an `AlertDelivery` model. Details relating to the status of the probe depend on the alert delivery mechanism, and are included in the `AlertDeliveryAttempts` model. For example, webhook receiver liveness probes include the HTTP status code returned by the receiver endpoint.\n\nNote that the response status is `200 OK` as long as a probe request was able to be sent to the receiver endpoint. If an HTTP-based receiver, such as a webhook, responds to the another status code, including an error, this will be indicated by the response body, *not* the status of the response.\n\nThe `resend` query parameter can be used to request re-delivery of failed events if the liveness probe succeeds. If it is set to true and the liveness probe succeeds, any alerts for which delivery to this receiver has failed will be queued for re-delivery.",
+        "operationId": "alert_receiver_probe",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resend",
+            "description": "If true, resend all events that have not been delivered successfully if the probe request succeeds.",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertProbeResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/alert-receivers/{receiver}/subscriptions": {
+      "post": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Add alert receiver subscription",
+        "operationId": "alert_receiver_subscription_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertSubscriptionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertSubscriptionCreated"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/alert-receivers/{receiver}/subscriptions/{subscription}": {
+      "delete": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Remove alert receiver subscription",
+        "operationId": "alert_receiver_subscription_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "subscription",
+            "description": "The event class subscription itself.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AlertSubscription"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/alerts/{alert_id}/resend": {
+      "post": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Request re-delivery of alert",
+        "operationId": "alert_delivery_resend",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alert_id",
+            "description": "UUID of the alert",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertDeliveryId"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -7523,7 +7988,6 @@
             "in": "query",
             "name": "silo",
             "description": "Name or ID of the silo",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -12081,6 +12545,201 @@
           }
         }
       }
+    },
+    "/v1/webhook-receivers": {
+      "post": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Create webhook receiver",
+        "operationId": "webhook_receiver_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookReceiver"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhook-receivers/{receiver}": {
+      "put": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Update webhook receiver",
+        "description": "Note that receiver secrets are NOT added or removed using this endpoint. Instead, use the `/v1/webhooks/{secrets}/?receiver={receiver}` endpoint to add and remove secrets.",
+        "operationId": "webhook_receiver_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookReceiverUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhook-secrets": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "List webhook receiver secret IDs",
+        "operationId": "webhook_secrets_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSecrets"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Add secret to webhook receiver",
+        "operationId": "webhook_secrets_add",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookSecretCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSecret"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhook-secrets/{secret_id}": {
+      "delete": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Remove secret from webhook receiver",
+        "operationId": "webhook_secrets_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "secret_id",
+            "description": "ID of the secret.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -12558,6 +13217,378 @@
         },
         "required": [
           "switch_histories"
+        ]
+      },
+      "AlertClass": {
+        "description": "An alert class.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "A description of what this alert class represents.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of the alert class.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "AlertClassResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertClass"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AlertDelivery": {
+        "description": "A delivery of a webhook event.",
+        "type": "object",
+        "properties": {
+          "alert_class": {
+            "description": "The event class.",
+            "type": "string"
+          },
+          "alert_id": {
+            "description": "The UUID of the event.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForAlertKind"
+              }
+            ]
+          },
+          "attempts": {
+            "description": "Individual attempts to deliver this webhook event, and their outcomes.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertDeliveryAttempts"
+              }
+            ]
+          },
+          "id": {
+            "description": "The UUID of this delivery attempt.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiver_id": {
+            "description": "The UUID of the alert receiver that this event was delivered to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForAlertReceiverKind"
+              }
+            ]
+          },
+          "state": {
+            "description": "The state of this delivery.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertDeliveryState"
+              }
+            ]
+          },
+          "time_started": {
+            "description": "The time at which this delivery began (i.e. the event was dispatched to the receiver).",
+            "type": "string",
+            "format": "date-time"
+          },
+          "trigger": {
+            "description": "Why this delivery was performed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertDeliveryTrigger"
+              }
+            ]
+          }
+        },
+        "required": [
+          "alert_class",
+          "alert_id",
+          "attempts",
+          "id",
+          "receiver_id",
+          "state",
+          "time_started",
+          "trigger"
+        ]
+      },
+      "AlertDeliveryAttempts": {
+        "description": "A list of attempts to deliver an alert to a receiver.\n\nThe type of the delivery attempt model depends on the receiver type, as it may contain information specific to that delivery mechanism. For example, webhook delivery attempts contain the HTTP status code of the webhook request.",
+        "oneOf": [
+          {
+            "description": "A list of attempts to deliver an alert to a webhook receiver.",
+            "type": "object",
+            "properties": {
+              "webhook": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WebhookDeliveryAttempt"
+                }
+              }
+            },
+            "required": [
+              "webhook"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "AlertDeliveryId": {
+        "type": "object",
+        "properties": {
+          "delivery_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "delivery_id"
+        ]
+      },
+      "AlertDeliveryResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertDelivery"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AlertDeliveryState": {
+        "description": "The state of a webhook delivery attempt.",
+        "oneOf": [
+          {
+            "description": "The webhook event has not yet been delivered successfully.\n\nEither no delivery attempts have yet been performed, or the delivery has failed at least once but has retries remaining.",
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          },
+          {
+            "description": "The webhook event has been delivered successfully.",
+            "type": "string",
+            "enum": [
+              "delivered"
+            ]
+          },
+          {
+            "description": "The webhook delivery attempt has failed permanently and will not be retried again.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          }
+        ]
+      },
+      "AlertDeliveryTrigger": {
+        "description": "The reason an alert was delivered",
+        "oneOf": [
+          {
+            "description": "Delivery was triggered by the alert itself.",
+            "type": "string",
+            "enum": [
+              "alert"
+            ]
+          },
+          {
+            "description": "Delivery was triggered by a request to resend the alert.",
+            "type": "string",
+            "enum": [
+              "resend"
+            ]
+          },
+          {
+            "description": "This delivery is a liveness probe.",
+            "type": "string",
+            "enum": [
+              "probe"
+            ]
+          }
+        ]
+      },
+      "AlertProbeResult": {
+        "description": "Data describing the result of an alert receiver liveness probe attempt.",
+        "type": "object",
+        "properties": {
+          "probe": {
+            "description": "The outcome of the probe delivery.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertDelivery"
+              }
+            ]
+          },
+          "resends_started": {
+            "nullable": true,
+            "description": "If the probe request succeeded, and resending failed deliveries on success was requested, the number of new delivery attempts started. Otherwise, if the probe did not succeed, or resending failed deliveries was not requested, this is null.\n\nNote that this may be 0, if there were no events found which had not been delivered successfully to this receiver.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "probe"
+        ]
+      },
+      "AlertReceiver": {
+        "description": "The configuration for an alert receiver.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "description": "Configuration specific to the kind of alert receiver that this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertReceiverKind"
+              }
+            ]
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "subscriptions": {
+            "description": "The list of alert classes to which this receiver is subscribed.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertSubscription"
+            }
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "kind",
+          "name",
+          "subscriptions",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "AlertReceiverKind": {
+        "description": "The possible alert delivery mechanisms for an alert receiver.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "webhook": {
+                "$ref": "#/components/schemas/WebhookReceiverConfig"
+              }
+            },
+            "required": [
+              "webhook"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "AlertReceiverResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertReceiver"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AlertSubscription": {
+        "title": "A webhook event class subscription",
+        "description": "A webhook event class subscription matches either a single event class exactly, or a glob pattern including wildcards that may match multiple event classes",
+        "type": "string",
+        "pattern": "^([a-zA-Z0-9_]+|\\*|\\*\\*)(\\.([a-zA-Z0-9_]+|\\*|\\*\\*))*$"
+      },
+      "AlertSubscriptionCreate": {
+        "type": "object",
+        "properties": {
+          "subscription": {
+            "description": "The event class pattern to subscribe to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertSubscription"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subscription"
+        ]
+      },
+      "AlertSubscriptionCreated": {
+        "type": "object",
+        "properties": {
+          "subscription": {
+            "description": "The new subscription added to the receiver.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertSubscription"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subscription"
         ]
       },
       "AllowList": {
@@ -23491,6 +24522,14 @@
           }
         }
       },
+      "TypedUuidForAlertKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForAlertReceiverKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForInstanceKind": {
         "type": "string",
         "format": "uuid"
@@ -24563,16 +25602,14 @@
         "type": "object",
         "properties": {
           "rules": {
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
             },
             "maxItems": 1024
           }
-        },
-        "required": [
-          "rules"
-        ]
+        }
       },
       "VpcFirewallRules": {
         "description": "Collection of a Vpc's firewall rules",
@@ -24909,6 +25946,289 @@
           }
         }
       },
+      "WebhookCreate": {
+        "description": "Create-time identity-related parameters",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "endpoint": {
+            "description": "The URL that webhook notification requests should be sent to",
+            "type": "string",
+            "format": "uri"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "secrets": {
+            "description": "A non-empty list of secret keys used to sign webhook payloads.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "subscriptions": {
+            "description": "A list of webhook event class subscriptions.\n\nIf this list is empty or is not included in the request body, the webhook will not be subscribed to any events.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertSubscription"
+            }
+          }
+        },
+        "required": [
+          "description",
+          "endpoint",
+          "name",
+          "secrets"
+        ]
+      },
+      "WebhookDeliveryAttempt": {
+        "description": "An individual delivery attempt for a webhook event.\n\nThis represents a single HTTP request that was sent to the receiver, and its outcome.",
+        "type": "object",
+        "properties": {
+          "attempt": {
+            "description": "The attempt number.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "response": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookDeliveryResponse"
+              }
+            ]
+          },
+          "result": {
+            "description": "The outcome of this delivery attempt: either the event was delivered successfully, or the request failed for one of several reasons.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookDeliveryAttemptResult"
+              }
+            ]
+          },
+          "time_sent": {
+            "description": "The time at which the webhook delivery was attempted.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "attempt",
+          "result",
+          "time_sent"
+        ]
+      },
+      "WebhookDeliveryAttemptResult": {
+        "oneOf": [
+          {
+            "description": "The webhook event has been delivered successfully.",
+            "type": "string",
+            "enum": [
+              "succeeded"
+            ]
+          },
+          {
+            "description": "A webhook request was sent to the endpoint, and it returned a HTTP error status code indicating an error.",
+            "type": "string",
+            "enum": [
+              "failed_http_error"
+            ]
+          },
+          {
+            "description": "The webhook request could not be sent to the receiver endpoint.",
+            "type": "string",
+            "enum": [
+              "failed_unreachable"
+            ]
+          },
+          {
+            "description": "A connection to the receiver endpoint was successfully established, but no response was received within the delivery timeout.",
+            "type": "string",
+            "enum": [
+              "failed_timeout"
+            ]
+          }
+        ]
+      },
+      "WebhookDeliveryResponse": {
+        "description": "The response received from a webhook receiver endpoint.",
+        "type": "object",
+        "properties": {
+          "duration_ms": {
+            "description": "The response time of the webhook endpoint, in milliseconds.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "status": {
+            "description": "The HTTP status code returned from the webhook endpoint.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "duration_ms",
+          "status"
+        ]
+      },
+      "WebhookReceiver": {
+        "description": "The configuration for a webhook alert receiver.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "endpoint": {
+            "description": "The URL that webhook notification requests are sent to.",
+            "type": "string",
+            "format": "uri"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "secrets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookSecret"
+            }
+          },
+          "subscriptions": {
+            "description": "The list of alert classes to which this receiver is subscribed.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertSubscription"
+            }
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "endpoint",
+          "id",
+          "name",
+          "secrets",
+          "subscriptions",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "WebhookReceiverConfig": {
+        "description": "Webhook-specific alert receiver configuration.",
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "description": "The URL that webhook notification requests are sent to.",
+            "type": "string",
+            "format": "uri"
+          },
+          "secrets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookSecret"
+            }
+          }
+        },
+        "required": [
+          "endpoint",
+          "secrets"
+        ]
+      },
+      "WebhookReceiverUpdate": {
+        "description": "Parameters to update a webhook configuration.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "endpoint": {
+            "nullable": true,
+            "description": "The URL that webhook notification requests should be sent to",
+            "type": "string",
+            "format": "uri"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
+      },
+      "WebhookSecret": {
+        "description": "A view of a shared secret key assigned to a webhook receiver.\n\nOnce a secret is created, the value of the secret is not available in the API, as it must remain secret. Instead, secrets are referenced by their unique IDs assigned when they are created.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The public unique ID of the secret.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "The UTC timestamp at which this secret was created.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created"
+        ]
+      },
+      "WebhookSecretCreate": {
+        "type": "object",
+        "properties": {
+          "secret": {
+            "description": "The value of the shared secret key.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret"
+        ]
+      },
+      "WebhookSecrets": {
+        "description": "A list of the IDs of secrets associated with a webhook receiver.",
+        "type": "object",
+        "properties": {
+          "secrets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookSecret"
+            }
+          }
+        },
+        "required": [
+          "secrets"
+        ]
+      },
       "NameOrIdSortMode": {
         "description": "Supported set of sort modes for scanning by name or id",
         "oneOf": [
@@ -24943,6 +26263,25 @@
             "type": "string",
             "enum": [
               "id_ascending"
+            ]
+          }
+        ]
+      },
+      "TimeAndIdSortMode": {
+        "description": "Supported set of sort modes for scanning by timestamp and ID",
+        "oneOf": [
+          {
+            "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
+            "type": "string",
+            "enum": [
+              "ascending"
+            ]
+          },
+          {
+            "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
+            "type": "string",
+            "enum": [
+              "descending"
             ]
           }
         ]
@@ -25097,6 +26436,13 @@
       "description": "Snapshots of virtual disks at a particular point in time.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/snapshots"
+      }
+    },
+    {
+      "name": "system/alerts",
+      "description": "Alerts deliver notifications for events that occur on the Oxide rack",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/alerts"
       }
     },
     {

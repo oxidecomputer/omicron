@@ -56,7 +56,7 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
 
     /// Creates a new NIC, intended for allowing Propolis to communicate
     /// with the control plane.
-    pub fn new_control(
+    pub async fn new_control(
         &self,
         mac: Option<MacAddr>,
     ) -> Result<Link, CreateVnicError> {
@@ -64,7 +64,7 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
         debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
-        self.dladm.create_vnic(&self.data_link, &name, mac, None, 9000)?;
+        self.dladm.create_vnic(&self.data_link, &name, mac, None, 9000).await?;
         Ok(Link {
             name,
             deleted: false,
@@ -101,9 +101,11 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
         }
     }
 
-    pub fn new_bootstrap(&self) -> Result<Link, CreateVnicError> {
+    pub async fn new_bootstrap(&self) -> Result<Link, CreateVnicError> {
         let name = self.next();
-        self.dladm.create_vnic(&self.data_link, &name, None, None, 1500)?;
+        self.dladm
+            .create_vnic(&self.data_link, &name, None, None, 1500)
+            .await?;
         Ok(Link {
             name,
             deleted: false,
@@ -198,11 +200,11 @@ impl Link {
     }
 
     /// Deletes a NIC (if it has not already been deleted).
-    pub fn delete(&mut self) -> Result<(), DeleteVnicError> {
+    pub async fn delete(&mut self) -> Result<(), DeleteVnicError> {
         if self.deleted || self.kind == LinkKind::Physical {
             Ok(())
         } else {
-            self.api.as_ref().unwrap().delete_vnic(&self.name)?;
+            self.api.as_ref().unwrap().delete_vnic(&self.name).await?;
             self.deleted = true;
             Ok(())
         }
@@ -243,7 +245,7 @@ struct VnicDestruction {
 impl Deletable for VnicDestruction {
     async fn delete(&self) -> Result<(), anyhow::Error> {
         if let Some(api) = self.api.as_ref() {
-            api.delete_vnic(&self.name)?;
+            api.delete_vnic(&self.name).await?;
         }
         Ok(())
     }

@@ -593,3 +593,24 @@ has_role(USER_DB_INIT: AuthenticatedActor, "admin", _silo: Silo);
 
 # Allow the internal API admin permissions on all silos.
 has_role(USER_INTERNAL_API: AuthenticatedActor, "admin", _silo: Silo);
+
+resource WebhookSecret {
+	permissions = [ "read", "modify" ];
+	relations = { parent_alert_receiver: AlertReceiver };
+
+	"read" if "read" on "parent_alert_receiver";
+	"modify" if "modify" on "parent_alert_receiver";
+}
+
+has_relation(rx: AlertReceiver, "parent_alert_receiver", secret: WebhookSecret)
+	if secret.alert_receiver = rx;
+
+resource AlertClassList {
+	permissions = [ "list_children" ];
+	relations = { parent_fleet: Fleet };
+
+	"list_children" if "viewer" on "parent_fleet";
+}
+
+has_relation(fleet: Fleet, "parent_fleet", collection: AlertClassList)
+	if collection.fleet = fleet;

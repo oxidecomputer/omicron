@@ -711,6 +711,45 @@ impl AuthorizedResource for TargetReleaseConfig {
     }
 }
 
+/// Synthetic resource used for modeling access to the list of alert classes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AlertClassList;
+pub const ALERT_CLASS_LIST: AlertClassList = AlertClassList {};
+
+impl oso::PolarClass for AlertClassList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        // Roles are not directly attached to AlertClassList
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_| FLEET)
+    }
+}
+
+impl AuthorizedResource for AlertClassList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 // Main resource hierarchy: Projects and their resources
 
 authz_resource! {
@@ -1100,4 +1139,28 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "Alert",
+    parent = "Fleet",
+    primary_key = { uuid_kind = AlertKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "AlertReceiver",
+    parent = "Fleet",
+    primary_key = { uuid_kind = AlertReceiverKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "WebhookSecret",
+    parent = "AlertReceiver",
+    primary_key = { uuid_kind = WebhookSecretKind },
+    roles_allowed = false,
+    polar_snippet = Custom,
 }

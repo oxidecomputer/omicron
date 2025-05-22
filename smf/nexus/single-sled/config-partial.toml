@@ -76,6 +76,10 @@ region_snapshot_replacement_finish.period_secs = 30
 tuf_artifact_replication.period_secs = 300
 tuf_artifact_replication.min_sled_replication = 1
 read_only_region_replacement_start.period_secs = 30
+# In general, the webhook dispatcher will be activated when events are queued,
+# so we don't need to periodically activate it *that* frequently.
+alert_dispatcher.period_secs = 60
+webhook_deliverator.period_secs = 60
 
 [default_region_allocation_strategy]
 # by default, allocate without requirement for distinct sleds.

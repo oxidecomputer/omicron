@@ -5,19 +5,22 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dropshot::{
-    HttpError, HttpResponseCreated, HttpResponseDeleted, HttpResponseOk,
+    Body, HttpError, HttpResponseCreated, HttpResponseDeleted, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, ResultsPage,
     TypedBody,
 };
+use http::Response;
 use nexus_types::{
     deployment::{
         Blueprint, BlueprintMetadata, BlueprintTarget, BlueprintTargetSet,
         ClickhousePolicy, OximeterReadPolicy,
     },
     external_api::{
-        params::{PhysicalDiskPath, SledSelector, UninitializedSledId},
-        shared::{ProbeInfo, UninitializedSled},
-        views::{Ping, PingStatus, SledPolicy},
+        params::{self, PhysicalDiskPath, SledSelector, UninitializedSledId},
+        shared::{self, ProbeInfo, UninitializedSled},
+        views::Ping,
+        views::PingStatus,
+        views::SledPolicy,
     },
     internal_api::{
         params::{
@@ -536,6 +539,100 @@ pub trait NexusInternalApi {
         rqctx: RequestContext<Self::Context>,
         disk: TypedBody<PhysicalDiskPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // Support bundles (experimental)
+
+    /// List all support bundles
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles",
+    }]
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>;
+
+    /// View a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+    }]
+    async fn support_bundle_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
+
+    /// Download the index of a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/index",
+    }]
+    async fn support_bundle_index(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the contents of a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
+    }]
+    async fn support_bundle_download(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download a file within a support bundle
+    #[endpoint {
+        method = GET,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
+    }]
+    async fn support_bundle_download_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the metadata of a support bundle
+    #[endpoint {
+        method = HEAD,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
+    }]
+    async fn support_bundle_head(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Download the metadata of a file within the support bundle
+    #[endpoint {
+        method = HEAD,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
+    }]
+    async fn support_bundle_head_file(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundleFilePath>,
+    ) -> Result<Response<Body>, HttpError>;
+
+    /// Create a new support bundle
+    #[endpoint {
+        method = POST,
+        path = "/experimental/v1/system/support-bundles",
+    }]
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError>;
+
+    /// Delete an existing support bundle
+    ///
+    /// May also be used to cancel a support bundle which is currently being
+    /// collected, or to remove metadata for a support bundle that has failed.
+    #[endpoint {
+        method = DELETE,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+    }]
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Get all the probes associated with a given sled.
     #[endpoint {

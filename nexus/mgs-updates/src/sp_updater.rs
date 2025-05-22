@@ -13,6 +13,7 @@ use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::SpComponentUpdater;
 use crate::common_sp_update::deliver_update;
+use crate::common_sp_update::error_means_caboose_is_invalid;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
@@ -212,7 +213,13 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
             let PendingMgsUpdateDetails::Sp {
                 expected_active_version,
                 expected_inactive_version,
-            } = &update.details;
+            } = &update.details
+            else {
+                unreachable!(
+                    "pending MGS update details within ReconfiguratorSpUpdater \
+                    will always be for the SP"
+                );
+            };
             if caboose.version != expected_active_version.to_string() {
                 return Err(PrecheckError::WrongActiveVersion {
                     expected: expected_active_version.clone(),
@@ -245,11 +252,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                     FoundVersion::Version(version.into_inner().version)
                 }
                 Err(error) => {
-                    let message = format!("{error:?}");
-                    if message.contains("the image caboose does not contain")
-                        || message
-                            .contains("the image does not include a caboose")
-                    {
+                    if error_means_caboose_is_invalid(&error) {
                         FoundVersion::MissingVersion
                     } else {
                         return Err(PrecheckError::from(error));

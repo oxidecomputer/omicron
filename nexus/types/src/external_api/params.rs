@@ -29,6 +29,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::{net::IpAddr, str::FromStr};
+use url::Url;
 use uuid::Uuid;
 
 macro_rules! path_param {
@@ -93,7 +94,7 @@ path_param!(AddressLotPath, address_lot, "address lot");
 path_param!(ProbePath, probe, "probe");
 path_param!(CertificatePath, certificate, "certificate");
 
-id_path_param!(SupportBundlePath, support_bundle, "support bundle");
+id_path_param!(SupportBundlePath, bundle_id, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
@@ -482,7 +483,7 @@ pub struct SiloQuotasUpdate {
 }
 
 /// Create-time parameters for a `User`
-#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub struct UserCreate {
     /// username used to log in
     pub external_id: UserId,
@@ -491,14 +492,13 @@ pub struct UserCreate {
 }
 
 /// A password used for authenticating a local-only user
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize)]
 #[serde(try_from = "String")]
-#[serde(into = "String")]
 // We store both the raw String and omicron_passwords::Password forms of the
 // password.  That's because `omicron_passwords::Password` does not support
 // getting the String back out (by design), but we may need to do that in order
 // to impl Serialize.  See the `From<Password> for String` impl below.
-pub struct Password(String, omicron_passwords::Password);
+pub struct Password(omicron_passwords::Password);
 
 impl FromStr for Password {
     type Err = String;
@@ -516,16 +516,7 @@ impl TryFrom<String> for Password {
         // TODO-security If we want to apply password policy rules, this seems
         // like the place.  We presumably want to also document them in the
         // OpenAPI schema below.  See omicron#2307.
-        Ok(Password(value, inner))
-    }
-}
-
-// This "From" impl only exists to make it easier to derive `Serialize`.  That
-// in turn is only to make this easier to use from the test suite.  (There's no
-// other reason structs in this file should need to impl Serialize at all.)
-impl From<Password> for String {
-    fn from(password: Password) -> Self {
-        password.0
+        Ok(Password(inner))
     }
 }
 
@@ -567,12 +558,12 @@ impl JsonSchema for Password {
 
 impl AsRef<omicron_passwords::Password> for Password {
     fn as_ref(&self) -> &omicron_passwords::Password {
-        &self.1
+        &self.0
     }
 }
 
 /// Parameters for setting a user's password
-#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "mode", content = "value")]
 pub enum UserPassword {
@@ -583,7 +574,7 @@ pub enum UserPassword {
 }
 
 /// Credentials for local user login
-#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub struct UsernamePasswordCredentials {
     pub username: UserId,
     pub password: Password,
@@ -2378,4 +2369,166 @@ pub struct DeviceAccessTokenRequest {
     pub grant_type: String,
     pub device_code: String,
     pub client_id: Uuid,
+}
+
+// Alerts
+
+/// Query params for listing alert classes.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertClassFilter {
+    /// An optional glob pattern for filtering alert class names.
+    ///
+    /// If provided, only alert classes which match this glob pattern will be
+    /// included in the response.
+    pub filter: Option<shared::AlertSubscription>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AlertSelector {
+    /// UUID of the alert
+    pub alert_id: Uuid,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertSubscriptionSelector {
+    /// The webhook receiver that the subscription is attached to.
+    #[serde(flatten)]
+    pub receiver: AlertReceiverSelector,
+    /// The event class subscription itself.
+    pub subscription: shared::AlertSubscription,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertClassPage {
+    /// The last webhook event class returned by a previous page.
+    pub last_seen: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertReceiverSelector {
+    /// The name or ID of the webhook receiver.
+    pub receiver: NameOrId,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The URL that webhook notification requests should be sent to
+    pub endpoint: Url,
+
+    /// A non-empty list of secret keys used to sign webhook payloads.
+    pub secrets: Vec<String>,
+
+    /// A list of webhook event class subscriptions.
+    ///
+    /// If this list is empty or is not included in the request body, the
+    /// webhook will not be subscribed to any events.
+    #[serde(default)]
+    pub subscriptions: Vec<shared::AlertSubscription>,
+}
+
+/// Parameters to update a webhook configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookReceiverUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+
+    /// The URL that webhook notification requests should be sent to
+    pub endpoint: Option<Url>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertSubscriptionCreate {
+    /// The event class pattern to subscribe to.
+    pub subscription: shared::AlertSubscription,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSecretCreate {
+    /// The value of the shared secret key.
+    pub secret: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSecretSelector {
+    /// ID of the secret.
+    pub secret_id: Uuid,
+}
+
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertDeliveryStateFilter {
+    /// If true, include deliveries which are currently in progress.
+    ///
+    /// If any of the "pending", "failed", or "delivered" query parameters are
+    /// set to true, only deliveries matching those state(s) will be included in
+    /// the response. If NO state filter parameters are set, then all deliveries
+    /// are included.
+    ///
+    /// A delivery is considered "pending" if it has not yet been sent at all,
+    /// or if a delivery attempt has failed but the delivery has retries
+    /// remaining.
+    pub pending: Option<bool>,
+    /// If true, include deliveries which have failed permanently.
+    ///
+    /// If any of the "pending", "failed", or "delivered" query parameters are
+    /// set to true, only deliveries matching those state(s) will be included in
+    /// the response. If NO state filter parameters are set, then all deliveries
+    /// are included.
+    ///
+    /// A delivery fails permanently when the retry limit of three total
+    /// attempts is reached without a successful delivery.
+    pub failed: Option<bool>,
+    /// If true, include deliveries which have succeeded.
+    ///
+    /// If any of the "pending", "failed", or "delivered" query parameters are
+    /// set to true, only deliveries matching those state(s) will be included in
+    /// the response. If NO state filter parameters are set, then all deliveries
+    /// are included.
+    pub delivered: Option<bool>,
+}
+
+impl Default for AlertDeliveryStateFilter {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
+impl AlertDeliveryStateFilter {
+    pub const ALL: Self =
+        Self { pending: Some(true), failed: Some(true), delivered: Some(true) };
+
+    pub fn include_pending(&self) -> bool {
+        self.pending == Some(true) || self.is_all_none()
+    }
+
+    pub fn include_failed(&self) -> bool {
+        self.failed == Some(true) || self.is_all_none()
+    }
+
+    pub fn include_delivered(&self) -> bool {
+        self.delivered == Some(true) || self.is_all_none()
+    }
+
+    pub fn include_all(&self) -> bool {
+        self.is_all_none()
+            || (self.pending == Some(true)
+                && self.failed == Some(true)
+                && self.delivered == Some(true))
+    }
+
+    fn is_all_none(&self) -> bool {
+        self.pending.is_none()
+            && self.failed.is_none()
+            && self.delivered.is_none()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertReceiverProbe {
+    /// If true, resend all events that have not been delivered successfully if
+    /// the probe request succeeds.
+    #[serde(default)]
+    pub resend: bool,
 }

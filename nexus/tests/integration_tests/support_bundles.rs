@@ -14,22 +14,22 @@ use nexus_client::types::LastResult;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::TestDataset;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::SupportBundleInfo;
 use nexus_types::external_api::shared::SupportBundleState;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
-use omicron_common::api::internal::shared::DatasetKind;
-use omicron_uuid_kinds::{DatasetUuid, SupportBundleUuid, ZpoolUuid};
+use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
 use zip::read::ZipArchive;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
-type DiskTest<'a> =
-    nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
+type DiskTestBuilder<'a> = nexus_test_utils::resource_helpers::DiskTestBuilder<
+    'a,
+    omicron_nexus::Server,
+>;
 
 // -- HTTP methods --
 //
@@ -340,39 +340,15 @@ async fn test_support_bundle_not_found(cptestctx: &ControlPlaneTestContext) {
 async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let mut disk_test = DiskTest::new(&cptestctx).await;
-
-    // We really care about just "getting a debug dataset" here.
-    let sled_id = cptestctx.first_sled_id();
-    disk_test
-        .add_zpool_with_dataset_ext(
-            sled_id,
-            nexus_test_utils::PHYSICAL_DISK_UUID.parse().unwrap(),
-            ZpoolUuid::new_v4(),
-            vec![
-                TestDataset {
-                    id: DatasetUuid::new_v4(),
-                    kind: DatasetKind::Crucible,
-                },
-                TestDataset {
-                    id: DatasetUuid::new_v4(),
-                    kind: DatasetKind::Debug,
-                },
-            ],
-            DiskTest::DEFAULT_ZPOOL_SIZE_GIB,
-        )
-        .await;
-    disk_test.propagate_datasets_to_sleds().await;
+    let disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(1).build().await;
 
     // Validate our test setup: We should see a single Debug dataset
     // in our disk test.
     let mut debug_dataset_count = 0;
     for zpool in disk_test.zpools() {
-        for dataset in &zpool.datasets {
-            if matches!(dataset.kind, DatasetKind::Debug) {
-                debug_dataset_count += 1;
-            }
-        }
+        let _dataset = zpool.debug_dataset();
+        debug_dataset_count += 1;
     }
     assert_eq!(debug_dataset_count, 1);
 

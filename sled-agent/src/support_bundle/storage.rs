@@ -28,6 +28,8 @@ use range_requests::PotentialRange;
 use range_requests::SingleRange;
 use sha2::{Digest, Sha256};
 use sled_agent_api::*;
+use sled_agent_types::support_bundle::BUNDLE_FILE_NAME;
+use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME_SUFFIX;
 use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::NestedDatasetLocation;
@@ -42,21 +44,6 @@ use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
 use tufaceous_artifact::ArtifactHash;
 use zip::result::ZipError;
-
-// The final name of the bundle, as it is stored within the dedicated
-// datasets.
-//
-// The full path is of the form:
-//
-// /pool/ext/$(POOL_UUID)/crypt/$(DATASET_TYPE)/$(BUNDLE_UUID)/bundle.zip
-//                              |               | This is a per-bundle nested dataset
-//                              | This is a Debug dataset
-//
-// NOTE: The "DumpSetupWorker" has been explicitly configured to ignore these files, so they are
-// not removed. If the files used here change in the future, DumpSetupWorker should also be
-// updated.
-pub const BUNDLE_FILE_NAME: &str = "bundle.zip";
-pub const BUNDLE_TMP_FILE_NAME_SUFFIX: &str = "bundle.zip.tmp";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -148,7 +135,7 @@ pub trait LocalStorage: Sync {
     async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error>;
 
     /// Returns properties about a dataset
-    fn dyn_dataset_get(
+    async fn dyn_dataset_get(
         &self,
         dataset_name: &String,
     ) -> Result<DatasetProperties, Error>;
@@ -193,7 +180,7 @@ impl LocalStorage for StorageHandle {
         self.datasets_config_list().await.map_err(|err| err.into())
     }
 
-    fn dyn_dataset_get(
+    async fn dyn_dataset_get(
         &self,
         dataset_name: &String,
     ) -> Result<DatasetProperties, Error> {
@@ -201,6 +188,7 @@ impl LocalStorage for StorageHandle {
             &[dataset_name.clone()],
             illumos_utils::zfs::WhichDatasets::SelfOnly,
         )
+        .await
         .map_err(|err| Error::DatasetLookup(err))?
         .pop() else {
             // This should not be possible, unless the "zfs get" command is
@@ -259,7 +247,7 @@ impl LocalStorage for crate::sim::Storage {
         self.lock().datasets_config_list().map_err(|err| err.into())
     }
 
-    fn dyn_dataset_get(
+    async fn dyn_dataset_get(
         &self,
         dataset_name: &String,
     ) -> Result<DatasetProperties, Error> {
@@ -470,7 +458,7 @@ impl<'a> SupportBundleManager<'a> {
             .ok_or_else(|| Error::DatasetNotFound)?;
 
         let dataset_props =
-            self.storage.dyn_dataset_get(&dataset.name.full_name())?;
+            self.storage.dyn_dataset_get(&dataset.name.full_name()).await?;
         if !dataset_props.mounted {
             return Err(Error::DatasetNotMounted {
                 dataset: dataset.name.clone(),

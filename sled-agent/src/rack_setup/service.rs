@@ -106,9 +106,7 @@ use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
-use omicron_common::disk::{
-    DatasetKind, DatasetsConfig, OmicronPhysicalDisksConfig,
-};
+use omicron_common::disk::DatasetKind;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::BlueprintUuid;
@@ -372,9 +370,10 @@ impl ServiceInner {
             info!(
                 log,
                 "attempting to set sled's config";
-                "disks" => ?sled_config.disks_config,
-                "datasets" => ?sled_config.datasets_config,
-                "zones" => ?sled_config.zones_config,
+                "generation" => %sled_config.generation,
+                "disks" => ?sled_config.disks,
+                "datasets" => ?sled_config.datasets,
+                "zones" => ?sled_config.zones,
             );
             let result = client.omicron_config_put(&sled_config).await;
             let error = match result {
@@ -464,12 +463,8 @@ impl ServiceInner {
                         log,
                         "ignoring attempt to initialize config because \
                         the server seems to be newer";
-                        "attempted_disks_generation" =>
-                            i64::from(&sled_config.disks_config.generation),
-                        "attempted_datasets_generation" =>
-                            i64::from(&sled_config.datasets_config.generation),
-                        "attempted_zones_generation" =>
-                            i64::from(&sled_config.zones_config.generation),
+                        "attempted_generation" =>
+                            i64::from(&sled_config.generation),
                         "req_id" => &response.request_id,
                         "server_message" => &response.message,
                     );
@@ -535,25 +530,18 @@ impl ServiceInner {
                     })?
                     .clone();
 
-                // TODO OmicronSledConfig should have a single generation; for
-                // now we reuse our zone generation for all three subfields.
-                // Tracked by
-                // https://github.com/oxidecomputer/omicron/issues/7774
-                let generation = zones_config.generation;
                 let sled_config = OmicronSledConfig {
-                    disks_config: OmicronPhysicalDisksConfig {
-                        generation,
-                        disks: config
-                            .disks
-                            .iter()
-                            .map(|c| c.clone().into())
-                            .collect(),
-                    },
-                    datasets_config: DatasetsConfig {
-                        generation,
-                        datasets: config.datasets.clone(),
-                    },
-                    zones_config,
+                    // We bump the zone generation as we step through phases of
+                    // RSS; use that as the overall sled config generation.
+                    generation: zones_config.generation,
+                    disks: config
+                        .disks
+                        .iter()
+                        .map(|c| c.clone().into())
+                        .collect(),
+                    datasets: config.datasets.values().cloned().collect(),
+                    zones: zones_config.zones.iter().cloned().collect(),
+                    remove_mupdate_override: None,
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
@@ -1511,7 +1499,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             datasets.insert(BlueprintDatasetConfig {
                 disposition: BlueprintDatasetDisposition::InService,
                 id: d.id,
-                pool: d.name.pool().clone(),
+                pool: *d.name.pool(),
                 kind: d.name.kind().clone(),
                 address,
                 compression: d.inner.compression,
@@ -1538,6 +1526,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 disks: sled_config.disks.clone(),
                 datasets,
                 zones: sled_config.zones.iter().cloned().collect(),
+                remove_mupdate_override: None,
             },
         );
     }
@@ -1668,8 +1657,8 @@ mod test {
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
     use nexus_sled_agent_shared::inventory::{
-        Baseboard, Inventory, InventoryDisk, OmicronZoneType,
-        OmicronZonesConfig, SledRole,
+        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
+        OmicronZoneType, SledRole,
     };
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
@@ -1696,10 +1685,6 @@ mod test {
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 reservoir_size: ByteCount::from_gibibytes_u32(0),
-                omicron_zones: OmicronZonesConfig {
-                    generation: Generation::new(),
-                    zones: vec![],
-                },
                 disks: (0..u2_count)
                     .map(|i| InventoryDisk {
                         identity: DiskIdentity {
@@ -1718,7 +1703,9 @@ mod test {
                     .collect(),
                 zpools: vec![],
                 datasets: vec![],
-                omicron_physical_disks_generation: Generation::new(),
+                ledgered_sled_config: None,
+                reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
+                last_reconciliation: None,
             },
             true,
         )

@@ -56,6 +56,7 @@ mod oximeter;
 mod oxql;
 mod reconfigurator;
 mod sled_agent;
+mod support_bundle;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {

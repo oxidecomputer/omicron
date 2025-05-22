@@ -4,21 +4,28 @@
 
 //! Inventory types shared between Nexus and sled-agent.
 
+use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use daft::Diffable;
+use id_map::IdMap;
+use id_map::IdMappable;
+use omicron_common::ledger::Ledgerable;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
     disk::{
-        DatasetManagementStatus, DatasetsConfig, DiskManagementStatus,
-        DiskVariant, OmicronPhysicalDisksConfig,
+        DatasetConfig, DatasetManagementStatus, DiskManagementStatus,
+        DiskVariant, OmicronPhysicalDiskConfig,
     },
     zpool_name::ZpoolName,
 };
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
+use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -104,11 +111,62 @@ pub struct Inventory {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
-    pub omicron_zones: OmicronZonesConfig,
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
     pub datasets: Vec<InventoryDataset>,
-    pub omicron_physical_disks_generation: Generation,
+    pub ledgered_sled_config: Option<OmicronSledConfig>,
+    pub reconciler_status: ConfigReconcilerInventoryStatus,
+    pub last_reconciliation: Option<ConfigReconcilerInventory>,
+}
+
+/// Describes the last attempt made by the sled-agent-config-reconciler to
+/// reconcile the current sled config against the actual state of the sled.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ConfigReconcilerInventory {
+    pub last_reconciled_config: OmicronSledConfig,
+    pub external_disks:
+        BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
+    pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
+    pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum ConfigReconcilerInventoryResult {
+    Ok,
+    Err { message: String },
+}
+
+impl From<Result<(), String>> for ConfigReconcilerInventoryResult {
+    fn from(result: Result<(), String>) -> Self {
+        match result {
+            Ok(()) => Self::Ok,
+            Err(message) => Self::Err { message },
+        }
+    }
+}
+
+/// Status of the sled-agent-config-reconciler task.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ConfigReconcilerInventoryStatus {
+    /// The reconciler task has not yet run for the first time since sled-agent
+    /// started.
+    NotYetRun,
+    /// The reconciler task is actively running.
+    Running {
+        config: OmicronSledConfig,
+        started_at: DateTime<Utc>,
+        running_for: Duration,
+    },
+    /// The reconciler task is currently idle, but previously did complete a
+    /// reconciliation attempt.
+    ///
+    /// This variant does not include the `OmicronSledConfig` used in the last
+    /// attempt, because that's always available via
+    /// [`ConfigReconcilerInventory::last_reconciled_config`].
+    Idle { completed_at: DateTime<Utc>, ran_for: Duration },
 }
 
 /// Describes the role of the sled within the rack.
@@ -130,13 +188,38 @@ pub enum SledRole {
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
 // TODO this struct should have a generation number; at the moment, each of
 // the fields has a separete one internally.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct OmicronSledConfig {
-    pub disks_config: OmicronPhysicalDisksConfig,
-    pub datasets_config: DatasetsConfig,
-    pub zones_config: OmicronZonesConfig,
+    pub generation: Generation,
+    pub disks: IdMap<OmicronPhysicalDiskConfig>,
+    pub datasets: IdMap<DatasetConfig>,
+    pub zones: IdMap<OmicronZoneConfig>,
+    pub remove_mupdate_override: Option<MupdateOverrideUuid>,
+}
+
+impl Default for OmicronSledConfig {
+    fn default() -> Self {
+        Self {
+            generation: Generation::new(),
+            disks: IdMap::default(),
+            datasets: IdMap::default(),
+            zones: IdMap::default(),
+            remove_mupdate_override: None,
+        }
+    }
+}
+
+impl Ledgerable for OmicronSledConfig {
+    fn is_newer_than(&self, other: &Self) -> bool {
+        self.generation > other.generation
+    }
+
+    fn generation_bump(&mut self) {
+        // DO NOTHING!
+        //
+        // Generation bumps must only ever come from nexus and will be encoded
+        // in the struct itself
+    }
 }
 
 /// Result of the currently-synchronous `omicron_config_put` endpoint.
@@ -190,6 +273,14 @@ pub struct OmicronZoneConfig {
     pub image_source: OmicronZoneImageSource,
 }
 
+impl IdMappable for OmicronZoneConfig {
+    type Id = OmicronZoneUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
+}
+
 impl OmicronZoneConfig {
     /// Returns the underlay IP address associated with this zone.
     ///
@@ -197,6 +288,13 @@ impl OmicronZoneConfig {
     /// currently true).
     pub fn underlay_ip(&self) -> Ipv6Addr {
         self.zone_type.underlay_ip()
+    }
+
+    pub fn zone_name(&self) -> String {
+        illumos_utils::running_zone::InstalledZone::get_zone_name(
+            self.zone_type.kind().zone_prefix(),
+            Some(self.id),
+        )
     }
 }
 
@@ -652,6 +750,18 @@ pub enum OmicronZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     Artifact { hash: ArtifactHash },
+}
+
+impl OmicronZoneImageSource {
+    /// Return the artifact hash used for the zone image, if the zone's image
+    /// source is from the artifact store.
+    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
+        if let OmicronZoneImageSource::Artifact { hash } = self {
+            Some(*hash)
+        } else {
+            None
+        }
+    }
 }
 
 // See `OmicronZoneConfig`. This is a separate function instead of being `impl

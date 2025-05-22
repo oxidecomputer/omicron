@@ -14,6 +14,7 @@ use camino_tempfile::tempfile_in;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::BoxFuture;
+use futures::stream::FuturesUnordered;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
@@ -33,6 +34,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use parallel_task_set::ParallelTaskSet;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::future::Future;
@@ -42,6 +44,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
 use tufaceous_artifact::ArtifactHash;
+use zip::ZipArchive;
 use zip::ZipWriter;
 use zip::write::FullFileOptions;
 
@@ -58,7 +61,7 @@ fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
 }
 
 // Specifies the data to be collected within the Support Bundle.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct BundleRequest {
     // If "false": Skip collecting host-specific info from each sled.
     skip_sled_info: bool,
@@ -371,13 +374,13 @@ impl SupportBundleCollector {
             }
         };
 
-        let collection = BundleCollection {
-            collector: &self,
+        let collection = Arc::new(BundleCollection {
+            datastore: self.datastore.clone(),
             log: opctx.log.new(slog::o!("bundle" => bundle.id.to_string())),
-            opctx,
-            request,
-            bundle: &bundle,
-        };
+            opctx: opctx.child(std::collections::BTreeMap::new()),
+            request: request.clone(),
+            bundle: bundle.clone(),
+        });
 
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         let mut report = collection.collect_bundle_and_store_on_sled().await?;
@@ -414,20 +417,18 @@ impl SupportBundleCollector {
 }
 
 // Wraps up all arguments to perform a single support bundle collection
-struct BundleCollection<'a> {
-    // The task responsible for this collection
-    collector: &'a SupportBundleCollector,
-
+struct BundleCollection {
+    datastore: Arc<DataStore>,
     log: slog::Logger,
-    opctx: &'a OpContext,
-    request: &'a BundleRequest,
-    bundle: &'a SupportBundle,
+    opctx: OpContext,
+    request: BundleRequest,
+    bundle: SupportBundle,
 }
 
-impl BundleCollection<'_> {
+impl BundleCollection {
     // Collect the bundle within Nexus, and store it on a target sled.
     async fn collect_bundle_and_store_on_sled(
-        &self,
+        self: &Arc<Self>,
     ) -> anyhow::Result<SupportBundleCollectionReport> {
         // Create a temporary directory where we'll store the support bundle
         // as it's being collected.
@@ -454,7 +455,7 @@ impl BundleCollection<'_> {
                         "bundle" => %self.bundle.id
                     );
 
-                    let bundle = self.collector.datastore.support_bundle_get(
+                    let bundle = self.datastore.support_bundle_get(
                         &self.opctx,
                         self.bundle.id.into()
                     ).await?;
@@ -489,7 +490,6 @@ impl BundleCollection<'_> {
 
         // Find the sled where we're storing this bundle.
         let sled_id = self
-            .collector
             .datastore
             .zpool_get_sled_if_in_service(
                 &self.opctx,
@@ -497,7 +497,7 @@ impl BundleCollection<'_> {
             )
             .await?;
         let sled_client = nexus_networking::sled_client(
-            &self.collector.datastore,
+            &self.datastore,
             &self.opctx,
             sled_id.into_untyped_uuid(),
             &self.log,
@@ -543,7 +543,7 @@ impl BundleCollection<'_> {
     // As a result, it is important that this function be implemented as
     // cancel-safe.
     async fn collect_bundle_as_file(
-        &self,
+        self: &Arc<Self>,
         dir: &Utf8TempDir,
     ) -> anyhow::Result<SupportBundleCollectionReport> {
         let log = &self.log;
@@ -559,130 +559,188 @@ impl BundleCollection<'_> {
         .await?;
 
         if let Ok(all_sleds) = self
-            .collector
             .datastore
             .sled_list_all_batched(&self.opctx, SledFilter::InService)
             .await
         {
             report.listed_in_service_sleds = true;
 
-            // NOTE: This could be, and probably should be, done concurrently.
-            for sled in &all_sleds {
-                info!(&log, "Collecting bundle info from sled"; "sled" => %sled.id());
-                let sled_path = dir
-                    .path()
-                    .join("rack")
-                    .join(sled.rack_id.to_string())
-                    .join("sled")
-                    .join(sled.id().to_string());
-                tokio::fs::create_dir_all(&sled_path).await?;
-                tokio::fs::write(
-                    sled_path.join("sled.txt"),
-                    format!("{sled:?}"),
-                )
-                .await?;
+            const MAX_CONCURRENT_SLED_REQUESTS: usize = 16;
+            const FAILURE_MESSAGE: &str =
+                "Failed to fully collect support bundle info from sled";
+            let mut set = ParallelTaskSet::new_with_parallelism(
+                MAX_CONCURRENT_SLED_REQUESTS,
+            );
 
-                if self.request.skip_sled_info {
-                    continue;
+            for sled in all_sleds {
+                let prev_result = set
+                    .spawn({
+                        let collection: Arc<BundleCollection> = self.clone();
+                        let dir = dir.path().to_path_buf();
+                        async move {
+                            collection.collect_data_from_sled(&sled, &dir).await
+                        }
+                    })
+                    .await;
+                if let Some(Err(err)) = prev_result {
+                    warn!(&self.log, "{FAILURE_MESSAGE}"; "err" => ?err);
                 }
-
-                let Ok(sled_client) = nexus_networking::sled_client(
-                    &self.collector.datastore,
-                    &self.opctx,
-                    sled.id(),
-                    log,
-                )
-                .await
-                else {
-                    tokio::fs::write(
-                        sled_path.join("error.txt"),
-                        "Could not contact sled",
-                    )
-                    .await?;
-                    continue;
-                };
-
-                // NB: As new sled-diagnostic commands are added they should
-                // be added to this array so that their output can be saved
-                // within the support bundle.
-                let mut diag_cmds = futures::stream::iter([
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "zoneadm",
-                        sled_client.support_zoneadm_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "dladm",
-                        sled_client.support_dladm_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "ipadm",
-                        sled_client.support_ipadm_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "nvmeadm",
-                        sled_client.support_nvmeadm_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "pargs",
-                        sled_client.support_pargs_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "pfiles",
-                        sled_client.support_pfiles_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "pstack",
-                        sled_client.support_pstack_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "zfs",
-                        sled_client.support_zfs_info(),
-                    )
-                    .boxed(),
-                    save_diag_cmd_output_or_error(
-                        &sled_path,
-                        "zpool",
-                        sled_client.support_zpool_info(),
-                    )
-                    .boxed(),
-                ])
-                // Currently we execute up to 10 commands concurrently which
-                // might be doing their own concurrent work, for example
-                // collectiong `pstack` output of every Oxide process that is
-                // found on a sled.
-                .buffer_unordered(10);
-
-                while let Some(result) = diag_cmds.next().await {
-                    // Log that we failed to write the diag command output to a
-                    // file but don't return early as we wish to get as much
-                    // information as we can.
-                    if let Err(e) = result {
-                        error!(
-                            &self.log,
-                            "failed to write diagnostic command output to \
-                            file: {e}"
-                        );
-                    }
+            }
+            while let Some(result) = set.join_next().await {
+                if let Err(err) = result {
+                    warn!(&self.log, "{FAILURE_MESSAGE}"; "err" => ?err);
                 }
             }
         }
 
         Ok(report)
+    }
+
+    // Collect data from a sled, storing it into a directory that will
+    // be turned into a support bundle.
+    //
+    // - "sled" is the sled from which we should collect data.
+    // - "dir" is a directory where data can be stored, to be turned
+    // into a bundle after collection completes.
+    async fn collect_data_from_sled(
+        &self,
+        sled: &nexus_db_model::Sled,
+        dir: &Utf8Path,
+    ) -> anyhow::Result<()> {
+        let log = &self.log;
+        info!(&log, "Collecting bundle info from sled"; "sled" => %sled.id());
+        let sled_path = dir
+            .join("rack")
+            .join(sled.rack_id.to_string())
+            .join("sled")
+            .join(sled.id().to_string());
+        tokio::fs::create_dir_all(&sled_path).await?;
+        tokio::fs::write(sled_path.join("sled.txt"), format!("{sled:?}"))
+            .await?;
+
+        if self.request.skip_sled_info {
+            return Ok(());
+        }
+
+        let Ok(sled_client) = nexus_networking::sled_client(
+            &self.datastore,
+            &self.opctx,
+            sled.id(),
+            log,
+        )
+        .await
+        else {
+            tokio::fs::write(
+                sled_path.join("error.txt"),
+                "Could not contact sled",
+            )
+            .await?;
+            return Ok(());
+        };
+
+        // NB: As new sled-diagnostic commands are added they should
+        // be added to this array so that their output can be saved
+        // within the support bundle.
+        let mut diag_cmds = futures::stream::iter([
+            save_diag_cmd_output_or_error(
+                &sled_path,
+                "zoneadm",
+                sled_client.support_zoneadm_info(),
+            )
+            .boxed(),
+            save_diag_cmd_output_or_error(
+                &sled_path,
+                "dladm",
+                sled_client.support_dladm_info(),
+            )
+            .boxed(),
+            save_diag_cmd_output_or_error(
+                &sled_path,
+                "ipadm",
+                sled_client.support_ipadm_info(),
+            )
+            .boxed(),
+            save_diag_cmd_output_or_error(
+                &sled_path,
+                "nvmeadm",
+                sled_client.support_nvmeadm_info(),
+            )
+            .boxed(),
+            save_diag_cmd_output_or_error(
+                &sled_path,
+                "pargs",
+                sled_client.support_pargs_info(),
+            )
+            .boxed(),
+            save_diag_cmd_output_or_error(
+                &sled_path,
+                "pfiles",
+                sled_client.support_pfiles_info(),
+            )
+            .boxed(),
+            save_diag_cmd_output_or_error(
+                &sled_path,
+                "pstack",
+                sled_client.support_pstack_info(),
+            )
+            .boxed(),
+            save_diag_cmd_output_or_error(
+                &sled_path,
+                "zfs",
+                sled_client.support_zfs_info(),
+            )
+            .boxed(),
+            save_diag_cmd_output_or_error(
+                &sled_path,
+                "zpool",
+                sled_client.support_zpool_info(),
+            )
+            .boxed(),
+            save_diag_cmd_output_or_error(
+                &sled_path,
+                "health-check",
+                sled_client.support_health_check(),
+            )
+            .boxed(),
+        ])
+        // Currently we execute up to 10 commands concurrently which
+        // might be doing their own concurrent work, for example
+        // collectiong `pstack` output of every Oxide process that is
+        // found on a sled.
+        .buffer_unordered(10);
+
+        while let Some(result) = diag_cmds.next().await {
+            // Log that we failed to write the diag command output to a
+            // file but don't return early as we wish to get as much
+            // information as we can.
+            if let Err(e) = result {
+                error!(
+                    &self.log,
+                    "failed to write diagnostic command output to \
+                    file: {e}"
+                );
+            }
+        }
+
+        // For each zone we concurrently fire off a request to its
+        // sled-agent to collect its logs in a zip file and write the
+        // result to the support bundle.
+        let zones = sled_client.support_logs().await?.into_inner();
+        let mut log_futs: FuturesUnordered<_> = zones
+            .iter()
+            .map(|zone| {
+                save_zone_log_zip_or_error(log, &sled_client, zone, &sled_path)
+            })
+            .collect();
+
+        while let Some(log_collection_result) = log_futs.next().await {
+            // We log any errors saving the zip file to disk and
+            // continue on.
+            if let Err(e) = log_collection_result {
+                error!(&self.log, "failed to write logs output: {e}");
+            }
+        }
+        return Ok(());
     }
 }
 
@@ -790,6 +848,89 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
     Ok(ArtifactHash(digest.as_slice().try_into()?))
 }
 
+/// For a given zone, save its service's logs into the provided destination
+/// path. This path should be the location to a per-sled directory that will end
+/// up in the final support bundle zip file.
+async fn save_zone_log_zip_or_error(
+    logger: &slog::Logger,
+    client: &sled_agent_client::Client,
+    zone: &str,
+    path: &Utf8Path,
+) -> anyhow::Result<()> {
+    // In the future when support bundle collection exposes tuning parameters
+    // this can turn into a collection parameter.
+    const DEFAULT_MAX_ROTATED_LOGS: u32 = 5;
+
+    match client.support_logs_download(zone, DEFAULT_MAX_ROTATED_LOGS).await {
+        Ok(res) => {
+            let bytestream = res.into_inner();
+            let output_dir = path.join(format!("logs/{zone}"));
+            let output_file = output_dir.join("logs.zip");
+
+            // Ensure the logs output directory exists.
+            tokio::fs::create_dir_all(&output_dir).await.with_context(
+                || format!("failed to create output directory: {output_dir}"),
+            )?;
+
+            let mut file =
+                tokio::fs::File::create(&output_file).await.with_context(
+                    || format!("failed to create file: {output_file}"),
+                )?;
+
+            let stream = bytestream.into_inner().map(|chunk| {
+                chunk.map_err(|e| std::io::Error::other(e.to_string()))
+            });
+            let mut reader = tokio_util::io::StreamReader::new(stream);
+            let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
+
+            // Unpack the zip so we don't end up with zip files inside of our
+            // final zip
+            let zipfile = output_file.clone();
+            tokio::task::spawn_blocking(move || {
+                extract_zip_file(&output_dir, &zipfile)
+            })
+            .await
+            .map_err(|join_error| {
+                anyhow::anyhow!(join_error)
+                    .context("unzipping support bundle logs zip panicked")
+            })??;
+
+            // Cleanup the zip file since we no longer need it
+            if let Err(e) = tokio::fs::remove_file(&output_file).await {
+                error!(
+                    logger,
+                    "failed to cleanup temporary logs zip file";
+                    "error" => %e,
+                    "file" => %output_file,
+
+                );
+            }
+        }
+        Err(err) => {
+            tokio::fs::write(
+                path.join(format!("{zone}.logs.err")),
+                err.to_string(),
+            )
+            .await?;
+        }
+    };
+
+    Ok(())
+}
+
+fn extract_zip_file(
+    output_dir: &Utf8Path,
+    zip_file: &Utf8Path,
+) -> Result<(), anyhow::Error> {
+    let mut zip = std::fs::File::open(&zip_file)
+        .with_context(|| format!("failed to open zip file: {zip_file}"))?;
+    let mut archive = ZipArchive::new(&mut zip)?;
+    archive.extract(&output_dir).with_context(|| {
+        format!("failed to extract log zip file to: {output_dir}")
+    })?;
+    Ok(())
+}
+
 /// Run a `sled-dianostics` future and save its output to a corresponding file.
 async fn save_diag_cmd_output_or_error<F, S: serde::Serialize>(
     path: &Utf8Path,
@@ -840,7 +981,6 @@ mod test {
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetName;
@@ -1046,8 +1186,15 @@ mod test {
                     )
                 })
                 .collect();
+
+            // Read current sled config generation from zones (this will change
+            // slightly once the simulator knows how to keep the unified config
+            // and be a little less weird)
+            let current_generation =
+                cptestctx.first_sled_agent().omicron_zones_list().generation;
+
             let dataset_config = DatasetsConfig {
-                generation: Generation::new().next(),
+                generation: current_generation.next(),
                 datasets,
             };
 

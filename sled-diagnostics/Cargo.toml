@@ -7,13 +7,27 @@ edition = "2021"
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
+camino.workspace = true
 cfg-if.workspace = true
-fs-err.workspace = true
+fs-err = { workspace = true, features = ["tokio"] }
 futures.workspace = true
+illumos-utils.workspace = true
 libc.workspace = true
 omicron-workspace-hack.workspace = true
+once_cell.workspace = true
+oxlog.workspace = true
+parallel-task-set.workspace = true
+rand.workspace = true
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
+zip = { workspace = true, features = ["zstd"] }
+
+[dev-dependencies]
+omicron-common.workspace = true
+omicron-test-utils.workspace = true
+omicron-uuid-kinds.workspace = true
+sled-storage = { workspace = true, features = ["testing"] }

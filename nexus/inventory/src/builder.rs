@@ -149,12 +149,6 @@ impl CollectionBuilder {
 
     /// Assemble a complete `Collection` representation
     pub fn build(mut self) -> Collection {
-        // This is not strictly necessary.  But for testing, it's helpful for
-        // things to be in sorted order.
-        for v in self.sleds.values_mut() {
-            v.omicron_zones.zones.sort_by(|a, b| a.id.cmp(&b.id));
-        }
-
         Collection {
             id: self.rng.id_rng.next(),
             errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
@@ -531,7 +525,6 @@ impl CollectionBuilder {
             reservoir_size: inventory.reservoir_size,
             time_collected,
             sled_id,
-            omicron_zones: inventory.omicron_zones,
             disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
             zpools: inventory
                 .zpools
@@ -543,8 +536,9 @@ impl CollectionBuilder {
                 .into_iter()
                 .map(|d| d.into())
                 .collect(),
-            omicron_physical_disks_generation: inventory
-                .omicron_physical_disks_generation,
+            ledgered_sled_config: inventory.ledgered_sled_config,
+            reconciler_status: inventory.reconciler_status,
+            last_reconciliation: inventory.last_reconciliation,
         };
 
         if let Some(previous) = self.sleds.get(&sled_id) {
@@ -591,11 +585,11 @@ mod test {
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use gateway_client::types::PowerState;
-    use gateway_client::types::RotSlot;
     use gateway_client::types::RotState;
     use gateway_client::types::SpComponentCaboose;
     use gateway_client::types::SpState;
     use gateway_client::types::SpType;
+    use gateway_types::rot::RotSlot;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
@@ -717,6 +711,7 @@ mod test {
             git_commit: String::from("git_commit_1"),
             name: String::from("name_1"),
             version: String::from("version_1"),
+            sign: Some(String::from("sign_1")),
         };
         for bb in &common_caboose_baseboards {
             let _ = collection.sps.get(*bb).unwrap();
@@ -1105,7 +1100,7 @@ mod test {
             git_commit: String::from("git_commit1"),
             name: String::from("name1"),
             version: String::from("version1"),
-            sign: None,
+            sign: Some(String::from("sign1")),
             epoch: None,
         };
         assert!(
@@ -1125,7 +1120,7 @@ mod test {
             "reporting caboose for unknown baseboard: \
             BaseboardId { part_number: \"p1\", serial_number: \"bogus\" } \
             (Caboose { board: \"board1\", git_commit: \"git_commit1\", \
-            name: \"name1\", version: \"version1\" })"
+            name: \"name1\", version: \"version1\", sign: Some(\"sign1\") })"
         );
         assert!(
             !builder
@@ -1177,7 +1172,7 @@ mod test {
                     git_commit: String::from("git_commit2"),
                     name: String::from("name2"),
                     version: String::from("version2"),
-                    sign: None,
+                    sign: Some(String::from("sign2")),
                     epoch: None,
                 },
             )

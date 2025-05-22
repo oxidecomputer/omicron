@@ -10,6 +10,7 @@ use super::UpdateProgress;
 use futures::future::BoxFuture;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
+use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use slog::Logger;
@@ -278,12 +279,20 @@ pub enum PrecheckStatus {
 
 #[derive(Debug, Error)]
 pub enum PrecheckError {
+    #[error(
+        "pending_persistent_boot_preference and/or transient_boot_preference is set"
+    )]
+    EphemeralRotBootPreferenceSet,
+
     #[error("communicating with MGS")]
     GatewayClientError(#[from] GatewayClientError),
 
+    #[error("communicating with RoT: {message:?}")]
+    RotCommunicationFailed { message: String },
+
     #[error(
-        "in {sp_type} slot {slot_id}, expected to find
-         part {expected_part:?} serial {expected_serial:?}, but found
+        "in {sp_type} slot {slot_id}, expected to find \
+         part {expected_part:?} serial {expected_serial:?}, but found \
          part {found_part:?} serial {found_serial:?}"
     )]
     WrongDevice {
@@ -295,8 +304,12 @@ pub enum PrecheckError {
         found_serial: String,
     },
 
+    #[error("expected to find active slot {expected:?}, but found {found:?}")]
+    WrongActiveSlot { expected: RotSlot, found: RotSlot },
+
     #[error(
-        "expected to find active version {expected:?}, but found {found:?}"
+        "expected to find active version {:?}, but found {found:?}",
+        .expected.as_str(),
     )]
     WrongActiveVersion { expected: ArtifactVersion, found: String },
 
@@ -310,4 +323,13 @@ pub enum PrecheckError {
 pub enum FoundVersion {
     MissingVersion,
     Version(String),
+}
+
+pub(crate) fn error_means_caboose_is_invalid(
+    error: &GatewayClientError,
+) -> bool {
+    // This is not great.  See oxidecomputer/omicron#8014.
+    let message = format!("{error:?}");
+    message.contains("the image caboose does not contain")
+        || message.contains("the image does not include a caboose")
 }

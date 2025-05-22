@@ -744,6 +744,302 @@
         }
       }
     },
+    "/experimental/v1/system/support-bundles": {
+      "get": {
+        "summary": "List all support bundles",
+        "operationId": "support_bundle_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfoResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "summary": "Create a new support bundle",
+        "operationId": "support_bundle_create",
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{bundle_id}": {
+      "get": {
+        "summary": "View a support bundle",
+        "operationId": "support_bundle_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete an existing support bundle",
+        "description": "May also be used to cancel a support bundle which is currently being collected, or to remove metadata for a support bundle that has failed.",
+        "operationId": "support_bundle_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{bundle_id}/download": {
+      "get": {
+        "summary": "Download the contents of a support bundle",
+        "operationId": "support_bundle_download",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "summary": "Download the metadata of a support bundle",
+        "operationId": "support_bundle_head",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}": {
+      "get": {
+        "summary": "Download a file within a support bundle",
+        "operationId": "support_bundle_download_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "summary": "Download the metadata of a file within the support bundle",
+        "operationId": "support_bundle_head_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{bundle_id}/index": {
+      "get": {
+        "summary": "Download the index of a support bundle",
+        "operationId": "support_bundle_index",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/instances/{instance_id}/migrate": {
       "post": {
         "operationId": "instance_migrate",
@@ -2334,6 +2630,14 @@
           },
           "disks": {
             "$ref": "#/components/schemas/IdMapBlueprintPhysicalDiskConfig"
+          },
+          "remove_mupdate_override": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              }
+            ]
           },
           "sled_agent_generation": {
             "description": "Generation number used when this type is converted into an `OmicronSledConfig` for use by sled-agent.\n\nThis field is explicitly named `sled_agent_generation` to indicate that it is only required to cover information that changes what Reconfigurator sends to sled agent. For example, changing the sled `state` from `Active` to `Decommissioned` would not require a bump to `sled_agent_generation`, because a `Decommissioned` sled will never be sent an `OmicronSledConfig`.",
@@ -3963,6 +4267,22 @@
           "request_id"
         ]
       },
+      "ExpectedActiveRotSlot": {
+        "description": "Describes the expected active RoT slot, and the version we expect to find for it",
+        "type": "object",
+        "properties": {
+          "slot": {
+            "$ref": "#/components/schemas/RotSlot"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ArtifactVersion"
+          }
+        },
+        "required": [
+          "slot",
+          "version"
+        ]
+      },
       "ExpectedVersion": {
         "description": "Describes the version that we expect to find in some firmware slot",
         "oneOf": [
@@ -5118,6 +5438,56 @@
               "expected_active_version",
               "expected_inactive_version"
             ]
+          },
+          {
+            "description": "the RoT is being updated",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "rot"
+                ]
+              },
+              "expected_active_slot": {
+                "$ref": "#/components/schemas/ExpectedActiveRotSlot"
+              },
+              "expected_inactive_version": {
+                "$ref": "#/components/schemas/ExpectedVersion"
+              },
+              "expected_pending_persistent_boot_preference": {
+                "nullable": true,
+                "description": "the persistent boot preference written into the CFPA scratch page that will become the persistent boot preference in the authoritative CFPA page upon reboot, unless CFPA update of the authoritative page fails for some reason.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "expected_persistent_boot_preference": {
+                "description": "the persistent boot preference written into the current authoritative CFPA page (ping or pong)",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "expected_transient_boot_preference": {
+                "nullable": true,
+                "description": "override persistent preference selection for a single boot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "expected_active_slot",
+              "expected_inactive_version",
+              "expected_persistent_boot_preference"
+            ]
           }
         ]
       },
@@ -5754,6 +6124,38 @@
           "time"
         ]
       },
+      "RotSlot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "a"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "b"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
+        ]
+      },
       "RouteConfig": {
         "type": "object",
         "properties": {
@@ -6355,6 +6757,87 @@
           "weight"
         ]
       },
+      "SupportBundleInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+          },
+          "reason_for_creation": {
+            "type": "string"
+          },
+          "reason_for_failure": {
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SupportBundleState"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "reason_for_creation",
+          "state",
+          "time_created"
+        ]
+      },
+      "SupportBundleInfoResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupportBundleInfo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SupportBundleState": {
+        "oneOf": [
+          {
+            "description": "Support Bundle still actively being collected.\n\nThis is the initial state for a Support Bundle, and it will automatically transition to either \"Failing\" or \"Active\".\n\nIf a user no longer wants to access a Support Bundle, they can request cancellation, which will transition to the \"Destroying\" state.",
+            "type": "string",
+            "enum": [
+              "collecting"
+            ]
+          },
+          {
+            "description": "Support Bundle is being destroyed.\n\nOnce backing storage has been freed, this bundle is destroyed.",
+            "type": "string",
+            "enum": [
+              "destroying"
+            ]
+          },
+          {
+            "description": "Support Bundle was not created successfully, or was created and has lost backing storage.\n\nThe record of the bundle still exists for readability, but the only valid operation on these bundles is to destroy them.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "Support Bundle has been processed, and is ready for usage.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          }
+        ]
+      },
       "SwitchLocation": {
         "description": "Identifies switch physical location",
         "oneOf": [
@@ -6449,6 +6932,10 @@
         "type": "string",
         "format": "uuid"
       },
+      "TypedUuidForMupdateOverrideKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForOmicronZoneKind": {
         "type": "string",
         "format": "uuid"
@@ -6458,6 +6945,10 @@
         "format": "uuid"
       },
       "TypedUuidForSledKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForSupportBundleKind": {
         "type": "string",
         "format": "uuid"
       },

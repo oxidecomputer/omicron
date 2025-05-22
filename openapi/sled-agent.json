@@ -659,6 +659,33 @@
         }
       }
     },
+    "/support/health-check": {
+      "get": {
+        "operationId": "support_health_check",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SledDiagnosticsQueryOutput",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/support/ipadm-info": {
       "get": {
         "operationId": "support_ipadm_info",
@@ -672,6 +699,73 @@
                   "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/support/logs/download/{zone}": {
+      "get": {
+        "summary": "This endpoint returns a zip file of a zone's logs organized by service.",
+        "operationId": "support_logs_download",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone",
+            "description": "The zone for which one would like to collect logs for",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_rotated",
+            "description": "The max number of rotated logs to include in the final support bundle",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/support/logs/zones": {
+      "get": {
+        "summary": "This endpoint returns a list of known zones on a sled that have service",
+        "description": "logs that can be collected into a support bundle.",
+        "operationId": "support_logs",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_String",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
                   }
                 }
               }
@@ -2518,6 +2612,74 @@
           "port"
         ]
       },
+      "BlobStorageBackend": {
+        "description": "A storage backend for a disk whose initial contents are given explicitly by the specification.",
+        "type": "object",
+        "properties": {
+          "base64": {
+            "description": "The disk's initial contents, encoded as a base64 string.",
+            "type": "string"
+          },
+          "readonly": {
+            "description": "Indicates whether the storage is read-only.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "base64",
+          "readonly"
+        ],
+        "additionalProperties": false
+      },
+      "Board": {
+        "description": "A VM's mainboard.",
+        "type": "object",
+        "properties": {
+          "chipset": {
+            "description": "The chipset to expose to guest software.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Chipset"
+              }
+            ]
+          },
+          "cpuid": {
+            "nullable": true,
+            "description": "The CPUID values to expose to the guest. If `None`, bhyve will derive default values from the host's CPUID values.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Cpuid"
+              }
+            ]
+          },
+          "cpus": {
+            "description": "The number of virtual logical processors attached to this VM.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "guest_hv_interface": {
+            "description": "The hypervisor platform to expose to the guest. The default is a bhyve-compatible interface with no additional features.\n\nFor compatibility with older versions of Propolis, this field is only serialized if it specifies a non-default interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GuestHypervisorInterface"
+              }
+            ]
+          },
+          "memory_mb": {
+            "description": "The amount of guest RAM attached to this VM.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "chipset",
+          "cpus",
+          "memory_mb"
+        ],
+        "additionalProperties": false
+      },
       "BootDiskOsWriteProgress": {
         "description": "Current progress of an OS image being written to disk.",
         "oneOf": [
@@ -2674,6 +2836,40 @@
           }
         ]
       },
+      "BootOrderEntry": {
+        "description": "An entry in the boot order stored in a [`BootSettings`] component.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The ID of another component in the spec that Propolis should try to boot from.\n\nCurrently, only disk device components are supported.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpecKey"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "BootSettings": {
+        "description": "Settings supplied to the guest's firmware image that specify the order in which it should consider its options when selecting a device to try to boot from.",
+        "type": "object",
+        "properties": {
+          "order": {
+            "description": "An ordered list of components to attempt to boot from.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BootOrderEntry"
+            }
+          }
+        },
+        "required": [
+          "order"
+        ],
+        "additionalProperties": false
+      },
       "BootstoreStatus": {
         "type": "object",
         "properties": {
@@ -2762,6 +2958,31 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "Chipset": {
+        "description": "A kind of virtual chipset.",
+        "oneOf": [
+          {
+            "description": "An Intel 440FX-compatible chipset.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "i440_fx"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/I440Fx"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        ]
       },
       "CleanupContext": {
         "description": "Context provided for the zone bundle cleanup task.",
@@ -2856,6 +3077,333 @@
         "allOf": [
           {
             "$ref": "#/components/schemas/Duration"
+          }
+        ]
+      },
+      "ComponentV0": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/VirtioDisk"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "virtio_disk"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/NvmeDisk"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nvme_disk"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/VirtioNic"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "virtio_nic"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/SerialPort"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "serial_port"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/PciPciBridge"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pci_pci_bridge"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/QemuPvpanic"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "qemu_pvpanic"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/BootSettings"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boot_settings"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/SoftNpuPciPort"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "soft_npu_pci_port"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/SoftNpuPort"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "soft_npu_port"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/SoftNpuP9"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "soft_npu_p9"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/P9fs"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "p9fs"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/MigrationFailureInjector"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "migration_failure_injector"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/CrucibleStorageBackend"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible_storage_backend"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/FileStorageBackend"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "file_storage_backend"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/BlobStorageBackend"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "blob_storage_backend"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/VirtioNetworkBackend"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "virtio_network_backend"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "$ref": "#/components/schemas/DlpiNetworkBackend"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dlpi_network_backend"
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "type"
+            ],
+            "additionalProperties": false
           }
         ]
       },
@@ -2964,6 +3512,251 @@
             ]
           }
         ]
+      },
+      "ConfigReconcilerInventory": {
+        "description": "Describes the last attempt made by the sled-agent-config-reconciler to reconcile the current sled config against the actual state of the sled.",
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          },
+          "external_disks": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          },
+          "last_reconciled_config": {
+            "$ref": "#/components/schemas/OmicronSledConfig"
+          },
+          "zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          }
+        },
+        "required": [
+          "datasets",
+          "external_disks",
+          "last_reconciled_config",
+          "zones"
+        ]
+      },
+      "ConfigReconcilerInventoryResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              }
+            },
+            "required": [
+              "result"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "result"
+            ]
+          }
+        ]
+      },
+      "ConfigReconcilerInventoryStatus": {
+        "description": "Status of the sled-agent-config-reconciler task.",
+        "oneOf": [
+          {
+            "description": "The reconciler task has not yet run for the first time since sled-agent started.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "not_yet_run"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The reconciler task is actively running.",
+            "type": "object",
+            "properties": {
+              "config": {
+                "$ref": "#/components/schemas/OmicronSledConfig"
+              },
+              "running_for": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "started_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "config",
+              "running_for",
+              "started_at",
+              "status"
+            ]
+          },
+          {
+            "description": "The reconciler task is currently idle, but previously did complete a reconciliation attempt.\n\nThis variant does not include the `OmicronSledConfig` used in the last attempt, because that's always available via [`ConfigReconcilerInventory::last_reconciled_config`].",
+            "type": "object",
+            "properties": {
+              "completed_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "ran_for": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "idle"
+                ]
+              }
+            },
+            "required": [
+              "completed_at",
+              "ran_for",
+              "status"
+            ]
+          }
+        ]
+      },
+      "Cpuid": {
+        "description": "A set of CPUID values to expose to a guest.",
+        "type": "object",
+        "properties": {
+          "entries": {
+            "description": "A list of CPUID leaves/subleaves and their associated values.\n\nPropolis servers require that each entry's `leaf` be unique and that it falls in either the \"standard\" (0 to 0xFFFF) or \"extended\" (0x8000_0000 to 0x8000_FFFF) function ranges, since these are the only valid input ranges currently defined by Intel and AMD. See the Intel 64 and IA-32 Architectures Software Developer's Manual (June 2024) Table 3-17 and the AMD64 Architecture Programmer's Manual (March 2024) Volume 3's documentation of the CPUID instruction.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CpuidEntry"
+            }
+          },
+          "vendor": {
+            "description": "The CPU vendor to emulate.\n\nCPUID leaves in the extended range (0x8000_0000 to 0x8000_FFFF) have vendor-defined semantics. Propolis uses this value to determine these semantics when deciding whether it needs to specialize the supplied template values for these leaves.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CpuidVendor"
+              }
+            ]
+          }
+        },
+        "required": [
+          "entries",
+          "vendor"
+        ],
+        "additionalProperties": false
+      },
+      "CpuidEntry": {
+        "description": "A full description of a CPUID leaf/subleaf and the values it produces.",
+        "type": "object",
+        "properties": {
+          "eax": {
+            "description": "The value to return in eax.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "ebx": {
+            "description": "The value to return in ebx.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "ecx": {
+            "description": "The value to return in ecx.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "edx": {
+            "description": "The value to return in edx.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "leaf": {
+            "description": "The leaf (function) number for this entry.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "subleaf": {
+            "nullable": true,
+            "description": "The subleaf (index) number for this entry, if it uses subleaves.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "eax",
+          "ebx",
+          "ecx",
+          "edx",
+          "leaf"
+        ],
+        "additionalProperties": false
+      },
+      "CpuidVendor": {
+        "description": "A CPU vendor to use when interpreting the meanings of CPUID leaves in the extended ID range (0x80000000 to 0x8000FFFF).",
+        "type": "string",
+        "enum": [
+          "amd",
+          "intel"
+        ]
+      },
+      "CrucibleStorageBackend": {
+        "description": "A Crucible storage backend.",
+        "type": "object",
+        "properties": {
+          "readonly": {
+            "description": "Indicates whether the storage is read-only.",
+            "type": "boolean"
+          },
+          "request_json": {
+            "description": "A serialized `[crucible_client_types::VolumeConstructionRequest]`. This is stored in serialized form so that breaking changes to the definition of a `VolumeConstructionRequest` do not inadvertently break instance spec deserialization.\n\nWhen using a spec to initialize a new instance, the spec author must ensure this request is well-formed and can be deserialized by the version of `crucible_client_types` used by the target Propolis.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "readonly",
+          "request_json"
+        ],
+        "additionalProperties": false
       },
       "DatasetConfig": {
         "description": "Configuration information necessary to request a single dataset.\n\nThese datasets are tracked directly by Nexus.",
@@ -3166,6 +3959,24 @@
             },
             "required": [
               "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_disk_control_plane_request"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           },
           {
@@ -3568,6 +4379,20 @@
           "M2"
         ]
       },
+      "DlpiNetworkBackend": {
+        "description": "A network backend associated with a DLPI VNIC on the host.",
+        "type": "object",
+        "properties": {
+          "vnic_name": {
+            "description": "The name of the VNIC to use as a backend.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "vnic_name"
+        ],
+        "additionalProperties": false
+      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -3692,11 +4517,84 @@
           "mappings"
         ]
       },
+      "FileStorageBackend": {
+        "description": "A storage backend backed by a file in the host system's file system.",
+        "type": "object",
+        "properties": {
+          "path": {
+            "description": "A path to a file that backs a disk.",
+            "type": "string"
+          },
+          "readonly": {
+            "description": "Indicates whether the storage is read-only.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "readonly"
+        ],
+        "additionalProperties": false
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "GuestHypervisorInterface": {
+        "description": "A hypervisor interface to expose to the guest.",
+        "oneOf": [
+          {
+            "description": "Expose a bhyve-like interface (\"bhyve bhyve \" as the hypervisor ID in leaf 0x4000_0000 and no additional leaves or features).",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bhyve"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Expose a Hyper-V-compatible hypervisor interface with the supplied features enabled.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "hyper_v"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "features": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/HyperVFeatureFlag"
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "features"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        ]
       },
       "GzipLevel": {
         "type": "integer",
@@ -3788,6 +4686,45 @@
         "minLength": 1,
         "maxLength": 253
       },
+      "HyperVFeatureFlag": {
+        "description": "Flags that enable \"simple\" Hyper-V enlightenments that require no feature-specific configuration.",
+        "type": "string",
+        "enum": [
+          "reference_tsc"
+        ]
+      },
+      "I440Fx": {
+        "description": "An Intel 440FX-compatible chipset.",
+        "type": "object",
+        "properties": {
+          "enable_pcie": {
+            "description": "Specifies whether the chipset should allow PCI configuration space to be accessed through the PCIe extended configuration mechanism.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enable_pcie"
+        ],
+        "additionalProperties": false
+      },
+      "IdMapDatasetConfig": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/DatasetConfig"
+        }
+      },
+      "IdMapOmicronPhysicalDiskConfig": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+        }
+      },
+      "IdMapOmicronZoneConfig": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/OmicronZoneConfig"
+        }
+      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -3829,82 +4766,23 @@
           }
         ]
       },
-      "InstanceBootSettings": {
-        "description": "Configures how an instance is told to try to boot.",
-        "type": "object",
-        "properties": {
-          "order": {
-            "description": "Propolis should tell guest firmware to try to boot from devices in this order.",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        },
-        "required": [
-          "order"
-        ]
-      },
-      "InstanceCpuCount": {
-        "description": "The number of CPUs in an Instance",
-        "type": "integer",
-        "format": "uint16",
-        "minimum": 0
-      },
-      "InstanceDisk": {
-        "description": "A request to attach a disk to an instance.",
-        "type": "object",
-        "properties": {
-          "disk_id": {
-            "description": "The disk's UUID.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "description": "The disk's name, used to generate the serial number for the virtual disk exposed to the guest.",
-            "type": "string"
-          },
-          "read_only": {
-            "description": "True if the disk is read-only.",
-            "type": "boolean"
-          },
-          "slot": {
-            "description": "The logical slot number assigned to the disk in its database record.",
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
-          },
-          "vcr_json": {
-            "description": "A JSON representation of the Crucible volume construction request for this attachment.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "disk_id",
-          "name",
-          "read_only",
-          "slot",
-          "vcr_json"
-        ]
-      },
       "InstanceEnsureBody": {
         "description": "The body of a request to ensure that a instance and VMM are known to a sled agent.",
         "type": "object",
         "properties": {
-          "hardware": {
-            "description": "A description of the instance's virtual hardware and the initial runtime state this sled agent should store for this incarnation of the instance.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceHardware"
-              }
-            ]
-          },
           "instance_id": {
             "description": "The ID of the instance for which this VMM is being created.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+              }
+            ]
+          },
+          "local_config": {
+            "description": "Information about the sled-local configuration that needs to be established to make the VM's virtual hardware fully functional.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceSledLocalConfig"
               }
             ]
           },
@@ -3933,14 +4811,23 @@
                 "$ref": "#/components/schemas/VmmRuntimeState"
               }
             ]
+          },
+          "vmm_spec": {
+            "description": "The virtual hardware configuration this virtual machine should have when it is started.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmSpec"
+              }
+            ]
           }
         },
         "required": [
-          "hardware",
           "instance_id",
+          "local_config",
           "metadata",
           "propolis_addr",
-          "vmm_runtime"
+          "vmm_runtime",
+          "vmm_spec"
         ]
       },
       "InstanceExternalIpBody": {
@@ -3986,73 +4873,6 @@
           }
         ]
       },
-      "InstanceHardware": {
-        "description": "Describes the instance hardware.",
-        "type": "object",
-        "properties": {
-          "boot_settings": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceBootSettings"
-              }
-            ]
-          },
-          "cloud_init_bytes": {
-            "nullable": true,
-            "type": "string"
-          },
-          "dhcp_config": {
-            "$ref": "#/components/schemas/DhcpConfig"
-          },
-          "disks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InstanceDisk"
-            }
-          },
-          "ephemeral_ip": {
-            "nullable": true,
-            "description": "Zero or more external IP addresses (either floating or ephemeral), provided to an instance to allow inbound connectivity.",
-            "type": "string",
-            "format": "ip"
-          },
-          "firewall_rules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
-            }
-          },
-          "floating_ips": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ip"
-            }
-          },
-          "nics": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NetworkInterface"
-            }
-          },
-          "properties": {
-            "$ref": "#/components/schemas/InstanceProperties"
-          },
-          "source_nat": {
-            "$ref": "#/components/schemas/SourceNatConfig"
-          }
-        },
-        "required": [
-          "dhcp_config",
-          "disks",
-          "firewall_rules",
-          "floating_ips",
-          "nics",
-          "properties",
-          "source_nat"
-        ]
-      },
       "InstanceMetadata": {
         "description": "Metadata used to track statistics about an instance.",
         "type": "object",
@@ -4084,30 +4904,72 @@
           "src_propolis_addr"
         ]
       },
-      "InstanceProperties": {
-        "description": "The \"static\" properties of an instance: information about the instance that doesn't change while the instance is running.",
+      "InstanceSledLocalConfig": {
+        "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional.",
         "type": "object",
         "properties": {
+          "dhcp_config": {
+            "$ref": "#/components/schemas/DhcpConfig"
+          },
+          "ephemeral_ip": {
+            "nullable": true,
+            "description": "Zero or more external IP addresses (either floating or ephemeral), provided to an instance to allow inbound connectivity.",
+            "type": "string",
+            "format": "ip"
+          },
+          "firewall_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
+            }
+          },
+          "floating_ips": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
           "hostname": {
-            "description": "RFC1035-compliant hostname for the instance.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Hostname"
-              }
-            ]
+            "$ref": "#/components/schemas/Hostname"
           },
-          "memory": {
-            "$ref": "#/components/schemas/ByteCount"
+          "nics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterface"
+            }
           },
-          "ncpus": {
-            "$ref": "#/components/schemas/InstanceCpuCount"
+          "source_nat": {
+            "$ref": "#/components/schemas/SourceNatConfig"
           }
         },
         "required": [
+          "dhcp_config",
+          "firewall_rules",
+          "floating_ips",
           "hostname",
-          "memory",
-          "ncpus"
+          "nics",
+          "source_nat"
         ]
+      },
+      "InstanceSpecV0": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "$ref": "#/components/schemas/Board"
+          },
+          "components": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ComponentV0"
+            }
+          }
+        },
+        "required": [
+          "board",
+          "components"
+        ],
+        "additionalProperties": false
       },
       "InternetGatewayRouterTarget": {
         "description": "An Internet Gateway router target.",
@@ -4168,11 +5030,24 @@
               "$ref": "#/components/schemas/InventoryDisk"
             }
           },
-          "omicron_physical_disks_generation": {
-            "$ref": "#/components/schemas/Generation"
+          "last_reconciliation": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConfigReconcilerInventory"
+              }
+            ]
           },
-          "omicron_zones": {
-            "$ref": "#/components/schemas/OmicronZonesConfig"
+          "ledgered_sled_config": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronSledConfig"
+              }
+            ]
+          },
+          "reconciler_status": {
+            "$ref": "#/components/schemas/ConfigReconcilerInventoryStatus"
           },
           "reservoir_size": {
             "$ref": "#/components/schemas/ByteCount"
@@ -4205,8 +5080,7 @@
           "baseboard",
           "datasets",
           "disks",
-          "omicron_physical_disks_generation",
-          "omicron_zones",
+          "reconciler_status",
           "reservoir_size",
           "sled_agent_address",
           "sled_id",
@@ -4486,6 +5360,29 @@
         "minLength": 5,
         "maxLength": 17
       },
+      "MigrationFailureInjector": {
+        "description": "Describes a synthetic device that registers for VM lifecycle notifications and returns errors during attempts to migrate.\n\nThis is only supported by Propolis servers compiled with the `failure-injection` feature.",
+        "type": "object",
+        "properties": {
+          "fail_exports": {
+            "description": "The number of times this device should fail requests to export state.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "fail_imports": {
+            "description": "The number of times this device should fail requests to import state.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "fail_exports",
+          "fail_imports"
+        ],
+        "additionalProperties": false
+      },
       "MigrationRuntimeState": {
         "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",
         "type": "object",
@@ -4674,6 +5571,45 @@
           }
         ]
       },
+      "NvmeDisk": {
+        "description": "A disk that presents an NVMe interface to the guest.",
+        "type": "object",
+        "properties": {
+          "backend_id": {
+            "description": "The name of the disk's backend component.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpecKey"
+              }
+            ]
+          },
+          "pci_path": {
+            "description": "The PCI bus/device/function at which this disk should be attached.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PciPath"
+              }
+            ]
+          },
+          "serial_number": {
+            "description": "The serial number to return in response to an NVMe Identify Controller command.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            },
+            "minItems": 20,
+            "maxItems": 20
+          }
+        },
+        "required": [
+          "backend_id",
+          "pci_path",
+          "serial_number"
+        ],
+        "additionalProperties": false
+      },
       "OmicronPhysicalDiskConfig": {
         "type": "object",
         "properties": {
@@ -4720,20 +5656,32 @@
         "description": "Describes the set of Reconfigurator-managed configuration elements of a sled",
         "type": "object",
         "properties": {
-          "datasets_config": {
-            "$ref": "#/components/schemas/DatasetsConfig"
+          "datasets": {
+            "$ref": "#/components/schemas/IdMapDatasetConfig"
           },
-          "disks_config": {
-            "$ref": "#/components/schemas/OmicronPhysicalDisksConfig"
+          "disks": {
+            "$ref": "#/components/schemas/IdMapOmicronPhysicalDiskConfig"
           },
-          "zones_config": {
-            "$ref": "#/components/schemas/OmicronZonesConfig"
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "remove_mupdate_override": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              }
+            ]
+          },
+          "zones": {
+            "$ref": "#/components/schemas/IdMapOmicronZoneConfig"
           }
         },
         "required": [
-          "datasets_config",
-          "disks_config",
-          "zones_config"
+          "datasets",
+          "disks",
+          "generation",
+          "zones"
         ]
       },
       "OmicronSledConfigResult": {
@@ -5196,30 +6144,91 @@
           }
         ]
       },
-      "OmicronZonesConfig": {
-        "description": "Describes the set of Omicron-managed zones running on a sled",
+      "P9fs": {
+        "description": "Describes a filesystem to expose through a P9 device.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.",
         "type": "object",
         "properties": {
-          "generation": {
-            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
+          "chunk_size": {
+            "description": "The chunk size to use in the 9P protocol. Vanilla Helios images should use 8192. Falcon Helios base images and Linux can use up to 65536.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "pci_path": {
+            "description": "The PCI path at which to attach the guest to this P9 filesystem.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/PciPath"
               }
             ]
           },
-          "zones": {
-            "description": "list of running zones",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OmicronZoneConfig"
-            }
+          "source": {
+            "description": "The host source path to mount into the guest.",
+            "type": "string"
+          },
+          "target": {
+            "description": "The 9P target filesystem tag.",
+            "type": "string"
           }
         },
         "required": [
-          "generation",
-          "zones"
+          "chunk_size",
+          "pci_path",
+          "source",
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "PciPath": {
+        "description": "A PCI bus/device/function tuple.",
+        "type": "object",
+        "properties": {
+          "bus": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "device": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "function": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "bus",
+          "device",
+          "function"
         ]
+      },
+      "PciPciBridge": {
+        "description": "A PCI-PCI bridge.",
+        "type": "object",
+        "properties": {
+          "downstream_bus": {
+            "description": "The logical bus number of this bridge's downstream bus. Other devices may use this bus number in their PCI paths to indicate they should be attached to this bridge's bus.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "pci_path": {
+            "description": "The PCI path at which to attach this bridge.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PciPath"
+              }
+            ]
+          }
+        },
+        "required": [
+          "downstream_bus",
+          "pci_path"
+        ],
+        "additionalProperties": false
       },
       "PortConfigV2": {
         "type": "object",
@@ -5358,6 +6367,19 @@
         },
         "minItems": 2,
         "maxItems": 2
+      },
+      "QemuPvpanic": {
+        "type": "object",
+        "properties": {
+          "enable_isa": {
+            "description": "Enable the QEMU PVPANIC ISA bus device (I/O port 0x505).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enable_isa"
+        ],
+        "additionalProperties": false
       },
       "RackNetworkConfigV2": {
         "description": "Initial network configuration",
@@ -5709,6 +6731,34 @@
           "version"
         ]
       },
+      "SerialPort": {
+        "description": "A serial port device.",
+        "type": "object",
+        "properties": {
+          "num": {
+            "description": "The serial port number for this port.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SerialPortNumber"
+              }
+            ]
+          }
+        },
+        "required": [
+          "num"
+        ],
+        "additionalProperties": false
+      },
+      "SerialPortNumber": {
+        "description": "A serial port identifier, which determines what I/O ports a guest can use to access a port.",
+        "type": "string",
+        "enum": [
+          "com1",
+          "com2",
+          "com3",
+          "com4"
+        ]
+      },
       "SledDiagnosticsQueryOutput": {
         "oneOf": [
           {
@@ -5862,6 +6912,65 @@
           "vmm_state"
         ]
       },
+      "SoftNpuP9": {
+        "description": "Describes a PCI device that shares host files with the guest using the P9 protocol.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.",
+        "type": "object",
+        "properties": {
+          "pci_path": {
+            "description": "The PCI path at which to attach the guest to this port.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PciPath"
+              }
+            ]
+          }
+        },
+        "required": [
+          "pci_path"
+        ],
+        "additionalProperties": false
+      },
+      "SoftNpuPciPort": {
+        "description": "Describes a SoftNPU PCI device.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.",
+        "type": "object",
+        "properties": {
+          "pci_path": {
+            "description": "The PCI path at which to attach the guest to this port.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PciPath"
+              }
+            ]
+          }
+        },
+        "required": [
+          "pci_path"
+        ],
+        "additionalProperties": false
+      },
+      "SoftNpuPort": {
+        "description": "Describes a port in a SoftNPU emulated ASIC.\n\nThis is only supported by Propolis servers compiled with the `falcon` feature.",
+        "type": "object",
+        "properties": {
+          "backend_id": {
+            "description": "The name of the port's associated DLPI backend.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpecKey"
+              }
+            ]
+          },
+          "link_name": {
+            "description": "The data link name for this port.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "backend_id",
+          "link_name"
+        ],
+        "additionalProperties": false
+      },
       "SourceNatConfig": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
@@ -5888,6 +6997,28 @@
           "first_port",
           "ip",
           "last_port"
+        ]
+      },
+      "SpecKey": {
+        "description": "A key identifying a component in an instance spec.",
+        "oneOf": [
+          {
+            "title": "uuid",
+            "allOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              }
+            ]
+          },
+          {
+            "title": "name",
+            "allOf": [
+              {
+                "type": "string"
+              }
+            ]
+          }
         ]
       },
       "StartSledAgentRequest": {
@@ -6108,6 +7239,10 @@
         "type": "string",
         "format": "uuid"
       },
+      "TypedUuidForMupdateOverrideKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForOmicronZoneKind": {
         "type": "string",
         "format": "uuid"
@@ -6146,6 +7281,80 @@
         "required": [
           "address"
         ]
+      },
+      "VirtioDisk": {
+        "description": "A disk that presents a virtio-block interface to the guest.",
+        "type": "object",
+        "properties": {
+          "backend_id": {
+            "description": "The name of the disk's backend component.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpecKey"
+              }
+            ]
+          },
+          "pci_path": {
+            "description": "The PCI bus/device/function at which this disk should be attached.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PciPath"
+              }
+            ]
+          }
+        },
+        "required": [
+          "backend_id",
+          "pci_path"
+        ],
+        "additionalProperties": false
+      },
+      "VirtioNetworkBackend": {
+        "description": "A network backend associated with a virtio-net (viona) VNIC on the host.",
+        "type": "object",
+        "properties": {
+          "vnic_name": {
+            "description": "The name of the viona VNIC to use as a backend.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "vnic_name"
+        ],
+        "additionalProperties": false
+      },
+      "VirtioNic": {
+        "description": "A network card that presents a virtio-net interface to the guest.",
+        "type": "object",
+        "properties": {
+          "backend_id": {
+            "description": "The name of the device's backend.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpecKey"
+              }
+            ]
+          },
+          "interface_id": {
+            "description": "A caller-defined correlation identifier for this interface. If Propolis is configured to collect network interface kstats in its Oximeter metrics, the metric series for this interface will be associated with this identifier.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "pci_path": {
+            "description": "The PCI path at which to attach this device.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PciPath"
+              }
+            ]
+          }
+        },
+        "required": [
+          "backend_id",
+          "interface_id",
+          "pci_path"
+        ],
+        "additionalProperties": false
       },
       "VirtualNetworkInterfaceHost": {
         "description": "A mapping from a virtual NIC to a physical host",
@@ -6259,6 +7468,14 @@
           "gen",
           "state",
           "time_updated"
+        ]
+      },
+      "VmmSpec": {
+        "description": "Specifies the virtual hardware configuration of a new Propolis VMM in the form of a Propolis instance specification.\n\nSled-agent expects that when an instance spec is provided alongside an `InstanceSledLocalConfig` to initialize a new instance, the NIC IDs in that config's network interface list will match the IDs of the virtio network backends in the instance spec.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/InstanceSpecV0"
+          }
         ]
       },
       "VmmState": {

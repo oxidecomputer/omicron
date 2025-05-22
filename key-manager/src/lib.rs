@@ -9,32 +9,23 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 use hkdf::Hkdf;
-use secrecy::{ExposeSecret, Secret};
+use secrecy::{ExposeSecret, ExposeSecretMut, SecretBox};
 use sha3::Sha3_256;
 use slog::{Logger, o, warn};
 use tokio::sync::{mpsc, oneshot};
-use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use omicron_common::disk::DiskIdentity;
-
-/// Input Key Material
-///
-/// This should never be used directly, and always wrapped in a `Secret<Ikm>`
-/// upon construction. We sparate the two types, because a `Secret` must contain
-/// `Zeroizable` data, and a `Box<[u8; 32]>` is not zeroizable on its own.
-#[derive(Zeroize, ZeroizeOnDrop)]
-struct Ikm(Box<[u8; 32]>);
 
 /// Secret Input Key Material for a given rack reconfiguration epoch
 pub struct VersionedIkm {
     epoch: u64,
     salt: [u8; 32],
-    ikm: Secret<Ikm>,
+    ikm: SecretBox<[u8; 32]>,
 }
 
 impl VersionedIkm {
     pub fn new(epoch: u64, salt: [u8; 32], data: &[u8; 32]) -> VersionedIkm {
-        let ikm = Secret::new(Ikm(Box::new(*data)));
+        let ikm = SecretBox::new(Box::new(*data));
         VersionedIkm { epoch, salt, ikm }
     }
 
@@ -47,7 +38,7 @@ impl VersionedIkm {
     }
 
     pub fn expose_secret(&self) -> &[u8; 32] {
-        &self.ikm.expose_secret().0
+        &self.ikm.expose_secret()
     }
 }
 
@@ -62,14 +53,14 @@ pub enum Error {
 }
 
 /// Derived Disk Encryption key
-#[derive(Zeroize, ZeroizeOnDrop, Default)]
-struct Aes256GcmDiskEncryptionKey(Box<[u8; 32]>);
+#[derive(Default)]
+struct Aes256GcmDiskEncryptionKey(SecretBox<[u8; 32]>);
 
 /// A Disk encryption key for a given epoch to be used with ZFS datasets for
 /// U.2 devices
 pub struct VersionedAes256GcmDiskEncryptionKey {
     epoch: u64,
-    key: Secret<Aes256GcmDiskEncryptionKey>,
+    key: Aes256GcmDiskEncryptionKey,
 }
 
 impl VersionedAes256GcmDiskEncryptionKey {
@@ -78,7 +69,7 @@ impl VersionedAes256GcmDiskEncryptionKey {
     }
 
     pub fn expose_secret(&self) -> &[u8; 32] {
-        &self.key.expose_secret().0
+        &self.key.0.expose_secret()
     }
 }
 
@@ -264,11 +255,11 @@ impl<S: SecretRetriever> KeyManager<S> {
                 disk_id.model.as_bytes(),
                 disk_id.serial.as_bytes(),
             ],
-            key.0.as_mut(),
+            key.0.expose_secret_mut(),
         )
         .unwrap();
 
-        Ok(VersionedAes256GcmDiskEncryptionKey { epoch, key: Secret::new(key) })
+        Ok(VersionedAes256GcmDiskEncryptionKey { epoch, key })
     }
 
     /// Return the epochs for all secrets which are loaded

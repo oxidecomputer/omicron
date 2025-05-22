@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde::de::Error as _;
 use serde::de::Visitor;
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::collections::btree_map;
 use std::fmt;
@@ -87,7 +88,11 @@ impl<T: IdMappable> IdMap<T> {
         self.inner.insert(entry.id(), entry)
     }
 
-    pub fn remove(&mut self, key: &T::Id) -> Option<T> {
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<T>
+    where
+        T::Id: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         self.inner.remove(key)
     }
 
@@ -95,15 +100,27 @@ impl<T: IdMappable> IdMap<T> {
         self.inner.first_key_value().map(|(_, val)| val)
     }
 
-    pub fn get(&self, key: &T::Id) -> Option<&T> {
+    pub fn get<Q>(&self, key: &Q) -> Option<&T>
+    where
+        T::Id: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         self.inner.get(key)
     }
 
-    pub fn get_mut(&mut self, key: &T::Id) -> Option<RefMut<'_, T>> {
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<RefMut<'_, T>>
+    where
+        T::Id: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         self.inner.get_mut(key).map(RefMut::new)
     }
 
-    pub fn contains_key(&self, key: &T::Id) -> bool {
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        T::Id: Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         self.inner.contains_key(key)
     }
 
@@ -272,6 +289,7 @@ impl<T: IdMappable + Debug + Eq> Diffable for IdMap<T> {
 
 /// Wrapper around a `&'a mut T` that panics when dropped if the borrowed
 /// value's `id()` has changed since the wrapper was created.
+#[derive(Debug)]
 pub struct RefMut<'a, T: IdMappable> {
     original_id: T::Id,
     // Always `Some(_)` until the `RefMut` is consumed by `into_ref()`.
@@ -600,5 +618,30 @@ mod tests {
                 slot.get_mut().id = 2;
             }
         }
+    }
+
+    #[test]
+    fn methods_allow_borrowed_ids() {
+        struct Foo {
+            id: String,
+            val: i32,
+        }
+
+        impl IdMappable for Foo {
+            type Id = String;
+
+            fn id(&self) -> Self::Id {
+                self.id.clone()
+            }
+        }
+
+        let mut foos = IdMap::new();
+        foos.insert(Foo { id: "foo".to_string(), val: 1 });
+
+        // Id type is `String`, but we can use `&str` for these methods
+        assert_eq!(foos.get("foo").unwrap().val, 1);
+        assert_eq!(foos.get_mut("foo").unwrap().val, 1);
+        assert!(foos.contains_key("foo"));
+        assert_eq!(foos.remove("foo").unwrap().val, 1);
     }
 }

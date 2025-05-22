@@ -10,8 +10,9 @@ use crate::db::DbUrlOptions;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::ConfirmationPrompt;
 use crate::helpers::const_max_len;
+use crate::helpers::display_option_blank;
 use crate::helpers::should_colorize;
-use anyhow::Context;
+use anyhow::Context as _;
 use anyhow::bail;
 use camino::Utf8PathBuf;
 use chrono::DateTime;
@@ -21,6 +22,7 @@ use clap::Args;
 use clap::ColorChoice;
 use clap::Subcommand;
 use clap::ValueEnum;
+use futures::StreamExt;
 use futures::TryStreamExt;
 use futures::future::try_join;
 use http::StatusCode;
@@ -69,12 +71,15 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
+use support_bundle_viewer::LocalFileAccess;
+use support_bundle_viewer::SupportBundleAccessor;
 use tabled::Tabled;
 use tabled::settings::Padding;
 use tabled::settings::object::Columns;
@@ -126,6 +131,9 @@ enum NexusCommands {
     Sagas(SagasArgs),
     /// interact with sleds
     Sleds(SledsArgs),
+    /// interact with support bundles
+    #[command(visible_alias = "sb")]
+    SupportBundles(SupportBundleArgs),
 }
 
 #[derive(Debug, Args)]
@@ -474,6 +482,80 @@ struct DiskExpungeArgs {
     physical_disk_id: PhysicalDiskUuid,
 }
 
+#[derive(Debug, Args)]
+struct SupportBundleArgs {
+    #[command(subcommand)]
+    command: SupportBundleCommands,
+}
+
+#[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
+enum SupportBundleCommands {
+    /// List all support bundles
+    List,
+    /// Create a new support bundle
+    Create,
+    /// Delete a support bundle
+    Delete(SupportBundleDeleteArgs),
+    /// Download an entire support bundle
+    Download(SupportBundleDownloadArgs),
+    /// Download the index of a support bundle
+    ///
+    /// This is a "list of files", from which individual files can be accessed
+    GetIndex(SupportBundleIndexArgs),
+    /// Download a single file within a support bundle
+    GetFile(SupportBundleFileArgs),
+    /// Creates a dashboard for viewing the contents of a support bundle
+    Inspect(SupportBundleInspectArgs),
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleDeleteArgs {
+    id: SupportBundleUuid,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleDownloadArgs {
+    id: SupportBundleUuid,
+
+    /// Optional output path where the file should be written,
+    /// instead of stdout.
+    #[arg(short, long)]
+    output: Option<Utf8PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleIndexArgs {
+    id: SupportBundleUuid,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleFileArgs {
+    id: SupportBundleUuid,
+    path: Utf8PathBuf,
+    /// Optional output path where the file should be written,
+    /// instead of stdout.
+    #[arg(short, long)]
+    output: Option<Utf8PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleInspectArgs {
+    /// A specific bundle to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "path".
+    #[arg(short, long)]
+    id: Option<SupportBundleUuid>,
+
+    /// A local bundle file to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "id".
+    #[arg(short, long)]
+    path: Option<Utf8PathBuf>,
+}
+
 impl NexusArgs {
     /// Run a `omdb nexus` subcommand.
     pub(crate) async fn run_cmd(
@@ -667,6 +749,33 @@ impl NexusArgs {
                 cmd_nexus_sled_expunge_disk(&client, args, omdb, log, token)
                     .await
             }
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::List,
+            }) => cmd_nexus_support_bundles_list(&client).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Create,
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_support_bundles_create(&client, token).await
+            }
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Delete(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_support_bundles_delete(&client, args, token).await
+            }
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Download(args),
+            }) => cmd_nexus_support_bundles_download(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::GetIndex(args),
+            }) => cmd_nexus_support_bundles_get_index(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::GetFile(args),
+            }) => cmd_nexus_support_bundles_get_file(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Inspect(args),
+            }) => cmd_nexus_support_bundles_inspect(&client, args).await,
         }
     }
 }
@@ -1016,6 +1125,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "tuf_artifact_replication" => {
             print_task_tuf_artifact_replication(details);
+        }
+        "alert_dispatcher" => {
+            print_task_alert_dispatcher(details);
+        }
+        "webhook_deliverator" => {
+            print_task_webhook_deliverator(details);
         }
         _ => {
             println!(
@@ -2314,6 +2429,295 @@ fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
     }
 }
 
+fn print_task_alert_dispatcher(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::AlertDispatched;
+    use nexus_types::internal_api::background::AlertDispatcherStatus;
+    use nexus_types::internal_api::background::AlertGlobStatus;
+
+    let AlertDispatcherStatus {
+        globs_reprocessed,
+        glob_version,
+        errors,
+        dispatched,
+        no_receivers,
+    } = match serde_json::from_value::<AlertDispatcherStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
+
+    if !errors.is_empty() {
+        println!(
+            "    task did not complete successfully! ({} errors)",
+            errors.len()
+        );
+        for line in &errors {
+            println!("    > {line}");
+        }
+    }
+
+    const DISPATCHED: &str = "alerts dispatched:";
+    const NO_RECEIVERS: &str = "alerts with no receivers subscribed:";
+    const OUTDATED_GLOBS: &str = "outdated glob subscriptions:";
+    const GLOBS_REPROCESSED: &str = "glob subscriptions reprocessed:";
+    const ALREADY_REPROCESSED: &str =
+        "globs already reprocessed by another Nexus:";
+    const GLOB_ERRORS: &str = "globs that failed to be reprocessed";
+    const WIDTH: usize = const_max_len(&[
+        DISPATCHED,
+        NO_RECEIVERS,
+        OUTDATED_GLOBS,
+        GLOBS_REPROCESSED,
+        ALREADY_REPROCESSED,
+        GLOB_ERRORS,
+    ]) + 1;
+    const NUM_WIDTH: usize = 3;
+
+    println!("    {DISPATCHED:<WIDTH$}{:>NUM_WIDTH$}", dispatched.len());
+    if !dispatched.is_empty() {
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct DispatchedRow {
+            // Don't include the typed UUID's kind in the table, which the
+            // TypedUuid fmt::Display impl will do...
+            event: Uuid,
+            subscribed: usize,
+            dispatched: usize,
+        }
+        let table_rows = dispatched.iter().map(
+            |&AlertDispatched { alert_id, subscribed, dispatched }| {
+                DispatchedRow {
+                    event: alert_id.into_untyped_uuid(),
+                    subscribed,
+                    dispatched,
+                }
+            },
+        );
+        let table = tabled::Table::new(table_rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+        println!("{}", textwrap::indent(&table.to_string(), "      "));
+    }
+
+    println!("    {NO_RECEIVERS:<WIDTH$}{:>NUM_WIDTH$}", no_receivers.len());
+    for event in no_receivers {
+        println!("      {event:?}");
+    }
+
+    let total_globs: usize =
+        globs_reprocessed.values().map(|globs| globs.len()).sum();
+    if total_globs > 0 {
+        let mut reprocessed = 0;
+        let mut already_reprocessed = 0;
+        let mut glob_errors = 0;
+        println!("    {OUTDATED_GLOBS:<WIDTH$}{total_globs:>NUM_WIDTH$}");
+        println!("    current schema version: {glob_version}");
+        for (rx_id, globs) in globs_reprocessed {
+            if globs.is_empty() {
+                continue;
+            }
+            println!("      receiver {rx_id:?}:");
+            for (glob, status) in globs {
+                match status {
+                    Ok(AlertGlobStatus::AlreadyReprocessed) => {
+                        println!("      > {glob:?}: already reprocessed");
+                        already_reprocessed += 1;
+                    }
+                    Ok(AlertGlobStatus::Reprocessed {
+                        created,
+                        deleted,
+                        prev_version,
+                    }) => {
+                        println!(
+                            "      > {glob:?}: previously at \
+                             {prev_version:?}\n        \
+                             exact subscriptions: {created:>NUM_WIDTH$} \
+                             created, {deleted:>NUM_WIDTH$} deleted",
+                        );
+                        reprocessed += 1;
+                    }
+                    Err(e) => {
+                        println!("      > {glob:?}: FAILED: {e}");
+                        glob_errors += 1;
+                    }
+                }
+            }
+        }
+        println!("    {GLOBS_REPROCESSED:<WIDTH$}{reprocessed:>NUM_WIDTH$}");
+        println!(
+            "    {ALREADY_REPROCESSED:<WIDTH$}{:>NUM_WIDTH$}",
+            already_reprocessed
+        );
+        println!(
+            "{} {GLOB_ERRORS:<WIDTH$}{glob_errors:>NUM_WIDTH$}",
+            warn_if_nonzero(glob_errors),
+        );
+    }
+}
+fn print_task_webhook_deliverator(details: &serde_json::Value) {
+    use nexus_types::external_api::views::WebhookDeliveryAttemptResult;
+    use nexus_types::internal_api::background::WebhookDeliveratorStatus;
+    use nexus_types::internal_api::background::WebhookDeliveryFailure;
+    use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
+
+    let WebhookDeliveratorStatus { by_rx, error } = match serde_json::from_value::<
+        WebhookDeliveratorStatus,
+    >(details.clone())
+    {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
+
+    if let Some(error) = error {
+        println!("    task did not complete successfully:\n    {error}");
+    }
+    const RECEIVERS: &str = "receivers:";
+    const TOTAL_OK: &str = "successful deliveries:";
+    const TOTAL_FAILED: &str = "failed deliveries:";
+    const TOTAL_ALREADY_DELIVERED: &str = "already delivered by another Nexus:";
+    const TOTAL_IN_PROGRESS: &str = "in progress by another Nexus:";
+    const TOTAL_ERRORS: &str = "internal delivery errors:";
+    const WIDTH: usize = const_max_len(&[
+        RECEIVERS,
+        TOTAL_OK,
+        TOTAL_FAILED,
+        TOTAL_ALREADY_DELIVERED,
+        TOTAL_IN_PROGRESS,
+        TOTAL_ERRORS,
+    ]) + 1;
+    const NUM_WIDTH: usize = 3;
+
+    let mut total_ok = 0;
+    let mut total_already_delivered = 0;
+    let mut total_in_progress = 0;
+    let mut total_failed = 0;
+    let mut total_errors = 0;
+    println!("    {RECEIVERS:<WIDTH$}{:>NUM_WIDTH$}", by_rx.len());
+    for (rx_id, status) in by_rx {
+        let WebhookRxDeliveryStatus {
+            ready,
+            delivered_ok,
+            already_delivered,
+            in_progress,
+            failed_deliveries,
+            delivery_errors,
+            error,
+        } = status;
+        println!("    > {rx_id:?}:    {ready}");
+
+        const SUCCESSFUL: &str = "successfully delivered:";
+        const FAILED: &str = "failed:";
+        const IN_PROGRESS: &str = "in progress elsewhere:";
+        const ALREADY_DELIVERED: &str = "already delivered:";
+        const ERRORS: &str = "internal errors:";
+        const WIDTH: usize = const_max_len(&[
+            SUCCESSFUL,
+            FAILED,
+            IN_PROGRESS,
+            ALREADY_DELIVERED,
+            ERRORS,
+        ]) + 1;
+        const NUM_WIDTH: usize = 3;
+
+        println!("      {SUCCESSFUL:<WIDTH$}{delivered_ok:>NUM_WIDTH$}");
+        println!(
+            "      {ALREADY_DELIVERED:<WIDTH$}{:>NUM_WIDTH$}",
+            already_delivered,
+        );
+        println!("      {IN_PROGRESS:<WIDTH$}{in_progress:>NUM_WIDTH$}");
+        total_ok += delivered_ok;
+        total_already_delivered += total_already_delivered;
+        total_in_progress += in_progress;
+        let n_failed = failed_deliveries.len();
+        total_failed += n_failed;
+        println!("      {FAILED:<WIDTH$}{n_failed:>NUM_WIDTH$}");
+        if n_failed > 0 {
+            #[derive(Tabled)]
+            #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+            struct FailureRow {
+                event: Uuid,
+                delivery: Uuid,
+                #[tabled(rename = "#")]
+                attempt: usize,
+                result: WebhookDeliveryAttemptResult,
+                #[tabled(display_with = "display_option_blank")]
+                status: Option<u16>,
+                #[tabled(display_with = "display_option_blank")]
+                duration: Option<chrono::TimeDelta>,
+            }
+            let table_rows = failed_deliveries.into_iter().map(
+                |WebhookDeliveryFailure {
+                     delivery_id,
+                     alert_id,
+                     attempt,
+                     result,
+                     response_status,
+                     response_duration,
+                 }| FailureRow {
+                    // Turn these into untyped `Uuid`s so that the Display impl
+                    // doesn't include the UUID kind in the table.
+                    delivery: delivery_id.into_untyped_uuid(),
+                    event: alert_id.into_untyped_uuid(),
+                    attempt,
+                    result,
+                    status: response_status,
+                    duration: response_duration,
+                },
+            );
+            let table = tabled::Table::new(table_rows)
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+            println!("{}", textwrap::indent(&table.to_string(), "      "));
+        }
+        let n_internal_errors =
+            delivery_errors.len() + if error.is_some() { 1 } else { 0 };
+        if n_internal_errors > 0 {
+            total_errors += n_internal_errors;
+            println!(
+                "/!\\   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                n_internal_errors,
+            );
+            if let Some(error) = error {
+                println!("      > {error}")
+            }
+            for (id, error) in delivery_errors {
+                println!("      > {id:?}: {error}")
+            }
+        }
+    }
+    println!("    {TOTAL_OK:<WIDTH$}{total_ok:>NUM_WIDTH$}");
+    println!("    {TOTAL_FAILED:<WIDTH$}{total_failed:>NUM_WIDTH$}");
+    println!(
+        "{} {TOTAL_ERRORS:<WIDTH$}{total_errors:>NUM_WIDTH$}",
+        warn_if_nonzero(total_errors),
+    );
+    println!(
+        "    {TOTAL_ALREADY_DELIVERED:<WIDTH$}{:>NUM_WIDTH$}",
+        total_already_delivered
+    );
+    println!(
+        "    {TOTAL_IN_PROGRESS:<WIDTH$}{:>NUM_WIDTH$}",
+        total_in_progress
+    );
+}
+
+fn warn_if_nonzero(n: usize) -> &'static str {
+    if n > 0 { "/!\\" } else { "   " }
+}
+
 /// Summarizes an `ActivationReason`
 fn reason_str(reason: &ActivationReason) -> &'static str {
     match reason {
@@ -3384,4 +3788,174 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
         .context("expunging disk")?;
     eprintln!("expunged disk {}", args.physical_disk_id);
     Ok(())
+}
+
+/// Runs `omdb nexus support-bundles list`
+async fn cmd_nexus_support_bundles_list(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let support_bundle_stream = client.support_bundle_list_stream(None, None);
+
+    let support_bundles = support_bundle_stream
+        .try_collect::<Vec<_>>()
+        .await
+        .context("listing support bundles")?;
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct SupportBundleInfo {
+        id: Uuid,
+        time_created: DateTime<Utc>,
+        reason_for_creation: String,
+        reason_for_failure: String,
+        state: String,
+    }
+    let rows = support_bundles.into_iter().map(|sb| SupportBundleInfo {
+        id: *sb.id,
+        time_created: sb.time_created,
+        reason_for_creation: sb.reason_for_creation,
+        reason_for_failure: sb
+            .reason_for_failure
+            .unwrap_or_else(|| "-".to_string()),
+        state: format!("{:?}", sb.state),
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    println!("{}", table);
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles create`
+async fn cmd_nexus_support_bundles_create(
+    client: &nexus_client::Client,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let support_bundle_id = client
+        .support_bundle_create()
+        .await
+        .context("creating support bundle")?
+        .into_inner()
+        .id;
+    println!("created support bundle: {support_bundle_id}");
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles delete`
+async fn cmd_nexus_support_bundles_delete(
+    client: &nexus_client::Client,
+    args: &SupportBundleDeleteArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let _ = client
+        .support_bundle_delete(args.id.as_untyped_uuid())
+        .await
+        .with_context(|| format!("deleting support bundle {}", args.id))?;
+    println!("support bundle {} deleted", args.id);
+    Ok(())
+}
+
+async fn write_stream_to_sink(
+    mut stream: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>>
+    + std::marker::Unpin,
+    mut sink: impl std::io::Write,
+) -> Result<(), anyhow::Error> {
+    while let Some(data) = stream.next().await {
+        match data {
+            Err(err) => return Err(anyhow::anyhow!(err)),
+            Ok(data) => sink.write_all(&data)?,
+        }
+    }
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles download`
+async fn cmd_nexus_support_bundles_download(
+    client: &nexus_client::Client,
+    args: &SupportBundleDownloadArgs,
+) -> Result<(), anyhow::Error> {
+    let stream = client
+        .support_bundle_download(args.id.as_untyped_uuid())
+        .await
+        .with_context(|| format!("downloading support bundle {}", args.id))?
+        .into_inner_stream();
+
+    let sink: Box<dyn std::io::Write> = match &args.output {
+        Some(path) => Box::new(std::fs::File::create(path)?),
+        None => Box::new(std::io::stdout()),
+    };
+
+    write_stream_to_sink(stream, sink)
+        .await
+        .with_context(|| format!("streaming support bundle {}", args.id))?;
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles get-index`
+async fn cmd_nexus_support_bundles_get_index(
+    client: &nexus_client::Client,
+    args: &SupportBundleIndexArgs,
+) -> Result<(), anyhow::Error> {
+    let stream = client
+        .support_bundle_index(args.id.as_untyped_uuid())
+        .await
+        .with_context(|| {
+            format!("downloading support bundle index {}", args.id)
+        })?
+        .into_inner_stream();
+
+    write_stream_to_sink(stream, std::io::stdout()).await.with_context(
+        || format!("streaming support bundle index {}", args.id),
+    )?;
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles get-file`
+async fn cmd_nexus_support_bundles_get_file(
+    client: &nexus_client::Client,
+    args: &SupportBundleFileArgs,
+) -> Result<(), anyhow::Error> {
+    let stream = client
+        .support_bundle_download_file(
+            args.id.as_untyped_uuid(),
+            args.path.as_str(),
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "downloading support bundle file {}: {}",
+                args.id, args.path
+            )
+        })?
+        .into_inner_stream();
+
+    let sink: Box<dyn std::io::Write> = match &args.output {
+        Some(path) => Box::new(std::fs::File::create(path)?),
+        None => Box::new(std::io::stdout()),
+    };
+
+    write_stream_to_sink(stream, sink).await.with_context(|| {
+        format!("streaming support bundle file {}: {}", args.id, args.path)
+    })?;
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles inspect`
+async fn cmd_nexus_support_bundles_inspect(
+    client: &nexus_client::Client,
+    args: &SupportBundleInspectArgs,
+) -> Result<(), anyhow::Error> {
+    let accessor: Box<dyn SupportBundleAccessor> = match (args.id, &args.path) {
+        (None, Some(path)) => Box::new(LocalFileAccess::new(path)?),
+        (maybe_id, None) => Box::new(
+            crate::support_bundle::access_bundle_from_id(client, maybe_id)
+                .await?,
+        ),
+        (Some(_), Some(_)) => {
+            bail!("Cannot specify both UUID and path");
+        }
+    };
+
+    support_bundle_viewer::run_dashboard(accessor).await
 }

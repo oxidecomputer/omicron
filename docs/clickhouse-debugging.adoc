@@ -12,7 +12,7 @@ If you have advice that is not covered here, consider adding it!
 
 The following provides instructions for connecting to a Clickhouse shell on a running system.
 
-. **Find the zone running Clickhouse**. This can be accomplished by running `zoneadm list -cv`, and finding the zone with a prefix of `oxz_clickhouse`. If you're running on a multi-machine system (e.g., dogfood, colo, etc) and you have access to the `pilot` binary, you can ask all sleds at once for the location of Clickhouse with:
+. **Find the zone running Clickhouse**. This can be accomplished by running `zoneadm list -cv`. To connect to the single node installation find the zone with a prefix of `oxz_clickhouse`, to connect to a replicated cluster installation use one fo the zones with a prefix of `oxz_clickhouse_server`. If you're running on a multi-machine system (e.g., dogfood, colo, etc) and you have access to the `pilot` binary, you can ask all sleds at once for the location of Clickhouse with:
 // '+' for list continuation to insert code blocks while keeping the list order
 +
 [source,bash]
@@ -29,6 +29,10 @@ $ pilot host login <cubby where clickhouse exists>
 
 # Run from the machine with the Clichouse zone
 $ pfexec zlogin oxz_clickhouse_<UUID>
+
+# or for a replicated cluster
+
+$ pfexec zlogin oxz_clickhouse_server<UUID>
 ----
 
 . **Identify the IP address of Clickhouse**. This is possible using `ipadm`:
@@ -55,7 +59,9 @@ Connected to ClickHouse server version 22.8.9 revision 54460.
 
 oxz_clickhouse_aa646c82-c6d7-4d0c-8401-150130927759.local :)
 ----
-. **Inspect the database**. At this point, you've successfully accessed the Clichouse shell.
+. **Inspect the database**. At this point, you've successfully accessed the ClickHouse shell.
+For replicated cluster installations, you may want to inspect the database in each of the replicas
+to make sure data is being replicated.
 The `oximeter` database is likely the most useful one for inspection:
 +
 [source,bash]
@@ -196,4 +202,182 @@ Query id: 813c994e-058c-4af2-9d3a-11cf9f222cbf
 │ volume_checkout          │       1 │      0.445790132 │ 2024-02-01 15:47:31.480943824 │
 │ volume_checkout          │       2 │      0.206526747 │ 2024-02-01 15:47:31.481037611 │
 └──────────────────────────┴─────────┴──────────────────┴───────────────────────────────┘
+----
+
+. **Use Clickana for a quick overview of the system.** Within each of the `oxz_clickhouse_*` or `oxz_clickhouse_server_*`
+zones you can find some basic dashboards with information about disk usage, memory allocation, queries started per second
+and running queries. Connect using the same address you used previously, with the port `8888`.
+
++
+[source,bash]
+----
+# Run from within the clickhouse or clickhouse_server zone
+$ /opt/oxide/clickana/bin/clickana -a [fd00:1122:3344:107::4]8888
+
+# Clickana has several settings to customise your dashboards
+$ /opt/oxide/clickana/bin/clickana -h
+Usage: clickana [OPTIONS] --clickhouse-addr <CLICKHOUSE_ADDR>
+
+Options:
+  -l, --log-path <LOG_PATH>                    Path to the log file [env: CLICKANA_LOG_PATH=] [default: /tmp/clickana.log]
+  -a, --clickhouse-addr <CLICKHOUSE_ADDR>      Address where a clickhouse admin server is listening on
+  -s, --sampling-interval <SAMPLING_INTERVAL>  The interval to collect monitoring data in seconds [default: 60]
+  -t, --time-range <TIME_RANGE>                Range of time to collect monitoring data in seconds [default: 3600]
+  -r, --refresh-interval <REFRESH_INTERVAL>    The interval at which the dashboards will refresh [default: 60]
+  -h, --help                                   Print help
+
+# You can exit the TUI by typing `q`
+----
+
+image::clickana.png[]
+
+. **Check the status of the keepers.** In a replicated cluster, you'll also have several keeper zones that act as coordinator
+nodes. To check each of their status you have several endpoints available through the clickhouse-admin API and the keeper client.
+Like above, you can use `ipadm` to retrieve the keeper IP address.
+
++
+[source,bash]
+----
+
+# Check the log indexes
+
+root@oxz_clickhouse_keeper_b251c2b6:~# curl [fd00:1122:3344:103::23]:8888/4lw-lgif | jq
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   236  100   236    0     0   2601      0 --:--:-- --:--:-- --:--:--  2622
+{
+  "first_log_idx": 100500001,
+  "first_log_term": 100500001,
+  "last_log_idx": 100630231,
+  "last_log_term": 1,
+  "last_committed_log_idx": 100630229,
+  "leader_committed_log_idx": 100630229,
+  "target_committed_log_idx": 100630229,
+  "last_snapshot_idx": 100600000
+}
+
+# See the raft configuration
+
+root@oxz_clickhouse_keeper_b251c2b6:~# curl [fd00:1122:3344:103::23]:8888/raft-config | jq
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   595  100   595    0     0   6666      0 --:--:-- --:--:-- --:--:--  6685
+{
+  "keeper_servers": [
+    {
+      "server_id": 1,
+      "host": {
+        "ipv6": "fd00:1122:3344:101::23"
+      },
+      "raft_port": 9234,
+      "server_type": "participant",
+      "priority": 1
+    },
+    {
+      "server_id": 2,
+      "host": {
+        "ipv6": "fd00:1122:3344:109::23"
+      },
+      "raft_port": 9234,
+      "server_type": "participant",
+      "priority": 1
+    },
+    {
+      "server_id": 3,
+      "host": {
+        "ipv6": "fd00:1122:3344:106::25"
+      },
+      "raft_port": 9234,
+      "server_type": "participant",
+      "priority": 1
+    },
+    {
+      "server_id": 4,
+      "host": {
+        "ipv6": "fd00:1122:3344:103::23"
+      },
+      "raft_port": 9234,
+      "server_type": "participant",
+      "priority": 1
+    },
+    {
+      "server_id": 5,
+      "host": {
+        "ipv6": "fd00:1122:3344:105::23"
+      },
+      "raft_port": 9234,
+      "server_type": "participant",
+      "priority": 1
+    }
+  ]
+}
+
+# See the keeper configuration
+
+root@oxz_clickhouse_keeper_b251c2b6:~# curl [fd00:1122:3344:103::23]:8888/4lw-conf | jq
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100  1153  100  1153    0     0  13639      0 --:--:-- --:--:-- --:--:-- 13564
+{
+  "server_id": 4,
+  "enable_ipv6": true,
+  "tcp_port": 9181,
+  "four_letter_word_allow_list": "conf,cons,crst,envi,ruok,srst,srvr,stat,wchs,dirs,mntr,isro,rcvr,apiv,csnp,lgif,rqld,rclc,clrs,ftfl",
+  "max_requests_batch_size": 100,
+  "min_session_timeout_ms": 10000,
+  "session_timeout_ms": 30000,
+  "operation_timeout_ms": 10000,
+  "dead_session_check_period_ms": 500,
+  "heart_beat_interval_ms": 500,
+  "election_timeout_lower_bound_ms": 1000,
+  "election_timeout_upper_bound_ms": 2000,
+  "reserved_log_items": 100000,
+  "snapshot_distance": 100000,
+  "auto_forwarding": true,
+  "shutdown_timeout": 5000,
+  "startup_timeout": 180000,
+  "raft_logs_level": "trace",
+  "snapshots_to_keep": 3,
+  "rotate_log_storage_interval": 100000,
+  "stale_log_gap": 10000,
+  "fresh_log_gap": 200,
+  "max_requests_batch_bytes_size": 102400,
+  "max_request_queue_size": 100000,
+  "max_requests_quick_batch_size": 100,
+  "quorum_reads": false,
+  "force_sync": true,
+  "compress_logs": true,
+  "compress_snapshots_with_zstd_format": true,
+  "configuration_change_tries_count": 20,
+  "raft_limits_reconnect_limit": 50,
+  "log_storage_path": "/data/coordination/log",
+  "log_storage_disk": "LocalLogDisk",
+  "snapshot_storage_path": "/data/coordination/snapshots",
+  "snapshot_storage_disk": "LocalSnapshotDisk"
+}
+
+# Use the keeper client to check the status of the queried keeper
+
+root@oxz_clickhouse_keeper_b251c2b6:~# /opt/oxide/clickhouse_keeper/clickhouse keeper-client -h [fd00:1122:3344:103::23]
+Connected to ZooKeeper at [fd00:1122:3344:103::23]:9181 with session_id 189495
+Keeper feature flag FILTERED_LIST: enabled
+Keeper feature flag MULTI_READ: enabled
+Keeper feature flag CHECK_NOT_EXISTS: disabled
+/ :) mntr
+zk_version      v23.8.7.1-lts-077df679bed122ad45c8b105d8916ccfec85ae64
+zk_avg_latency  0
+zk_max_latency  6
+zk_min_latency  0
+zk_packets_received     88521
+zk_packets_sent 50603
+zk_num_alive_connections        1
+zk_outstanding_requests 0
+zk_server_state follower
+zk_znode_count  44567
+zk_watch_count  0
+zk_ephemerals_count     123
+zk_approximate_data_size        16940968
+zk_key_arena_size       8384512
+zk_latest_snapshot_size 0
+
 ----

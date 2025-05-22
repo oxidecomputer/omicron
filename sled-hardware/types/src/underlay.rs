@@ -30,11 +30,11 @@ impl BootstrapInterface {
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
     // could be randomly generated when it no longer needs to be durable.
-    pub fn ip(
+    pub async fn ip(
         self,
         link: &PhysicalLink,
     ) -> Result<Ipv6Addr, dladm::GetMacError> {
-        let mac = Dladm::get_mac(link)?;
+        let mac = Dladm::get_mac(link).await?;
         Ok(mac_to_bootstrap_ip(mac, self.interface_id()))
     }
 }

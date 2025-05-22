@@ -5,18 +5,18 @@ baseboards:
     part "i86pc" serial "SimGimlet01"
 
 cabooses:
-    board "SimGimletSp" name "SimGimlet" version "0.0.1" git_commit "fefefefe"
-    board "SimGimletSp" name "SimGimlet" version "0.0.2" git_commit "ffffffff"
-    board "SimRot" name "SimGimletRot" version "0.0.3" git_commit "edededed"
-    board "SimRot" name "SimSidecar" version "0.0.3" git_commit "edededed"
-    board "SimRot" name "SimGimletRot" version "0.0.4" git_commit "eeeeeeee"
-    board "SimRot" name "SimSidecar" version "0.0.4" git_commit "eeeeeeee"
-    board "SimRotStage0" name "SimSidecar" version "0.0.200" git_commit "dadadada"
-    board "SimRotStage0" name "SimGimletRot" version "0.0.200" git_commit "dadadadad"
-    board "SimRotStage0" name "SimSidecar" version "0.0.200" git_commit "dddddddd"
-    board "SimRotStage0" name "SimGimletRot" version "0.0.200" git_commit "ddddddddd"
-    board "SimSidecarSp" name "SimSidecar" version "0.0.1" git_commit "fefefefe"
-    board "SimSidecarSp" name "SimSidecar" version "0.0.2" git_commit "ffffffff"
+    board "SimGimletSp" name "SimGimlet" version "0.0.1" git_commit "fefefefe" sign None
+    board "SimGimletSp" name "SimGimlet" version "0.0.2" git_commit "ffffffff" sign None
+    board "SimRot" name "SimGimletRot" version "0.0.3" git_commit "edededed" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimRot" name "SimSidecarRot" version "0.0.3" git_commit "edededed" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimRot" name "SimGimletRot" version "0.0.4" git_commit "eeeeeeee" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimRot" name "SimSidecarRot" version "0.0.4" git_commit "eeeeeeee" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimRotStage0" name "SimGimletRot" version "0.0.200" git_commit "dadadadad" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimRotStage0" name "SimSidecarRot" version "0.0.200" git_commit "dadadadad" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimRotStage0" name "SimGimletRot" version "0.0.200" git_commit "ddddddddd" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimRotStage0" name "SimSidecarRot" version "0.0.200" git_commit "ddddddddd" sign Some("11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf")
+    board "SimSidecarSp" name "SimSidecar" version "0.0.1" git_commit "fefefefe" sign None
+    board "SimSidecarSp" name "SimSidecar" version "0.0.2" git_commit "ffffffff" sign None
 
 rot pages:
     data_base64 "Z2ltbGV0LWNmcGEtYWN0aXZlAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="

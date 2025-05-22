@@ -23,10 +23,11 @@ use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 
 use crate::{
+    ArtifactWriter, WriteDestination,
     artifact::ArtifactIdOpts,
-    peers::{DiscoveryMechanism, FetchedArtifact, Peers},
-    reporter::ProgressReporter,
-    write::{ArtifactWriter, WriteDestination},
+    fetch::{FetchArtifactBackend, FetchedArtifact, HttpFetchBackend},
+    peers::DiscoveryMechanism,
+    reporter::{HttpProgressBackend, ProgressReporter, ReportProgressBackend},
 };
 
 /// Installinator app.
@@ -90,12 +91,15 @@ struct DebugDiscoverOpts {
 
 impl DebugDiscoverOpts {
     async fn exec(self, log: &slog::Logger) -> Result<()> {
-        let peers = Peers::new(
+        let backend = FetchArtifactBackend::new(
             log,
-            self.opts.mechanism.discover_peers(log).await?,
+            Box::new(HttpFetchBackend::new(
+                &log,
+                self.opts.mechanism.discover_peers(&log).await?,
+            )),
             Duration::from_secs(10),
         );
-        println!("discovered peers: {}", peers.display());
+        println!("discovered peers: {}", backend.peers().display());
         Ok(())
     }
 }
@@ -163,13 +167,22 @@ struct InstallOpts {
     data_link1: String,
 
     // TODO: checksum?
-
-    // The destination to write to.
+    /// The first destination to write to, representing M.2 slot A.
+    ///
+    /// This is mutually exclusive with --install-on-gimlet. At least one of the
+    /// two must be provided.
     #[clap(
         required_unless_present = "install_on_gimlet",
         conflicts_with = "install_on_gimlet"
     )]
-    destination: Option<Utf8PathBuf>,
+    a_destination: Option<Utf8PathBuf>,
+
+    /// The second destination to write to, representing M.2 slot B.
+    ///
+    /// This is mutually exclusive with --install-on-gimlet, and is optional to
+    /// provide.
+    #[clap(conflicts_with = "install_on_gimlet")]
+    b_destination: Option<Utf8PathBuf>,
 }
 
 impl InstallOpts {
@@ -182,19 +195,14 @@ impl InstallOpts {
         let image_id = self.artifact_ids.resolve()?;
 
         let discovery = self.discover_opts.mechanism.clone();
-        let discovery_log = log.clone();
-        let (progress_reporter, event_sender) =
-            ProgressReporter::new(log, image_id.update_id, move || {
-                let log = discovery_log.clone();
-                let discovery = discovery.clone();
-                async move {
-                    Ok(Peers::new(
-                        &log,
-                        discovery.discover_peers(&log).await?,
-                        Duration::from_secs(10),
-                    ))
-                }
-            });
+        let (progress_reporter, event_sender) = ProgressReporter::new(
+            log,
+            image_id.update_id,
+            ReportProgressBackend::new(
+                log,
+                HttpProgressBackend::new(log, discovery),
+            ),
+        );
         let progress_handle = progress_reporter.start();
         let discovery = &self.discover_opts.mechanism;
 
@@ -234,7 +242,7 @@ impl InstallOpts {
                     )
                     .await?;
 
-                    let address = host_phase_2_artifact.addr;
+                    let address = host_phase_2_artifact.peer.address();
 
                     StepSuccess::new(host_phase_2_artifact)
                         .with_metadata(
@@ -273,7 +281,7 @@ impl InstallOpts {
                     )
                     .await?;
 
-                    let address = control_plane_artifact.addr;
+                    let address = control_plane_artifact.peer.address();
 
                     StepSuccess::new(control_plane_artifact)
                         .with_metadata(
@@ -297,10 +305,13 @@ impl InstallOpts {
                 )
                 .register()
         } else {
-            // clap ensures `self.destination` is not `None` if
+            // clap ensures `self.a_destination` is not `None` if
             // `install_on_gimlet` is false.
-            let destination = self.destination.as_ref().unwrap();
-            StepHandle::ready(WriteDestination::in_directory(destination)?)
+            let a_destination = self.a_destination.as_ref().unwrap();
+            StepHandle::ready(WriteDestination::in_directories(
+                a_destination,
+                self.b_destination.as_deref(),
+            )?)
         };
 
         let control_plane_zones = engine
@@ -493,9 +504,12 @@ async fn fetch_artifact(
         cx,
         &log,
         || async {
-            Ok(Peers::new(
+            Ok(FetchArtifactBackend::new(
                 &log,
-                discovery.discover_peers(&log).await?,
+                Box::new(HttpFetchBackend::new(
+                    &log,
+                    discovery.discover_peers(&log).await?,
+                )),
                 Duration::from_secs(10),
             ))
         },
@@ -508,7 +522,7 @@ async fn fetch_artifact(
         log,
         "fetched {} bytes from {}",
         artifact.artifact.num_bytes(),
-        artifact.addr,
+        artifact.peer,
     );
 
     Ok(artifact)

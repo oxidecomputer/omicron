@@ -9,7 +9,7 @@ use crate::trust_quorum::{RackSecret, TrustQuorumError};
 use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, aead::Aead};
 use hkdf::Hkdf;
 use rand::{RngCore, rngs::OsRng};
-use secrecy::{ExposeSecret, Secret};
+use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use sled_hardware_types::Baseboard;
@@ -94,7 +94,7 @@ impl SharePkg {
     pub fn decrypt_shares(
         &self,
         rack_secret: &RackSecret,
-    ) -> Result<Secret<Vec<Vec<u8>>>, TrustQuorumError> {
+    ) -> Result<SecretBox<Vec<Vec<u8>>>, TrustQuorumError> {
         let cipher = derive_encryption_key(
             &self.common.rack_uuid,
             &rack_secret,
@@ -117,7 +117,7 @@ pub struct LearnedSharePkg {
 pub fn create_pkgs(
     rack_uuid: Uuid,
     initial_membership: BTreeSet<Baseboard>,
-) -> Result<Secret<Vec<SharePkg>>, TrustQuorumError> {
+) -> Result<SecretBox<Vec<SharePkg>>, TrustQuorumError> {
     // There are only up to 32 sleds in a rack.
     let n = u8::try_from(initial_membership.len()).unwrap();
     let rack_secret = RackSecret::new();
@@ -141,13 +141,13 @@ pub fn create_pkgs(
             .take(shares_per_sled);
         let share = iter.next().unwrap();
         let plaintext_len = (shares_per_sled - 1) * SHARE_SIZE;
-        let plaintext: Secret<Vec<u8>> = Secret::new(iter.fold(
-            Vec::with_capacity(plaintext_len),
-            |mut acc, x| {
+        let plaintext: SecretBox<[u8]> = SecretBox::new(
+            iter.fold(Vec::with_capacity(plaintext_len), |mut acc, x| {
                 acc.extend_from_slice(x);
                 acc
-            },
-        ));
+            })
+            .into_boxed_slice(),
+        );
         let nonce = new_nonce(i);
         let encrypted_shares = cipher
             .encrypt((&nonce).into(), plaintext.expose_secret().as_ref())
@@ -170,7 +170,7 @@ pub fn create_pkgs(
         };
         pkgs.push(pkg);
     }
-    Ok(Secret::new(pkgs))
+    Ok(SecretBox::new(Box::new(pkgs)))
 }
 
 // This is a fairly standard nonce construction consisting of a random part and
@@ -186,7 +186,7 @@ fn new_nonce(i: u8) -> [u8; 12] {
     nonce
 }
 
-fn share_digests(shares: &Secret<Vec<Vec<u8>>>) -> BTreeSet<Sha3_256Digest> {
+fn share_digests(shares: &SecretBox<Vec<Vec<u8>>>) -> BTreeSet<Sha3_256Digest> {
     shares
         .expose_secret()
         .iter()
@@ -223,15 +223,15 @@ fn decrypt_shares(
     nonce: [u8; 12],
     cipher: &ChaCha20Poly1305,
     ciphertext: &[u8],
-) -> Result<Secret<Vec<Vec<u8>>>, TrustQuorumError> {
+) -> Result<SecretBox<Vec<Vec<u8>>>, TrustQuorumError> {
     let plaintext = Zeroizing::new(
         cipher
             .decrypt((&nonce).into(), ciphertext)
             .map_err(|_| TrustQuorumError::FailedToDecrypt)?,
     );
-    Ok(Secret::new(
+    Ok(SecretBox::new(Box::new(
         plaintext.chunks(SHARE_SIZE).map(|share| share.into()).collect(),
-    ))
+    )))
 }
 
 // We don't want to risk debug-logging the actual share contents, so implement

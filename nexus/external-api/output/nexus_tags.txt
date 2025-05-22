@@ -53,14 +53,14 @@ probe_delete                             DELETE   /experimental/v1/probes/{probe
 probe_list                               GET      /experimental/v1/probes
 probe_view                               GET      /experimental/v1/probes/{probe}
 support_bundle_create                    POST     /experimental/v1/system/support-bundles
-support_bundle_delete                    DELETE   /experimental/v1/system/support-bundles/{support_bundle}
-support_bundle_download                  GET      /experimental/v1/system/support-bundles/{support_bundle}/download
-support_bundle_download_file             GET      /experimental/v1/system/support-bundles/{support_bundle}/download/{file}
-support_bundle_head                      HEAD     /experimental/v1/system/support-bundles/{support_bundle}/download
-support_bundle_head_file                 HEAD     /experimental/v1/system/support-bundles/{support_bundle}/download/{file}
-support_bundle_index                     GET      /experimental/v1/system/support-bundles/{support_bundle}/index
+support_bundle_delete                    DELETE   /experimental/v1/system/support-bundles/{bundle_id}
+support_bundle_download                  GET      /experimental/v1/system/support-bundles/{bundle_id}/download
+support_bundle_download_file             GET      /experimental/v1/system/support-bundles/{bundle_id}/download/{file}
+support_bundle_head                      HEAD     /experimental/v1/system/support-bundles/{bundle_id}/download
+support_bundle_head_file                 HEAD     /experimental/v1/system/support-bundles/{bundle_id}/download/{file}
+support_bundle_index                     GET      /experimental/v1/system/support-bundles/{bundle_id}/index
 support_bundle_list                      GET      /experimental/v1/system/support-bundles
-support_bundle_view                      GET      /experimental/v1/system/support-bundles/{support_bundle}
+support_bundle_view                      GET      /experimental/v1/system/support-bundles/{bundle_id}
 target_release_update                    PUT      /v1/system/update/target-release
 target_release_view                      GET      /v1/system/update/target-release
 timeseries_query                         POST     /v1/timeseries/query
@@ -159,6 +159,23 @@ snapshot_create                          POST     /v1/snapshots
 snapshot_delete                          DELETE   /v1/snapshots/{snapshot}
 snapshot_list                            GET      /v1/snapshots
 snapshot_view                            GET      /v1/snapshots/{snapshot}
+
+API operations found with tag "system/alerts"
+OPERATION ID                             METHOD   URL PATH
+alert_class_list                         GET      /v1/alert-classes
+alert_delivery_list                      GET      /v1/alert-receivers/{receiver}/deliveries
+alert_delivery_resend                    POST     /v1/alerts/{alert_id}/resend
+alert_receiver_delete                    DELETE   /v1/alert-receivers/{receiver}
+alert_receiver_list                      GET      /v1/alert-receivers
+alert_receiver_probe                     POST     /v1/alert-receivers/{receiver}/probe
+alert_receiver_subscription_add          POST     /v1/alert-receivers/{receiver}/subscriptions
+alert_receiver_subscription_remove       DELETE   /v1/alert-receivers/{receiver}/subscriptions/{subscription}
+alert_receiver_view                      GET      /v1/alert-receivers/{receiver}
+webhook_receiver_create                  POST     /v1/webhook-receivers
+webhook_receiver_update                  PUT      /v1/webhook-receivers/{receiver}
+webhook_secrets_add                      POST     /v1/webhook-secrets
+webhook_secrets_delete                   DELETE   /v1/webhook-secrets/{secret_id}
+webhook_secrets_list                     GET      /v1/webhook-secrets
 
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH

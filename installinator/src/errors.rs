@@ -33,8 +33,13 @@ pub(crate) enum DiscoverPeersError {
     #[allow(unused)]
     Retry(#[source] anyhow::Error),
 
-    #[error("failed to discover peers (no more retries left, will abort)")]
-    #[allow(unused)]
+    /// Abort further discovery.
+    ///
+    /// The installinator must keep retrying until it has completed, which is why
+    /// there's no abort case here in the not cfg(test) case. However, we test
+    /// some abort-related functionality in tests.
+    #[cfg(test)]
+    #[error("failed to discover peers (will abort)")]
     Abort(#[source] anyhow::Error),
 }
 

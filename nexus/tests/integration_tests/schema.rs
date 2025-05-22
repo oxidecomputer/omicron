@@ -10,9 +10,11 @@ use nexus_config::SchemaConfig;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
+use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
 use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
+use nexus_test_utils::sql::AnySqlType;
 use nexus_test_utils::sql::ColumnValue;
 use nexus_test_utils::sql::Row;
 use nexus_test_utils::sql::SqlEnum;
@@ -24,6 +26,7 @@ use pretty_assertions::{assert_eq, assert_ne};
 use semver::Version;
 use similar_asserts;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::sync::Mutex;
@@ -63,10 +66,16 @@ async fn test_setup<'a>(
 // Only returns an error if the transaction failed to commit.
 async fn apply_update_as_transaction_inner(
     client: &omicron_test_utils::dev::db::Client,
-    sql: &str,
+    step: &SchemaUpgradeStep,
 ) -> Result<(), tokio_postgres::Error> {
     client.batch_execute("BEGIN;").await.expect("Failed to BEGIN transaction");
-    client.batch_execute(&sql).await.expect("Failed to execute update");
+    if let Err(err) = client.batch_execute(step.sql()).await {
+        panic!(
+            "Failed to execute update step {}: {}",
+            step.label(),
+            InlineErrorChain::new(&err)
+        );
+    };
     client.batch_execute("COMMIT;").await?;
     Ok(())
 }
@@ -77,13 +86,16 @@ async fn apply_update_as_transaction_inner(
 async fn apply_update_as_transaction(
     log: &Logger,
     client: &omicron_test_utils::dev::db::Client,
-    sql: &str,
+    step: &SchemaUpgradeStep,
 ) {
     loop {
-        match apply_update_as_transaction_inner(client, sql).await {
+        match apply_update_as_transaction_inner(client, step).await {
             Ok(()) => break,
             Err(err) => {
-                warn!(log, "Failed to apply update as transaction"; "err" => err.to_string());
+                warn!(
+                    log, "Failed to apply update as transaction";
+                    InlineErrorChain::new(&err),
+                );
                 client
                     .batch_execute("ROLLBACK;")
                     .await
@@ -94,7 +106,7 @@ async fn apply_update_as_transaction(
                         continue;
                     }
                 }
-                panic!("Failed to apply update: {err}");
+                panic!("Failed to apply update {}: {err}", step.label());
             }
         }
     }
@@ -141,7 +153,7 @@ async fn apply_update(
         );
 
         for _ in 0..times_to_apply {
-            apply_update_as_transaction(&log, &client, step.sql()).await;
+            apply_update_as_transaction(&log, &client, step).await;
 
             // The following is a set of "versions exempt from being
             // re-applied" multiple times. PLEASE AVOID ADDING TO THIS LIST.
@@ -552,11 +564,8 @@ impl InformationSchema {
             other.statistics,
             "Statistics did not match. This often means that in dbinit.sql, a new \
             column was added into the middle of a table rather than to the end. \
-            If that is the case:\n\n \
-            \
-            * Change dbinit.sql to add the column to the end of the table.\n\
-            * Update nexus/db-model/src/schema.rs and the corresponding \
-            Queryable/Insertable struct with the new column ordering."
+            If that is the case, change dbinit.sql to add the column to the \
+            end of the table.\n"
         );
         similar_asserts::assert_eq!(self.sequences, other.sequences);
         similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
@@ -895,6 +904,7 @@ const INSTANCE4: Uuid = Uuid::from_u128(0x44441257_5c3d_4647_83b0_8f3515da7be1);
 
 // "67060115" -> "Prop"olis
 const PROPOLIS: Uuid = Uuid::from_u128(0x11116706_5c3d_4647_83b0_8f3515da7be1);
+const PROPOLIS2: Uuid = Uuid::from_u128(0x22226706_5c3d_4647_83b0_8f3515da7be1);
 
 // "7154"-> "Disk"
 const DISK1: Uuid = Uuid::from_u128(0x11117154_5c3d_4647_83b0_8f3515da7be1);
@@ -1100,7 +1110,6 @@ fn before_70_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             ))
             .await
             .expect("failed to create instances");
-
         ctx.client
             .batch_execute(&format!(
                 "
@@ -2044,6 +2053,151 @@ fn after_134_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        let probe_alert_id: Uuid =
+            "001de000-7768-4000-8000-000000000001".parse().unwrap();
+        let rows = ctx
+            .client
+            .query(
+                // Don't select timestamps, as those are variable, and we don't
+                // want to assert that they always have a particular value.
+                // However, we *do* need to ensure that `time_dispatched` is
+                // set, so that the event is not eligible for dispatching ---
+                // include a WHERE clause ensuring it is not null.
+                r#"
+                SELECT
+                    id,
+                    event_class,
+                    event,
+                    num_dispatched
+                FROM webhook_event
+                WHERE time_dispatched IS NOT NULL
+                "#,
+                &[],
+            )
+            .await
+            .expect("loaded bp_omicron_zone rows");
+
+        let records = process_rows(&rows);
+
+        assert_eq!(
+            records.len(),
+            1,
+            "there should be exactly one singleton event in the webhook_event \
+             table"
+        );
+
+        assert_eq!(
+            records[0].values,
+            vec![
+                ColumnValue::new("id", probe_alert_id),
+                ColumnValue::new(
+                    "event_class",
+                    SqlEnum::from(("webhook_event_class", "probe")),
+                ),
+                ColumnValue::new("event", serde_json::json!({})),
+                ColumnValue::new("num_dispatched", 0i64),
+            ],
+            "singleton liveness probe webhook event record must have the \
+             correct values",
+        );
+    })
+}
+
+fn before_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // We'll mostly reuse the instances from previous migration tests, but
+        // give instance 4 a VMM in the `Stopped` state.
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO vmm (
+                    id,
+                    time_created,
+                    time_deleted,
+                    instance_id,
+                    time_state_updated,
+                    state_generation,
+                    sled_id,
+                    propolis_ip,
+                    propolis_port,
+                    state
+                ) VALUES (
+                    '{PROPOLIS2}',
+                    now(),
+                    NULL,
+                    '{INSTANCE4}',
+                    now(),
+                    1,
+                    '{SLED2}',
+                    'fd00:1122:3344:104::1',
+                    12400,
+                    'stopped'
+                );"
+            ))
+            .await
+            .expect("inserted VMM record");
+        ctx.client
+            .batch_execute(&format!(
+                "UPDATE instance
+                SET
+                    state = 'vmm',
+                    active_propolis_id = '{PROPOLIS2}'
+                WHERE id = '{INSTANCE4}';"
+            ))
+            .await
+            .expect("updated instance4 record");
+    })
+}
+
+fn after_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        let rows = ctx
+            .client
+            .query("SELECT id, intended_state FROM instance ORDER BY id", &[])
+            .await
+            .expect("failed to load instance auto-restart policies");
+        let records = process_rows(&rows);
+        let instances = records.into_iter().map(|row| {
+            slog::info!(&ctx.log, "instance record: {row:?}");
+            let [id_value, state_value] = &row.values[..] else {
+                panic!("row did not have two columns! {row:?}");
+            };
+            let Some(&AnySqlType::Uuid(id)) = id_value.expect("id") else {
+                panic!("id column must be non-null UUID, but found: {id_value:?}")
+            };
+            let AnySqlType::Enum(intended_state) = state_value
+                .expect("intended_state")
+                .expect("intended state must not be null")
+            else {
+                panic!("intended_state column must be an enum, but found: {state_value:?}");
+            };
+            (id, intended_state.clone())
+        }).collect::<std::collections::HashMap<_, _>>();
+
+        assert_eq!(
+            instances.get(&INSTANCE1),
+            Some(&SqlEnum::from(("instance_intended_state", "stopped"))),
+            "instance 1 ({INSTANCE1}): state='no_vmm'"
+        );
+        assert_eq!(
+            instances.get(&INSTANCE2),
+            Some(&SqlEnum::from(("instance_intended_state", "running"))),
+            "instance 2 ({INSTANCE2}): state='vmm', active_vmm='running'"
+        );
+        assert_eq!(
+            instances.get(&INSTANCE3),
+            Some(&SqlEnum::from(("instance_intended_state", "running"))),
+            "instance 3 ({INSTANCE3}): state='failed'"
+        );
+        assert_eq!(
+            instances.get(&INSTANCE4),
+            Some(&SqlEnum::from(("instance_intended_state", "stopped"))),
+            "instance 4 ({INSTANCE4}): state='vmm',active_vmm='stopped'"
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -2099,6 +2253,14 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(134, 0, 0),
         DataMigrationFns::new().before(before_134_0_0).after(after_134_0_0),
+    );
+    map.insert(
+        Version::new(139, 0, 0),
+        DataMigrationFns::new().after(after_139_0_0),
+    );
+    map.insert(
+        Version::new(140, 0, 0),
+        DataMigrationFns::new().before(before_140_0_0).after(after_140_0_0),
     );
 
     map

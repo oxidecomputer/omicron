@@ -374,8 +374,104 @@ impl JsonSchema for SwitchLinkState {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(try_from = "String")]
+#[serde(into = "String")]
+pub struct AlertSubscription(String);
+
+impl AlertSubscription {
+    const PATTERN: &str =
+        r"^([a-zA-Z0-9_]+|\*|\*\*)(\.([a-zA-Z0-9_]+|\*|\*\*))*$";
+
+    fn is_valid(s: &str) -> Result<(), anyhow::Error> {
+        static REGEX: std::sync::LazyLock<regex::Regex> =
+            std::sync::LazyLock::new(|| {
+                regex::Regex::new(AlertSubscription::PATTERN).expect(
+                    "AlertSubscription validation regex should be valid",
+                )
+            });
+        if REGEX.is_match(s) {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "alert subscription {s:?} does not match the pattern {}",
+                AlertSubscription::PATTERN
+            ))
+        }
+    }
+
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for AlertSubscription {
+    type Error = anyhow::Error;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Self::is_valid(&s)?;
+        Ok(Self(s))
+    }
+}
+
+impl std::str::FromStr for AlertSubscription {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::is_valid(s)?;
+        Ok(Self(s.to_string()))
+    }
+}
+
+impl From<AlertSubscription> for String {
+    fn from(AlertSubscription(s): AlertSubscription) -> Self {
+        s
+    }
+}
+
+impl AsRef<str> for AlertSubscription {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl JsonSchema for AlertSubscription {
+    fn schema_name() -> String {
+        "AlertSubscription".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A webhook event class subscription".to_string()),
+                description: Some(
+                    "A webhook event class subscription matches either a single event class exactly, or a glob pattern including wildcards that may match multiple event classes"
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: None,
+                min_length: None,
+                pattern: Some(AlertSubscription::PATTERN.to_string()),
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+impl std::fmt::Display for AlertSubscription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use super::AlertSubscription;
     use super::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
     use super::Policy;
     use serde::Deserialize;
@@ -416,6 +512,60 @@ mod test {
             error.to_string(),
             "invalid length 65, expected a list of at most 64 role assignments"
         );
+    }
+
+    #[test]
+    fn test_webhook_subscription_validation() {
+        let successes = [
+            "foo.bar",
+            "foo.bar.baz",
+            "foo_bar.baz",
+            "foo_1.bar_200.**",
+            "1.2.3",
+            "foo.**",
+            "foo.*.baz",
+            "foo.**.baz",
+            "foo.bar.**",
+            "foo.*.baz.**",
+            "**.foo",
+            "**.foo.bar.*",
+            "**.foo.bar.*.baz",
+            "*.foo.bar.*",
+            "*.foo",
+            "*",
+            "*.*",
+        ];
+        let failures = [
+            "",
+            "f*o.bar",
+            "**foo.bar",
+            "foo.**bar",
+            "foo.*bar*",
+            "*foo*",
+            "f**.bar",
+            "foo.***",
+            "***",
+            "$.foo.bar",
+            "foo.%bar",
+            "foo.[barbaz]",
+        ];
+        for s in successes {
+            match s.parse::<AlertSubscription>() {
+                Ok(_) => {}
+                Err(e) => panic!(
+                    "expected string {s:?} to be a valid webhook subscription: {e}"
+                ),
+            }
+        }
+
+        for s in failures {
+            match s.parse::<AlertSubscription>() {
+                Ok(_) => panic!(
+                    "expected string {s:?} to NOT be a valid webhook subscription"
+                ),
+                Err(_) => {}
+            }
+        }
     }
 }
 

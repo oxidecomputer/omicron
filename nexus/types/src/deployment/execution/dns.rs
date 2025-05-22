@@ -192,7 +192,7 @@ pub fn blueprint_external_dns_config<'a>(
     blueprint: &Blueprint,
     silos: impl IntoIterator<Item = &'a Name>,
     external_dns_zone_name: String,
-) -> anyhow::Result<DnsConfigZone> {
+) -> DnsConfigZone {
     let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
     let dns_external_ips = blueprint_external_dns_nameserver_ips(blueprint);
 

@@ -53,6 +53,7 @@ use uuid::Uuid;
 // by resource.
 mod address_lot;
 mod affinity;
+mod alert;
 mod allow_list;
 pub(crate) mod background;
 mod bfd;
@@ -69,6 +70,7 @@ mod iam;
 mod image;
 mod instance;
 mod instance_network;
+mod instance_platform;
 mod internet_gateway;
 mod ip_pool;
 mod lldp;
@@ -98,6 +100,7 @@ mod volume;
 mod vpc;
 mod vpc_router;
 mod vpc_subnet;
+mod webhook;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
@@ -125,7 +128,22 @@ pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
 pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
 
 pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
-pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 256 * (1 << 30); // 256 GiB
+// This is larger than total memory (let alone reservoir) on some sleds; it is
+// not to guard against overallocation, but to keep instance memory sizes in
+// ranges that we've tested. It is bounded only by the intersection of
+// large-memory hardware configurations and tested instance sizes.
+//
+// Propolis has a similar limit in MAX_PHYSMEM. There, we would like to remove
+// the limit entirely. Here, we may want to make the max size operator
+// configurable as it may have implications on migratability for racks with
+// mixed sled configurations.
+//
+// Before raising or removing this limit, testing has been valuable. See:
+// * illumos bug #17403
+// * Propolis issue #903
+// There are known issues setting this above 1028 GiB. See:
+// * Propolis issue #907
+pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 1024 * (1 << 30); // 1 TiB
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
@@ -186,6 +204,13 @@ pub struct Nexus {
 
     /// Client to the timeseries database.
     timeseries_client: oximeter_db::Client,
+
+    /// `reqwest` client used for webhook delivery requests.
+    ///
+    /// This lives on the Nexus struct as we would like to use the same client
+    /// pool for the webhook deliverator background task and the webhook probe
+    /// API.
+    webhook_delivery_client: reqwest::Client,
 
     /// Contents of the trusted root role for the TUF repository.
     #[allow(dead_code)]
@@ -387,6 +412,19 @@ impl Nexus {
             ))
         };
 
+        let webhook_delivery_client = {
+            // The webhook delivery HTTP client will send requests to endpoints
+            // external to the rack, so apply the configuration for external
+            // HTTP clients.
+            let builder = external_http_client_builder(
+                &config.deployment.external_http_clients,
+                &external_resolver,
+            );
+            webhook::delivery_client(builder).map_err(|e| {
+                format!("failed to build webhook delivery client: {e}")
+            })?
+        };
+
         let mut mgs_resolver =
             qorb_resolver.for_service(ServiceName::ManagementGatewayService);
         let mut repo_depot_resolver =
@@ -421,6 +459,7 @@ impl Nexus {
             populate_status,
             reqwest_client,
             timeseries_client,
+            webhook_delivery_client,
             updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
             opctx_alloc: OpContext::for_background(
@@ -503,6 +542,9 @@ impl Nexus {
                     resolver,
                     saga_starter: task_nexus.sagas.clone(),
                     producer_registry: task_registry,
+                    webhook_delivery_client: task_nexus
+                        .webhook_delivery_client
+                        .clone(),
 
                     saga_recovery: SagaRecoveryHelpers {
                         recovery_opctx: saga_recovery_opctx,
@@ -1185,4 +1227,29 @@ async fn map_switch_zone_addrs(
         "mappings" => #?switch_zone_addrs
     );
     Ok(switch_zone_addrs)
+}
+
+/// Begin configuring an external HTTP client, returning a
+/// `reqwest::ClientBuilder`.
+pub(crate) fn external_http_client_builder(
+    config: &nexus_config::ExternalHttpClientConfig,
+    resolver: &Arc<external_dns::Resolver>,
+) -> reqwest::ClientBuilder {
+    let mut builder = reqwest::ClientBuilder::new();
+
+    builder = builder.dns_resolver(resolver.clone());
+
+    // If we are configured to only bind external TCP connections on a specific interface, do so.
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "illumos",
+    ))]
+    {
+        if let Some(ref interface) = config.interface {
+            builder = builder.interface(interface);
+        }
+    }
+
+    builder
 }

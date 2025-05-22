@@ -8,6 +8,9 @@
 #:	"=/work/manifest.toml",
 #:	"=/work/repo.zip",
 #:	"=/work/repo.zip.sha256.txt",
+#:	"=/work/helios.json",
+#:	"=/work/incorporation.p5m",
+#:	"=/work/incorporation.p5p",
 #:	"%/work/*.log",
 #: ]
 #: access_repos = [
@@ -42,6 +45,21 @@
 #: name = "repo.zip.sha256.txt"
 #: from_output = "/work/repo.zip.sha256.txt"
 #:
+#: [[publish]]
+#: series = "rot-all"
+#: name = "helios.json"
+#: from_output = "/work/helios.json"
+#:
+#: [[publish]]
+#: series = "rot-all"
+#: name = "incorporation.p5m"
+#: from_output = "/work/incorporation.p5m"
+#:
+#: [[publish]]
+#: series = "rot-all"
+#: name = "incorporation.p5m"
+#: from_output = "/work/incorporation.p5p"
+#:
 
 set -o errexit
 set -o pipefail
@@ -73,4 +91,4 @@ esac
 pfexec zfs create -p "rpool/images/$USER/host"
 pfexec zfs create -p "rpool/images/$USER/recovery"
 
-cargo xtask releng --output-dir /work
+cargo xtask releng --output-dir /work --mkincorp

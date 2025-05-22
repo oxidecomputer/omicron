@@ -115,6 +115,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         SiloIdentityProviderList::get_polar_class(),
         SiloUserList::get_polar_class(),
         TargetReleaseConfig::get_polar_class(),
+        AlertClassList::get_polar_class(),
     ];
     for c in classes {
         oso_builder = oso_builder.register_class(c)?;
@@ -163,6 +164,9 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Sled::init(),
         TufRepo::init(),
         TufArtifact::init(),
+        Alert::init(),
+        AlertReceiver::init(),
+        WebhookSecret::init(),
         Zpool::init(),
         Service::init(),
         UserBuiltin::init(),

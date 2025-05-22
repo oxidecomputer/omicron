@@ -180,6 +180,9 @@ pub struct DeploymentConfig {
     pub database: Database,
     /// External DNS servers Nexus can use to resolve external hosts.
     pub external_dns_servers: Vec<IpAddr>,
+    /// Configuration for HTTP clients to external services.
+    #[serde(default)]
+    pub external_http_clients: ExternalHttpClientConfig,
 }
 
 fn default_techport_external_server_port() -> u16 {
@@ -272,6 +275,17 @@ pub struct MgdConfig {
 struct UnvalidatedTunables {
     max_vpc_ipv4_subnet_prefix: u8,
     load_timeout: Option<std::time::Duration>,
+}
+
+/// Configuration for HTTP clients to external services.
+#[derive(
+    Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema,
+)]
+pub struct ExternalHttpClientConfig {
+    /// If present, bind all TCP connections for external HTTP clients on the
+    /// specified interface name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interface: Option<String>,
 }
 
 /// Tunable configuration parameters, intended for use in test environments or
@@ -421,6 +435,10 @@ pub struct BackgroundTaskConfig {
     /// configuration for read-only region replacement start task
     pub read_only_region_replacement_start:
         ReadOnlyRegionReplacementStartConfig,
+    /// configuration for webhook dispatcher task
+    pub alert_dispatcher: AlertDispatcherConfig,
+    /// configuration for webhook deliverator task
+    pub webhook_deliverator: WebhookDeliveratorConfig,
 }
 
 #[serde_as]
@@ -745,6 +763,46 @@ pub struct ReadOnlyRegionReplacementStartConfig {
     pub period_secs: Duration,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AlertDispatcherConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WebhookDeliveratorConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// duration after which another Nexus' lease on a delivery attempt is
+    /// considered expired.
+    ///
+    /// this is tuneable to allow testing lease expiration without having to
+    /// wait a long time.
+    #[serde(default = "WebhookDeliveratorConfig::default_lease_timeout_secs")]
+    pub lease_timeout_secs: u64,
+
+    /// backoff period for the first retry of a failed delivery attempt.
+    ///
+    /// this is tuneable to allow testing delivery retries without having to
+    /// wait a long time.
+    #[serde(default = "WebhookDeliveratorConfig::default_first_retry_backoff")]
+    pub first_retry_backoff_secs: u64,
+
+    /// backoff period for the second retry of a failed delivery attempt.
+    ///
+    /// this is tuneable to allow testing delivery retries without having to
+    /// wait a long time.
+    #[serde(
+        default = "WebhookDeliveratorConfig::default_second_retry_backoff"
+    )]
+    pub second_retry_backoff_secs: u64,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -813,6 +871,20 @@ impl std::fmt::Display for SchemeName {
             SchemeName::SessionCookie => "session_cookie",
             SchemeName::AccessToken => "access_token",
         })
+    }
+}
+
+impl WebhookDeliveratorConfig {
+    const fn default_lease_timeout_secs() -> u64 {
+        60 // one minute
+    }
+
+    const fn default_first_retry_backoff() -> u64 {
+        60 // one minute
+    }
+
+    const fn default_second_retry_backoff() -> u64 {
+        60 * 5 // five minutes
     }
 }
 
@@ -946,6 +1018,8 @@ mod test {
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+            [deployment.external_http_clients]
+            interface = "opte0"
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             default_request_body_max_bytes = 1024
@@ -1005,6 +1079,11 @@ mod test {
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
             read_only_region_replacement_start.period_secs = 30
+            alert_dispatcher.period_secs = 42
+            webhook_deliverator.period_secs = 43
+            webhook_deliverator.lease_timeout_secs = 44
+            webhook_deliverator.first_retry_backoff_secs = 45
+            webhook_deliverator.second_retry_backoff_secs = 46
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1047,6 +1126,9 @@ mod test {
                         "1.1.1.1".parse().unwrap(),
                         "9.9.9.9".parse().unwrap(),
                     ],
+                    external_http_clients: ExternalHttpClientConfig {
+                        interface: Some("opte0".to_string()),
+                    },
                 },
                 pkg: PackageConfig {
                     console: ConsoleConfig {
@@ -1210,6 +1292,15 @@ mod test {
                             ReadOnlyRegionReplacementStartConfig {
                                 period_secs: Duration::from_secs(30),
                             },
+                        alert_dispatcher: AlertDispatcherConfig {
+                            period_secs: Duration::from_secs(42),
+                        },
+                        webhook_deliverator: WebhookDeliveratorConfig {
+                            period_secs: Duration::from_secs(43),
+                            lease_timeout_secs: 44,
+                            first_retry_backoff_secs: 45,
+                            second_retry_backoff_secs: 46,
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1296,6 +1387,8 @@ mod test {
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
             read_only_region_replacement_start.period_secs = 30
+            alert_dispatcher.period_secs = 42
+            webhook_deliverator.period_secs = 43
             [default_region_allocation_strategy]
             type = "random"
             "##,

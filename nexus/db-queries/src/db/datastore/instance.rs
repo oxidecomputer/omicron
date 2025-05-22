@@ -21,6 +21,7 @@ use crate::db::model::Instance;
 use crate::db::model::InstanceAutoRestart;
 use crate::db::model::InstanceAutoRestartPolicy;
 use crate::db::model::InstanceCpuCount;
+use crate::db::model::InstanceIntendedState;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
 use crate::db::model::InstanceUpdate;
@@ -776,6 +777,47 @@ impl DataStore {
             })?;
 
         Ok(updated)
+    }
+
+    pub async fn instance_set_intended_state(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        intended_state: db::model::InstanceIntendedState,
+    ) -> Result<Instance, Error> {
+        use nexus_db_schema::schema::instance::dsl;
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        let instance_id = authz_instance.id().into_untyped_uuid();
+
+        let UpdateAndQueryResult { status, found } =
+            diesel::update(dsl::instance)
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::id.eq(instance_id))
+                // Don't spuriously set time_modified if the intended state won't change.
+                .filter(dsl::intended_state.ne(intended_state))
+                .set((
+                    dsl::intended_state.eq(intended_state),
+                    dsl::time_modified.eq(chrono::Utc::now()),
+                ))
+                .check_if_exists::<Instance>(instance_id)
+                .execute_and_check(&*self.pool_connection_unauthorized().await?)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByResource(authz_instance),
+                    )
+                })?;
+
+        slog::info!(
+            opctx.log,
+            "set intended instance state";
+            "instance_id" => ?instance_id,
+            "intended_state" => %intended_state,
+            "changed" => status == UpdateStatus::Updated,
+        );
+
+        Ok(found)
     }
 
     /// Updates an instance record by setting the instance's migration ID to the
@@ -1925,11 +1967,18 @@ impl DataStore {
         authz_instance: &authz::Instance,
         lock: &UpdaterLock,
         new_runtime: &InstanceRuntimeState,
+        new_intent: Option<InstanceIntendedState>,
     ) -> Result<bool, Error> {
         use nexus_db_schema::schema::instance::dsl;
 
         let instance_id = authz_instance.id();
         let UpdaterLock { updater_id, locked_gen } = *lock;
+
+        #[derive(diesel::AsChangeset)]
+        #[diesel(table_name = nexus_db_schema::schema::instance)]
+        struct IntentUpdate {
+            intended_state: Option<InstanceIntendedState>,
+        }
 
         let result = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
@@ -1946,6 +1995,7 @@ impl DataStore {
                 dsl::updater_gen.eq(Generation(locked_gen.0.next())),
                 dsl::updater_id.eq(None::<Uuid>),
                 new_runtime.clone(),
+                IntentUpdate { intended_state: new_intent },
             ))
             .check_if_exists::<Instance>(instance_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
@@ -2594,7 +2644,8 @@ mod tests {
                     &opctx,
                     &authz_instance,
                     &lock,
-                    &new_runtime
+                    &new_runtime,
+                    None,
                 )
                 .await
         )
@@ -2608,7 +2659,8 @@ mod tests {
                     &opctx,
                     &authz_instance,
                     &lock,
-                    &new_runtime
+                    &new_runtime,
+                    None,
                 )
                 .await
         )
@@ -2633,7 +2685,8 @@ mod tests {
                         migration_id: Some(Uuid::new_v4()),
                         dst_propolis_id: Some(Uuid::new_v4()),
                         ..new_runtime.clone()
-                    }
+                    },
+                    None,
                 )
                 .await
         )
@@ -2718,6 +2771,7 @@ mod tests {
                         nexus_state: InstanceState::NoVmm,
                         time_last_auto_restarted: None,
                     },
+                    None,
                 )
                 .await
         )

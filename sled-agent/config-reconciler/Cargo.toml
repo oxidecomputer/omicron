@@ -1,0 +1,55 @@
+[package]
+name = "sled-agent-config-reconciler"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+camino.workspace = true
+camino-tempfile.workspace = true
+chrono.workspace = true
+debug-ignore.workspace = true
+derive_more.workspace = true
+dropshot.workspace = true
+either.workspace = true
+futures.workspace = true
+glob.workspace = true
+id-map.workspace = true
+illumos-utils.workspace = true
+key-manager.workspace = true
+nexus-sled-agent-shared.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+serde.workspace = true
+sled-agent-api.workspace = true
+sled-agent-types.workspace = true
+sled-hardware.workspace = true
+sled-storage.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tufaceous-artifact.workspace = true
+zone.workspace = true
+
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+assert_matches.workspace = true
+expectorate.workspace = true
+illumos-utils = { workspace = true, features = ["testing"] }
+omicron-test-utils.workspace = true
+proptest.workspace = true
+scopeguard.workspace = true
+serde_json.workspace = true
+sled-storage = { workspace = true, features = ["testing"] }
+test-strategy.workspace = true
+xshell.workspace = true
+
+[features]
+testing = []

@@ -21,7 +21,6 @@ use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use omicron_common::NoDebug;
 use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
 use omicron_common::api::internal::shared::{
     NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers, SourceNatConfig,
@@ -34,6 +33,7 @@ use omicron_uuid_kinds::{
 };
 use propolis_api_types::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
+use propolis_client::instance_spec::{ComponentV0, SpecKey};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_types::instance::*;
@@ -75,6 +75,9 @@ pub enum Error {
     // TODO: Add more specific errors
     #[error("Failure during migration: {0}")]
     Migration(anyhow::Error),
+
+    #[error("requested NIC {0} has no virtio network backend in Propolis spec")]
+    NicNotInPropolisSpec(Uuid),
 
     #[error(transparent)]
     ZoneCommand(#[from] illumos_utils::running_zone::RunCommandError),
@@ -496,14 +499,14 @@ struct InstanceRunner {
 
     // Properties visible to Propolis
     properties: propolis_client::types::InstanceProperties,
-    vcpus: u8,
-    memory_mib: u64,
 
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: PropolisUuid,
 
     // The socket address of the Propolis server running this instance
     propolis_addr: SocketAddr,
+
+    propolis_spec: VmmSpec,
 
     // NIC-related properties
     vnic_allocator: VnicAllocator<Etherstub>,
@@ -519,11 +522,6 @@ struct InstanceRunner {
     floating_ips: Vec<IpAddr>,
     firewall_rules: Vec<ResolvedVpcFirewallRule>,
     dhcp_config: DhcpCfg,
-
-    // Disk related properties
-    requested_disks: Vec<InstanceDisk>,
-    boot_settings: Option<InstanceBootSettings>,
-    cloud_init_bytes: Option<NoDebug<String>>,
 
     // Internal State management
     state: InstanceStates,
@@ -1031,161 +1029,21 @@ impl InstanceRunner {
         res.map(|_| ())
     }
 
-    /// Sends an instance ensure request to this instance's Propolis,
-    /// constructing its configuration from the fields in `self` that describe
-    /// the instance's virtual hardware configuration.
+    /// Sends an instance ensure request to this instance's Propolis using the
+    /// information contained in this instance's Propolis VM spec.
     async fn send_propolis_instance_ensure(
         &self,
         client: &PropolisClient,
         running_zone: &RunningZone,
         migrate: Option<InstanceMigrationTargetParams>,
     ) -> Result<(), Error> {
-        // A bit of history helps to explain the workings of the rest of this
-        // function.
-        //
-        // In the past, the Propolis API accepted an InstanceEnsureRequest
-        // struct that described a VM's hardware configuration at more or less
-        // the level of specificity used in Nexus's database. Callers passed
-        // this struct irrespective of whether they were starting a brand new VM
-        // migrating from an existing VM in some other Propolis. It was
-        // Propolis's job to convert any insufficiently-specific parameters
-        // passed in its API into the concrete details needed to set up VM
-        // components (e.g., converting device slot numbers into concrete PCI
-        // bus/device/function numbers).
-        //
-        // The Propolis VM creation API used below differs from this scheme in
-        // two important ways:
-        //
-        // 1. Callers are responsible for filling in all the details of a VM's
-        //    configuration (e.g., choosing PCI BDFs for PCI devices).
-        // 2. During a live migration, the migration target inherits most of its
-        //    configuration directly from the migration source. Propolis only
-        //    allows clients to specify new configurations for the specific set
-        //    of components that it expects to be reconfigured over a migration.
-        //    These are described further below.
-        //
-        // This scheme aims to
-        //
-        // 1. prevent bugs where an instance can't migrate because the control
-        //    plane has specified conflicting configurations to the source and
-        //    target, and
-        // 2. maximize the updateability of VM configurations by allowing the
-        //    control plane, which (at least in Nexus) is relatively easy to
-        //    update, to make the rules about how Nexus instance configurations
-        //    are realized in Propolis VMs.
-        //
-        // See propolis#804 for even more context on this API's design.
-        //
-        // A "virtual platform" is a set of rules that describe how to realize a
-        // Propolis VM configuration from a control plane instance description.
-        // The logic below encodes the "Oxide MVP" virtual platform that
-        // Propolis implicitly implemented in its legacy instance-ensure API. In
-        // the future there will be additional virtual platforms that may encode
-        // different rules and configuration options.
-        //
-        // TODO(#615): Eventually this logic should move to a robust virtual
-        // platform library in Nexus.
-
         use propolis_client::{
-            PciPath, SpecKey,
-            types::{
-                BlobStorageBackend, Board, BootOrderEntry, BootSettings,
-                Chipset, ComponentV0, CrucibleStorageBackend,
-                InstanceInitializationMethod, NvmeDisk, QemuPvpanic,
-                ReplacementComponent, SerialPort, SerialPortNumber, VirtioDisk,
-                VirtioNetworkBackend, VirtioNic,
-            },
+            instance_spec::ReplacementComponent,
+            types::InstanceInitializationMethod,
         };
 
-        // Define some local helper structs for unpacking hardware descriptions
-        // into the types Propolis wants to see in its specifications.
-        struct DiskComponents {
-            id: Uuid,
-            device: NvmeDisk,
-            backend: CrucibleStorageBackend,
-        }
-
-        struct NicComponents {
-            id: Uuid,
-            device: VirtioNic,
-            backend: VirtioNetworkBackend,
-        }
-
-        // Assemble the list of NVMe disks associated with this instance.
-        let disks: Vec<DiskComponents> = self
-            .requested_disks
-            .iter()
-            .map(|disk| -> Result<DiskComponents, std::io::Error> {
-                // One of the details Propolis asks clients to fill in is the
-                // serial number for each NVMe disk. It's important that this
-                // number remain stable because it can be written to an
-                // instance's nonvolatile EFI variables, specifically its boot
-                // order variables, which can be undercut if a serial number
-                // changes.
-                //
-                // The old version of the Propolis API generated serial numbers
-                // by taking the control plane disk name and padding it with
-                // zero bytes. Match this behavior here.
-                //
-                // Note that this scheme violates version 1.2.1 of the NVMe
-                // specification: section 1.5 says that string fields like this
-                // one should be left-justified and padded with spaces, not
-                // zeroes. Future versions of this logic may switch to this
-                // behavior.
-                let serial_number =
-                    propolis_client::support::nvme_serial_from_str(
-                        &disk.name, 0,
-                    );
-
-                Ok(DiskComponents {
-                    id: disk.disk_id,
-                    device: NvmeDisk {
-                        backend_id: SpecKey::Uuid(disk.disk_id),
-                        // The old Propolis API added 16 to disk slot numbers to
-                        // get their PCI device numbers.
-                        pci_path: PciPath::new(0, disk.slot + 0x10, 0)?,
-                        serial_number,
-                    },
-                    backend: CrucibleStorageBackend {
-                        readonly: disk.read_only,
-                        request_json: disk.vcr_json.0.clone(),
-                    },
-                })
-            })
-            .collect::<Result<Vec<DiskComponents>, _>>()?;
-
-        // Next, assemble the list of guest NICs.
-        let nics: Vec<NicComponents> = running_zone
-            .opte_ports()
-            .map(|port| -> Result<NicComponents, Error> {
-                let nic = self
-                    .requested_nics
-                    .iter()
-                    // We expect to match NIC slots to OPTE port slots.
-                    // Error out if we can't find a NIC for a port.
-                    .find(|nic| nic.slot == port.slot())
-                    .ok_or(Error::Opte(
-                        illumos_utils::opte::Error::NoNicforPort(
-                            port.name().into(),
-                            port.slot().into(),
-                        ),
-                    ))?;
-
-                Ok(NicComponents {
-                    id: nic.id,
-                    device: VirtioNic {
-                        backend_id: SpecKey::Uuid(nic.id),
-                        interface_id: nic.id,
-                        // The old Propolis API added 8 to NIC slot numbers to
-                        // get their PCI device numbers.
-                        pci_path: PciPath::new(0, nic.slot + 8, 0)?,
-                    },
-                    backend: VirtioNetworkBackend {
-                        vnic_name: port.name().to_string(),
-                    },
-                })
-            })
-            .collect::<Result<Vec<NicComponents>, _>>()?;
+        let mut spec = self.propolis_spec.clone();
+        self.amend_propolis_network_backends(&mut spec, running_zone)?;
 
         // When a VM migrates, the migration target inherits most of its
         // configuration directly from the migration source. The exceptions are
@@ -1226,30 +1084,29 @@ impl InstanceRunner {
 
             // Add the new Crucible backends to the list of source instance spec
             // elements that should be replaced in the target's spec.
-            let mut elements_to_replace: std::collections::HashMap<_, _> =
-                disks
-                    .into_iter()
-                    .map(|disk| {
-                        (
-                            // N.B. This ID must match the one supplied when the
-                            // instance was started.
-                            disk.id.to_string(),
-                            ReplacementComponent::CrucibleStorageBackend(
-                                disk.backend,
-                            ),
-                        )
-                    })
-                    .collect();
+            let mut elements_to_replace: std::collections::HashMap<_, _> = spec
+                .crucible_backends()
+                .map(|(id, backend)| {
+                    (
+                        id.to_string(),
+                        ReplacementComponent::CrucibleStorageBackend(
+                            backend.clone(),
+                        ),
+                    )
+                })
+                .collect();
 
             // Add new OPTE backend configuration to the replacement list.
-            elements_to_replace.extend(nics.into_iter().map(|nic| {
-                (
-                    // N.B. This ID must match the one supplied when the
-                    // instance was started.
-                    nic.id.to_string(),
-                    ReplacementComponent::VirtioNetworkBackend(nic.backend),
-                )
-            }));
+            elements_to_replace.extend(spec.viona_backends().map(
+                |(id, backend)| {
+                    (
+                        id.to_string(),
+                        ReplacementComponent::VirtioNetworkBackend(
+                            backend.clone(),
+                        ),
+                    )
+                },
+            ));
 
             propolis_client::types::InstanceEnsureRequest {
                 properties: self.properties.clone(),
@@ -1260,136 +1117,9 @@ impl InstanceRunner {
                 },
             }
         } else {
-            // This is not a request to migrate, so construct a brand new spec
-            // to send to Propolis.
-            //
-            // Spec components must all have unique names. This routine ensures
-            // that names are unique as follows:
-            //
-            // 1. Backend components corresponding to specific control plane
-            //    objects (e.g. Crucible disks, network interfaces) are
-            //    identified by their control plane record IDs, which are UUIDs.
-            //    (If these UUIDs collide, Nexus has many other problems.)
-            // 2. Devices attached to those backends are identified by a string
-            //    that includes the backend UUID; see `id_to_device_name` below.
-            // 3. Other components that are implicitly added to all VMs are
-            //    assigned unique component names within this function.
-            //
-            // Because *Nexus object names* (which *can* alias) are never used
-            // directly to name spec components, there should never be a
-            // conflict, so this helper asserts that all keys in the component
-            // map are unique.
-            fn add_component(
-                spec: &mut propolis_client::types::InstanceSpecV0,
-                key: String,
-                component: ComponentV0,
-            ) {
-                assert!(spec.components.insert(key, component).is_none());
-            }
-
-            fn id_to_device_name(id: &Uuid) -> String {
-                format!("{id}:device")
-            }
-
-            let mut spec = propolis_client::types::InstanceSpecV0 {
-                board: Board {
-                    chipset: Chipset::default(),
-                    cpus: self.vcpus,
-                    memory_mb: self.memory_mib,
-                    cpuid: None,
-                    guest_hv_interface: None,
-                },
-                components: Default::default(),
-            };
-
-            for (name, num) in [
-                ("com1", SerialPortNumber::Com1),
-                ("com2", SerialPortNumber::Com2),
-                ("com3", SerialPortNumber::Com3),
-                ("com4", SerialPortNumber::Com4),
-            ] {
-                add_component(
-                    &mut spec,
-                    name.to_string(),
-                    ComponentV0::SerialPort(SerialPort { num }),
-                );
-            }
-
-            for DiskComponents { id, device, backend } in disks.into_iter() {
-                add_component(
-                    &mut spec,
-                    id_to_device_name(&id),
-                    ComponentV0::NvmeDisk(device),
-                );
-
-                add_component(
-                    &mut spec,
-                    id.to_string(),
-                    ComponentV0::CrucibleStorageBackend(backend),
-                );
-            }
-
-            for NicComponents { id, device, backend } in nics.into_iter() {
-                add_component(
-                    &mut spec,
-                    id_to_device_name(&id),
-                    ComponentV0::VirtioNic(device),
-                );
-                add_component(
-                    &mut spec,
-                    id.to_string(),
-                    ComponentV0::VirtioNetworkBackend(backend),
-                );
-            }
-
-            add_component(
-                &mut spec,
-                "pvpanic".to_owned(),
-                ComponentV0::QemuPvpanic(QemuPvpanic { enable_isa: true }),
-            );
-
-            if let Some(settings) = &self.boot_settings {
-                // The boot order contains a list of disk IDs. Propolis matches
-                // boot order entries based on device component names, so pass
-                // the ID through `id_to_device_name` when generating the
-                // Propolis boot order.
-                let settings = ComponentV0::BootSettings(BootSettings {
-                    order: settings
-                        .order
-                        .iter()
-                        .map(|id| BootOrderEntry {
-                            id: SpecKey::Name(id_to_device_name(&id)),
-                        })
-                        .collect(),
-                });
-
-                add_component(&mut spec, "boot_settings".to_string(), settings);
-            }
-
-            if let Some(cloud_init) = &self.cloud_init_bytes {
-                let device_name = "cloud-init-dev";
-                let backend_name = "cloud-init-backend";
-
-                // The old Propolis API (and sled-agent's arguments to it)
-                // always attached cloud-init drives at BDF 0.24.0.
-                let device = ComponentV0::VirtioDisk(VirtioDisk {
-                    backend_id: SpecKey::Name(backend_name.to_string()),
-                    pci_path: PciPath::new(0, 0x18, 0).unwrap(),
-                });
-
-                let backend =
-                    ComponentV0::BlobStorageBackend(BlobStorageBackend {
-                        base64: cloud_init.0.clone(),
-                        readonly: true,
-                    });
-
-                add_component(&mut spec, device_name.to_string(), device);
-                add_component(&mut spec, backend_name.to_string(), backend);
-            }
-
             propolis_client::types::InstanceEnsureRequest {
                 properties: self.properties.clone(),
-                init: InstanceInitializationMethod::Spec { spec },
+                init: InstanceInitializationMethod::Spec { spec: spec.0 },
             }
         };
 
@@ -1400,6 +1130,51 @@ impl InstanceRunner {
         Ok(())
     }
 
+    /// Amends the network backend entries in the supplied Propolis VM `spec` so
+    /// that they map to the correct OPTE ports in the supplied `running_zone`.
+    fn amend_propolis_network_backends(
+        &self,
+        spec: &mut VmmSpec,
+        running_zone: &RunningZone,
+    ) -> Result<(), Error> {
+        for port in running_zone.opte_ports() {
+            let nic = self
+                .requested_nics
+                .iter()
+                .find(|nic| nic.slot == port.slot())
+                .ok_or(Error::Opte(
+                    illumos_utils::opte::Error::NoNicforPort(
+                        port.name().into(),
+                        port.slot().into(),
+                    ),
+                ))?;
+
+            // The caller is presumed to have arranged things so that NICs in
+            // the requested NIC list appear with the same IDs in the instance
+            // spec. Bail if this isn't the case.
+            let Some(backend) =
+                spec.0.components.get_mut(&SpecKey::Uuid(nic.id))
+            else {
+                return Err(Error::NicNotInPropolisSpec(nic.id));
+            };
+
+            let ComponentV0::VirtioNetworkBackend(be) = backend else {
+                return Err(Error::NicNotInPropolisSpec(nic.id));
+            };
+
+            be.vnic_name = port.name().to_string();
+        }
+
+        Ok(())
+    }
+
+    /// Given a freshly-created Propolis process, sends an ensure request to
+    /// that Propolis and launches all of the tasks needed to monitor the
+    /// resulting Propolis VM.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this routine is called more than once for a given Instance.
     async fn install_running_state(
         &mut self,
         PropolisSetup { client, running_zone }: PropolisSetup,
@@ -1729,7 +1504,8 @@ pub struct Instance {
 
 #[derive(Debug)]
 pub(crate) struct InstanceInitialState {
-    pub hardware: InstanceHardware,
+    pub vmm_spec: VmmSpec,
+    pub local_config: InstanceSledLocalConfig,
     pub vmm_runtime: VmmRuntimeState,
     pub propolis_addr: SocketAddr,
     /// UUID of the migration in to this VMM, if the VMM is being created as the
@@ -1769,7 +1545,8 @@ impl Instance {
               "state" => ?state);
 
         let InstanceInitialState {
-            hardware,
+            vmm_spec,
+            local_config,
             vmm_runtime,
             propolis_addr,
             migration_id,
@@ -1787,20 +1564,19 @@ impl Instance {
 
         let mut dhcp_config = DhcpCfg {
             hostname: Some(
-                hardware
-                    .properties
+                local_config
                     .hostname
                     .as_str()
                     .parse()
                     .map_err(Error::InvalidHostname)?,
             ),
-            host_domain: hardware
+            host_domain: local_config
                 .dhcp_config
                 .host_domain
                 .map(|domain| domain.parse())
                 .transpose()
                 .map_err(Error::InvalidHostname)?,
-            domain_search_list: hardware
+            domain_search_list: local_config
                 .dhcp_config
                 .search_domains
                 .into_iter()
@@ -1810,7 +1586,7 @@ impl Instance {
             dns4_servers: Vec::new(),
             dns6_servers: Vec::new(),
         };
-        for ip in hardware.dhcp_config.dns_servers {
+        for ip in local_config.dhcp_config.dns_servers {
             match ip {
                 IpAddr::V4(ip) => dhcp_config.dns4_servers.push(ip.into()),
                 IpAddr::V6(ip) => dhcp_config.dns6_servers.push(ip.into()),
@@ -1849,31 +1625,23 @@ impl Instance {
             tx_monitor,
             rx_monitor,
             monitor_handle: None,
-            // NOTE: Mostly lies.
             properties: propolis_client::types::InstanceProperties {
                 id: id.into_untyped_uuid(),
-                name: hardware.properties.hostname.to_string(),
-                description: "Test description".to_string(),
+                name: local_config.hostname.to_string(),
+                description: "Omicron-managed VM".to_string(),
                 metadata,
             },
-            // TODO: we should probably make propolis aligned with
-            // InstanceCpuCount here, to avoid any casting...
-            vcpus: hardware.properties.ncpus.0 as u8,
-            // TODO: Align the byte type w/propolis.
-            memory_mib: hardware.properties.memory.to_whole_mebibytes(),
+            propolis_spec: vmm_spec,
             propolis_id,
             propolis_addr,
             vnic_allocator,
             port_manager,
-            requested_nics: hardware.nics,
-            source_nat: hardware.source_nat,
-            ephemeral_ip: hardware.ephemeral_ip,
-            floating_ips: hardware.floating_ips,
-            firewall_rules: hardware.firewall_rules,
+            requested_nics: local_config.nics,
+            source_nat: local_config.source_nat,
+            ephemeral_ip: local_config.ephemeral_ip,
+            floating_ips: local_config.floating_ips,
+            firewall_rules: local_config.firewall_rules,
             dhcp_config,
-            requested_disks: hardware.disks,
-            cloud_init_bytes: hardware.cloud_init_bytes,
-            boot_settings: hardware.boot_settings,
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,
@@ -2015,7 +1783,7 @@ impl InstanceRunner {
             return None;
         };
         match run_state.running_zone.root_zpool() {
-            ZpoolOrRamdisk::Zpool(zpool_name) => Some(zpool_name.clone()),
+            ZpoolOrRamdisk::Zpool(zpool_name) => Some(*zpool_name),
             ZpoolOrRamdisk::Ramdisk => None,
         }
     }
@@ -2504,10 +2272,8 @@ mod tests {
     use dropshot::HttpServer;
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
-    use omicron_common::api::external::{
-        ByteCount, Generation, Hostname, InstanceCpuCount,
-    };
-    use omicron_common::api::internal::nexus::{InstanceProperties, VmmState};
+    use omicron_common::api::external::{Generation, Hostname};
+    use omicron_common::api::internal::nexus::VmmState;
     use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
@@ -2662,7 +2428,7 @@ mod tests {
         propolis_addr: SocketAddr,
         nexus_client: NexusClient,
         storage_handle: StorageHandle,
-        temp_dir: &String,
+        temp_dir: &str,
     ) -> (Instance, MetricsRx) {
         let id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
@@ -2676,7 +2442,8 @@ mod tests {
             storage_handle,
             nexus_client,
             temp_dir,
-        );
+        )
+        .await;
 
         let metadata = InstanceMetadata {
             silo_id: Uuid::new_v4(),
@@ -2707,12 +2474,20 @@ mod tests {
     fn fake_instance_initial_state(
         propolis_addr: SocketAddr,
     ) -> InstanceInitialState {
-        let hardware = InstanceHardware {
-            properties: InstanceProperties {
-                ncpus: InstanceCpuCount(1),
-                memory: ByteCount::from_gibibytes_u32(1),
-                hostname: Hostname::from_str("bert").unwrap(),
+        use propolis_client::instance_spec::{Board, InstanceSpecV0};
+        let spec = VmmSpec(InstanceSpecV0 {
+            board: Board {
+                cpus: 1,
+                memory_mb: 1024,
+                chipset: Default::default(),
+                guest_hv_interface: Default::default(),
+                cpuid: None,
             },
+            components: Default::default(),
+        });
+
+        let local_config = InstanceSledLocalConfig {
+            hostname: Hostname::from_str("bert").unwrap(),
             nics: vec![],
             source_nat: SourceNatConfig::new(
                 IpAddr::V6(Ipv6Addr::UNSPECIFIED),
@@ -2728,13 +2503,11 @@ mod tests {
                 host_domain: None,
                 search_domains: vec![],
             },
-            disks: vec![],
-            boot_settings: None,
-            cloud_init_bytes: None,
         };
 
         InstanceInitialState {
-            hardware,
+            vmm_spec: spec,
+            local_config,
             vmm_runtime: VmmRuntimeState {
                 state: VmmState::Starting,
                 gen: Generation::new(),
@@ -2748,11 +2521,11 @@ mod tests {
     // Helper alias for the receive-side of the metrics request queue.
     type MetricsRx = mpsc::Receiver<metrics::Message>;
 
-    fn fake_instance_manager_services(
+    async fn fake_instance_manager_services(
         log: &Logger,
         storage_handle: StorageHandle,
         nexus_client: NexusClient,
-        temp_dir: &String,
+        temp_dir: &str,
     ) -> (InstanceManagerServices, MetricsRx) {
         let vnic_allocator = VnicAllocator::new(
             "Instance",
@@ -2769,7 +2542,8 @@ mod tests {
             log.new(o!("component" => "ZoneBundler")),
             storage_handle.clone(),
             cleanup_context,
-        );
+        )
+        .await;
 
         let (metrics_queue, rx) = MetricsRequestQueue::for_test();
         let services = InstanceManagerServices {
@@ -2807,8 +2581,9 @@ mod tests {
                 log,
                 storage_harness.handle().clone(),
                 nexus.nexus_client.clone(),
-                &temp_guard.path().to_string(),
-            );
+                temp_guard.path().as_str(),
+            )
+            .await;
 
             let InstanceManagerServices {
                 nexus_client,
@@ -2871,7 +2646,6 @@ mod tests {
         let storage_handle = storage_harness.handle().clone();
 
         let temp_guard = Utf8TempDir::new().unwrap();
-        let temp_dir = temp_guard.path().to_string();
 
         let (inst, mut metrics_rx) = timeout(
             TIMEOUT_DURATION,
@@ -2880,7 +2654,7 @@ mod tests {
                 propolis_addr,
                 nexus_client,
                 storage_handle,
-                &temp_dir,
+                temp_guard.path().as_str(),
             ),
         )
         .await
@@ -2957,7 +2731,6 @@ mod tests {
         let storage_handle = storage_harness.handle().clone();
 
         let temp_guard = Utf8TempDir::new().unwrap();
-        let temp_dir = temp_guard.path().to_string();
 
         let (inst, _) = timeout(
             TIMEOUT_DURATION,
@@ -2967,7 +2740,7 @@ mod tests {
                 SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
                 nexus_client,
                 storage_handle,
-                &temp_dir,
+                temp_guard.path().as_str(),
             ),
         )
         .await
@@ -3022,7 +2795,8 @@ mod tests {
         let instance_id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
         let InstanceInitialState {
-            hardware,
+            vmm_spec,
+            local_config,
             vmm_runtime,
             propolis_addr,
             migration_id: _,
@@ -3045,9 +2819,10 @@ mod tests {
             .ensure_registered(
                 propolis_id,
                 InstanceEnsureBody {
+                    vmm_spec,
+                    local_config,
                     instance_id,
                     migration_id: None,
-                    hardware,
                     vmm_runtime,
                     propolis_addr,
                     metadata,
@@ -3124,7 +2899,8 @@ mod tests {
         let instance_id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
         let InstanceInitialState {
-            hardware,
+            vmm_spec,
+            local_config,
             vmm_runtime,
             propolis_addr,
             migration_id: _,
@@ -3147,9 +2923,10 @@ mod tests {
             .ensure_registered(
                 propolis_id,
                 InstanceEnsureBody {
+                    vmm_spec,
+                    local_config,
                     instance_id,
                     migration_id: None,
-                    hardware,
                     vmm_runtime,
                     propolis_addr,
                     metadata,
@@ -3279,7 +3056,8 @@ mod tests {
             };
 
             let InstanceInitialState {
-                hardware,
+                vmm_spec,
+                local_config,
                 vmm_runtime,
                 propolis_addr,
                 migration_id,
@@ -3310,21 +3088,17 @@ mod tests {
                     description: "test instance".to_string(),
                     metadata,
                 },
-                vcpus: 1,
-                memory_mib: 1024,
+                propolis_spec: vmm_spec,
                 propolis_id,
                 propolis_addr,
                 vnic_allocator,
                 port_manager,
-                requested_nics: hardware.nics,
-                source_nat: hardware.source_nat,
-                ephemeral_ip: hardware.ephemeral_ip,
-                floating_ips: hardware.floating_ips,
-                firewall_rules: hardware.firewall_rules,
+                requested_nics: local_config.nics,
+                source_nat: local_config.source_nat,
+                ephemeral_ip: local_config.ephemeral_ip,
+                floating_ips: local_config.floating_ips,
+                firewall_rules: local_config.firewall_rules,
                 dhcp_config,
-                requested_disks: hardware.disks,
-                cloud_init_bytes: hardware.cloud_init_bytes,
-                boot_settings: hardware.boot_settings,
                 state: InstanceStates::new(vmm_runtime, migration_id),
                 running_state: None,
                 nexus_client,
@@ -3369,8 +3143,9 @@ mod tests {
                 &log,
                 storage_harness.handle().clone(),
                 nexus_client,
-                &temp_guard.path().to_string(),
-            );
+                temp_guard.path().as_str(),
+            )
+            .await;
             let propolis_id = PropolisUuid::new_v4();
             let propolis_addr = SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::new(127, 0, 0, 1),

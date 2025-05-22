@@ -23,5 +23,6 @@ reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sled-agent-types.workspace = true
 slog.workspace = true
 uuid.workspace = true

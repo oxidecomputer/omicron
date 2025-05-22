@@ -46,8 +46,8 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
     BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, ExternalIpUuid,
-    GenericUuid, OmicronZoneKind, OmicronZoneUuid, PhysicalDiskKind, SledKind,
-    SledUuid, ZpoolKind, ZpoolUuid,
+    GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
+    PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
 use std::net::{IpAddr, SocketAddrV6};
 use uuid::Uuid;
@@ -144,6 +144,7 @@ pub struct BpSledMetadata {
     pub sled_id: DbTypedUuid<SledKind>,
     pub sled_state: SledState,
     pub sled_agent_generation: Generation,
+    pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
 }
 
 impl_enum_type!(

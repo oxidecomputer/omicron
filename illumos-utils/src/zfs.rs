@@ -4,7 +4,7 @@
 
 //! Utilities for poking at ZFS.
 
-use crate::{PFEXEC, execute};
+use crate::{PFEXEC, execute_async};
 use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -18,6 +18,8 @@ use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use std::collections::BTreeMap;
 use std::fmt;
+
+use tokio::process::Command;
 
 // These locations in the ramdisk must only be used by the switch zone.
 //
@@ -58,9 +60,9 @@ pub enum DestroyDatasetErrorVariant {
 
 /// Error returned by [`Zfs::destroy_dataset`].
 #[derive(thiserror::Error, Debug)]
-#[error("Could not destroy dataset {name}: {err}")]
+#[error("Could not destroy dataset {name}")]
 pub struct DestroyDatasetError {
-    name: String,
+    pub name: String,
     #[source]
     pub err: DestroyDatasetErrorVariant,
 }
@@ -282,7 +284,7 @@ pub struct SizeDetails {
     pub compression: CompressionAlgorithm,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DatasetProperties {
     /// The Uuid of the dataset
     pub id: Option<DatasetUuid>,
@@ -596,7 +598,7 @@ pub struct DatasetEnsureArgs<'a> {
 //
 // If this function is called on a mountwhich which is already mounted, an error
 // is returned.
-fn ensure_empty_immutable_mountpoint(
+async fn ensure_empty_immutable_mountpoint(
     mountpoint: &Utf8Path,
 ) -> Result<(), MountpointError> {
     if mountpoint
@@ -605,7 +607,7 @@ fn ensure_empty_immutable_mountpoint(
     {
         // If the mountpoint exists, confirm nothing is already mounted
         // on it.
-        let mut command = std::process::Command::new(ZFS);
+        let mut command = Command::new(ZFS);
         let cmd = command.args(&[
             "get",
             "-Hpo",
@@ -613,8 +615,9 @@ fn ensure_empty_immutable_mountpoint(
             "mountpoint",
             mountpoint.as_str(),
         ]);
-        let output =
-            execute(cmd).map_err(|err| MountpointError::CheckMounted(err))?;
+        let output = execute_async(cmd)
+            .await
+            .map_err(|err| MountpointError::CheckMounted(err))?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let Some(dir_mountpoint) = stdout.trim().lines().next() else {
             return Err(MountpointError::CheckMountedParse(stdout.to_string()));
@@ -651,7 +654,7 @@ fn ensure_empty_immutable_mountpoint(
     //
     // - If necessary, we make the directory mutable, and try to clear it out.
     // - We then re-set the directory to immutable.
-    let immutablity = is_directory_immutable(mountpoint)?;
+    let immutablity = is_directory_immutable(mountpoint).await?;
     if is_directory_empty(mountpoint)?
         && immutablity.as_immutable_as_filesystem_allows()
     {
@@ -659,11 +662,11 @@ fn ensure_empty_immutable_mountpoint(
     }
 
     if immutablity.can_set_immutable() {
-        make_directory_mutable(mountpoint)?;
+        make_directory_mutable(mountpoint).await?;
     }
     ensure_mountpoint_empty(mountpoint)?;
     if immutablity.can_set_immutable() {
-        make_directory_immutable(mountpoint)?;
+        make_directory_immutable(mountpoint).await?;
     }
 
     // This concurrent error case is a bit exceptional: we briefly made the
@@ -723,17 +726,25 @@ fn ensure_mountpoint_empty(path: &Utf8Path) -> Result<(), MountpointError> {
     Ok(())
 }
 
-fn make_directory_immutable(path: &Utf8Path) -> Result<(), MountpointError> {
-    let mut command = std::process::Command::new(PFEXEC);
+async fn make_directory_immutable(
+    path: &Utf8Path,
+) -> Result<(), MountpointError> {
+    let mut command = Command::new(PFEXEC);
     let cmd = command.args(&["chmod", "S+ci", path.as_str()]);
-    execute(cmd).map_err(|err| MountpointError::MakeImmutable(err))?;
+    execute_async(cmd)
+        .await
+        .map_err(|err| MountpointError::MakeImmutable(err))?;
     Ok(())
 }
 
-fn make_directory_mutable(path: &Utf8Path) -> Result<(), MountpointError> {
-    let mut command = std::process::Command::new(PFEXEC);
+async fn make_directory_mutable(
+    path: &Utf8Path,
+) -> Result<(), MountpointError> {
+    let mut command = Command::new(PFEXEC);
     let cmd = command.args(&["chmod", "S-ci", path.as_str()]);
-    execute(cmd).map_err(|err| MountpointError::MakeMutable(err))?;
+    execute_async(cmd)
+        .await
+        .map_err(|err| MountpointError::MakeMutable(err))?;
     Ok(())
 }
 
@@ -762,13 +773,14 @@ impl Immutability {
     }
 }
 
-fn is_directory_immutable(
+async fn is_directory_immutable(
     path: &Utf8Path,
 ) -> Result<Immutability, MountpointError> {
-    let mut command = std::process::Command::new(PFEXEC);
+    let mut command = Command::new(PFEXEC);
     let cmd = command.args(&["ls", "-d/v", path.as_str()]);
-    let output =
-        execute(cmd).map_err(|err| MountpointError::MakeImmutable(err))?;
+    let output = execute_async(cmd)
+        .await
+        .map_err(|err| MountpointError::MakeImmutable(err))?;
 
     // NOTE: Experimenting with "truss ls -d/v" shows that it seems to be using
     // the https://illumos.org/man/2/acl API, but we will need to likely bring
@@ -821,11 +833,14 @@ impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     ///
     /// Strips the input `name` from the output dataset names.
-    pub fn list_datasets(name: &str) -> Result<Vec<String>, ListDatasetsError> {
-        let mut command = std::process::Command::new(ZFS);
+    pub async fn list_datasets(
+        name: &str,
+    ) -> Result<Vec<String>, ListDatasetsError> {
+        let mut command = Command::new(ZFS);
         let cmd = command.args(&["list", "-d", "1", "-rHpo", "name", name]);
 
-        let output = execute(cmd)
+        let output = execute_async(cmd)
+            .await
             .map_err(|err| ListDatasetsError { name: name.to_string(), err })?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let filesystems: Vec<String> = stdout
@@ -848,11 +863,11 @@ impl Zfs {
     /// substantial results about the datasets found.
     ///
     /// Sorts results and de-duplicates them by name.
-    pub fn get_dataset_properties(
+    pub async fn get_dataset_properties(
         datasets: &[String],
         which: WhichDatasets,
     ) -> Result<Vec<DatasetProperties>, anyhow::Error> {
-        let mut command = std::process::Command::new(ZFS);
+        let mut command = Command::new(ZFS);
         let cmd = command.arg("get");
 
         // Restrict to just filesystems and volumes to be consistent with
@@ -879,7 +894,7 @@ impl Zfs {
         //
         // If one or more dataset doesn't exist, we can still read stdout to
         // see about the ones that do exist.
-        let output = cmd.output().map_err(|err| {
+        let output = cmd.output().await.map_err(|err| {
             anyhow!(
                 "Failed to get dataset properties for {datasets:?}: {err:?}"
             )
@@ -893,10 +908,13 @@ impl Zfs {
     ///
     /// The object can either be a dataset name, or a path, in which case it
     /// will be resolved to the _mounted_ ZFS dataset containing that path.
-    pub fn get_dataset_name(object: &str) -> Result<String, ListDatasetsError> {
-        let mut command = std::process::Command::new(ZFS);
+    pub async fn get_dataset_name(
+        object: &str,
+    ) -> Result<String, ListDatasetsError> {
+        let mut command = Command::new(ZFS);
         let cmd = command.args(&["get", "-Hpo", "value", "name", object]);
-        execute(cmd)
+        execute_async(cmd)
+            .await
             .map(|output| {
                 String::from_utf8_lossy(&output.stdout).trim().to_string()
             })
@@ -904,10 +922,12 @@ impl Zfs {
     }
 
     /// Destroys a dataset.
-    pub fn destroy_dataset(name: &str) -> Result<(), DestroyDatasetError> {
-        let mut command = std::process::Command::new(PFEXEC);
+    pub async fn destroy_dataset(
+        name: &str,
+    ) -> Result<(), DestroyDatasetError> {
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "destroy", "-r", name]);
-        execute(cmd).map_err(|err| {
+        execute_async(cmd).await.map_err(|err| {
             let variant = match err {
                 crate::ExecutionError::CommandFailure(info)
                     if info.stderr.contains("does not exist") =>
@@ -924,59 +944,58 @@ impl Zfs {
     /// Ensures that a ZFS dataset is mounted
     ///
     /// Returns an error if the dataset exists, but cannot be mounted.
-    pub fn ensure_dataset_mounted_and_exists(
+    pub async fn ensure_dataset_mounted_and_exists(
         name: &str,
         mountpoint: &Mountpoint,
     ) -> Result<(), EnsureDatasetError> {
         Self::ensure_dataset_mounted_and_exists_inner(name, mountpoint)
-            .map_err(|err| EnsureDatasetError {
-                name: name.to_string(),
-                err,
-            })?;
+            .await
+            .map_err(|err| EnsureDatasetError { name: name.to_string(), err })?;
         Ok(())
     }
 
-    fn ensure_dataset_mounted_and_exists_inner(
+    async fn ensure_dataset_mounted_and_exists_inner(
         name: &str,
         mountpoint: &Mountpoint,
     ) -> Result<(), EnsureDatasetErrorRaw> {
-        let mount_info = Self::dataset_exists(name, mountpoint)?;
+        let mount_info = Self::dataset_exists(name, mountpoint).await?;
         if !mount_info.exists {
             return Err(EnsureDatasetErrorRaw::DoesNotExist);
         }
 
         if !mount_info.mounted {
-            Self::ensure_dataset_mounted(name, mountpoint)?;
+            Self::ensure_dataset_mounted(name, mountpoint).await?;
         }
         return Ok(());
     }
 
-    fn ensure_dataset_mounted(
+    async fn ensure_dataset_mounted(
         name: &str,
         mountpoint: &Mountpoint,
     ) -> Result<(), EnsureDatasetErrorRaw> {
-        ensure_empty_immutable_mountpoint(&mountpoint.0).map_err(|err| {
-            EnsureDatasetErrorRaw::MountpointCreation {
+        ensure_empty_immutable_mountpoint(&mountpoint.0).await.map_err(
+            |err| EnsureDatasetErrorRaw::MountpointCreation {
                 mountpoint: mountpoint.0.to_path_buf(),
                 err,
-            }
-        })?;
-        Self::mount_dataset(name)?;
+            },
+        )?;
+        Self::mount_dataset(name).await?;
         Ok(())
     }
 
     /// Creates a new ZFS dataset unless one already exists.
     ///
     /// Refer to [DatasetEnsureArgs] for details on the supplied arguments.
-    pub fn ensure_dataset(
-        args: DatasetEnsureArgs,
+    pub async fn ensure_dataset(
+        args: DatasetEnsureArgs<'_>,
     ) -> Result<(), EnsureDatasetError> {
         let name = args.name.to_string();
         Self::ensure_dataset_inner(args)
+            .await
             .map_err(|err| EnsureDatasetError { name, err })
     }
 
-    fn ensure_dataset_inner(
+    async fn ensure_dataset_inner(
         DatasetEnsureArgs {
             name,
             mountpoint,
@@ -986,9 +1005,9 @@ impl Zfs {
             size_details,
             id,
             additional_options,
-        }: DatasetEnsureArgs,
+        }: DatasetEnsureArgs<'_>,
     ) -> Result<(), EnsureDatasetErrorRaw> {
-        let dataset_info = Self::dataset_exists(name, &mountpoint)?;
+        let dataset_info = Self::dataset_exists(name, &mountpoint).await?;
 
         // Non-zoned datasets with an explicit mountpoint and the
         // "canmount=on" property should be mounted within the global zone.
@@ -1004,10 +1023,11 @@ impl Zfs {
             // have changed, and ensure it has been mounted if it needs
             // to be mounted.
             Self::set_values(name, props.as_slice())
+                .await
                 .map_err(|err| EnsureDatasetErrorRaw::from(err.err))?;
 
             if wants_mounting {
-                Self::ensure_dataset_mounted(name, &mountpoint)?;
+                Self::ensure_dataset_mounted(name, &mountpoint).await?;
             }
 
             return Ok(());
@@ -1019,7 +1039,7 @@ impl Zfs {
         // creating the dataset itself, which will also mount it.
         if wants_mounting {
             let path = &mountpoint.0;
-            ensure_empty_immutable_mountpoint(&path).map_err(|err| {
+            ensure_empty_immutable_mountpoint(&path).await.map_err(|err| {
                 EnsureDatasetErrorRaw::MountpointCreation {
                     mountpoint: path.to_path_buf(),
                     err,
@@ -1027,7 +1047,7 @@ impl Zfs {
             })?;
         }
 
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "create"]);
         if zoned {
             cmd.args(&["-o", "zoned=on"]);
@@ -1061,37 +1081,45 @@ impl Zfs {
 
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
 
-        execute(cmd).map_err(|err| EnsureDatasetErrorRaw::from(err))?;
+        execute_async(cmd)
+            .await
+            .map_err(|err| EnsureDatasetErrorRaw::from(err))?;
 
         // We ensure that the currently running process has the ability to
         // act on the underlying mountpoint.
         if !zoned {
-            let mut command = std::process::Command::new(PFEXEC);
+            let mut command = Command::new(PFEXEC);
             let user = whoami::username();
             let mount = format!("{mountpoint}");
             let cmd = command.args(["chown", "-R", &user, &mount]);
-            execute(cmd).map_err(|err| EnsureDatasetErrorRaw::from(err))?;
+            execute_async(cmd)
+                .await
+                .map_err(|err| EnsureDatasetErrorRaw::from(err))?;
         }
 
         Self::set_values(name, props.as_slice())
+            .await
             .map_err(|err| EnsureDatasetErrorRaw::from(err.err))?;
 
         Ok(())
     }
 
     // Mounts a dataset, loading keys if necessary.
-    fn mount_dataset(name: &str) -> Result<(), EnsureDatasetErrorRaw> {
-        let mut command = std::process::Command::new(PFEXEC);
+    async fn mount_dataset(name: &str) -> Result<(), EnsureDatasetErrorRaw> {
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-l", name]);
-        execute(cmd)
+        execute_async(cmd)
+            .await
             .map_err(|err| EnsureDatasetErrorRaw::MountFsFailed(err))?;
         Ok(())
     }
 
-    pub fn mount_overlay_dataset(name: &str) -> Result<(), EnsureDatasetError> {
-        let mut command = std::process::Command::new(PFEXEC);
+    pub async fn mount_overlay_dataset(
+        name: &str,
+    ) -> Result<(), EnsureDatasetError> {
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-O", name]);
-        execute(cmd).map_err(|err| EnsureDatasetError {
+        execute_async(cmd).await.map_err(|err| EnsureDatasetError {
             name: name.to_string(),
             err: EnsureDatasetErrorRaw::MountOverlayFsFailed(err),
         })?;
@@ -1100,11 +1128,11 @@ impl Zfs {
 
     // Return (true, mounted) if the dataset exists, (false, false) otherwise,
     // where mounted is if the dataset is mounted.
-    fn dataset_exists(
+    async fn dataset_exists(
         name: &str,
         mountpoint: &Mountpoint,
     ) -> Result<DatasetMountInfo, EnsureDatasetErrorRaw> {
-        let mut command = std::process::Command::new(ZFS);
+        let mut command = Command::new(ZFS);
         let cmd = command.args(&[
             "list",
             "-Hpo",
@@ -1112,7 +1140,7 @@ impl Zfs {
             name,
         ]);
         // If the list command returns any valid output, validate it.
-        if let Ok(output) = execute(cmd) {
+        if let Ok(output) = execute_async(cmd).await {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let values: Vec<&str> = stdout.trim().split('\t').collect();
             if &values[..3] != &[name, "filesystem", &mountpoint.to_string()] {
@@ -1126,23 +1154,23 @@ impl Zfs {
     }
 
     /// Set the value of an Oxide-managed ZFS property.
-    pub fn set_oxide_value(
+    pub async fn set_oxide_value(
         filesystem_name: &str,
         name: &str,
         value: &str,
     ) -> Result<(), SetValueError> {
-        Zfs::set_value(filesystem_name, &format!("oxide:{}", name), value)
+        Zfs::set_value(filesystem_name, &format!("oxide:{}", name), value).await
     }
 
-    fn set_value(
+    async fn set_value(
         filesystem_name: &str,
         name: &str,
         value: &str,
     ) -> Result<(), SetValueError> {
-        Self::set_values(filesystem_name, &[(name, value)])
+        Self::set_values(filesystem_name, &[(name, value)]).await
     }
 
-    fn set_values<K: std::fmt::Display, V: std::fmt::Display>(
+    async fn set_values<K: std::fmt::Display, V: std::fmt::Display>(
         filesystem_name: &str,
         name_values: &[(K, V)],
     ) -> Result<(), SetValueError> {
@@ -1150,13 +1178,13 @@ impl Zfs {
             return Ok(());
         }
 
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "set"]);
         for (name, value) in name_values {
             cmd.arg(format!("{name}={value}"));
         }
         cmd.arg(filesystem_name);
-        execute(cmd).map_err(|err| SetValueError {
+        execute_async(cmd).await.map_err(|err| SetValueError {
             filesystem: filesystem_name.to_string(),
             values: name_values
                 .iter()
@@ -1168,7 +1196,7 @@ impl Zfs {
     }
 
     /// Get the value of an Oxide-managed ZFS property.
-    pub fn get_oxide_value(
+    pub async fn get_oxide_value(
         filesystem_name: &str,
         name: &str,
     ) -> Result<String, GetValueError> {
@@ -1177,24 +1205,26 @@ impl Zfs {
             filesystem_name,
             &[&property],
             Some(PropertySource::Local),
-        )?;
+        )
+        .await?;
         Ok(value)
     }
 
     /// Calls "zfs get" with a single value
-    pub fn get_value(
+    pub async fn get_value(
         filesystem_name: &str,
         name: &str,
     ) -> Result<String, GetValueError> {
-        let [value] = Self::get_values(filesystem_name, &[name], None)?;
+        let [value] = Self::get_values(filesystem_name, &[name], None).await?;
         Ok(value)
     }
 
     /// List all extant snapshots.
-    pub fn list_snapshots() -> Result<Vec<Snapshot>, ListSnapshotsError> {
-        let mut command = std::process::Command::new(ZFS);
+    pub async fn list_snapshots() -> Result<Vec<Snapshot>, ListSnapshotsError> {
+        let mut command = Command::new(ZFS);
         let cmd = command.args(&["list", "-H", "-o", "name", "-t", "snapshot"]);
-        execute(cmd)
+        execute_async(cmd)
+            .await
             .map(|output| {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 stdout
@@ -1217,36 +1247,40 @@ impl Zfs {
     ///
     /// A list of properties, as name-value tuples, may be passed to this
     /// method, for creating properties directly on the snapshots.
-    pub fn create_snapshot<'a>(
+    pub async fn create_snapshot<'a>(
         filesystem: &'a str,
         snap_name: &'a str,
         properties: &'a [(&'a str, &'a str)],
     ) -> Result<(), CreateSnapshotError> {
-        let mut command = std::process::Command::new(ZFS);
-        let mut cmd = command.arg("snapshot");
+        let mut command = Command::new(PFEXEC);
+        let mut cmd = command.args([ZFS, "snapshot"]);
         for (name, value) in properties.iter() {
             cmd = cmd.arg("-o").arg(&format!("{name}={value}"));
         }
         cmd.arg(&format!("{filesystem}@{snap_name}"));
-        execute(cmd).map(|_| ()).map_err(|err| CreateSnapshotError {
-            filesystem: filesystem.to_string(),
-            snap_name: snap_name.to_string(),
-            err,
+        execute_async(cmd).await.map(|_| ()).map_err(|err| {
+            CreateSnapshotError {
+                filesystem: filesystem.to_string(),
+                snap_name: snap_name.to_string(),
+                err,
+            }
         })
     }
 
     /// Destroy a named snapshot of a filesystem.
-    pub fn destroy_snapshot(
+    pub async fn destroy_snapshot(
         filesystem: &str,
         snap_name: &str,
     ) -> Result<(), DestroySnapshotError> {
-        let mut command = std::process::Command::new(ZFS);
+        let mut command = Command::new(PFEXEC);
         let path = format!("{filesystem}@{snap_name}");
-        let cmd = command.args(&["destroy", &path]);
-        execute(cmd).map(|_| ()).map_err(|err| DestroySnapshotError {
-            filesystem: filesystem.to_string(),
-            snap_name: snap_name.to_string(),
-            err,
+        let cmd = command.args(&[ZFS, "destroy", &path]);
+        execute_async(cmd).await.map(|_| ()).map_err(|err| {
+            DestroySnapshotError {
+                filesystem: filesystem.to_string(),
+                snap_name: snap_name.to_string(),
+                err,
+            }
         })
     }
 
@@ -1255,12 +1289,12 @@ impl Zfs {
     /// - `names`: The properties being acquired
     /// - `source`: The optioanl property source (origin of the property)
     /// Defaults to "all sources" when unspecified.
-    pub fn get_values<const N: usize>(
+    pub async fn get_values<const N: usize>(
         filesystem_name: &str,
         names: &[&str; N],
         source: Option<PropertySource>,
     ) -> Result<[String; N], GetValueError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+        let mut cmd = Command::new(PFEXEC);
         let all_names = names
             .into_iter()
             .map(|n| match *n {
@@ -1280,11 +1314,12 @@ impl Zfs {
         }
         cmd.arg(&all_names);
         cmd.arg(filesystem_name);
-        let output = execute(&mut cmd).map_err(|err| GetValueError {
-            filesystem: filesystem_name.to_string(),
-            name: format!("{:?}", names),
-            err: err.into(),
-        })?;
+        let output =
+            execute_async(&mut cmd).await.map_err(|err| GetValueError {
+                filesystem: filesystem_name.to_string(),
+                name: format!("{:?}", names),
+                err: err.into(),
+            })?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let values = stdout.trim();
 
@@ -1315,8 +1350,19 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Return the full path to the snapshot directory within the filesystem.
-    pub fn full_path(&self) -> Result<Utf8PathBuf, GetValueError> {
-        let mountpoint = Zfs::get_value(&self.filesystem, "mountpoint")?;
+    ///
+    /// NB: Be careful when calling this method as it may return a `Utf8PathBuf`
+    /// that does not actually map to a real filesystem path. On helios systems
+    /// `rpool/ROOT/<BE>` for example will will return
+    /// "legacy/.zfs/snapshot/<SNAP_NAME>" because the mountpoint of the dataset
+    /// is a "legacy" mount. Additionally a fileystem with no mountpoint will
+    /// have a zfs mountpoint property of "-".
+    pub async fn full_path(&self) -> Result<Utf8PathBuf, GetValueError> {
+        // TODO (omicron#8023):
+        // When a mountpoint is returned as "legacy" we could go fish around in
+        // "/etc/mnttab". That would probably mean making this function return a
+        // result of an option.
+        let mountpoint = Zfs::get_value(&self.filesystem, "mountpoint").await?;
         Ok(Utf8PathBuf::from(mountpoint)
             .join(format!(".zfs/snapshot/{}", self.snap_name)))
     }
@@ -1329,18 +1375,19 @@ impl fmt::Display for Snapshot {
 }
 
 /// Returns all datasets managed by Omicron
-pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
+pub async fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>>
+{
     let mut datasets = vec![];
 
     // Collect all datasets within Oxide zpools.
     //
     // This includes cockroachdb, clickhouse, and crucible datasets.
-    let zpools = crate::zpool::Zpool::list()?;
+    let zpools = crate::zpool::Zpool::list().await?;
     for pool in &zpools {
         let internal =
             pool.kind() == omicron_common::zpool_name::ZpoolKind::Internal;
         let pool = pool.to_string();
-        for dataset in &Zfs::list_datasets(&pool)? {
+        for dataset in &Zfs::list_datasets(&pool).await? {
             // Avoid erasing crashdump, backing data and swap datasets on
             // internal pools. The swap device may be in use.
             if internal
@@ -1355,7 +1402,8 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
     }
 
     // Collect all datasets for ramdisk-based Oxide zones, if any exist.
-    if let Ok(ramdisk_datasets) = Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)
+    if let Ok(ramdisk_datasets) =
+        Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET).await
     {
         for dataset in &ramdisk_datasets {
             datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
@@ -1370,25 +1418,25 @@ mod test {
     use super::*;
 
     #[cfg(target_os = "illumos")]
-    #[test]
-    fn directory_mutability() {
+    #[tokio::test]
+    async fn directory_mutability() {
         let dir = Utf8TempDir::new_in("/var/tmp").unwrap();
-        let immutablity = is_directory_immutable(dir.path()).unwrap();
+        let immutablity = is_directory_immutable(dir.path()).await.unwrap();
         assert!(
             matches!(immutablity, Immutability::No),
             "new directory should be mutable, is: {:?}",
             immutablity
         );
 
-        make_directory_immutable(dir.path()).unwrap();
-        let immutablity = is_directory_immutable(dir.path()).unwrap();
+        make_directory_immutable(dir.path()).await.unwrap();
+        let immutablity = is_directory_immutable(dir.path()).await.unwrap();
         assert!(
             matches!(immutablity, Immutability::Yes),
             "directory should be immutable"
         );
 
-        make_directory_mutable(dir.path()).unwrap();
-        let immutablity = is_directory_immutable(dir.path()).unwrap();
+        make_directory_mutable(dir.path()).await.unwrap();
+        let immutablity = is_directory_immutable(dir.path()).await.unwrap();
         assert!(
             matches!(immutablity, Immutability::No),
             "directory should be mutable"
@@ -1400,10 +1448,11 @@ mod test {
     // To minimize test setup, we rely on a zfs dataset named "rpool" existing,
     // but do not modify it within this test.
     #[cfg(target_os = "illumos")]
-    #[test]
-    fn get_values_of_rpool() {
+    #[tokio::test]
+    async fn get_values_of_rpool() {
         // If the rpool exists, it should have a name.
         let values = Zfs::get_values("rpool", &["name"; 1], None)
+            .await
             .expect("Failed to query rpool type");
         assert_eq!(values[0], "rpool");
 
@@ -1411,12 +1460,14 @@ mod test {
         // want this to throw an error.
         let _values =
             Zfs::get_values("rpool", &["name"; 1], Some(PropertySource::Local))
+                .await
                 .expect("Failed to query rpool type");
 
         // Also, the "all" property should not be queryable. It's normally fine
         // to pass this value, it just returns a variable number of properties,
         // which doesn't work with the current implementation's parsing.
         let err = Zfs::get_values("rpool", &["all"; 1], None)
+            .await
             .expect_err("Should not be able to query for 'all' property");
 
         assert!(

@@ -5,6 +5,8 @@
 //! Utility helpers for the omdb CLI.
 
 use anyhow::bail;
+use chrono::DateTime;
+use chrono::Utc;
 use clap::ColorChoice;
 use reedline::DefaultPrompt;
 use reedline::DefaultPromptSegment;
@@ -34,6 +36,30 @@ pub(crate) const fn const_max_len(strs: &[&str]) -> usize {
         i += 1;
     }
     max
+}
+
+// Display an empty cell for an Option<T> if it's None.
+pub(crate) fn display_option_blank<T: std::fmt::Display>(
+    opt: &Option<T>,
+) -> String {
+    opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
+}
+
+// Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using
+// `Z` rather than the UTC offset for UTC timestamps, to save a few characters
+// of line width in tabular output.
+pub(crate) fn datetime_rfc3339_concise(t: &DateTime<Utc>) -> String {
+    t.to_rfc3339_opts(chrono::format::SecondsFormat::Millis, true)
+}
+
+// Format an optional `chrono::DateTime` in RFC3339 with milliseconds precision
+// and using `Z` rather than the UTC offset for UTC timestamps, to save a few
+// characters of line width in tabular output.
+pub(crate) fn datetime_opt_rfc3339_concise(
+    t: &Option<DateTime<Utc>>,
+) -> String {
+    t.map(|t| t.to_rfc3339_opts(chrono::format::SecondsFormat::Millis, true))
+        .unwrap_or_else(|| "-".to_string())
 }
 
 pub(crate) struct ConfirmationPrompt(Reedline);

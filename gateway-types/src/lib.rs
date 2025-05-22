@@ -11,4 +11,5 @@ pub mod host;
 pub mod ignition;
 pub mod rot;
 pub mod sensor;
+pub mod task_dump;
 pub mod update;

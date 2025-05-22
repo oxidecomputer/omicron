@@ -23,7 +23,6 @@ use daft::Diffable;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
@@ -31,13 +30,12 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
-use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -71,6 +69,7 @@ pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
 pub use clickhouse::ClickhouseClusterConfig;
 use gateway_client::types::SpType;
+use gateway_types::rot::RotSlot;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
@@ -107,7 +106,7 @@ pub use zone_type::blueprint_zone_type;
 
 use blueprint_display::{
     BpDiffState, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
-    BpTable, BpTableData, BpTableRow, KvListWithHeading, constants::*,
+    BpTable, BpTableData, BpTableRow, KvList, constants::*,
 };
 use id_map::{IdMap, IdMappable};
 use serde::de::SeqAccess;
@@ -433,15 +432,15 @@ pub struct BlueprintDisplay<'a> {
 }
 
 impl BlueprintDisplay<'_> {
-    fn make_cockroachdb_table(&self) -> KvListWithHeading {
+    fn make_cockroachdb_table(&self) -> KvList {
         let fingerprint = if self.blueprint.cockroachdb_fingerprint.is_empty() {
             NONE_PARENS.to_string()
         } else {
             self.blueprint.cockroachdb_fingerprint.clone()
         };
 
-        KvListWithHeading::new_unchanged(
-            COCKROACHDB_HEADING,
+        KvList::new_unchanged(
+            Some(COCKROACHDB_HEADING),
             vec![
                 (COCKROACHDB_FINGERPRINT, fingerprint),
                 (
@@ -454,9 +453,9 @@ impl BlueprintDisplay<'_> {
         )
     }
 
-    fn make_oximeter_table(&self) -> KvListWithHeading {
-        KvListWithHeading::new_unchanged(
-            OXIMETER_HEADING,
+    fn make_oximeter_table(&self) -> KvList {
+        KvList::new_unchanged(
+            Some(OXIMETER_HEADING),
             vec![
                 (GENERATION, self.blueprint.oximeter_read_version.to_string()),
                 (
@@ -467,15 +466,15 @@ impl BlueprintDisplay<'_> {
         )
     }
 
-    fn make_metadata_table(&self) -> KvListWithHeading {
+    fn make_metadata_table(&self) -> KvList {
         let comment = if self.blueprint.comment.is_empty() {
             NONE_PARENS.to_string()
         } else {
             self.blueprint.comment.clone()
         };
 
-        KvListWithHeading::new_unchanged(
-            METADATA_HEADING,
+        KvList::new_unchanged(
+            Some(METADATA_HEADING),
             vec![
                 (CREATED_BY, self.blueprint.creator.clone()),
                 (
@@ -501,7 +500,7 @@ impl BlueprintDisplay<'_> {
     // Return tables representing a [`ClickhouseClusterConfig`] in a given blueprint
     fn make_clickhouse_cluster_config_tables(
         &self,
-    ) -> Option<(KvListWithHeading, BpTable, BpTable)> {
+    ) -> Option<(KvList, BpTable, BpTable)> {
         let config = &self.blueprint.clickhouse_cluster_config.as_ref()?;
 
         let diff_table =
@@ -572,8 +571,17 @@ impl fmt::Display for BlueprintDisplay<'_> {
             writeln!(
                 f,
                 "\n  sled: {sled_id} ({sled_state}, config generation \
-                 {generation})\n\n{disks_table}\n",
+                 {generation})",
             )?;
+
+            let mut rows = Vec::new();
+            if let Some(id) = config.remove_mupdate_override {
+                rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
+            }
+            let list = KvList::new_unchanged(None, rows);
+            writeln!(f, "{list}")?;
+
+            writeln!(f, "{disks_table}\n")?;
 
             // Construct the datasets subtable
             let datasets_tab = BpTable::new(
@@ -659,6 +667,7 @@ pub struct BlueprintSledConfig {
     pub disks: IdMap<BlueprintPhysicalDiskConfig>,
     pub datasets: IdMap<BlueprintDatasetConfig>,
     pub zones: IdMap<BlueprintZoneConfig>,
+    pub remove_mupdate_override: Option<MupdateOverrideUuid>,
 }
 
 impl BlueprintSledConfig {
@@ -668,53 +677,42 @@ impl BlueprintSledConfig {
     /// is named slightly more explicitly, as it filters the blueprint
     /// configuration to only consider components that should be in-service.
     pub fn into_in_service_sled_config(self) -> OmicronSledConfig {
-        // TODO OmicronSledConfig should have a single generation; for now we
-        // reuse our generation for all three subfields. Tracked by
-        // https://github.com/oxidecomputer/omicron/issues/7774
-        let generation = self.sled_agent_generation;
         OmicronSledConfig {
-            disks_config: OmicronPhysicalDisksConfig {
-                generation,
-                disks: self
-                    .disks
-                    .into_iter()
-                    .filter_map(|disk| {
-                        if disk.disposition.is_in_service() {
-                            Some(disk.into())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
-            },
-            datasets_config: DatasetsConfig {
-                generation,
-                datasets: self
-                    .datasets
-                    .into_iter()
-                    .filter_map(|dataset| {
-                        if dataset.disposition.is_in_service() {
-                            Some((dataset.id, dataset.into()))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
-            },
-            zones_config: OmicronZonesConfig {
-                generation,
-                zones: self
-                    .zones
-                    .into_iter()
-                    .filter_map(|zone| {
-                        if zone.disposition.is_in_service() {
-                            Some(zone.into())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect(),
-            },
+            generation: self.sled_agent_generation,
+            disks: self
+                .disks
+                .into_iter()
+                .filter_map(|disk| {
+                    if disk.disposition.is_in_service() {
+                        Some(disk.into())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            datasets: self
+                .datasets
+                .into_iter()
+                .filter_map(|dataset| {
+                    if dataset.disposition.is_in_service() {
+                        Some(dataset.into())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            zones: self
+                .zones
+                .into_iter()
+                .filter_map(|zone| {
+                    if zone.disposition.is_in_service() {
+                        Some(zone.into())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            remove_mupdate_override: self.remove_mupdate_override,
         }
     }
 
@@ -826,7 +824,7 @@ impl BlueprintZoneConfig {
             Some(self.id),
         );
         let kind = DatasetKind::TransientZone { name };
-        DatasetName::new(self.filesystem_pool.clone(), kind)
+        DatasetName::new(self.filesystem_pool, kind)
     }
 
     pub fn kind(&self) -> ZoneKind {
@@ -1260,6 +1258,36 @@ pub enum PendingMgsUpdateDetails {
         /// expected contents of the inactive slot
         expected_inactive_version: ExpectedVersion,
     },
+    /// the RoT is being updated
+    Rot {
+        // implicit: component = ROT
+        // implicit: firmware slot id will be the inactive slot
+        // whether we expect the "A" or "B" slot to be active
+        // and its expected version
+        expected_active_slot: ExpectedActiveRotSlot,
+        // expected version of the "A" or "B" slot (opposite to
+        // the active slot as specified above)
+        expected_inactive_version: ExpectedVersion,
+        // under normal operation, this should always match the active slot.
+        // if this field changed without the active slot changing, that might
+        // reflect a bad update.
+        //
+        /// the persistent boot preference written into the current authoritative
+        /// CFPA page (ping or pong)
+        expected_persistent_boot_preference: RotSlot,
+        // if this value changed, but not any of this other information, that could
+        // reflect an attempt to switch to the other slot.
+        //
+        /// the persistent boot preference written into the CFPA scratch page that
+        /// will become the persistent boot preference in the authoritative CFPA
+        /// page upon reboot, unless CFPA update of the authoritative page fails
+        /// for some reason.
+        expected_pending_persistent_boot_preference: Option<RotSlot>,
+        // this field is not in use yet.
+        //
+        /// override persistent preference selection for a single boot
+        expected_transient_boot_preference: Option<RotSlot>,
+    },
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
@@ -1281,6 +1309,38 @@ impl slog::KV for PendingMgsUpdateDetails {
                 serializer.emit_str(
                     Key::from("expected_inactive_version"),
                     &format!("{:?}", expected_inactive_version),
+                )
+            }
+            PendingMgsUpdateDetails::Rot {
+                expected_active_slot,
+                expected_inactive_version,
+                expected_persistent_boot_preference,
+                expected_pending_persistent_boot_preference,
+                expected_transient_boot_preference,
+            } => {
+                serializer.emit_str(Key::from("component"), "rot")?;
+                serializer.emit_str(
+                    Key::from("expected_inactive_version"),
+                    &format!("{:?}", expected_inactive_version),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_active_slot"),
+                    &format!("{:?}", expected_active_slot),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_persistent_boot_preference"),
+                    &format!("{:?}", expected_persistent_boot_preference),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_pending_persistent_boot_preference"),
+                    &format!(
+                        "{:?}",
+                        expected_pending_persistent_boot_preference
+                    ),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_transient_boot_preference"),
+                    &format!("{:?}", expected_transient_boot_preference),
                 )
             }
         }
@@ -1308,6 +1368,25 @@ impl FromStr for ExpectedVersion {
         } else {
             Ok(ExpectedVersion::Version(s.parse()?))
         }
+    }
+}
+
+/// Describes the expected active RoT slot, and the version we expect to find for it
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+pub struct ExpectedActiveRotSlot {
+    pub slot: RotSlot,
+    pub version: ArtifactVersion,
+}
+
+impl ExpectedActiveRotSlot {
+    pub fn slot(&self) -> &RotSlot {
+        &self.slot
+    }
+
+    pub fn version(&self) -> ArtifactVersion {
+        self.version.clone()
     }
 }
 
@@ -1561,7 +1640,7 @@ fn unwrap_or_none<T: ToString>(opt: &Option<T>) -> String {
 impl BlueprintDatasetConfig {
     fn as_strings(&self) -> Vec<String> {
         vec![
-            DatasetName::new(self.pool.clone(), self.kind.clone()).full_name(),
+            DatasetName::new(self.pool, self.kind.clone()).full_name(),
             self.id.to_string(),
             self.disposition.to_string(),
             unwrap_or_none(&self.quota),
@@ -1638,7 +1717,7 @@ impl From<&BlueprintDatasetConfig> for CollectionDatasetIdentifier {
     fn from(d: &BlueprintDatasetConfig) -> Self {
         Self {
             id: Some(d.id),
-            name: DatasetName::new(d.pool.clone(), d.kind.clone()).full_name(),
+            name: DatasetName::new(d.pool, d.kind.clone()).full_name(),
         }
     }
 }

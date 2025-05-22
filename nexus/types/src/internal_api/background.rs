@@ -2,13 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::AlertReceiverUuid;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::WebhookDeliveryUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -449,6 +453,69 @@ impl slog::KV for DebugDatasetsRendezvousStats {
         )?;
         Ok(())
     }
+}
+
+/// The status of a `alert_dispatcher` background task activation.
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AlertDispatcherStatus {
+    pub globs_reprocessed: BTreeMap<AlertReceiverUuid, ReprocessedGlobs>,
+
+    pub glob_version: semver::Version,
+
+    /// The alerts dispatched on this activation.
+    pub dispatched: Vec<AlertDispatched>,
+
+    /// Alerts  which did not have receivers.
+    pub no_receivers: Vec<AlertUuid>,
+
+    /// Any errors that occurred during activation.
+    pub errors: Vec<String>,
+}
+
+type ReprocessedGlobs = BTreeMap<String, Result<AlertGlobStatus, String>>;
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub enum AlertGlobStatus {
+    AlreadyReprocessed,
+    Reprocessed {
+        created: usize,
+        deleted: usize,
+        prev_version: Option<semver::Version>,
+    },
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AlertDispatched {
+    pub alert_id: AlertUuid,
+    pub subscribed: usize,
+    pub dispatched: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookDeliveratorStatus {
+    pub by_rx: BTreeMap<AlertReceiverUuid, WebhookRxDeliveryStatus>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WebhookRxDeliveryStatus {
+    pub ready: usize,
+    pub delivered_ok: usize,
+    pub already_delivered: usize,
+    pub in_progress: usize,
+    pub failed_deliveries: Vec<WebhookDeliveryFailure>,
+    pub delivery_errors: BTreeMap<WebhookDeliveryUuid, String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookDeliveryFailure {
+    pub delivery_id: WebhookDeliveryUuid,
+    pub alert_id: AlertUuid,
+    pub attempt: usize,
+    pub result: views::WebhookDeliveryAttemptResult,
+    pub response_status: Option<u16>,
+    pub response_duration: Option<chrono::TimeDelta>,
 }
 
 /// The status of a `read_only_region_replacement_start` background task

@@ -31,6 +31,7 @@ use omicron_common::ledger::Ledger;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog::{Logger, error, info, o, warn};
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::future::Future;
@@ -172,7 +173,8 @@ impl NestedDatasetLocation {
         Zfs::ensure_dataset_mounted_and_exists(
             &self.full_name(),
             &Mountpoint(mountpoint.clone()),
-        )?;
+        )
+        .await?;
 
         return Ok(mountpoint);
     }
@@ -994,6 +996,7 @@ impl StorageManager {
                 .as_slice(),
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap_or_default()
         .into_iter()
         .map(|props| (props.name.clone(), props))
@@ -1126,8 +1129,7 @@ impl StorageManager {
             .await
         {
             warn!(log, "Failed to ensure dataset"; "dataset" => ?status.dataset_name, "err" => ?err);
-            status.err =
-                Some(slog_error_chain::InlineErrorChain::new(&err).to_string());
+            status.err = Some(InlineErrorChain::new(&err).to_string());
         };
 
         status
@@ -1178,6 +1180,7 @@ impl StorageManager {
             datasets_of_interest.as_slice(),
             WhichDatasets::SelfAndChildren,
         )
+        .await
         .map_err(Error::Other)
     }
 
@@ -1230,7 +1233,7 @@ impl StorageManager {
             return Err(anyhow!(msg).into());
         }
 
-        Zfs::destroy_dataset(&full_name).map_err(|e| anyhow!(e))?;
+        Zfs::destroy_dataset(&full_name).await.map_err(|e| anyhow!(e))?;
         Ok(())
     }
 
@@ -1250,6 +1253,7 @@ impl StorageManager {
             &[full_name],
             WhichDatasets::SelfAndChildren,
         )
+        .await
         .map_err(|e| {
             warn!(
                 log,
@@ -1531,7 +1535,8 @@ impl StorageManager {
             size_details,
             id: dataset_id,
             additional_options: None,
-        })?;
+        })
+        .await?;
 
         Ok(())
     }
@@ -1567,7 +1572,8 @@ impl StorageManager {
             size_details,
             id: request.dataset_id,
             additional_options: None,
-        })?;
+        })
+        .await?;
 
         Ok(())
     }
@@ -2046,8 +2052,7 @@ mod tests {
         // We can call "upsert_filesystem" both with and without a UUID.
         let dataset_id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let dataset_name =
-            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        let dataset_name = DatasetName::new(zpool_name, DatasetKind::Crucible);
         harness
             .handle()
             .upsert_filesystem(Some(dataset_id), dataset_name.clone())
@@ -2058,6 +2063,7 @@ mod tests {
             &[dataset_name.full_name()],
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap()[0];
         assert_eq!(observed_dataset.id, Some(dataset_id));
 
@@ -2072,6 +2078,7 @@ mod tests {
             &[dataset_name.full_name()],
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap()[0];
         assert_eq!(observed_dataset.id, Some(dataset_id));
 
@@ -2099,8 +2106,7 @@ mod tests {
 
         // Create a filesystem on the newly formatted U.2, without a UUID
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let dataset_name =
-            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        let dataset_name = DatasetName::new(zpool_name, DatasetKind::Crucible);
         harness
             .handle()
             .upsert_filesystem(None, dataset_name.clone())
@@ -2110,6 +2116,7 @@ mod tests {
             &[dataset_name.full_name()],
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap()[0];
         assert_eq!(observed_dataset.id, None);
 
@@ -2124,6 +2131,7 @@ mod tests {
             &[dataset_name.full_name()],
             WhichDatasets::SelfOnly,
         )
+        .await
         .unwrap()[0];
         assert_eq!(observed_dataset.id, Some(dataset_id));
 
@@ -2152,7 +2160,7 @@ mod tests {
         // Create a dataset on the newly formatted U.2
         let id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let name = DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        let name = DatasetName::new(zpool_name, DatasetKind::Crucible);
         let datasets = BTreeMap::from([(
             id,
             DatasetConfig { id, name, inner: SharedDatasetConfig::default() },
@@ -2250,7 +2258,7 @@ mod tests {
         // Create a dataset on the newly formatted U.2
         let id = DatasetUuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let name = DatasetName::new(zpool_name.clone(), DatasetKind::Debug);
+        let name = DatasetName::new(zpool_name, DatasetKind::Debug);
         let datasets = BTreeMap::from([(
             id,
             DatasetConfig {
@@ -2317,7 +2325,7 @@ mod tests {
             !kind.zoned(),
             "We need to use a non-zoned dataset for this test"
         );
-        let name = DatasetName::new(zpool_name.clone(), kind);
+        let name = DatasetName::new(zpool_name, kind);
         let datasets = BTreeMap::from([(
             id,
             DatasetConfig {
@@ -2425,33 +2433,30 @@ mod tests {
             let zpool_name = ZpoolName::new_external(config.disks[i].pool_id);
 
             let id = DatasetUuid::new_v4();
+            let name = DatasetName::new(zpool_name, DatasetKind::Crucible);
+            datasets.insert(
+                id,
+                DatasetConfig {
+                    id,
+                    name,
+                    inner: SharedDatasetConfig::default(),
+                },
+            );
+
+            let id = DatasetUuid::new_v4();
+            let name = DatasetName::new(zpool_name, DatasetKind::Debug);
+            datasets.insert(
+                id,
+                DatasetConfig {
+                    id,
+                    name,
+                    inner: SharedDatasetConfig::default(),
+                },
+            );
+
+            let id = DatasetUuid::new_v4();
             let name =
-                DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
-            datasets.insert(
-                id,
-                DatasetConfig {
-                    id,
-                    name,
-                    inner: SharedDatasetConfig::default(),
-                },
-            );
-
-            let id = DatasetUuid::new_v4();
-            let name = DatasetName::new(zpool_name.clone(), DatasetKind::Debug);
-            datasets.insert(
-                id,
-                DatasetConfig {
-                    id,
-                    name,
-                    inner: SharedDatasetConfig::default(),
-                },
-            );
-
-            let id = DatasetUuid::new_v4();
-            let name = DatasetName::new(
-                zpool_name.clone(),
-                DatasetKind::TransientZoneRoot,
-            );
+                DatasetName::new(zpool_name, DatasetKind::TransientZoneRoot);
             datasets.insert(
                 id,
                 DatasetConfig {
@@ -2504,7 +2509,7 @@ mod tests {
 
         // Use the dataset on the newly formatted U.2
         let all_disks = harness.handle().get_latest_disks().await;
-        let zpool = all_disks.all_u2_zpools()[0].clone();
+        let zpool = all_disks.all_u2_zpools()[0];
         let datasets = harness.handle().datasets_list(zpool).await.unwrap();
 
         let dataset = datasets
@@ -2628,7 +2633,8 @@ mod tests {
             .expect_err(
                 "Should not be able to destroy nested dataset a second time",
             );
-        assert!(err.to_string().contains("Dataset not found"), "{err:?}");
+        let err = InlineErrorChain::new(&err).to_string();
+        assert!(err.contains("Dataset not found"), "{err:?}");
 
         // The nested dataset should now be gone
         let nested_datasets = harness

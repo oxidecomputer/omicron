@@ -24,8 +24,9 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
+    ConfigReconcilerInventoryStatus, Inventory, InventoryDataset,
+    InventoryDisk, InventoryZpool, OmicronSledConfig, OmicronSledConfigResult,
+    OmicronZonesConfig, SledRole,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -47,12 +48,9 @@ use omicron_uuid_kinds::{
     SupportBundleUuid, ZpoolUuid,
 };
 use oxnet::Ipv6Net;
+use propolis_client::instance_spec::SpecKey;
 use propolis_client::{
-    Client as PropolisClient,
-    types::{
-        Board, Chipset, ComponentV0, InstanceInitializationMethod,
-        InstanceSpecV0, SerialPort, SerialPortNumber,
-    },
+    Client as PropolisClient, types::InstanceInitializationMethod,
 };
 use range_requests::PotentialRange;
 use sled_agent_api::SupportBundleMetadata;
@@ -155,9 +153,10 @@ impl SledAgent {
 
         simulated_upstairs.register_storage(id, &storage);
 
-        let repo_depot = ArtifactStore::new(&log, SimArtifactStorage::new())
-            .await
-            .start(&log, &config.dropshot);
+        let repo_depot =
+            ArtifactStore::new(&log, SimArtifactStorage::new(), None)
+                .await
+                .start(&log, &config.dropshot);
 
         Arc::new(SledAgent {
             id,
@@ -202,23 +201,31 @@ impl SledAgent {
         instance: InstanceEnsureBody,
     ) -> Result<SledVmmState, Error> {
         let InstanceEnsureBody {
+            vmm_spec,
+            local_config,
             instance_id,
             migration_id,
-            hardware,
             vmm_runtime,
             metadata,
             ..
         } = instance;
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
-        let ncpus: i64 = (&hardware.properties.ncpus).into();
+        let ncpus = vmm_spec.0.board.cpus;
         if ncpus > 16 {
             return Err(Error::internal_error(
                 &"could not allocate an instance: ran out of CPUs!",
             ));
         };
 
-        for disk in &hardware.disks {
+        for (id, _disk) in vmm_spec.crucible_backends() {
+            let SpecKey::Uuid(id) = id else {
+                return Err(Error::invalid_value(
+                    id.to_string(),
+                    "Crucible disks in a Propolis spec must have UUID keys",
+                ));
+            };
+
             let initial_state = DiskRuntimeState {
                 disk_state: DiskState::Attached(
                     instance_id.into_untyped_uuid(),
@@ -229,7 +236,6 @@ impl SledAgent {
 
             // Ensure that any disks that are in this request are attached to
             // this instance.
-            let id = disk.disk_id;
             self.disks
                 .sim_ensure(
                     &id,
@@ -240,7 +246,7 @@ impl SledAgent {
                 )
                 .await?;
             self.disks
-                .sim_ensure_producer(&id, (self.nexus_address, id))
+                .sim_ensure_producer(id, (self.nexus_address, *id))
                 .await?;
         }
 
@@ -274,7 +280,7 @@ impl SledAgent {
                 };
                 let properties = propolis_client::types::InstanceProperties {
                     id: propolis_id.into_untyped_uuid(),
-                    name: hardware.properties.hostname.to_string(),
+                    name: local_config.hostname.to_string(),
                     description: "sled-agent-sim created instance".to_string(),
                     metadata,
                 };
@@ -282,28 +288,10 @@ impl SledAgent {
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
                     init: InstanceInitializationMethod::Spec {
-                        spec: InstanceSpecV0 {
-                            board: Board {
-                                cpus: hardware.properties.ncpus.0 as u8,
-                                chipset: Chipset::default(),
-                                memory_mb: hardware
-                                    .properties
-                                    .memory
-                                    .to_whole_mebibytes(),
-                                cpuid: None,
-                                guest_hv_interface: None,
-                            },
-                            components: [(
-                                "com1".to_string(),
-                                ComponentV0::SerialPort(SerialPort {
-                                    num: SerialPortNumber::Com1,
-                                }),
-                            )]
-                            .into_iter()
-                            .collect(),
-                        },
+                        spec: vmm_spec.0.clone(),
                     },
                 };
+
                 // Try to create the instance
                 client.instance_ensure().body(body).send().await.map_err(
                     |e| {
@@ -337,13 +325,17 @@ impl SledAgent {
             )
             .await?;
 
-        for disk_request in &hardware.disks {
-            let vcr = serde_json::from_str(&disk_request.vcr_json.0)?;
-            self.simulated_upstairs.map_id_to_vcr(disk_request.disk_id, &vcr);
+        for (id, disk_request) in vmm_spec.crucible_backends() {
+            let SpecKey::Uuid(id) = id else {
+                unreachable!("already verified Crucible disks have UUID keys");
+            };
+
+            let vcr = serde_json::from_str(&disk_request.request_json)?;
+            self.simulated_upstairs.map_id_to_vcr(*id, &vcr);
         }
 
         let mut routes = self.vpc_routes.lock().unwrap();
-        for nic in &hardware.nics {
+        for nic in &local_config.nics {
             let my_routers = [
                 RouterId { vni: nic.vni, kind: RouterKind::System },
                 RouterId { vni: nic.vni, kind: RouterKind::Custom(nic.subnet) },
@@ -513,7 +505,7 @@ impl SledAgent {
         &self.updates
     }
 
-    pub(super) fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {
+    pub fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {
         self.repo_depot.app_private()
     }
 
@@ -710,6 +702,7 @@ impl SledAgent {
             SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
         let dropshot_config = propolis_mock_server::Config {
             bind_address: propolis_bind_address,
+            default_request_body_max_bytes: 1024 * 1024,
             ..Default::default()
         };
         info!(log, "Starting mock propolis-server...");
@@ -735,6 +728,21 @@ impl SledAgent {
         };
 
         let storage = self.storage.lock();
+
+        let disks_config =
+            storage.omicron_physical_disks_list().unwrap_or_default();
+        let datasets_config =
+            storage.datasets_config_list().unwrap_or_default();
+        let zones_config = self.fake_zones.lock().unwrap().clone();
+
+        let sled_config = OmicronSledConfig {
+            generation: zones_config.generation,
+            disks: disks_config.disks.into_iter().collect(),
+            datasets: datasets_config.datasets.into_values().collect(),
+            zones: zones_config.zones.into_iter().collect(),
+            remove_mupdate_override: None,
+        };
+
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
@@ -749,7 +757,6 @@ impl SledAgent {
                 self.config.hardware.reservoir_ram,
             )
             .context("reservoir_size")?,
-            omicron_zones: self.fake_zones.lock().unwrap().clone(),
             disks: storage
                 .physical_disks()
                 .values()
@@ -797,7 +804,9 @@ impl SledAgent {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_else(|_| vec![]),
-            omicron_physical_disks_generation: Generation::new(),
+            ledgered_sled_config: Some(sled_config),
+            reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
+            last_reconciliation: None,
         })
     }
 
@@ -905,15 +914,27 @@ impl SledAgent {
         &self,
         config: OmicronSledConfig,
     ) -> Result<OmicronSledConfigResult, HttpError> {
+        let disks_config = OmicronPhysicalDisksConfig {
+            generation: config.generation,
+            disks: config.disks.into_iter().collect(),
+        };
+        let datasets_config = DatasetsConfig {
+            generation: config.generation,
+            datasets: config.datasets.into_iter().map(|d| (d.id, d)).collect(),
+        };
+        let zones_config = OmicronZonesConfig {
+            generation: config.generation,
+            zones: config.zones.into_iter().collect(),
+        };
         let (disks, datasets) = {
             let mut storage = self.storage.lock();
             let DisksManagementResult { status: disks } =
-                storage.omicron_physical_disks_ensure(config.disks_config)?;
+                storage.omicron_physical_disks_ensure(disks_config)?;
             let DatasetsManagementResult { status: datasets } =
-                storage.datasets_ensure(config.datasets_config)?;
+                storage.datasets_ensure(datasets_config)?;
             (disks, datasets)
         };
-        *self.fake_zones.lock().unwrap() = config.zones_config;
+        *self.fake_zones.lock().unwrap() = zones_config;
         Ok(OmicronSledConfigResult { disks, datasets })
     }
 

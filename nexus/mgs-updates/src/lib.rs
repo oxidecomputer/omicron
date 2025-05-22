@@ -19,6 +19,8 @@ mod host_phase1_updater;
 mod mgs_clients;
 mod rot_updater;
 mod sp_updater;
+#[cfg(test)]
+mod test_util;
 
 pub use artifacts::ArtifactCache;
 pub use artifacts::ArtifactCacheError;

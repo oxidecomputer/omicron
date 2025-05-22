@@ -237,6 +237,7 @@ mod test {
                         disks: IdMap::new(),
                         datasets: IdMap::new(),
                         zones,
+                        remove_mupdate_override: None,
                     },
                 )
             })

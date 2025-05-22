@@ -4,9 +4,11 @@
 
 //! Tests `RotUpdater`'s delivery of updates to RoTs via MGS
 
-use gateway_client::types::{RotSlot, SpType};
-use gateway_messages::SpPort;
+use gateway_client::SpComponent;
+use gateway_client::types::{GetRotBootInfoParams, SpType};
+use gateway_messages::{RotBootInfo, SpPort};
 use gateway_test_utils::setup as mgs_setup;
+use gateway_types::rot::RotSlot;
 use hubtools::RawHubrisArchive;
 use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 use nexus_mgs_updates::{MgsClients, RotUpdater, UpdateProgress};
@@ -23,14 +25,21 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-fn make_fake_rot_image() -> Vec<u8> {
-    let caboose = CabooseBuilder::default()
+fn make_fake_rot_archive() -> Vec<u8> {
+    let caboose = make_fake_rot_archive_caboose();
+    make_fake_rot_archive_with_caboose(&caboose)
+}
+
+fn make_fake_rot_archive_caboose() -> hubtools::Caboose {
+    CabooseBuilder::default()
         .git_commit("fake-git-commit")
         .board(SIM_ROT_BOARD)
         .version("0.0.0")
         .name("fake-name")
-        .build();
+        .build()
+}
 
+fn make_fake_rot_archive_with_caboose(caboose: &hubtools::Caboose) -> Vec<u8> {
     let mut builder = HubrisArchiveBuilder::with_fake_image();
     builder.write_caboose(caboose.as_slice()).unwrap();
     builder.build_to_vec().unwrap()
@@ -44,17 +53,15 @@ async fn test_rot_updater_updates_sled() {
             .await;
 
     // Configure an MGS client.
-    let mut mgs_clients =
-        MgsClients::from_clients([gateway_client::Client::new(
-            &mgstestctx.client.url("/").to_string(),
-            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )]);
+    let mgs_client = mgstestctx.client();
+    let mut mgs_clients = MgsClients::from_clients([mgs_client.clone()]);
 
     // Configure and instantiate an `RotUpdater`.
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_rot_image();
+    let deployed_caboose = make_fake_rot_archive_caboose();
+    let hubris_archive = make_fake_rot_archive_with_caboose(&deployed_caboose);
     let target_rot_slot = RotSlot::B;
 
     let rot_updater = RotUpdater::new(
@@ -65,6 +72,59 @@ async fn test_rot_updater_updates_sled() {
         hubris_archive.clone(),
         &mgstestctx.logctx.log,
     );
+
+    // Grab the initial cabooses, RoT state, and RoT boot info so that we can
+    // later check that they've changed.
+    let caboose_a_before = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::ROT.const_as_str(),
+            0,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let caboose_b_before = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::ROT.const_as_str(),
+            1,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let rot_state_before =
+        mgs_client.sp_get(sp_type, sp_slot).await.unwrap().into_inner().rot;
+    let rot_boot_info_before = mgs_client
+        .sp_rot_boot_info(
+            sp_type,
+            sp_slot,
+            SpComponent::ROT.const_as_str(),
+            &GetRotBootInfoParams {
+                version: RotBootInfo::HIGHEST_KNOWN_VERSION,
+            },
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    // This test updates slot B, so we're assuming that the simulated SP is
+    // running out of slot A.
+    assert_eq!(rot_state_before, rot_boot_info_before);
+    let gateway_client::types::RotState::V3 {
+        slot_a_fwid: slot_a_fwid_before,
+        slot_b_fwid: slot_b_fwid_before,
+        active: RotSlot::A,
+        pending_persistent_boot_preference: None,
+        persistent_boot_preference: RotSlot::A,
+        transient_boot_preference: None,
+        ..
+    } = rot_state_before
+    else {
+        panic!("unexpected initial RoT state: {:?}", rot_state_before);
+    };
 
     // Run the update.
     rot_updater.update(&mut mgs_clients).await.expect("update failed");
@@ -86,6 +146,73 @@ async fn test_rot_updater_updates_sled() {
         hubris_archive.image.data.len()
     );
 
+    // Grab the final cabooses and other state so we can verify that they
+    // changed as expected.
+    let caboose_a_after = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::ROT.const_as_str(),
+            0,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let caboose_b_after = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::ROT.const_as_str(),
+            1,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let rot_state_after =
+        mgs_client.sp_get(sp_type, sp_slot).await.unwrap().into_inner().rot;
+    let rot_boot_info_after = mgs_client
+        .sp_rot_boot_info(
+            sp_type,
+            sp_slot,
+            SpComponent::ROT.const_as_str(),
+            &GetRotBootInfoParams {
+                version: RotBootInfo::HIGHEST_KNOWN_VERSION,
+            },
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(caboose_a_before, caboose_a_after);
+    assert_ne!(caboose_b_before, caboose_b_after);
+    assert_eq!(
+        deployed_caboose.board().unwrap(),
+        caboose_b_after.board.as_bytes()
+    );
+    assert_eq!(
+        deployed_caboose.git_commit().unwrap(),
+        caboose_b_after.git_commit.as_bytes(),
+    );
+    assert_eq!(
+        deployed_caboose.version().unwrap(),
+        caboose_b_after.version.as_bytes(),
+    );
+
+    assert_eq!(rot_state_after, rot_boot_info_after);
+    let gateway_client::types::RotState::V3 {
+        slot_a_fwid: slot_a_fwid_after,
+        slot_b_fwid: slot_b_fwid_after,
+        active: RotSlot::B,
+        pending_persistent_boot_preference: None,
+        persistent_boot_preference: RotSlot::B,
+        transient_boot_preference: None,
+        ..
+    } = rot_state_after
+    else {
+        panic!("unexpected final RoT state: {:?}", rot_state_after);
+    };
+    assert_eq!(slot_a_fwid_before, slot_a_fwid_after);
+    assert_ne!(slot_b_fwid_before, slot_b_fwid_after);
+
     mgstestctx.teardown().await;
 }
 
@@ -97,16 +224,15 @@ async fn test_rot_updater_updates_switch() {
             .await;
 
     // Configure an MGS client.
-    let mut mgs_clients =
-        MgsClients::from_clients([gateway_client::Client::new(
-            &mgstestctx.client.url("/").to_string(),
-            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )]);
+    let mgs_client = mgstestctx.client();
+    let mut mgs_clients = MgsClients::from_clients([mgs_client.clone()]);
 
+    // Configure and instantiate an `RotUpdater`.
     let sp_type = SpType::Switch;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_rot_image();
+    let deployed_caboose = make_fake_rot_archive_caboose();
+    let hubris_archive = make_fake_rot_archive_with_caboose(&deployed_caboose);
     let target_rot_slot = RotSlot::B;
 
     let rot_updater = RotUpdater::new(
@@ -118,8 +244,63 @@ async fn test_rot_updater_updates_switch() {
         &mgstestctx.logctx.log,
     );
 
+    // Grab the initial cabooses, RoT state, and RoT boot info so that we can
+    // later check that they've changed.
+    let caboose_a_before = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::ROT.const_as_str(),
+            0,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let caboose_b_before = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::ROT.const_as_str(),
+            1,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let rot_state_before =
+        mgs_client.sp_get(sp_type, sp_slot).await.unwrap().into_inner().rot;
+    let rot_boot_info_before = mgs_client
+        .sp_rot_boot_info(
+            sp_type,
+            sp_slot,
+            SpComponent::ROT.const_as_str(),
+            &GetRotBootInfoParams {
+                version: RotBootInfo::HIGHEST_KNOWN_VERSION,
+            },
+        )
+        .await
+        .unwrap()
+        .into_inner();
+
+    // This test updates slot B, so we're assuming that the simulated SP is
+    // running out of slot A.
+    assert_eq!(rot_state_before, rot_boot_info_before);
+    let gateway_client::types::RotState::V3 {
+        slot_a_fwid: slot_a_fwid_before,
+        slot_b_fwid: slot_b_fwid_before,
+        active: RotSlot::A,
+        pending_persistent_boot_preference: None,
+        persistent_boot_preference: RotSlot::A,
+        transient_boot_preference: None,
+        ..
+    } = rot_state_before
+    else {
+        panic!("unexpected initial RoT state: {:?}", rot_state_before);
+    };
+
+    // Run the update.
     rot_updater.update(&mut mgs_clients).await.expect("update failed");
 
+    // Ensure the RoT received the complete update.
     let last_update_image = mgstestctx.simrack.sidecars[sp_slot as usize]
         .last_rot_update_data()
         .await
@@ -135,6 +316,73 @@ async fn test_rot_updater_updates_switch() {
         last_update_image.len(),
         hubris_archive.image.data.len()
     );
+
+    // Grab the final cabooses and other state so we can verify that they
+    // changed as expected.
+    let caboose_a_after = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::ROT.const_as_str(),
+            0,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let caboose_b_after = mgs_client
+        .sp_component_caboose_get(
+            sp_type,
+            sp_slot,
+            SpComponent::ROT.const_as_str(),
+            1,
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    let rot_state_after =
+        mgs_client.sp_get(sp_type, sp_slot).await.unwrap().into_inner().rot;
+    let rot_boot_info_after = mgs_client
+        .sp_rot_boot_info(
+            sp_type,
+            sp_slot,
+            SpComponent::ROT.const_as_str(),
+            &GetRotBootInfoParams {
+                version: RotBootInfo::HIGHEST_KNOWN_VERSION,
+            },
+        )
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(caboose_a_before, caboose_a_after);
+    assert_ne!(caboose_b_before, caboose_b_after);
+    assert_eq!(
+        deployed_caboose.board().unwrap(),
+        caboose_b_after.board.as_bytes()
+    );
+    assert_eq!(
+        deployed_caboose.git_commit().unwrap(),
+        caboose_b_after.git_commit.as_bytes(),
+    );
+    assert_eq!(
+        deployed_caboose.version().unwrap(),
+        caboose_b_after.version.as_bytes(),
+    );
+
+    assert_eq!(rot_state_after, rot_boot_info_after);
+    let gateway_client::types::RotState::V3 {
+        slot_a_fwid: slot_a_fwid_after,
+        slot_b_fwid: slot_b_fwid_after,
+        active: RotSlot::B,
+        pending_persistent_boot_preference: None,
+        persistent_boot_preference: RotSlot::B,
+        transient_boot_preference: None,
+        ..
+    } = rot_state_after
+    else {
+        panic!("unexpected final RoT state: {:?}", rot_state_after);
+    };
+    assert_eq!(slot_a_fwid_before, slot_a_fwid_after);
+    assert_ne!(slot_b_fwid_before, slot_b_fwid_after);
 
     mgstestctx.teardown().await;
 }
@@ -192,7 +440,7 @@ async fn test_rot_updater_remembers_successful_mgs_instance() {
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_rot_image();
+    let hubris_archive = make_fake_rot_archive();
     let target_rot_slot = RotSlot::B;
 
     let rot_updater = RotUpdater::new(
@@ -312,7 +560,7 @@ async fn test_rot_updater_switches_mgs_instances_on_failure() {
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_rot_image();
+    let hubris_archive = make_fake_rot_archive();
     let target_rot_slot = RotSlot::B;
 
     let rot_updater = RotUpdater::new(
@@ -449,16 +697,12 @@ async fn test_rot_updater_delivers_progress() {
     .await;
 
     // Configure an MGS client.
-    let mut mgs_clients =
-        MgsClients::from_clients([gateway_client::Client::new(
-            &mgstestctx.client.url("/").to_string(),
-            mgstestctx.logctx.log.new(slog::o!("component" => "MgsClient")),
-        )]);
+    let mut mgs_clients = MgsClients::from_clients([mgstestctx.client()]);
 
     let sp_type = SpType::Sled;
     let sp_slot = 0;
     let update_id = Uuid::new_v4();
-    let hubris_archive = make_fake_rot_image();
+    let hubris_archive = make_fake_rot_archive();
     let target_rot_slot = RotSlot::B;
     let target_sp = &mgstestctx.simrack.gimlets[sp_slot as usize];
 

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc fb007673eab02e3d39f2263528ab21a909bf2055b9d7912d567056bc8bfa886f # shrinks to input = _ProptestRawDiskChangesArgs { disks: ArbitraryRawDisks { by_serial: {"": Real, "\u{591}": Real, "𐢧": Real, "𑣿": Real, "🡠": Real} }, ops: [Add(Index(0)), Add(Index(0)), Add(Index(0)), Update(Index(69879)), Add(Index(8892286633686738576)), Update(Index(4009860107871123054)), Set { start: Index(5809992450340680185), num: 4639171440487543291 }, Update(Index(222805021778727288)), Update(Index(2109343307542353202)), Remove(Index(11422642146311331368))] }
+cc d578ef93a3724348036d82386f6f3491f2a4288fa5fcc6e0a1d9cd29f6dcc89d # shrinks to input = _ProptestRawDiskChangesArgs { disks: ArbitraryRawDisks { by_serial: {"": Real, "0": Real, "A": Real, "B": Real, "🌀": Real} }, ops: [Set { start: Index(11068046444225730970), num: 2 }, Set { start: Index(11068046444225730970), num: 2 }, Add(Index(0)), Add(Index(0)), Add(Index(0)), Add(Index(1360440199)), Add(Index(14496962536436731557)), Update(Index(10866497980620065376)), Update(Index(1279541773920994163)), Add(Index(13634454254486639504))] }

@@ -26,11 +26,14 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
+use omicron_uuid_kinds::AlertReceiverUuid;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::WebhookSecretUuid;
 use slog::{error, trace};
 use uuid::Uuid;
 
@@ -476,6 +479,59 @@ impl<'a> LookupPath<'a> {
     {
         SamlIdentityProvider::PrimaryKey(Root { lookup_root: self }, id)
     }
+
+    pub fn alert_receiver_id<'b>(
+        self,
+        id: AlertReceiverUuid,
+    ) -> AlertReceiver<'b>
+    where
+        'a: 'b,
+    {
+        AlertReceiver::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type [`AlertReceiver`], identified by its name
+    pub fn alert_receiver_name<'b, 'c>(
+        self,
+        name: &'b Name,
+    ) -> AlertReceiver<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        AlertReceiver::Name(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type [`AlertReceiver`], identified by its owned name
+    pub fn alert_receiver_name_owned<'b, 'c>(
+        self,
+        name: Name,
+    ) -> AlertReceiver<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        AlertReceiver::OwnedName(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type [`WebhookSecret`], identified by its UUID.
+    pub fn webhook_secret_id<'b>(
+        self,
+        id: WebhookSecretUuid,
+    ) -> WebhookSecret<'b>
+    where
+        'a: 'b,
+    {
+        WebhookSecret::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type [`Alert`], identified by its UUID.
+    pub fn alert_id<'b>(self, id: AlertUuid) -> Alert<'b>
+    where
+        'a: 'b,
+    {
+        Alert::PrimaryKey(Root { lookup_root: self }, id)
+    }
 }
 
 /// Represents the head of the selection path for a resource
@@ -848,6 +904,36 @@ lookup_resource! {
         { column_name = "address", rust_type = IpNetwork },
         { column_name = "rack_id", rust_type = Uuid },
         { column_name = "switch_location", rust_type = String }
+    ]
+}
+
+lookup_resource! {
+    name = "AlertReceiver",
+    ancestors = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = AlertReceiverKind }
+    ]
+}
+
+lookup_resource! {
+    name = "WebhookSecret",
+    ancestors = ["AlertReceiver"],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = WebhookSecretKind }
+    ]
+}
+
+lookup_resource! {
+    name = "Alert",
+    ancestors = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = AlertKind }
     ]
 }
 

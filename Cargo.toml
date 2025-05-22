@@ -13,7 +13,6 @@ members = [
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
-    "clients/ereport-client",
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
@@ -53,7 +52,6 @@ members = [
     "dns-server",
     "dns-server-api",
     "end-to-end-tests",
-    "ereport/api",
     "ereport/types",
     "gateway",
     "gateway-api",
@@ -118,14 +116,17 @@ members = [
     "oximeter/timeseries-macro",
     "oximeter/types",
     "package",
+    "parallel-task-set",
     "passwords",
     "range-requests",
     "rpaths",
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
+    "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/zone-images",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -162,7 +163,6 @@ default-members = [
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
-    "clients/ereport-client",
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
@@ -204,7 +204,6 @@ default-members = [
     "dns-server",
     "dns-server-api",
     "end-to-end-tests",
-    "ereport/api",
     "ereport/types",
     "gateway",
     "gateway-api",
@@ -269,14 +268,17 @@ default-members = [
     "oximeter/timeseries-macro",
     "oximeter/types",
     "package",
+    "parallel-task-set",
     "passwords",
     "range-requests",
     "rpaths",
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
+    "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/zone-images",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -309,6 +311,9 @@ resolver = "3"
 [workspace.lints.clippy]
 # Clippy's style nits are useful, but not worth keeping in CI.
 style = { level = "allow", priority = -1 }
+# This lint would be useful to address over time, but has too many hits as of
+# 2025-05-15.
+result_large_err = "allow"
 # But continue to warn on anything in the "disallowed_" namespace.
 disallowed_macros = "warn"
 disallowed_methods = "warn"
@@ -358,7 +363,8 @@ buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
 bytes = "1.10.1"
 camino = { version = "1.1", features = ["serde1"] }
-camino-tempfile = "1.1.1"
+camino-tempfile = "1.3.0"
+camino-tempfile-ext = { version = "0.3.0", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
 cargo_metadata = "0.19.2"
 chacha20poly1305 = "0.10.1"
@@ -397,33 +403,32 @@ curve25519-dalek = "4"
 daft = { version = "0.1.3", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
+datatest-stable = "0.3.2"
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
-derive_more = "0.99.19"
+derive_more = "0.99.20"
 derive-where = "1.2.7"
 dev-tools-common = { path = "dev-tools/common" }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.9", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.2.10", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
 digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite" }
-dropshot = { version = "0.16.0", features = [ "usdt-probes" ] }
+dropshot = { version = "0.16.1", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
 either = "1.14.0"
-ereport-api = { path = "ereport/api" }
-ereport-client = { path = "clients/ereport-client" }
 ereport-types = { path = "ereport/types" }
-expectorate = "1.1.0"
+expectorate = "1.2.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
 flate2 = "1.1.1"
 float-ord = "0.3.2"
 flume = "0.11.1"
 foreign-types = "0.3.2"
-fs-err = "2.11.0"
+fs-err = "3.1.0"
 futures = "0.3.31"
 gateway-api = { path = "gateway-api" }
 gateway-client = { path = "clients/gateway-client" }
@@ -435,14 +440,16 @@ gateway-client = { path = "clients/gateway-client" }
 # is "fine", because SP/MGS communication maintains forwards and backwards
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "f9566e68e0a0ccb7c3eeea081ae1cea279c11b2a", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "f9566e68e0a0ccb7c3eeea081ae1cea279c11b2a" }
+#
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0e1e055b66ec007c537e5bd45e210c245f9c537d", default-features = false, features = ["debug-impls"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0e1e055b66ec007c537e5bd45e210c245f9c537d", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0e1e055b66ec007c537e5bd45e210c245f9c537d" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
 glob = "0.3.2"
-guppy = "0.17.17"
+guppy = "0.17.18"
 headers = "0.4.0"
 heck = "0.5"
 hex = "0.4.3"
@@ -453,7 +460,8 @@ hickory-resolver = "0.24.4"
 hickory-server = "0.24.4"
 highway = "1.3.0"
 hkdf = "0.12.4"
-http = "1.2.0"
+hmac = "0.12.1"
+http = "1.3.1"
 http-body = "1.0.1"
 http-body-util = "0.1.3"
 http-range = "0.1.5"
@@ -469,7 +477,7 @@ id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
 indent_write = "2.2.0"
-indexmap = "2.7.1"
+indexmap = "2.9.0"
 indicatif = { version = "0.17.11", features = ["rayon"] }
 indoc = "2.0.6"
 installinator = { path = "installinator" }
@@ -484,10 +492,10 @@ itertools = "0.14.0"
 internet-checksum = "0.2"
 ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
-jiff = "0.2.6"
+jiff = "0.2.13"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
-libc = "0.2.170"
+libc = "0.2.172"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
@@ -498,9 +506,9 @@ lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "prot
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8452936a53c3b16e53cbbf4e34e5e59899afc965" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8452936a53c3b16e53cbbf4e34e5e59899afc965" }
-multimap = "0.10.0"
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "875ae5b7f8f0e32e9be672a36b5dda109b9b2450" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "875ae5b7f8f0e32e9be672a36b5dda109b9b2450" }
+multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
 nexus-client = { path = "clients/nexus-client" }
@@ -551,19 +559,19 @@ omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
-omicron-zone-package = "0.12.0"
+omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "26d949762112189b7196d2b8fdf0eeb6d9d5a28f", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "9e79588b11a69ff3d40f9aa29af97e31a0045c4b", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
-oxnet = "0.1.1"
-once_cell = "1.20.3"
+oxnet = "0.1.2"
+once_cell = "1.21.3"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapi-manager-types = { path = "dev-tools/openapi-manager/types" }
 openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "26d949762112189b7196d2b8fdf0eeb6d9d5a28f" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "9e79588b11a69ff3d40f9aa29af97e31a0045c4b" }
 oso = "0.27"
 owo-colors = "4.2.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -580,6 +588,7 @@ oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
 oximeter-types = { path = "oximeter/types" }
 oxql-types = { path = "oximeter/oxql-types" }
 p256 = "0.13"
+parallel-task-set = { path = "parallel-task-set" }
 parse-display = "0.10.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.1.0"
@@ -596,17 +605,17 @@ postgres-protocol = "0.6.8"
 predicates = "3.1.3"
 pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
-prettyplease = { version = "0.2.30", features = ["verbatim"] }
+prettyplease = { version = "0.2.32", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.10.0"
 progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "e3988414bd68ecf806078fb898120e1194451ee9" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "e3988414bd68ecf806078fb898120e1194451ee9" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e3988414bd68ecf806078fb898120e1194451ee9" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "e3988414bd68ecf806078fb898120e1194451ee9" }
 # NOTE: see above!
 proptest = "1.6.0"
 qorb = "0.3.1"
@@ -626,8 +635,8 @@ regex = "1.11.1"
 regress = "0.10.3"
 repo-depot-api = { path = "sled-agent/repo-depot-api" }
 repo-depot-client = { path = "clients/repo-depot-client" }
-reqwest = { version = "0.12", default-features = false }
-ring = "0.17.11"
+reqwest = { version = "0.12.15", default-features = false }
+ring = "0.17.14"
 rpassword = "7.3.1"
 rstest = "0.24.0"
 rustfmt-wrapper = "0.2"
@@ -637,9 +646,10 @@ rustyline = "14.0.0"
 samael = { version = "0.0.18", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
-secrecy = "0.8.0"
+secrecy = "0.10.0"
 semver = { version = "1.0.25", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
+serde_cbor = "0.11.2"
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
 serde_json = "1.0.139"
 serde_tokenstream = "0.2"
@@ -661,7 +671,9 @@ similar-asserts = "1.7.0"
 sled = "=0.34.7"
 sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
+sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
+sled-agent-zone-images = { path = "sled-agent/zone-images" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }
@@ -677,7 +689,7 @@ smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
 sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "6d31fa63217c6a51061dc4afa1ebe175a0021981" }
-sqlformat = "0.2.6"
+sqlformat = "0.3.5"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
@@ -688,6 +700,7 @@ strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
 subtle = "2.6.1"
 supports-color = "3.0.2"
+support-bundle-viewer = "0.1.0"
 swrite = "0.1.0"
 sync-ptr = "0.1.1"
 libsw = { version = "3.4.0", features = ["tokio"] }
@@ -733,6 +746,7 @@ wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
 xshell = "0.2.7"
+zerocopy = "0.8.25"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
 zip = { version = "2.6.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
@@ -966,3 +980,8 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
+
+# Waiting for https://github.com/seanmonstar/reqwest/pull/2623 to be released...
+[patch.crates-io.reqwest]
+git = 'https://github.com/seanmonstar/reqwest'
+rev = '114d97c1a862567b465cb57f14d584626e1cf30c'

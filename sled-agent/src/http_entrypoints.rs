@@ -1035,4 +1035,46 @@ impl SledAgentApi for SledAgentImpl {
         let res = sa.support_zpool_info().await;
         Ok(HttpResponseOk(res.get_output()))
     }
+
+    async fn support_health_check(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(
+            sa.support_health_check()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
+    }
+
+    async fn support_logs(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
+        let sa = request_context.context();
+        sa.as_support_bundle_logs()
+            .zones_list()
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
+    }
+
+    async fn support_logs_download(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
+        query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        let sa = request_context.context();
+        let SledDiagnosticsLogsDownloadPathParm { zone } =
+            path_params.into_inner();
+        let SledDiagnosticsLogsDownloadQueryParam { max_rotated } =
+            query_params.into_inner();
+
+        sa.as_support_bundle_logs()
+            .get_logs_for_zone(zone, max_rotated)
+            .await
+            .map_err(HttpError::from)
+    }
 }

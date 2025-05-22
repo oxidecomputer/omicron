@@ -5,6 +5,7 @@
 //! Tests for authz policy not covered in the set of unauthorized tests
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 
 use nexus_types::external_api::params;
@@ -38,7 +39,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"user1".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -46,7 +47,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"user2".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -144,7 +145,7 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -162,7 +163,7 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"otheruser".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await;
 
@@ -200,7 +201,7 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -236,7 +237,7 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -266,7 +267,7 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"unpriv".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;

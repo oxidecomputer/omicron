@@ -7,6 +7,7 @@ mod async_temp_file;
 mod bootstrap;
 mod dispatch;
 mod errors;
+mod fetch;
 mod hardware;
 #[cfg(test)]
 mod mock_peers;

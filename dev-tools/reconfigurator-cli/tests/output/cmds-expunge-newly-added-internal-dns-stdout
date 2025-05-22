@@ -1,0 +1,30 @@
+using provided RNG seed: reconfigurator-cli-test
+> load-example
+loaded example system with:
+- collection: f45ba181-4b56-42cc-a762-874d90184a43
+- blueprint: dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+
+
+> blueprint-show 62422356-97cd-4e0f-bd17-f946c25193c1
+error: no such key: blueprint 62422356-97cd-4e0f-bd17-f946c25193c1
+
+> blueprint-edit 62422356-97cd-4e0f-bd17-f946c25193c1 expunge-zone 3fc76516-d258-48bc-b25e-9fca5e37c888
+error: no such key: blueprint 62422356-97cd-4e0f-bd17-f946c25193c1
+
+> blueprint-diff 62422356-97cd-4e0f-bd17-f946c25193c1 14b8ff1c-91ff-4ab7-bb64-3c0f5f642e09
+error: no such key: blueprint 62422356-97cd-4e0f-bd17-f946c25193c1
+
+
+> blueprint-edit 14b8ff1c-91ff-4ab7-bb64-3c0f5f642e09 mark-for-cleanup 3fc76516-d258-48bc-b25e-9fca5e37c888
+error: no such key: blueprint 14b8ff1c-91ff-4ab7-bb64-3c0f5f642e09
+
+> blueprint-diff 14b8ff1c-91ff-4ab7-bb64-3c0f5f642e09 afb6a9dd-4375-42ab-99d8-a0120d042025
+error: no such key: blueprint 14b8ff1c-91ff-4ab7-bb64-3c0f5f642e09
+
+
+> blueprint-plan afb6a9dd-4375-42ab-99d8-a0120d042025
+error: no such key: blueprint afb6a9dd-4375-42ab-99d8-a0120d042025
+
+> blueprint-diff afb6a9dd-4375-42ab-99d8-a0120d042025 9666fcb5-6a2a-4eb3-a244-594b4af23fc9
+error: no such key: blueprint afb6a9dd-4375-42ab-99d8-a0120d042025
+

@@ -90,6 +90,7 @@
 use super::Driver;
 use super::driver::TaskDefinition;
 use super::tasks::abandoned_vmm_reaper;
+use super::tasks::alert_dispatcher::AlertDispatcher;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
@@ -124,6 +125,7 @@ use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
+use super::tasks::webhook_deliverator;
 use crate::Nexus;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::saga::StartSaga;
@@ -222,6 +224,8 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_finish: Activator::new(),
             task_tuf_artifact_replication: Activator::new(),
             task_read_only_region_replacement_start: Activator::new(),
+            task_alert_dispatcher: Activator::new(),
+            task_webhook_deliverator: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -294,6 +298,8 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_finish,
             task_tuf_artifact_replication,
             task_read_only_region_replacement_start,
+            task_alert_dispatcher,
+            task_webhook_deliverator,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -858,11 +864,66 @@ impl BackgroundTasksInitializer {
                 process",
             period: config.read_only_region_replacement_start.period_secs,
             task_impl: Box::new(ReadOnlyRegionReplacementDetector::new(
-                datastore,
+                datastore.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_read_only_region_replacement_start,
+        });
+
+        driver.register(TaskDefinition {
+            name: "alert_dispatcher",
+            description: "dispatches queued alerts to receivers",
+            period: config.alert_dispatcher.period_secs,
+            task_impl: Box::new(AlertDispatcher::new(
+                datastore.clone(),
+                task_webhook_deliverator.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_alert_dispatcher,
+        });
+
+        driver.register({
+            let nexus_config::WebhookDeliveratorConfig {
+                lease_timeout_secs,
+                period_secs,
+                first_retry_backoff_secs,
+                second_retry_backoff_secs,
+            } = config.webhook_deliverator;
+            let cfg = webhook_deliverator::DeliveryConfig {
+                lease_timeout: chrono::TimeDelta::seconds(
+                    lease_timeout_secs.try_into().expect(
+                        "invalid webhook_deliverator.lease_timeout_secs",
+                    ),
+                ),
+                first_retry_backoff: chrono::TimeDelta::seconds(
+                    first_retry_backoff_secs.try_into().expect(
+                        "invalid webhook_deliverator.first_retry_backoff_secs",
+                    ),
+                ),
+                second_retry_backoff: chrono::TimeDelta::seconds(
+                    second_retry_backoff_secs.try_into().expect(
+                        "invalid webhook_deliverator.first_retry_backoff_secs",
+                    ),
+                ),
+            };
+            TaskDefinition {
+                name: "webhook_deliverator",
+                description: "sends webhook delivery requests",
+                period: period_secs,
+                task_impl: Box::new(
+                    webhook_deliverator::WebhookDeliverator::new(
+                        datastore,
+                        cfg,
+                        nexus_id,
+                        args.webhook_delivery_client,
+                    ),
+                ),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_webhook_deliverator,
+            }
         });
 
         driver
@@ -891,6 +952,11 @@ pub struct BackgroundTasksData {
     pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
     /// Channel for TUF repository artifacts to be replicated out to sleds
     pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
+    /// `reqwest::Client` for webhook delivery requests.
+    ///
+    /// This is shared with the external API as it's also used when sending
+    /// webhook liveness probe requests from the API.
+    pub webhook_delivery_client: reqwest::Client,
     /// Channel for configuring pending MGS updates
     pub mgs_updates_tx: watch::Sender<PendingMgsUpdates>,
 }

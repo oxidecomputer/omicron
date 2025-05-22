@@ -245,7 +245,7 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                 SledKind::ZoneFilesystemDatasetCollision {
                     zone1: previous.clone(),
                     zone2: zone.clone(),
-                    zpool: filesystem_dataset.pool().clone(),
+                    zpool: *filesystem_dataset.pool(),
                 },
             );
         }
@@ -265,7 +265,7 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                     SledKind::ZoneDurableDatasetCollision {
                         zone1: previous.clone(),
                         zone2: zone.clone(),
-                        zpool: durable_dataset.dataset.pool_name.clone(),
+                        zpool: durable_dataset.dataset.pool_name,
                     },
                 );
             }
@@ -278,11 +278,8 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                     Severity::Fatal,
                     SledKind::ZoneWithDatasetsOnDifferentZpools {
                         zone: zone.clone(),
-                        durable_zpool: durable_dataset
-                            .dataset
-                            .pool_name
-                            .clone(),
-                        transient_zpool: filesystem_dataset.pool().clone(),
+                        durable_zpool: durable_dataset.dataset.pool_name,
+                        transient_zpool: *filesystem_dataset.pool(),
                     },
                 );
             }
@@ -987,16 +984,15 @@ mod tests {
             dns_iter.next().expect("at least two external DNS zones");
         assert_ne!(dns0_sled_id, dns1_sled_id);
 
-        let dup_zpool = dns0
+        let dup_zpool = *dns0
             .zone_type
             .durable_zpool()
-            .expect("external DNS has a durable zpool")
-            .clone();
+            .expect("external DNS has a durable zpool");
         match &mut dns1.zone_type {
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { dataset, .. },
             ) => {
-                dataset.pool_name = dup_zpool.clone();
+                dataset.pool_name = dup_zpool;
             }
             _ => unreachable!("this is an external DNS zone"),
         };
@@ -1012,7 +1008,7 @@ mod tests {
                     kind: SledKind::ZoneDurableDatasetCollision {
                         zone1: dns0.clone(),
                         zone2: dns1.clone(),
-                        zpool: dup_zpool.clone(),
+                        zpool: dup_zpool,
                     },
                 },
             },
@@ -1022,8 +1018,8 @@ mod tests {
                     sled_id: dns1_sled_id,
                     kind: SledKind::ZoneWithDatasetsOnDifferentZpools {
                         zone: dns1.clone(),
-                        durable_zpool: dup_zpool.clone(),
-                        transient_zpool: dns1.filesystem_pool.clone(),
+                        durable_zpool: dup_zpool,
+                        transient_zpool: dns1.filesystem_pool,
                     },
                 },
             },
@@ -1069,8 +1065,8 @@ mod tests {
             dns_iter.next().expect("at least two external DNS zones");
         assert_ne!(dns0_sled_id, dns1_sled_id);
 
-        let dup_zpool = dns0.filesystem_pool.clone();
-        dns1.filesystem_pool = dup_zpool.clone();
+        let dup_zpool = dns0.filesystem_pool;
+        dns1.filesystem_pool = dup_zpool;
 
         let dns0 = dns0.into_ref().clone();
         let dns1 = dns1.into_ref().clone();
@@ -1082,7 +1078,7 @@ mod tests {
                     kind: SledKind::ZoneFilesystemDatasetCollision {
                         zone1: dns0.clone(),
                         zone2: dns1.clone(),
-                        zpool: dup_zpool.clone(),
+                        zpool: dup_zpool,
                     },
                 },
             },
@@ -1092,12 +1088,8 @@ mod tests {
                     sled_id: dns1_sled_id,
                     kind: SledKind::ZoneWithDatasetsOnDifferentZpools {
                         zone: dns1.clone(),
-                        durable_zpool: dns1
-                            .zone_type
-                            .durable_zpool()
-                            .unwrap()
-                            .clone(),
-                        transient_zpool: dup_zpool.clone(),
+                        durable_zpool: *dns1.zone_type.durable_zpool().unwrap(),
+                        transient_zpool: dup_zpool,
                     },
                 },
             },
@@ -1135,12 +1127,12 @@ mod tests {
                 if let Some(prev) =
                     by_kind.insert(dataset.kind.clone(), dataset.clone())
                 {
-                    dataset.pool = prev.pool.clone();
+                    dataset.pool = prev.pool;
 
                     found_sled_id = Some(*sled_id);
                     dataset1 = Some(prev);
                     dataset2 = Some(dataset.clone());
-                    zpool = Some(dataset.pool.clone());
+                    zpool = Some(dataset.pool);
                     break 'outer;
                 }
             }

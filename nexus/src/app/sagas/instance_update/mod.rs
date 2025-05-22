@@ -349,6 +349,7 @@ use crate::app::db::datastore::VmmStateUpdateResult;
 use crate::app::db::datastore::instance;
 use crate::app::db::model::ByteCount;
 use crate::app::db::model::Generation;
+use crate::app::db::model::InstanceIntendedState;
 use crate::app::db::model::InstanceRuntimeState;
 use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
@@ -412,8 +413,8 @@ pub fn update_saga_needed(
 ) -> bool {
     // Currently, an instance-update saga is required if (and only if):
     //
-    // - The instance's active VMM has transitioned to `Destroyed` or `Failed`. We don't
-    //   actually know whether the VMM whose state was updated here was the
+    // - The instance's active VMM has transitioned to `Destroyed` or `Failed`.
+    //   We don't actually know whether the VMM whose state was updated here was the
     //   active VMM or not, so we will always attempt to run an instance-update
     //   saga if the VMM was `Destroyed` (or `Failed`).
     let vmm_needs_update =
@@ -465,6 +466,9 @@ struct UpdatesRequired {
     /// saga completes.
     new_runtime: InstanceRuntimeState,
 
+    /// A new intended state should be written to the instance record.
+    new_intent: Option<InstanceIntendedState>,
+
     /// If this is [`Some`], the instance's active VMM with this UUID has
     /// transitioned to [`VmmState::Destroyed`], and its resources must be
     /// cleaned up by a [`destroyed`] subsaga.
@@ -510,6 +514,7 @@ impl UpdatesRequired {
         let mut new_runtime = snapshot.instance.runtime().clone();
         new_runtime.gen = Generation(new_runtime.gen.next());
         new_runtime.time_updated = Utc::now();
+        let mut new_intent = None;
         let instance_id = snapshot.instance.id();
 
         let mut update_required = false;
@@ -532,7 +537,24 @@ impl UpdatesRequired {
                     // instance's new state to `Failed` rather than to `NoVmm`.
                     if active_vmm.runtime.state == VmmState::Failed {
                         active_vmm_failed = true;
+                    } else if snapshot.instance.intended_state
+                        == InstanceIntendedState::Running
+                        && snapshot.migration.is_none()
+                    {
+                        // Did the active VMM shut itself down, when it was
+                        // intended to be running *and* we were not migrating
+                        // out? If so, update the instance's intended state to
+                        // indicate that it stopped itself.
+                        new_intent = Some(InstanceIntendedState::GuestShutdown);
+                        info!(
+                            log,
+                            "instance update (active VMM destroyed): guest shut \
+                             itself down";
+                            "instance_id" => %instance_id,
+                            "propolis_id" => %active_vmm.id,
+                        );
                     }
+
                     Some(id)
                 } else {
                     None
@@ -710,6 +732,7 @@ impl UpdatesRequired {
         }
 
         Some(Self {
+            new_intent,
             new_runtime,
             destroy_active_vmm,
             destroy_target_vmm,
@@ -1159,6 +1182,7 @@ async fn siu_commit_instance_updates(
         "instance update: committing new runtime state and unlocking...";
         "instance_id" => %instance_id,
         "new_runtime" => ?update.new_runtime,
+        "new_intent" => ?update.new_intent,
         "lock" => ?lock,
     );
 
@@ -1169,6 +1193,7 @@ async fn siu_commit_instance_updates(
             &authz_instance,
             &lock,
             &update.new_runtime,
+            update.new_intent,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -1287,10 +1312,9 @@ async fn siu_chain_successor_saga(
             // auto-restart policy allows it to be automatically restarted. If
             // it does, activate the instance-reincarnation background task to
             // automatically restart it.
-            let karmic_state = new_state.instance.auto_restart.status(
-                &new_state.instance.runtime_state,
-                new_state.active_vmm.as_ref(),
-            );
+            let karmic_state = new_state
+                .instance
+                .auto_restart_status(new_state.active_vmm.as_ref());
             if karmic_state.should_reincarnate() {
                 info!(
                     log,
@@ -1300,6 +1324,7 @@ async fn siu_chain_successor_saga(
                     "instance_id" => %instance_id,
                     "auto_restart_config" => ?new_state.instance.auto_restart,
                     "runtime_state" => ?new_state.instance.runtime_state,
+                    "intended_state" => %new_state.instance.intended_state,
                 );
                 nexus.background_tasks.task_instance_reincarnation.activate();
             } else {
@@ -1310,6 +1335,7 @@ async fn siu_chain_successor_saga(
                     "auto_restart_config" => ?new_state.instance.auto_restart,
                     "needs_reincarnation" => karmic_state.needs_reincarnation,
                     "karmic_state" => ?karmic_state.can_reincarnate,
+                    "intended_state" => %new_state.instance.intended_state,
                 )
             }
         }

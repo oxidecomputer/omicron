@@ -1259,8 +1259,8 @@ pub(crate) mod test {
 
         assert_eq!(region_allocations(&datastore).await, 0);
 
-        let mut disk_test = DiskTest::new(cptestctx).await;
-        disk_test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+        let disk_test =
+            DiskTestBuilder::new(cptestctx).with_zpool_count(4).build().await;
 
         assert_eq!(region_allocations(&datastore).await, 0);
 
@@ -1500,20 +1500,18 @@ pub(crate) mod test {
         let mut non_destroyed_regions_from_agent = vec![];
 
         for zpool in test.zpools() {
-            for dataset in &zpool.datasets {
-                let crucible_dataset =
-                    sled_agent.get_crucible_dataset(zpool.id, dataset.id);
-                for region in crucible_dataset.list() {
-                    match region.state {
-                        crucible_agent_client::types::State::Tombstoned
-                        | crucible_agent_client::types::State::Destroyed => {
-                            // ok
-                        }
+            let dataset = zpool.crucible_dataset();
+            let crucible_dataset =
+                sled_agent.get_crucible_dataset(zpool.id, dataset.id);
+            for region in crucible_dataset.list() {
+                match region.state {
+                    crucible_agent_client::types::State::Tombstoned
+                    | crucible_agent_client::types::State::Destroyed => {
+                        // ok
+                    }
 
-                        _ => {
-                            non_destroyed_regions_from_agent
-                                .push(region.clone());
-                        }
+                    _ => {
+                        non_destroyed_regions_from_agent.push(region.clone());
                     }
                 }
             }

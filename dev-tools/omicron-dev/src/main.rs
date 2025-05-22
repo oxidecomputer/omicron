@@ -8,6 +8,7 @@ use futures::StreamExt;
 use libc::SIGINT;
 use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
+use nexus_test_utils::resource_helpers::DiskTest;
 use signal_hook_tokio::Signals;
 
 #[tokio::main]
@@ -78,6 +79,18 @@ impl RunAllArgs {
         >(&mut config, 0)
         .await
         .context("error setting up services")?;
+
+        println!("omicron-dev: Adding disks to first sled agent");
+
+        // This is how our integration tests are identifying that "disks exist"
+        // within the database.
+        //
+        // This inserts:
+        // - DEFAULT_ZPOOL_COUNT zpools, each of which contains:
+        //   - A crucible dataset
+        //   - A debug dataset
+        DiskTest::new(&cptestctx).await;
+
         println!("omicron-dev: services are running.");
 
         // Print out basic information about what was started.

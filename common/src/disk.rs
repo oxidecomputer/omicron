@@ -7,6 +7,7 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use daft::Diffable;
+use id_map::IdMappable;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -40,6 +41,14 @@ pub struct OmicronPhysicalDiskConfig {
     pub identity: DiskIdentity,
     pub id: PhysicalDiskUuid,
     pub pool_id: ZpoolUuid,
+}
+
+impl IdMappable for OmicronPhysicalDiskConfig {
+    type Id = PhysicalDiskUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
 }
 
 #[derive(
@@ -337,6 +346,14 @@ pub struct DatasetConfig {
     pub inner: SharedDatasetConfig,
 }
 
+impl IdMappable for DatasetConfig {
+    type Id = DatasetUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
+}
+
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
@@ -500,6 +517,9 @@ impl DisksManagementResult {
 pub enum DiskManagementError {
     #[error("Disk requested by control plane, but not found on device")]
     NotFound,
+
+    #[error("Disk requested by control plane is an internal disk: {0}")]
+    InternalDiskControlPlaneRequest(PhysicalDiskUuid),
 
     #[error("Expected zpool UUID of {expected}, but saw {observed}")]
     ZpoolUuidMismatch { expected: ZpoolUuid, observed: ZpoolUuid },

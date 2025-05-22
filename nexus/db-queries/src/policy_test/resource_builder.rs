@@ -278,6 +278,9 @@ impl_dyn_authorized_resource_for_resource!(authz::TufArtifact);
 impl_dyn_authorized_resource_for_resource!(authz::TufRepo);
 impl_dyn_authorized_resource_for_resource!(authz::Vpc);
 impl_dyn_authorized_resource_for_resource!(authz::VpcSubnet);
+impl_dyn_authorized_resource_for_resource!(authz::Alert);
+impl_dyn_authorized_resource_for_resource!(authz::AlertReceiver);
+impl_dyn_authorized_resource_for_resource!(authz::WebhookSecret);
 impl_dyn_authorized_resource_for_resource!(authz::Zpool);
 
 impl_dyn_authorized_resource_for_global!(authz::Database);
@@ -288,6 +291,7 @@ impl_dyn_authorized_resource_for_global!(authz::DnsConfig);
 impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
 impl_dyn_authorized_resource_for_global!(authz::Inventory);
 impl_dyn_authorized_resource_for_global!(authz::TargetReleaseConfig);
+impl_dyn_authorized_resource_for_global!(authz::AlertClassList);
 
 impl DynAuthorizedResource for authz::SiloCertificateList {
     fn do_authorize<'a, 'b>(

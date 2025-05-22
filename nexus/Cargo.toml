@@ -31,7 +31,6 @@ crucible-pantry-client.workspace = true
 crucible-common.workspace = true
 dns-service-client.workspace = true
 dpd-client.workspace = true
-ereport-client.workspace = true
 mg-admin-client.workspace = true
 dropshot.workspace = true
 fatfs.workspace = true
@@ -40,6 +39,7 @@ gateway-client.workspace = true
 headers.workspace = true
 hex.workspace = true
 hickory-resolver.workspace = true
+hmac.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
@@ -52,6 +52,7 @@ ipnetwork.workspace = true
 itertools.workspace = true
 lldpd_client.workspace = true
 macaddr.workspace = true
+maplit.workspace = true
 nexus-background-task-interface.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
@@ -68,6 +69,7 @@ oximeter-client.workspace = true
 oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
 oxnet.workspace = true
 oxql-types.workspace = true
+parallel-task-set.workspace = true
 parse-display.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -78,6 +80,7 @@ qorb.workspace = true
 rand.workspace = true
 range-requests.workspace = true
 ref-cast.workspace = true
+regex.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 ring.workspace = true
 samael.workspace = true
@@ -89,6 +92,7 @@ serde_urlencoded.workspace = true
 serde_with.workspace = true
 sha2.workspace = true
 sled-agent-client.workspace = true
+sled-agent-types.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
@@ -159,7 +163,6 @@ pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 similar-asserts.workspace = true
-sled-agent-types.workspace = true
 sp-sim.workspace = true
 rustls.workspace = true
 subprocess.workspace = true
@@ -168,6 +171,7 @@ hickory-resolver.workspace = true
 tufaceous.workspace = true
 tufaceous-lib.workspace = true
 httptest.workspace = true
+httpmock.workspace = true
 strum.workspace = true
 tufaceous-artifact.workspace = true
 

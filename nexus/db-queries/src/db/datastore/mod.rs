@@ -46,6 +46,8 @@ use std::sync::Arc;
 
 mod address_lot;
 mod affinity;
+mod alert;
+mod alert_rx;
 mod allow_list;
 mod auth;
 mod bfd;
@@ -109,6 +111,7 @@ mod vmm;
 mod volume;
 mod volume_repair;
 mod vpc;
+pub mod webhook_delivery;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;

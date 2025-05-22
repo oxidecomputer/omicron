@@ -15,8 +15,11 @@ use gateway_client::SpComponent;
 use gateway_client::types::UpdateAbortBody;
 use gateway_client::types::{SpType, SpUpdateStatus};
 use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SpUpdateUuid;
 use qorb::resolver::AllBackends;
 use slog::{debug, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
@@ -29,7 +32,7 @@ use uuid::Uuid;
 
 /// How long may the status remain unchanged without us treating this as a
 /// problem?
-const PROGRESS_TIMEOUT: Duration = Duration::from_secs(120);
+pub const PROGRESS_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// How long to wait between failed attempts to reset the device
 const RESET_DELAY_INTERVAL: Duration = Duration::from_secs(10);
@@ -47,18 +50,53 @@ const RESET_TIMEOUT: Duration = Duration::from_secs(60);
 ///
 /// This is similar in spirit to the `SpComponentUpdater` trait but uses a
 /// struct-based interface instead.
-pub struct SpComponentUpdate {
+pub(crate) struct SpComponentUpdate {
     pub log: slog::Logger,
     pub component: SpComponent,
     pub target_sp_type: SpType,
     pub target_sp_slot: u32,
     pub firmware_slot: u16,
-    pub update_id: Uuid,
+    pub update_id: SpUpdateUuid,
 }
 
 impl SpComponentUpdate {
     fn component(&self) -> &str {
         self.component.const_as_str()
+    }
+
+    pub fn from_request(
+        log: &slog::Logger,
+        request: &PendingMgsUpdate,
+        update_id: SpUpdateUuid,
+    ) -> SpComponentUpdate {
+        match &request.details {
+            PendingMgsUpdateDetails::Sp { .. } => SpComponentUpdate {
+                log: log.clone(),
+                component: SpComponent::SP_ITSELF,
+                target_sp_type: request.sp_type,
+                target_sp_slot: request.slot_id,
+                // The SP has two firmware slots, but they're aren't
+                // individually labeled. We always request an update to slot
+                // 0, which (confusingly in this context) means "the
+                // inactive slot".
+                firmware_slot: 0,
+                update_id,
+            },
+            PendingMgsUpdateDetails::Rot { expected_active_slot, .. } => {
+                SpComponentUpdate {
+                    log: log.clone(),
+                    component: SpComponent::ROT,
+                    target_sp_type: request.sp_type,
+                    target_sp_slot: request.slot_id,
+                    // Like the SP, we request an update to the inactive slot
+                    firmware_slot: expected_active_slot
+                        .slot()
+                        .toggled()
+                        .to_u16(),
+                    update_id,
+                }
+            }
+        }
     }
 }
 
@@ -74,7 +112,7 @@ pub enum ApplyUpdateError {
     SpUpdateAborted(Uuid),
     #[error("SP reports update {0} failed: {1:?}")]
     SpUpdateFailed(Uuid, String),
-    #[error("SP not knowing about our update attempt")]
+    #[error("SP reports not knowing about our update attempt")]
     SpUpdateLost,
     #[error(
         "gave up after {}ms waiting for update {0} to finish",
@@ -123,6 +161,7 @@ pub(crate) async fn apply_update(
     mgs_rx: watch::Receiver<AllBackends>,
     update: &PendingMgsUpdate,
     status: UpdateAttemptStatusUpdater,
+    progress_timeout: Duration,
 ) -> Result<UpdateCompletedHow, ApplyUpdateError> {
     // Set up an instance of `MgsClients` to talk to MGS for the duration of
     // this attempt.  For each call to `try_serially()`, `MgsClients` will try
@@ -190,7 +229,7 @@ pub(crate) async fn apply_update(
                         sp_slot,
                         component,
                         sp_update.firmware_slot,
-                        &sp_update.update_id,
+                        &sp_update.update_id.as_untyped_uuid(),
                         reqwest::Body::from(data.clone()),
                     )
                     .await?;
@@ -226,7 +265,9 @@ pub(crate) async fn apply_update(
     status.update(UpdateAttemptStatus::UpdateWaiting);
     let our_update =
         match wait_for_delivery(&mut mgs_clients, sp_update).await? {
-            DeliveryWaitStatus::Completed(id) => id == my_update_id,
+            DeliveryWaitStatus::Completed(id) => {
+                id == my_update_id.into_untyped_uuid()
+            }
             DeliveryWaitStatus::Aborted(id) => {
                 warn!(
                     log,
@@ -274,7 +315,7 @@ pub(crate) async fn apply_update(
             update_helper,
             &mut mgs_clients,
             update,
-            PROGRESS_TIMEOUT,
+            progress_timeout,
         )
         .await
         {
@@ -543,11 +584,14 @@ async fn wait_for_update_done(
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
 
-            // An incorrect version in the "inactive" slot is normal during the
-            // upgrade.  We have no reason to think this won't converge so we
-            // proceed with waiting.
+            // An incorrect version in the "inactive" slot, incorrect active slot,
+            // or non-empty pending_persistent_boot_preference/transient_boot_preference
+            // are normal during the upgrade. We have no reason to think these won't
+            // converge so we proceed with waiting.
             Err(PrecheckError::GatewayClientError(_))
             | Err(PrecheckError::WrongInactiveVersion { .. })
+            | Err(PrecheckError::WrongActiveSlot { .. })
+            | Err(PrecheckError::EphemeralRotBootPreferenceSet)
             | Ok(PrecheckStatus::ReadyForUpdate) => {
                 if before.elapsed() >= timeout {
                     return Err(UpdateWaitError::Timeout(timeout));
@@ -558,11 +602,424 @@ async fn wait_for_update_done(
             }
 
             Err(error @ PrecheckError::WrongDevice { .. })
-            | Err(error @ PrecheckError::WrongActiveVersion { .. }) => {
+            | Err(error @ PrecheckError::WrongActiveVersion { .. })
+            | Err(error @ PrecheckError::RotCommunicationFailed { .. }) => {
                 // Stop trying to make this update happen.  It's not going to
                 // happen.
                 return Err(UpdateWaitError::Indeterminate(error));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::ApplyUpdateError;
+    use crate::test_util::test_artifacts::TestArtifacts;
+    use crate::test_util::updates::UpdateDescription;
+    use assert_matches::assert_matches;
+    use gateway_client::types::SpType;
+    use gateway_messages::SpPort;
+    use gateway_test_utils::setup::GatewayTestContext;
+    use nexus_types::deployment::ExpectedVersion;
+    use nexus_types::internal_api::views::UpdateAttemptStatus;
+    use nexus_types::internal_api::views::UpdateCompletedHow;
+    use nexus_types::inventory::BaseboardId;
+    use slog_error_chain::InlineErrorChain;
+    use std::time::Duration;
+    use tufaceous_artifact::ArtifactHash;
+
+    /// Tests several happy-path cases of updating an SP
+    #[tokio::test]
+    async fn test_sp_update_basic() {
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_sp_update_basic",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let artifacts = TestArtifacts::new(log).await.unwrap();
+
+        // Basic case: normal update
+        run_one_successful_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Sled,
+            1,
+            &artifacts.sp_gimlet_artifact_hash,
+            UpdateCompletedHow::CompletedUpdate,
+        )
+        .await;
+
+        // Basic case: attempted update, found no changes needed
+        run_one_successful_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Sled,
+            1,
+            &artifacts.sp_gimlet_artifact_hash,
+            UpdateCompletedHow::FoundNoChangesNeeded,
+        )
+        .await;
+
+        // Run the same two tests for a switch SP.
+        run_one_successful_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Switch,
+            0,
+            &artifacts.sp_sidecar_artifact_hash,
+            UpdateCompletedHow::CompletedUpdate,
+        )
+        .await;
+        run_one_successful_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Switch,
+            0,
+            &artifacts.sp_sidecar_artifact_hash,
+            UpdateCompletedHow::FoundNoChangesNeeded,
+        )
+        .await;
+
+        artifacts.teardown().await;
+        gwtestctx.teardown().await;
+    }
+
+    async fn run_one_successful_update(
+        gwtestctx: &GatewayTestContext,
+        artifacts: &TestArtifacts,
+        sp_type: SpType,
+        slot_id: u32,
+        artifact_hash: &ArtifactHash,
+        expected_result: UpdateCompletedHow,
+    ) {
+        let desc = UpdateDescription {
+            gwtestctx,
+            artifacts,
+            sp_type,
+            slot_id,
+            artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: None,
+            override_progress_timeout: None,
+        };
+
+        let in_progress = desc.setup().await;
+        let finished = in_progress.finish().await;
+        finished.expect_success(expected_result);
+    }
+
+    /// Tests the case where two updates run concurrently.  One notices another
+    /// is running and waits for it to complete.
+    #[tokio::test]
+    async fn test_sp_update_watched() {
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_sp_update_watched",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let artifacts = TestArtifacts::new(log).await.unwrap();
+
+        // We're going to start two concurrent update attempts.  The sequence
+        // we want is:
+        //
+        // - update1 gets far enough along to have started the upload, but does
+        //   not actually finish
+        // - update2 gets far enough along to notice that update1 is running
+        // - then update1 finished
+        // - then update2 can finish
+        //
+        // It's a little tricky to orchestrate this with the tools we have
+        // available.  The most robust is actually have update2's precondition
+        // reflect that update1 has finished its upload.
+        let desc1 = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: None,
+            override_progress_timeout: None,
+        };
+
+        let desc2 = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: Some(ExpectedVersion::Version(
+                std::str::from_utf8(
+                    artifacts
+                        .deployed_caboose(&artifacts.sp_gimlet_artifact_hash)
+                        .expect("deployed caboose for generated artifact")
+                        .version()
+                        .expect("valid version"),
+                )
+                .expect("version is UTF-8")
+                .parse()
+                .expect("version is valid"),
+            )),
+            override_progress_timeout: None,
+        };
+
+        let mut in_progress1 = desc1.setup().await;
+        let mut in_progress2 = desc2.setup().await;
+
+        // Start one, but pause it while waiting for the update to upload.
+        in_progress1.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
+
+        // Start the other.  Pause it at the point where it's also waiting for
+        // the upload to finish.
+        in_progress2.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
+
+        // Finish the first update, then the second.
+        let finished1 = in_progress1.finish().await;
+        let finished2 = in_progress2.finish().await;
+
+        // Both should succeed, but with different codes.
+        finished1.expect_success(UpdateCompletedHow::CompletedUpdate);
+        finished2.expect_success(UpdateCompletedHow::WaitedForConcurrentUpdate);
+
+        artifacts.teardown().await;
+        gwtestctx.teardown().await;
+    }
+
+    /// Tests the case where an update takes over from a previously-started one.
+    #[tokio::test]
+    async fn test_sp_update_takeover() {
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_sp_update_takeover",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let artifacts = TestArtifacts::new(log).await.unwrap();
+
+        // See the notes in test_sp_update_watched().  We start the same way.
+        let desc1 = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: None,
+            override_progress_timeout: None,
+        };
+
+        let desc2 = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: Some(ExpectedVersion::Version(
+                std::str::from_utf8(
+                    artifacts
+                        .deployed_caboose(&artifacts.sp_gimlet_artifact_hash)
+                        .expect("deployed caboose for generated artifact")
+                        .version()
+                        .expect("valid version"),
+                )
+                .expect("version is UTF-8")
+                .parse()
+                .expect("version is valid"),
+            )),
+            // This timeout (10 seconds) seeks to balance being long enough to
+            // be relevant without making the tests take too long.  (It's
+            // assumed that 10 seconds here is not a huge deal because this is
+            // mostly idle time and this test is unlikely to be the long pole.)
+            override_progress_timeout: Some(Duration::from_secs(10)),
+        };
+
+        let mut in_progress1 = desc1.setup().await;
+        let mut in_progress2 = desc2.setup().await;
+
+        // Start one, but pause it while waiting for the update to upload.
+        in_progress1.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
+
+        // Start the other.  Pause it at the point where it's also waiting for
+        // the upload to finish.
+        in_progress2.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
+
+        // This time, resume the second update first.  It will take over the
+        // first one.
+        let finished2 = in_progress2.finish().await;
+        finished2.expect_success(UpdateCompletedHow::TookOverConcurrentUpdate);
+
+        // Now if we resume the first update, it will find that the SP has been
+        // reset out from under it.  This is the closest thing we have to a test
+        // where the SP gets reset during the update.  This does verify that if
+        // the SP gets reset during this phase, the code detects that and
+        // doesn't get stuck.  With more control over the simulated SP (e.g.,
+        // the ability to pause the upload on the SP side), we could more
+        // exhaustively test what happens if the SP gets reset at each step in
+        // the update process.
+        in_progress1.finish().await.expect_failure(&|error, _sp1, _sp2| {
+            assert_matches!(error, ApplyUpdateError::SpUpdateLost);
+        });
+
+        artifacts.teardown().await;
+        gwtestctx.teardown().await;
+    }
+
+    /// Tests a bunch of easy fast-failure cases.
+    #[tokio::test]
+    async fn test_sp_basic_failures() {
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_sp_basic_failures",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let artifacts = TestArtifacts::new(log).await.unwrap();
+
+        // Test a case of mistaken identity (reported baseboard does not match
+        // the one that we expect).
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: Some(BaseboardId {
+                part_number: String::from("i86pc"),
+                serial_number: String::from("SimGimlet0"),
+            }),
+            override_expected_active: None,
+            override_expected_inactive: None,
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "in sled slot 1, expected to find part \"i86pc\" serial \
+                     \"SimGimlet0\", but found part \"i86pc\" serial \
+                     \"SimGimlet01\"",
+            ));
+
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        // Test a case where the active version doesn't match what we expect.
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: Some("not-right".parse().unwrap()),
+            override_expected_inactive: None,
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "expected to find active version \"not-right\", but \
+                     found \"0.0.2\""
+            ));
+
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        // Test a case where the inactive version doesn't match what it should
+        // (expected invalid, found something else).
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: Some(ExpectedVersion::NoValidVersion),
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "expected to find inactive version NoValidVersion, \
+                     but found Version(\"0.0.1\")"
+            ));
+
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        // Now test a case where the inactive version doesn't match what it
+        // should (expected a different valid version).
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: Some(ExpectedVersion::Version(
+                "something-else".parse().unwrap(),
+            )),
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "expected to find inactive version \
+                     Version(ArtifactVersion(\"something-else\")), but found \
+                     Version(\"0.0.1\")"
+            ));
+
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        // Test a case where we fail to fetch the artifact.  We simulate this by
+        // tearing down our artifact server before the update starts.
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_active: None,
+            override_expected_inactive: None,
+            override_progress_timeout: None,
+        };
+        let in_progress = desc.setup().await;
+        artifacts.teardown().await;
+        in_progress.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::FetchArtifact(..));
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        gwtestctx.teardown().await;
     }
 }

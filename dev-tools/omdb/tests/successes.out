@@ -56,7 +56,7 @@ EXECUTING COMMAND: omdb ["db", "instances"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-ID STATE PROPOLIS_ID SLED_ID HOST_SERIAL NAME 
+ID STATE INTENT PROPOLIS_ID SLED_ID HOST_SERIAL NAME 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -242,6 +242,10 @@ task: "abandoned_vmm_reaper"
     instances
 
 
+task: "alert_dispatcher"
+    dispatches queued alerts to receivers
+
+
 task: "bfd_manager"
     Manages bidirectional fowarding detection (BFD) configuration on rack
     switches
@@ -403,6 +407,10 @@ task: "vpc_route_manager"
     propagates updated VPC routes to all OPTE ports
 
 
+task: "webhook_deliverator"
+    sends webhook delivery requests
+
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -497,6 +505,14 @@ task: "abandoned_vmm_reaper"
       VMM records deleted:                     0
       VMMs already deleted by another Nexus:   0
     sled resource reservations deleted:        0
+
+task: "alert_dispatcher"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    alerts dispatched:                            0
+    alerts with no receivers subscribed:          0
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
@@ -778,6 +794,18 @@ task: "vpc_route_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
+
+task: "webhook_deliverator"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    receivers:                            0
+    successful deliveries:                0
+    failed deliveries:                    0
+    internal delivery errors:             0
+    already delivered by another Nexus:   0
+    in progress by another Nexus:         0
 
 ---------------------------------------------
 stderr:
@@ -997,6 +1025,14 @@ task: "abandoned_vmm_reaper"
       VMMs already deleted by another Nexus:   0
     sled resource reservations deleted:        0
 
+task: "alert_dispatcher"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    alerts dispatched:                            0
+    alerts with no receivers subscribed:          0
+
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
@@ -1277,6 +1313,18 @@ task: "vpc_route_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
+
+task: "webhook_deliverator"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    receivers:                            0
+    successful deliveries:                0
+    failed deliveries:                    0
+    internal delivery errors:             0
+    already delivered by another Nexus:   0
+    in progress by another Nexus:         0
 
 ---------------------------------------------
 stderr:
