@@ -2371,26 +2371,41 @@ pub struct DeviceAccessTokenRequest {
     pub client_id: Uuid,
 }
 
-// Webhooks
+// Alerts
 
-/// Query params for listing webhook event classes.
+/// Query params for listing alert classes.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EventClassFilter {
-    /// An optional glob pattern for filtering event class names.
+pub struct AlertClassFilter {
+    /// An optional glob pattern for filtering alert class names.
     ///
-    /// If provided, only event classes which match this glob pattern will be
+    /// If provided, only alert classes which match this glob pattern will be
     /// included in the response.
-    pub filter: Option<shared::WebhookSubscription>,
+    pub filter: Option<shared::AlertSubscription>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AlertSelector {
+    /// UUID of the alert
+    pub alert_id: Uuid,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EventClassPage {
+pub struct AlertSubscriptionSelector {
+    /// The webhook receiver that the subscription is attached to.
+    #[serde(flatten)]
+    pub receiver: AlertReceiverSelector,
+    /// The event class subscription itself.
+    pub subscription: shared::AlertSubscription,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertClassPage {
     /// The last webhook event class returned by a previous page.
     pub last_seen: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookReceiverSelector {
+pub struct AlertReceiverSelector {
     /// The name or ID of the webhook receiver.
     pub receiver: NameOrId,
 }
@@ -2411,7 +2426,7 @@ pub struct WebhookCreate {
     /// If this list is empty or is not included in the request body, the
     /// webhook will not be subscribed to any events.
     #[serde(default)]
-    pub subscriptions: Vec<shared::WebhookSubscription>,
+    pub subscriptions: Vec<shared::AlertSubscription>,
 }
 
 /// Parameters to update a webhook configuration.
@@ -2425,9 +2440,9 @@ pub struct WebhookReceiverUpdate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookSubscriptionCreate {
+pub struct AlertSubscriptionCreate {
     /// The event class pattern to subscribe to.
-    pub subscription: shared::WebhookSubscription,
+    pub subscription: shared::AlertSubscription,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -2442,23 +2457,8 @@ pub struct WebhookSecretSelector {
     pub secret_id: Uuid,
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct WebhookEventSelector {
-    /// UUID of the event
-    pub event_id: Uuid,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookSubscriptionSelector {
-    /// The webhook receiver that the subscription is attached to.
-    #[serde(flatten)]
-    pub receiver: WebhookReceiverSelector,
-    /// The event class subscription itself.
-    pub subscription: shared::WebhookSubscription,
-}
-
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookDeliveryStateFilter {
+pub struct AlertDeliveryStateFilter {
     /// If true, include deliveries which are currently in progress.
     ///
     /// If any of the "pending", "failed", or "delivered" query parameters are
@@ -2489,13 +2489,13 @@ pub struct WebhookDeliveryStateFilter {
     pub delivered: Option<bool>,
 }
 
-impl Default for WebhookDeliveryStateFilter {
+impl Default for AlertDeliveryStateFilter {
     fn default() -> Self {
         Self::ALL
     }
 }
 
-impl WebhookDeliveryStateFilter {
+impl AlertDeliveryStateFilter {
     pub const ALL: Self =
         Self { pending: Some(true), failed: Some(true), delivered: Some(true) };
 
@@ -2526,7 +2526,7 @@ impl WebhookDeliveryStateFilter {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookProbe {
+pub struct AlertReceiverProbe {
     /// If true, resend all events that have not been delivered successfully if
     /// the probe request succeeds.
     #[serde(default)]

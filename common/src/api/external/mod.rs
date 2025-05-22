@@ -981,6 +981,8 @@ pub enum ResourceType {
     AffinityGroupMember,
     AntiAffinityGroup,
     AntiAffinityGroupMember,
+    Alert,
+    AlertReceiver,
     AllowList,
     BackgroundTask,
     BgpConfig,
@@ -1044,8 +1046,6 @@ pub enum ResourceType {
     Probe,
     ProbeNetworkInterface,
     LldpLinkConfig,
-    WebhookEvent,
-    WebhookReceiver,
     WebhookSecret,
 }
 

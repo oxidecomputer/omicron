@@ -112,11 +112,12 @@ pub struct Inventory {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
-    pub omicron_zones: OmicronZonesConfig,
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
     pub datasets: Vec<InventoryDataset>,
-    pub omicron_physical_disks_generation: Generation,
+    pub ledgered_sled_config: Option<OmicronSledConfig>,
+    pub reconciler_status: ConfigReconcilerInventoryStatus,
+    pub last_reconciliation: Option<ConfigReconcilerInventory>,
 }
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to
@@ -195,6 +196,18 @@ pub struct OmicronSledConfig {
     pub datasets: IdMap<DatasetConfig>,
     pub zones: IdMap<OmicronZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
+}
+
+impl Default for OmicronSledConfig {
+    fn default() -> Self {
+        Self {
+            generation: Generation::new(),
+            disks: IdMap::default(),
+            datasets: IdMap::default(),
+            zones: IdMap::default(),
+            remove_mupdate_override: None,
+        }
+    }
 }
 
 impl Ledgerable for OmicronSledConfig {
