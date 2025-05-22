@@ -485,10 +485,11 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   test suite
-    created at:::::::::::   1970-01-01T00:00:00.000Z
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   test suite
+    created at:::::::::::::   1970-01-01T00:00:00.000Z
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   (none)
 
  PENDING MGS-MANAGED UPDATES: 0

@@ -224,6 +224,7 @@ mod test {
                 parent_blueprint_id: Some(parent_blueprint_id),
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
+                target_release_minimum_generation: None,
                 cockroachdb_fingerprint: String::new(),
                 clickhouse_cluster_config: None,
                 oximeter_read_version: Generation::new(),

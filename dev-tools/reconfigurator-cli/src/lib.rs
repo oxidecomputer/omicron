@@ -53,6 +53,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
+use std::num::ParseIntError;
 use std::str::FromStr;
 use swrite::{SWrite, swriteln};
 use tabled::Tabled;
@@ -439,6 +440,16 @@ enum BlueprintEditCommands {
         /// the UUID to set the field to, or "unset"
         value: MupdateOverrideUuidOpt,
     },
+    /// set the minimum generation for which target releases are accepted
+    ///
+    /// At the moment, this just sets the field to the given value. In the
+    /// future, we'll likely want to set this based on the current target
+    /// release generation.
+    #[clap(visible_alias = "set-release-min-gen")]
+    SetTargetReleaseMinimumGeneration {
+        /// the minimum target release generation
+        generation: GenerationOpt,
+    },
     /// expunge a zone
     ExpungeZone { zone_id: OmicronZoneUuid },
     /// configure an SP update
@@ -555,6 +566,42 @@ impl From<MupdateOverrideUuidOpt> for Option<MupdateOverrideUuid> {
         match value {
             MupdateOverrideUuidOpt::Unset => None,
             MupdateOverrideUuidOpt::Set(uuid) => Some(uuid),
+        }
+    }
+}
+
+/// Clap field for an optional generation.
+///
+/// This structure is similar to `Option`, but is specified separately to:
+///
+/// 1. Disable clap's magic around `Option`.
+/// 2. Provide a custom parser.
+///
+/// There are other ways to do both 1 and 2 (e.g. specify the type as
+/// `std::option::Option`), but when combined they're uglier than this.
+#[derive(Clone, Copy, Debug)]
+enum GenerationOpt {
+    Unset,
+    Set(Generation),
+}
+
+impl FromStr for GenerationOpt {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "unset" || s == "none" {
+            Ok(Self::Unset)
+        } else {
+            Ok(Self::Set(s.parse::<Generation>()?))
+        }
+    }
+}
+
+impl From<GenerationOpt> for Option<Generation> {
+    fn from(value: GenerationOpt) -> Self {
+        match value {
+            GenerationOpt::Unset => None,
+            GenerationOpt::Set(generation) => Some(generation),
         }
     }
 }
@@ -1101,6 +1148,23 @@ fn cmd_blueprint_edit(
                 }
                 MupdateOverrideUuidOpt::Set(uuid) => {
                     format!("set remove_mupdate_override to {uuid}")
+                }
+            }
+        }
+        BlueprintEditCommands::SetTargetReleaseMinimumGeneration {
+            generation,
+        } => {
+            builder
+                .set_target_release_minimum_generation(generation.into())
+                .context("failed to set target release minimum generation")?;
+            match generation {
+                GenerationOpt::Unset => {
+                    "unset target release minimum generation".to_owned()
+                }
+                GenerationOpt::Set(generation) => {
+                    format!(
+                        "set target release minimum generation to {generation}"
+                    )
                 }
             }
         }

@@ -65,6 +65,7 @@ pub struct Blueprint {
     pub time_created: DateTime<Utc>,
     pub creator: String,
     pub comment: String,
+    pub target_release_minimum_generation: Option<Generation>,
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
@@ -81,6 +82,9 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
+            target_release_minimum_generation: bp
+                .target_release_minimum_generation
+                .map(Generation),
         }
     }
 }
@@ -92,6 +96,9 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             parent_blueprint_id: value.parent_blueprint_id.map(From::from),
             internal_dns_version: *value.internal_dns_version,
             external_dns_version: *value.external_dns_version,
+            target_release_minimum_generation: value
+                .target_release_minimum_generation
+                .map(From::from),
             cockroachdb_fingerprint: value.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::from_optional_string(

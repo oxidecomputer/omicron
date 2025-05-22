@@ -4074,7 +4074,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- represented by the presence of the default value in that field.
     --
     -- `cluster.preserve_downgrade_option`
-    cockroachdb_setting_preserve_downgrade TEXT
+    cockroachdb_setting_preserve_downgrade TEXT,
+
+    -- The minimum target release generation to use.
+    target_release_minimum_generation INT8
 );
 
 -- table describing both the current and historical target blueprints of the

@@ -292,10 +292,11 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   test_blueprint2
-    created at:::::::::::   1970-01-01T00:00:00.000Z
-    comment::::::::::::::   sled a1b477db-b629-48eb-911d-1ccdafca75b9 expunged (expunged 10 disks, 47 datasets, 15 zones)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   test_blueprint2
+    created at:::::::::::::   1970-01-01T00:00:00.000Z
+    comment::::::::::::::::   sled a1b477db-b629-48eb-911d-1ccdafca75b9 expunged (expunged 10 disks, 47 datasets, 15 zones)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   (none)
 
  PENDING MGS-MANAGED UPDATES: 0

@@ -332,8 +332,9 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
     cluster.preserve_downgrade_option:   (do not modify) (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   1 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   (none) (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
