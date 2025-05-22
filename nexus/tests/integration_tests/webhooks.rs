@@ -7,7 +7,7 @@
 use dropshot::test_util::ClientTestContext;
 use hmac::{Hmac, Mac};
 use httpmock::prelude::*;
-use nexus_db_model::WebhookEventClass;
+use nexus_db_model::AlertClass;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -19,9 +19,9 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, shared, views};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::NameOrId;
+use omicron_uuid_kinds::AlertReceiverUuid;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::WebhookEventUuid;
-use omicron_uuid_kinds::WebhookReceiverUuid;
 use sha2::Sha256;
 use std::time::Duration;
 use uuid::Uuid;
@@ -29,9 +29,10 @@ use uuid::Uuid;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-const RECEIVERS_BASE_PATH: &str = "/v1/webhooks/receivers";
-const SECRETS_BASE_PATH: &str = "/v1/webhooks/secrets";
-const DELIVERIES_BASE_PATH: &str = "/v1/webhooks/deliveries";
+const ALERTS_BASE_PATH: &str = "/v1/alerts";
+const ALERT_RECEIVERS_BASE_PATH: &str = "/v1/alert-receivers";
+const WEBHOOK_RECEIVERS_BASE_PATH: &str = "/v1/webhook-receivers";
+const SECRETS_BASE_PATH: &str = "/v1/webhook-secrets";
 
 async fn webhook_create(
     ctx: &ControlPlaneTestContext,
@@ -40,27 +41,27 @@ async fn webhook_create(
     resource_helpers::object_create::<
         params::WebhookCreate,
         views::WebhookReceiver,
-    >(&ctx.external_client, RECEIVERS_BASE_PATH, params)
+    >(&ctx.external_client, WEBHOOK_RECEIVERS_BASE_PATH, params)
     .await
 }
 
-fn get_webhooks_url(name_or_id: impl Into<NameOrId>) -> String {
+fn alert_rx_url(name_or_id: impl Into<NameOrId>) -> String {
     let name_or_id = name_or_id.into();
-    format!("{RECEIVERS_BASE_PATH}/{name_or_id}")
+    format!("{ALERT_RECEIVERS_BASE_PATH}/{name_or_id}")
 }
 
-async fn webhook_get(
+async fn alert_rx_get(
     client: &ClientTestContext,
     webhook_url: &str,
-) -> views::WebhookReceiver {
-    webhook_get_as(client, webhook_url, AuthnMode::PrivilegedUser).await
+) -> views::AlertReceiver {
+    alert_rx_get_as(client, webhook_url, AuthnMode::PrivilegedUser).await
 }
 
-async fn webhook_get_as(
+async fn alert_rx_get_as(
     client: &ClientTestContext,
     webhook_url: &str,
     authn_as: AuthnMode,
-) -> views::WebhookReceiver {
+) -> views::AlertReceiver {
     NexusRequest::object_get(client, &webhook_url)
         .authn_as(authn_as)
         .execute()
@@ -70,12 +71,12 @@ async fn webhook_get_as(
         .unwrap()
 }
 
-async fn webhook_rx_list(
+async fn alert_rx_list(
     client: &ClientTestContext,
-) -> Vec<views::WebhookReceiver> {
-    resource_helpers::objects_list_page_authz::<views::WebhookReceiver>(
+) -> Vec<views::AlertReceiver> {
+    resource_helpers::objects_list_page_authz::<views::AlertReceiver>(
         client,
-        RECEIVERS_BASE_PATH,
+        ALERT_RECEIVERS_BASE_PATH,
     )
     .await
     .items
@@ -100,36 +101,32 @@ async fn webhook_secrets_get(
 
 fn resend_url(
     webhook_name_or_id: impl Into<NameOrId>,
-    event_id: WebhookEventUuid,
+    alert_id: AlertUuid,
 ) -> String {
     let rx = webhook_name_or_id.into();
-    format!("{DELIVERIES_BASE_PATH}/{event_id}/resend?receiver={rx}")
+    format!("{ALERTS_BASE_PATH}/{alert_id}/resend?receiver={rx}")
 }
 
-async fn webhook_deliveries_list(
+async fn alert_deliveries_list(
     client: &ClientTestContext,
     webhook_name_or_id: impl Into<NameOrId>,
-) -> Collection<views::WebhookDelivery> {
-    let rx = webhook_name_or_id.into();
-    NexusRequest::iter_collection_authn(
-        client,
-        &format!("{DELIVERIES_BASE_PATH}?receiver={rx}"),
-        "",
-        None,
-    )
-    .await
-    .unwrap()
+) -> Collection<views::AlertDelivery> {
+    let mut rx_url = alert_rx_url(webhook_name_or_id);
+    rx_url.push_str("/deliveries");
+    NexusRequest::iter_collection_authn(client, &rx_url, "", None)
+        .await
+        .unwrap()
 }
 
-async fn webhook_delivery_resend(
+async fn alert_delivery_resend(
     client: &ClientTestContext,
     webhook_name_or_id: impl Into<NameOrId>,
-    event_id: WebhookEventUuid,
-) -> views::WebhookDeliveryId {
+    alert_id: AlertUuid,
+) -> views::AlertDeliveryId {
     let req = RequestBuilder::new(
         client,
         http::Method::POST,
-        &resend_url(webhook_name_or_id, event_id),
+        &resend_url(webhook_name_or_id, alert_id),
     )
     .body::<serde_json::Value>(None)
     .expect_status(Some(http::StatusCode::CREATED));
@@ -145,13 +142,13 @@ async fn webhook_delivery_resend(
 async fn webhook_delivery_resend_error(
     client: &ClientTestContext,
     webhook_name_or_id: impl Into<NameOrId>,
-    event_id: WebhookEventUuid,
+    alert_id: AlertUuid,
     status: http::StatusCode,
 ) -> dropshot::HttpErrorResponseBody {
     let req = RequestBuilder::new(
         client,
         http::Method::POST,
-        &resend_url(webhook_name_or_id, event_id),
+        &resend_url(webhook_name_or_id, alert_id),
     )
     .body::<serde_json::Value>(None)
     .expect_status(Some(status));
@@ -189,7 +186,7 @@ const MY_COOL_SECRET: &str = "my cool secret";
 
 async fn secret_add(
     ctx: &ControlPlaneTestContext,
-    webhook_id: WebhookReceiverUuid,
+    webhook_id: AlertReceiverUuid,
     params: &params::WebhookSecretCreate,
 ) -> views::WebhookSecret {
     resource_helpers::object_create::<
@@ -205,23 +202,21 @@ async fn secret_add(
 
 async fn subscription_add(
     ctx: &ControlPlaneTestContext,
-    webhook_id: WebhookReceiverUuid,
-    subscription: &shared::WebhookSubscription,
-) -> views::WebhookSubscriptionCreated {
+    webhook_id: AlertReceiverUuid,
+    subscription: &shared::AlertSubscription,
+) -> views::AlertSubscriptionCreated {
     resource_helpers::object_create(
         &ctx.external_client,
-        &format!("{RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions"),
-        &params::WebhookSubscriptionCreate {
-            subscription: subscription.clone(),
-        },
+        &format!("{ALERT_RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions"),
+        &params::AlertSubscriptionCreate { subscription: subscription.clone() },
     )
     .await
 }
 
 async fn subscription_remove(
     ctx: &ControlPlaneTestContext,
-    webhook_id: WebhookReceiverUuid,
-    subscription: &shared::WebhookSubscription,
+    webhook_id: AlertReceiverUuid,
+    subscription: &shared::AlertSubscription,
 ) {
     resource_helpers::object_delete(
         &ctx.external_client,
@@ -231,20 +226,23 @@ async fn subscription_remove(
 }
 
 fn subscription_remove_url(
-    webhook_id: WebhookReceiverUuid,
-    subscription: &shared::WebhookSubscription,
+    webhook_id: AlertReceiverUuid,
+    subscription: &shared::AlertSubscription,
 ) -> String {
-    format!("{RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions/{subscription}")
+    format!(
+        "{ALERT_RECEIVERS_BASE_PATH}/{webhook_id}/subscriptions/{subscription}"
+    )
 }
 
-async fn webhook_send_probe(
+async fn alert_receiver_send_probe(
     ctx: &ControlPlaneTestContext,
-    webhook_id: &WebhookReceiverUuid,
+    webhook_id: &AlertReceiverUuid,
     resend: bool,
     status: http::StatusCode,
-) -> views::WebhookProbeResult {
+) -> views::AlertProbeResult {
     let pathparams = if resend { "?resend=true" } else { "" };
-    let path = format!("{RECEIVERS_BASE_PATH}/{webhook_id}/probe{pathparams}");
+    let path =
+        format!("{ALERT_RECEIVERS_BASE_PATH}/{webhook_id}/probe{pathparams}");
     NexusRequest::new(
         RequestBuilder::new(&ctx.external_client, http::Method::POST, &path)
             .expect_status(Some(status)),
@@ -262,7 +260,7 @@ async fn webhook_send_probe(
 fn is_valid_for_webhook(
     webhook: &views::WebhookReceiver,
 ) -> impl FnOnce(httpmock::When) -> httpmock::When {
-    let path = webhook.endpoint.path().to_string();
+    let path = webhook.config.endpoint.path().to_string();
     let id = webhook.identity.id.to_string();
     move |when| {
         when.path(path)
@@ -333,9 +331,10 @@ struct ExpectAttempt {
 /// such as timestamps, which are variable.
 #[track_caller]
 fn expect_delivery_attempts(
-    actual: &[views::WebhookDeliveryAttempt],
+    actual: &views::AlertDeliveryAttempts,
     expected: &[ExpectAttempt],
 ) {
+    let views::AlertDeliveryAttempts::Webhook(actual) = actual;
     assert_eq!(
         actual.len(),
         expected.len(),
@@ -372,13 +371,13 @@ async fn test_webhook_receiver_get(cptestctx: &ControlPlaneTestContext) {
     dbg!(&created_webhook);
 
     // Fetch the receiver by ID.
-    let by_id_url = get_webhooks_url(created_webhook.identity.id);
-    let webhook_view = webhook_get(client, &by_id_url).await;
+    let by_id_url = alert_rx_url(created_webhook.identity.id);
+    let webhook_view = alert_rx_get(client, &by_id_url).await;
     assert_eq!(created_webhook, webhook_view);
 
     // Fetch the receiver by name.
-    let by_name_url = get_webhooks_url(created_webhook.identity.name.clone());
-    let webhook_view = webhook_get(client, &by_name_url).await;
+    let by_name_url = alert_rx_url(created_webhook.identity.name.clone());
+    let webhook_view = alert_rx_get(client, &by_name_url).await;
     assert_eq!(created_webhook, webhook_view);
 }
 
@@ -403,16 +402,13 @@ async fn test_webhook_receiver_create_delete(
     .await;
     dbg!(&created_webhook);
 
-    resource_helpers::object_delete(
-        client,
-        &format!("{RECEIVERS_BASE_PATH}/{}", created_webhook.identity.name),
-    )
-    .await;
+    let delete_url = alert_rx_url(created_webhook.identity.name.clone());
+    resource_helpers::object_delete(client, &delete_url).await;
 
     // It should be gone now.
     resource_helpers::object_delete_error(
         client,
-        &format!("{RECEIVERS_BASE_PATH}/{}", created_webhook.identity.name),
+        &delete_url,
         http::StatusCode::NOT_FOUND,
     )
     .await;
@@ -441,7 +437,7 @@ async fn test_webhook_receiver_names_are_unique(
 
     let error = resource_helpers::object_create_error(
         &client,
-        RECEIVERS_BASE_PATH,
+        WEBHOOK_RECEIVERS_BASE_PATH,
         &params::WebhookCreate {
             identity: my_great_webhook_identity(),
             endpoint: "https://example.com/more-webhooks"
@@ -455,7 +451,7 @@ async fn test_webhook_receiver_names_are_unique(
     .await;
     assert_eq!(
         dbg!(&error).message,
-        "already exists: webhook-receiver \"my-great-webhook\""
+        "already exists: alert-receiver \"my-great-webhook\""
     );
 }
 
@@ -465,7 +461,7 @@ async fn test_cannot_subscribe_to_probes(cptestctx: &ControlPlaneTestContext) {
 
     let error = resource_helpers::object_create_error(
         &client,
-        RECEIVERS_BASE_PATH,
+        WEBHOOK_RECEIVERS_BASE_PATH,
         &params::WebhookCreate {
             identity: my_great_webhook_identity(),
             endpoint: "https://example.com/webhooks"
@@ -498,7 +494,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
 
     let server = httpmock::MockServer::start_async().await;
 
-    let id = WebhookEventUuid::new_v4();
+    let id = AlertUuid::new_v4();
 
     // Create a webhook receiver.
     let webhook =
@@ -510,8 +506,8 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
         server
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
-                    "event_class": "test.foo",
-                    "event_id": id,
+                    "alert_class": "test.foo",
+                    "alert_id": id,
                     "data": {
                         "hello_world": true,
                     }
@@ -522,7 +518,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -533,17 +529,17 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
 
     // Publish an event
     let event = nexus
-        .webhook_event_publish(
+        .alert_publish(
             &opctx,
             id,
-            WebhookEventClass::TestFoo,
+            AlertClass::TestFoo,
             serde_json::json!({"hello_world": true}),
         )
         .await
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
     dbg!(
         activate_background_task(internal_client, "webhook_deliverator").await
     );
@@ -562,7 +558,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
 
     let server = httpmock::MockServer::start_async().await;
 
-    let id = WebhookEventUuid::new_v4();
+    let id = AlertUuid::new_v4();
     let endpoint =
         server.url("/webhooks").parse().expect("this should be a valid URL");
 
@@ -585,9 +581,9 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     dbg!(&webhook);
-    let rx_id = WebhookReceiverUuid::from_untyped_uuid(webhook.identity.id);
+    let rx_id = AlertReceiverUuid::from_untyped_uuid(webhook.identity.id);
 
-    let secret1_id = webhook.secrets[0].id;
+    let secret1_id = webhook.config.secrets[0].id;
 
     let client = &cptestctx.external_client;
     let assert_secrets_get = |mut expected: Vec<Uuid>| async move {
@@ -655,17 +651,17 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
 
     // Publish an event
     let event = nexus
-        .webhook_event_publish(
+        .alert_publish(
             &opctx,
             id,
-            WebhookEventClass::TestFoo,
+            AlertClass::TestFoo,
             serde_json::json!({"hello_world": true}),
         )
         .await
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
     dbg!(
         activate_background_task(internal_client, "webhook_deliverator").await
     );
@@ -683,12 +679,12 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let bar_event_id = WebhookEventUuid::new_v4();
-    let baz_event_id = WebhookEventUuid::new_v4();
+    let bar_alert_id = AlertUuid::new_v4();
+    let baz_alert_id = AlertUuid::new_v4();
 
     let assert_webhook_rx_list_matches =
-        |mut expected: Vec<views::WebhookReceiver>| async move {
-            let mut actual = webhook_rx_list(client).await;
+        |mut expected: Vec<views::AlertReceiver>| async move {
+            let mut actual = alert_rx_list(client).await;
             actual.sort_by_key(|rx| rx.identity.id);
             expected.sort_by_key(|rx| rx.identity.id);
             assert_eq!(expected, actual);
@@ -714,17 +710,17 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     dbg!(&rx_bar);
-    assert_webhook_rx_list_matches(vec![rx_bar.clone()]).await;
+    assert_webhook_rx_list_matches(vec![rx_bar.clone().into()]).await;
     let mock_bar = {
         let webhook = rx_bar.clone();
         srv_bar
             .mock_async(move |when, then| {
                 when.method(POST)
                     .header("x-oxide-event-class", "test.foo.bar")
-                    .header("x-oxide-event-id", bar_event_id.to_string())
+                    .header("x-oxide-event-id", bar_alert_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         BAR_SECRET.as_bytes().to_vec(),
                     ));
                 then.status(200);
@@ -751,17 +747,21 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     dbg!(&rx_baz);
-    assert_webhook_rx_list_matches(vec![rx_bar.clone(), rx_baz.clone()]).await;
+    assert_webhook_rx_list_matches(vec![
+        rx_bar.clone().into(),
+        rx_baz.clone().into(),
+    ])
+    .await;
     let mock_baz = {
         let webhook = rx_baz.clone();
         srv_baz
             .mock_async(move |when, then| {
                 when.method(POST)
                     .header("x-oxide-event-class", "test.foo.baz")
-                    .header("x-oxide-event-id", baz_event_id.to_string())
+                    .header("x-oxide-event-id", baz_alert_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         BAZ_SECRET.as_bytes().to_vec(),
                     ));
                 then.status(200);
@@ -789,9 +789,9 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     .await;
     dbg!(&rx_star);
     assert_webhook_rx_list_matches(vec![
-        rx_bar.clone(),
-        rx_baz.clone(),
-        rx_star.clone(),
+        rx_bar.clone().into(),
+        rx_baz.clone().into(),
+        rx_star.clone().into(),
     ])
     .await;
     let mock_star = {
@@ -806,7 +806,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                     .header_exists("x-oxide-event-id")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         STAR_SECRET.as_bytes().to_vec(),
                     ));
                 then.status(200);
@@ -816,10 +816,10 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
 
     // Publish a test.foo.bar event
     let event = nexus
-        .webhook_event_publish(
+        .alert_publish(
             &opctx,
-            bar_event_id,
-            WebhookEventClass::TestFooBar,
+            bar_alert_id,
+            AlertClass::TestFooBar,
             serde_json::json!({"lol": "webhooked on phonics"}),
         )
         .await
@@ -827,17 +827,17 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     dbg!(event);
     // Publish a test.foo.baz event
     let event = nexus
-        .webhook_event_publish(
+        .alert_publish(
             &opctx,
-            baz_event_id,
-            WebhookEventClass::TestFooBaz,
+            baz_alert_id,
+            AlertClass::TestFooBaz,
             serde_json::json!({"lol": "webhook, line, and sinker"}),
         )
         .await
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
     dbg!(
         activate_background_task(internal_client, "webhook_deliverator").await
     );
@@ -863,7 +863,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
 
     let server = httpmock::MockServer::start_async().await;
 
-    let id = WebhookEventUuid::new_v4();
+    let id = AlertUuid::new_v4();
 
     // Create a webhook receiver.
     let webhook =
@@ -875,8 +875,8 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
         server
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
-                    "event_class": "test.foo",
-                    "event_id": id,
+                    "alert_class": "test.foo",
+                    "alert_id": id,
                     "data": {
                         "hello_world": true,
                     }
@@ -887,7 +887,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -898,28 +898,26 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
 
     // Publish an event
     let event = nexus
-        .webhook_event_publish(
+        .alert_publish(
             &opctx,
             id,
-            WebhookEventClass::TestFoo,
+            AlertClass::TestFoo,
             serde_json::json!({"hello_world": true}),
         )
         .await
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
     dbg!(
         activate_background_task(internal_client, "webhook_deliverator").await
     );
 
     mock.assert_calls_async(1).await;
 
-    let deliveries = webhook_deliveries_list(
-        &cptestctx.external_client,
-        webhook.identity.id,
-    )
-    .await;
+    let deliveries =
+        alert_deliveries_list(&cptestctx.external_client, webhook.identity.id)
+            .await;
     assert_eq!(
         deliveries.all_items.len(),
         1,
@@ -928,10 +926,10 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     );
 
     let delivery = dbg!(&deliveries.all_items[0]);
-    assert_eq!(delivery.webhook_id.into_untyped_uuid(), webhook.identity.id);
-    assert_eq!(delivery.event_id, id);
-    assert_eq!(delivery.event_class, "test.foo");
-    assert_eq!(delivery.state, views::WebhookDeliveryState::Pending);
+    assert_eq!(delivery.receiver_id.into_untyped_uuid(), webhook.identity.id);
+    assert_eq!(delivery.alert_id, id);
+    assert_eq!(delivery.alert_class, "test.foo");
+    assert_eq!(delivery.state, views::AlertDeliveryState::Pending);
     expect_delivery_attempts(
         &delivery.attempts,
         &[ExpectAttempt {
@@ -956,8 +954,8 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
         server
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
-                    "event_class": "test.foo",
-                    "event_id": id,
+                    "alert_class": "test.foo",
+                    "alert_id": id,
                     "data": {
                         "hello_world": true,
                     }
@@ -968,7 +966,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -991,11 +989,9 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     mock.assert_calls_async(1).await;
     mock.delete_async().await;
 
-    let deliveries = webhook_deliveries_list(
-        &cptestctx.external_client,
-        webhook.identity.id,
-    )
-    .await;
+    let deliveries =
+        alert_deliveries_list(&cptestctx.external_client, webhook.identity.id)
+            .await;
     assert_eq!(
         deliveries.all_items.len(),
         1,
@@ -1004,10 +1000,10 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     );
 
     let delivery = dbg!(&deliveries.all_items[0]);
-    assert_eq!(delivery.webhook_id.into_untyped_uuid(), webhook.identity.id);
-    assert_eq!(delivery.event_id, id);
-    assert_eq!(delivery.event_class, "test.foo");
-    assert_eq!(delivery.state, views::WebhookDeliveryState::Pending);
+    assert_eq!(delivery.receiver_id.into_untyped_uuid(), webhook.identity.id);
+    assert_eq!(delivery.alert_id, id);
+    assert_eq!(delivery.alert_class, "test.foo");
+    assert_eq!(delivery.state, views::AlertDeliveryState::Pending);
     expect_delivery_attempts(
         &delivery.attempts,
         &[
@@ -1028,8 +1024,8 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
         server
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
-                    "event_class": "test.foo",
-                    "event_id": id,
+                    "alert_class": "test.foo",
+                    "alert_id": id,
                     "data": {
                         "hello_world": true,
                     }
@@ -1040,7 +1036,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-id", id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1063,11 +1059,9 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     mock.assert_async().await;
 
     // Make sure the deliveries endpoint correctly records the request history.
-    let deliveries = webhook_deliveries_list(
-        &cptestctx.external_client,
-        webhook.identity.id,
-    )
-    .await;
+    let deliveries =
+        alert_deliveries_list(&cptestctx.external_client, webhook.identity.id)
+            .await;
     assert_eq!(
         deliveries.all_items.len(),
         1,
@@ -1075,10 +1069,10 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
         deliveries.all_items
     );
     let delivery = dbg!(&deliveries.all_items[0]);
-    assert_eq!(delivery.webhook_id.into_untyped_uuid(), webhook.identity.id);
-    assert_eq!(delivery.event_id, id);
-    assert_eq!(delivery.event_class, "test.foo");
-    assert_eq!(delivery.state, views::WebhookDeliveryState::Delivered);
+    assert_eq!(delivery.receiver_id.into_untyped_uuid(), webhook.identity.id);
+    assert_eq!(delivery.alert_id, id);
+    assert_eq!(delivery.alert_class, "test.foo");
+    assert_eq!(delivery.state, views::AlertDeliveryState::Delivered);
     expect_delivery_attempts(
         &delivery.attempts,
         &[
@@ -1106,10 +1100,10 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     let webhook =
         webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
     dbg!(&webhook);
-    let rx_id = WebhookReceiverUuid::from_untyped_uuid(webhook.identity.id);
+    let rx_id = AlertReceiverUuid::from_untyped_uuid(webhook.identity.id);
 
     let body = serde_json::json!({
-        "event_class": "probe",
+        "alert_class": "probe",
         "data": {}
     })
     .to_string();
@@ -1125,7 +1119,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-class", "probe")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1142,20 +1136,27 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     };
 
     // Send a probe. The probe should fail due to a timeout.
-    let probe1 =
-        webhook_send_probe(&cptestctx, &rx_id, false, http::StatusCode::OK)
-            .await;
+    let probe1 = alert_receiver_send_probe(
+        &cptestctx,
+        &rx_id,
+        false,
+        http::StatusCode::OK,
+    )
+    .await;
     dbg!(&probe1);
 
     mock.assert_async().await;
 
-    assert_eq!(
-        probe1.probe.attempts[0].result,
-        views::WebhookDeliveryAttemptResult::FailedTimeout
+    expect_delivery_attempts(
+        &probe1.probe.attempts,
+        &[ExpectAttempt {
+            result: views::WebhookDeliveryAttemptResult::FailedTimeout,
+            status: None,
+        }],
     );
-    assert_eq!(probe1.probe.event_class, "probe");
-    assert_eq!(probe1.probe.trigger, views::WebhookDeliveryTrigger::Probe);
-    assert_eq!(probe1.probe.state, views::WebhookDeliveryState::Failed);
+    assert_eq!(probe1.probe.alert_class, "probe");
+    assert_eq!(probe1.probe.trigger, views::AlertDeliveryTrigger::Probe);
+    assert_eq!(probe1.probe.state, views::AlertDeliveryState::Failed);
     assert_eq!(
         probe1.resends_started, None,
         "we did not request events be resent"
@@ -1172,7 +1173,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-class", "probe")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1181,19 +1182,26 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
             .await
     };
 
-    let probe2 =
-        webhook_send_probe(&cptestctx, &rx_id, false, http::StatusCode::OK)
-            .await;
+    let probe2 = alert_receiver_send_probe(
+        &cptestctx,
+        &rx_id,
+        false,
+        http::StatusCode::OK,
+    )
+    .await;
     dbg!(&probe2);
 
     mock.assert_async().await;
-    assert_eq!(
-        probe2.probe.attempts[0].result,
-        views::WebhookDeliveryAttemptResult::FailedHttpError
+    expect_delivery_attempts(
+        &probe2.probe.attempts,
+        &[ExpectAttempt {
+            result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+            status: Some(503),
+        }],
     );
-    assert_eq!(probe2.probe.event_class, "probe");
-    assert_eq!(probe2.probe.trigger, views::WebhookDeliveryTrigger::Probe);
-    assert_eq!(probe2.probe.state, views::WebhookDeliveryState::Failed);
+    assert_eq!(probe2.probe.alert_class, "probe");
+    assert_eq!(probe2.probe.trigger, views::AlertDeliveryTrigger::Probe);
+    assert_eq!(probe2.probe.state, views::AlertDeliveryState::Failed);
     assert_ne!(
         probe2.probe.id, probe1.probe.id,
         "a new delivery ID should be assigned to each probe"
@@ -1214,7 +1222,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
                     .header("x-oxide-event-class", "probe")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1223,18 +1231,26 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
             .await
     };
 
-    let probe3 =
-        webhook_send_probe(&cptestctx, &rx_id, false, http::StatusCode::OK)
-            .await;
+    let probe3 = alert_receiver_send_probe(
+        &cptestctx,
+        &rx_id,
+        false,
+        http::StatusCode::OK,
+    )
+    .await;
     dbg!(&probe3);
     mock.assert_async().await;
-    assert_eq!(
-        probe3.probe.attempts[0].result,
-        views::WebhookDeliveryAttemptResult::Succeeded
+
+    expect_delivery_attempts(
+        &probe3.probe.attempts,
+        &[ExpectAttempt {
+            result: views::WebhookDeliveryAttemptResult::Succeeded,
+            status: Some(200),
+        }],
     );
-    assert_eq!(probe3.probe.event_class, "probe");
-    assert_eq!(probe3.probe.trigger, views::WebhookDeliveryTrigger::Probe);
-    assert_eq!(probe3.probe.state, views::WebhookDeliveryState::Delivered);
+    assert_eq!(probe3.probe.alert_class, "probe");
+    assert_eq!(probe3.probe.trigger, views::AlertDeliveryTrigger::Probe);
+    assert_eq!(probe3.probe.state, views::AlertDeliveryState::Delivered);
     assert_ne!(
         probe3.probe.id, probe1.probe.id,
         "a new delivery ID should be assigned to each probe"
@@ -1266,8 +1282,8 @@ async fn test_probe_resends_failed_deliveries(
         webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
     dbg!(&webhook);
 
-    let event1_id = WebhookEventUuid::new_v4();
-    let event2_id = WebhookEventUuid::new_v4();
+    let event1_id = AlertUuid::new_v4();
+    let event2_id = AlertUuid::new_v4();
     let mock = {
         let webhook = webhook.clone();
         server
@@ -1281,7 +1297,7 @@ async fn test_probe_resends_failed_deliveries(
                     )
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ));
                 then.status(500);
@@ -1292,10 +1308,10 @@ async fn test_probe_resends_failed_deliveries(
     // Publish both events
     dbg!(
         nexus
-            .webhook_event_publish(
+            .alert_publish(
                 &opctx,
                 event1_id,
-                WebhookEventClass::TestFoo,
+                AlertClass::TestFoo,
                 serde_json::json!({"hello": "world"}),
             )
             .await
@@ -1303,17 +1319,17 @@ async fn test_probe_resends_failed_deliveries(
     );
     dbg!(
         nexus
-            .webhook_event_publish(
+            .alert_publish(
                 &opctx,
                 event2_id,
-                WebhookEventClass::TestFoo,
+                AlertClass::TestFoo,
                 serde_json::json!({"hello": "emeryville"}),
             )
             .await
             .expect("event2 should be published successfully")
     );
 
-    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
     dbg!(
         activate_background_task(internal_client, "webhook_deliverator").await
     );
@@ -1341,7 +1357,7 @@ async fn test_probe_resends_failed_deliveries(
         server
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
-                    "event_class": "probe",
+                    "alert_class": "probe",
                     "data": {
                     }
                 })
@@ -1350,7 +1366,7 @@ async fn test_probe_resends_failed_deliveries(
                     .header("x-oxide-event-class", "probe")
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1373,7 +1389,7 @@ async fn test_probe_resends_failed_deliveries(
                     )
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ));
                 then.status(200);
@@ -1382,14 +1398,18 @@ async fn test_probe_resends_failed_deliveries(
     };
 
     // Send a probe with ?resend=true
-    let rx_id = WebhookReceiverUuid::from_untyped_uuid(webhook.identity.id);
-    let probe =
-        webhook_send_probe(&cptestctx, &rx_id, true, http::StatusCode::OK)
-            .await;
+    let rx_id = AlertReceiverUuid::from_untyped_uuid(webhook.identity.id);
+    let probe = alert_receiver_send_probe(
+        &cptestctx,
+        &rx_id,
+        true,
+        http::StatusCode::OK,
+    )
+    .await;
     dbg!(&probe);
     probe_mock.assert_async().await;
     probe_mock.delete_async().await;
-    assert_eq!(probe.probe.state, views::WebhookDeliveryState::Delivered);
+    assert_eq!(probe.probe.state, views::AlertDeliveryState::Delivered);
     assert_eq!(probe.resends_started, Some(2));
 
     // Both events should be resent.
@@ -1417,11 +1437,11 @@ async fn test_api_resends_failed_deliveries(
         webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
     dbg!(&webhook);
 
-    let event1_id = WebhookEventUuid::new_v4();
-    let event2_id = WebhookEventUuid::new_v4();
+    let event1_id = AlertUuid::new_v4();
+    let event2_id = AlertUuid::new_v4();
     let body = serde_json::json!({
-        "event_class": "test.foo",
-        "event_id": event1_id,
+        "alert_class": "test.foo",
+        "alert_id": event1_id,
         "data": {
             "hello_world": true,
         }
@@ -1437,7 +1457,7 @@ async fn test_api_resends_failed_deliveries(
                     .header("x-oxide-event-id", event1_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1448,10 +1468,10 @@ async fn test_api_resends_failed_deliveries(
 
     // Publish an event
     let event1 = nexus
-        .webhook_event_publish(
+        .alert_publish(
             &opctx,
             event1_id,
-            WebhookEventClass::TestFoo,
+            AlertClass::TestFoo,
             serde_json::json!({"hello_world": true}),
         )
         .await
@@ -1460,17 +1480,17 @@ async fn test_api_resends_failed_deliveries(
 
     // Publish another event that our receiver is not subscribed to.
     let event2 = nexus
-        .webhook_event_publish(
+        .alert_publish(
             &opctx,
             event2_id,
-            WebhookEventClass::TestQuuxBar,
+            AlertClass::TestQuuxBar,
             serde_json::json!({"hello_world": true}),
         )
         .await
         .expect("event should be published successfully");
     dbg!(event2);
 
-    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
     dbg!(
         activate_background_task(internal_client, "webhook_deliverator").await
     );
@@ -1497,7 +1517,7 @@ async fn test_api_resends_failed_deliveries(
                     .header("x-oxide-event-id", event1_id.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1508,7 +1528,7 @@ async fn test_api_resends_failed_deliveries(
 
     // Try to resend event 1.
     let delivery =
-        webhook_delivery_resend(client, webhook.identity.id, event1_id).await;
+        alert_delivery_resend(client, webhook.identity.id, event1_id).await;
     dbg!(delivery);
 
     // Try to resend event 2. This should fail, as the receiver is not
@@ -1551,8 +1571,8 @@ async fn subscription_add_test(
 
     let server = httpmock::MockServer::start_async().await;
 
-    let id1 = WebhookEventUuid::new_v4();
-    let id2 = WebhookEventUuid::new_v4();
+    let id1 = AlertUuid::new_v4();
+    let id2 = AlertUuid::new_v4();
 
     // Create a webhook receiver.
     let webhook =
@@ -1564,8 +1584,8 @@ async fn subscription_add_test(
         server
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
-                    "event_class": "test.foo.bar",
-                    "event_id": id2,
+                    "alert_class": "test.foo.bar",
+                    "alert_id": id2,
                     "data": {
                         "hello_world": true,
                     }
@@ -1576,7 +1596,7 @@ async fn subscription_add_test(
                     .header("x-oxide-event-id", id2.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1588,32 +1608,32 @@ async fn subscription_add_test(
     // Publish an event. This should not be received, as we are not subscribed
     // to it.
     let event = nexus
-        .webhook_event_publish(
+        .alert_publish(
             &opctx,
             id1,
-            WebhookEventClass::TestFooBar,
+            AlertClass::TestFooBar,
             serde_json::json!({"hello_world": false}),
         )
         .await
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
     dbg!(
         activate_background_task(internal_client, "webhook_deliverator").await
     );
 
     mock.assert_calls_async(0).await;
 
-    let rx_id = WebhookReceiverUuid::from_untyped_uuid(webhook.identity.id);
+    let rx_id = AlertReceiverUuid::from_untyped_uuid(webhook.identity.id);
     let new_subscription =
-        new_subscription.parse::<shared::WebhookSubscription>().unwrap();
+        new_subscription.parse::<shared::AlertSubscription>().unwrap();
     dbg!(subscription_add(&cptestctx, rx_id, &new_subscription).await);
 
     // The new subscription should be there.
-    let rx = webhook_get(
+    let rx = alert_rx_get(
         &cptestctx.external_client,
-        &get_webhooks_url(webhook.identity.id),
+        &alert_rx_url(webhook.identity.id),
     )
     .await;
     dbg!(&rx);
@@ -1621,17 +1641,17 @@ async fn subscription_add_test(
 
     // Publish an event. This one should make it through.
     let event = nexus
-        .webhook_event_publish(
+        .alert_publish(
             &opctx,
             id2,
-            WebhookEventClass::TestFooBar,
+            AlertClass::TestFooBar,
             serde_json::json!({"hello_world": true}),
         )
         .await
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
     dbg!(
         activate_background_task(internal_client, "webhook_deliverator").await
     );
@@ -1668,14 +1688,14 @@ async fn subscription_remove_test(
 
     let server = httpmock::MockServer::start_async().await;
 
-    let id1 = WebhookEventUuid::new_v4();
-    let id2 = WebhookEventUuid::new_v4();
-    let id3 = WebhookEventUuid::new_v4();
+    let id1 = AlertUuid::new_v4();
+    let id2 = AlertUuid::new_v4();
+    let id3 = AlertUuid::new_v4();
 
     let other_subscription =
-        "test.foo".parse::<shared::WebhookSubscription>().unwrap();
+        "test.foo".parse::<shared::AlertSubscription>().unwrap();
     let deleted_subscription =
-        deleted_subscription.parse::<shared::WebhookSubscription>().unwrap();
+        deleted_subscription.parse::<shared::AlertSubscription>().unwrap();
 
     // Create a webhook receiver.
     let webhook = webhook_create(
@@ -1696,8 +1716,8 @@ async fn subscription_remove_test(
         server
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
-                    "event_class": "test.foo.bar",
-                    "event_id": id1,
+                    "alert_class": "test.foo.bar",
+                    "alert_id": id1,
                     "data": {
                         "hello_world": true,
                     }
@@ -1708,7 +1728,7 @@ async fn subscription_remove_test(
                     .header("x-oxide-event-id", id1.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1720,30 +1740,30 @@ async fn subscription_remove_test(
     // Publish an event. This should be received, as it matches the subscription
     // we are about to delete.
     let event = nexus
-        .webhook_event_publish(
+        .alert_publish(
             &opctx,
             id1,
-            WebhookEventClass::TestFooBar,
+            AlertClass::TestFooBar,
             serde_json::json!({"hello_world": true}),
         )
         .await
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
     dbg!(
         activate_background_task(internal_client, "webhook_deliverator").await
     );
 
     mock.assert_calls_async(1).await;
 
-    let rx_id = WebhookReceiverUuid::from_untyped_uuid(webhook.identity.id);
+    let rx_id = AlertReceiverUuid::from_untyped_uuid(webhook.identity.id);
     dbg!(subscription_remove(&cptestctx, rx_id, &deleted_subscription).await);
 
     // The deleted subscription should no longer be there.
-    let rx = webhook_get(
+    let rx = alert_rx_get(
         &cptestctx.external_client,
-        &get_webhooks_url(webhook.identity.id),
+        &alert_rx_url(webhook.identity.id),
     )
     .await;
     dbg!(&rx);
@@ -1752,17 +1772,17 @@ async fn subscription_remove_test(
     // Publish an event. This one should not be received, as we are no longer
     // subscribed to its event class.
     let event = nexus
-        .webhook_event_publish(
+        .alert_publish(
             &opctx,
             id2,
-            WebhookEventClass::TestFooBar,
+            AlertClass::TestFooBar,
             serde_json::json!({"hello_world": false}),
         )
         .await
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
     dbg!(
         activate_background_task(internal_client, "webhook_deliverator").await
     );
@@ -1777,8 +1797,8 @@ async fn subscription_remove_test(
         server
             .mock_async(move |when, then| {
                 let body = serde_json::json!({
-                    "event_class": "test.foo",
-                    "event_id": id3,
+                    "alert_class": "test.foo",
+                    "alert_id": id3,
                     "data": {
                         "whatever": 1
                     }
@@ -1789,7 +1809,7 @@ async fn subscription_remove_test(
                     .header("x-oxide-event-id", id3.to_string())
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
-                        webhook.secrets[0].id,
+                        webhook.config.secrets[0].id,
                         MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
@@ -1799,17 +1819,17 @@ async fn subscription_remove_test(
     };
 
     let event = nexus
-        .webhook_event_publish(
+        .alert_publish(
             &opctx,
             id3,
-            WebhookEventClass::TestFoo,
+            AlertClass::TestFoo,
             serde_json::json!({"whatever": 1}),
         )
         .await
         .expect("event should be published successfully");
     dbg!(event);
 
-    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(activate_background_task(internal_client, "alert_dispatcher").await);
     dbg!(
         activate_background_task(internal_client, "webhook_deliverator").await
     );

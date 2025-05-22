@@ -90,6 +90,7 @@
 use super::Driver;
 use super::driver::TaskDefinition;
 use super::tasks::abandoned_vmm_reaper;
+use super::tasks::alert_dispatcher::AlertDispatcher;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
@@ -125,7 +126,6 @@ use super::tasks::tuf_artifact_replication;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
-use super::tasks::webhook_dispatcher::WebhookDispatcher;
 use crate::Nexus;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::saga::StartSaga;
@@ -224,7 +224,7 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_finish: Activator::new(),
             task_tuf_artifact_replication: Activator::new(),
             task_read_only_region_replacement_start: Activator::new(),
-            task_webhook_dispatcher: Activator::new(),
+            task_alert_dispatcher: Activator::new(),
             task_webhook_deliverator: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
@@ -298,7 +298,7 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_finish,
             task_tuf_artifact_replication,
             task_read_only_region_replacement_start,
-            task_webhook_dispatcher,
+            task_alert_dispatcher,
             task_webhook_deliverator,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
@@ -872,16 +872,16 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
-            name: "webhook_dispatcher",
-            description: "dispatches queued webhook events to receivers",
-            period: config.webhook_dispatcher.period_secs,
-            task_impl: Box::new(WebhookDispatcher::new(
+            name: "alert_dispatcher",
+            description: "dispatches queued alerts to receivers",
+            period: config.alert_dispatcher.period_secs,
+            task_impl: Box::new(AlertDispatcher::new(
                 datastore.clone(),
                 task_webhook_deliverator.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
-            activator: task_webhook_dispatcher,
+            activator: task_alert_dispatcher,
         });
 
         driver.register({

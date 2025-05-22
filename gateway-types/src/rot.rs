@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use daft::Diffable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -165,7 +166,9 @@ impl From<gateway_messages::RotBootInfo> for RotState {
 
 #[derive(
     Debug,
+    Diffable,
     Clone,
+    Copy,
     PartialEq,
     Eq,
     PartialOrd,

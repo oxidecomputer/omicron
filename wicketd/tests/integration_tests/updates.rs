@@ -447,18 +447,6 @@ async fn test_installinator_fetch() {
         "mupdate override info matches across A and B drives",
     );
 
-    // Check that the zone1 and zone2 images are present in the zone set. (The
-    // names come from fake-non-semver.toml, under
-    // [artifact.control-plane.source]).
-    assert!(
-        a_override_info.zones.contains_key("zone1.tar.gz"),
-        "zone1 is present in the zone set"
-    );
-    assert!(
-        a_override_info.zones.contains_key("zone2.tar.gz"),
-        "zone2 is present in the zone set"
-    );
-
     recv_handle.await.expect("recv_handle succeeded");
 
     wicketd_testctx.teardown().await;

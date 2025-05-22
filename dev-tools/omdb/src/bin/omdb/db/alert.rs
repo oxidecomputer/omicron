@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! `omdb db webhook` subcommands
+//! `omdb db alert` subcommands
 
 use super::DbFetchOptions;
 use super::check_limit;
@@ -22,100 +22,162 @@ use diesel::ExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
+use nexus_db_model::Alert;
+use nexus_db_model::AlertClass;
+use nexus_db_model::AlertReceiver;
 use nexus_db_model::WebhookDelivery;
-use nexus_db_model::WebhookEvent;
-use nexus_db_model::WebhookEventClass;
-use nexus_db_model::WebhookReceiver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_schema::schema::alert::dsl as alert_dsl;
 use nexus_db_schema::schema::webhook_delivery::dsl as delivery_dsl;
 use nexus_db_schema::schema::webhook_delivery_attempt::dsl as attempt_dsl;
-use nexus_db_schema::schema::webhook_event::dsl as event_dsl;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::WebhookEventUuid;
 use tabled::Tabled;
 use uuid::Uuid;
 
 #[derive(Debug, Args, Clone)]
-pub(super) struct WebhookArgs {
+pub(super) struct AlertArgs {
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Debug, Subcommand, Clone)]
 enum Commands {
-    /// Get information on webhook receivers
-    #[clap(alias = "rx")]
-    Receiver {
-        #[command(subcommand)]
-        command: RxCommands,
-    },
-    /// Get information on webhook events
-    Event {
-        #[command(subcommand)]
-        command: EventCommands,
-    },
-    /// Get information on webhook delivieries
-    Delivery {
-        #[command(subcommand)]
-        command: DeliveryCommands,
-    },
-}
-
-#[derive(Debug, Subcommand, Clone)]
-enum RxCommands {
-    /// List webhook receivers
+    /// List alerts
     #[clap(alias = "ls")]
-    List(RxListArgs),
+    List(AlertListArgs),
 
+    /// Show details on an alert
     #[clap(alias = "show")]
-    Info(RxInfoArgs),
+    Info(AlertInfoArgs),
+
+    /// Commands relating to webhook alerts.
+    Webhook(WebhookArgs),
 }
 
 #[derive(Debug, Args, Clone)]
-struct RxInfoArgs {
+struct AlertListArgs {
+    /// If set, include alert JSON payloads in the output.
+    ///
+    /// Note that this results in very wide output.
+    #[clap(long, short)]
+    payload: bool,
+
+    /// Include only alerts created before this timestamp
+    #[clap(long, short)]
+    before: Option<DateTime<Utc>>,
+
+    /// Include only alerts created after this timestamp
+    #[clap(long, short)]
+    after: Option<DateTime<Utc>>,
+
+    /// Include only alerts fully dispatched before this timestamp
+    #[clap(long)]
+    dispatched_before: Option<DateTime<Utc>>,
+
+    /// Include only alerts fully dispatched after this timestamp
+    #[clap(long)]
+    dispatched_after: Option<DateTime<Utc>>,
+
+    /// If `true`, include only alerts that have been fully dispatched.
+    /// If `false`, include only alerts that have not been fully dispatched.
+    ///
+    /// If this argument is not provided, both dispatched and un-dispatched
+    /// events are included.
+    #[clap(long, short)]
+    dispatched: Option<bool>,
+}
+
+#[derive(Debug, Args, Clone)]
+struct AlertInfoArgs {
+    /// The ID of the alert to show
+    id: AlertUuid,
+}
+
+#[derive(Debug, Args, Clone)]
+struct WebhookArgs {
+    #[clap(subcommand)]
+    command: WebhookCommands,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum WebhookCommands {
+    /// Get information on webhook alert receivers
+    #[clap(alias = "rx")]
+    Receiver(WebhookRxArgs),
+
+    /// Get information on webhook alert deliveries
+    Delivery(WebhookDeliveryArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct WebhookRxArgs {
+    #[clap(subcommand)]
+    command: WebhookRxCommands,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum WebhookRxCommands {
+    /// List webhook alert receivers
+    #[clap(alias = "ls")]
+    List(WebhookRxListArgs),
+
+    /// Get details on a webhook alert receiver
+    #[clap(alias = "show")]
+    Info(WebhookRxInfoArgs),
+}
+
+#[derive(Debug, Args, Clone)]
+struct WebhookRxInfoArgs {
     receiver: NameOrId,
 }
 
 #[derive(Debug, Args, Clone)]
-struct RxListArgs {
+struct WebhookRxListArgs {
     #[clap(long, short = 'a')]
     start_at: Option<Uuid>,
 }
 
+#[derive(Debug, Args, Clone)]
+struct WebhookDeliveryArgs {
+    #[clap(subcommand)]
+    command: WebhookDeliveryCommands,
+}
+
 #[derive(Debug, Subcommand, Clone)]
-enum DeliveryCommands {
+enum WebhookDeliveryCommands {
     /// List webhook deliveries
     #[clap(alias = "ls")]
-    List(DeliveryListArgs),
+    List(WebhookDeliveryListArgs),
 
     /// Show details on a webhook delivery, including its payload and attempt history.
     #[clap(alias = "show")]
-    Info(DeliveryInfoArgs),
+    Info(WebhookDeliveryInfoArgs),
 }
 
 #[derive(Debug, Args, Clone)]
-struct DeliveryListArgs {
+struct WebhookDeliveryListArgs {
     /// If present, show only deliveries to this receiver.
     #[clap(long, short, alias = "rx")]
     receiver: Option<NameOrId>,
 
     /// If present, select only deliveries for the given event.
     #[clap(long, short)]
-    event: Option<WebhookEventUuid>,
+    event: Option<AlertUuid>,
 
     /// If present, select only deliveries in the provided state(s)
     #[clap(long = "state", short)]
-    states: Vec<db::model::WebhookDeliveryState>,
+    states: Vec<db::model::AlertDeliveryState>,
 
     /// If present, select only deliveries with the provided trigger(s)
     #[clap(long = "trigger", short)]
-    triggers: Vec<db::model::WebhookDeliveryTrigger>,
+    triggers: Vec<db::model::AlertDeliveryTrigger>,
 
     /// Include only delivery entries created before this timestamp
     #[clap(long, short)]
@@ -127,86 +189,49 @@ struct DeliveryListArgs {
 }
 
 #[derive(Debug, Args, Clone)]
-struct DeliveryInfoArgs {
+struct WebhookDeliveryInfoArgs {
     /// The ID of the delivery to show.
     delivery_id: Uuid,
 }
 
-#[derive(Debug, Subcommand, Clone)]
-enum EventCommands {
-    /// List webhook events
-    #[clap(alias = "ls")]
-    List(EventListArgs),
-
-    /// Show details on a webhook event
-    #[clap(alias = "show")]
-    Info(EventInfoArgs),
+pub(super) async fn cmd_db_alert(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &AlertArgs,
+) -> anyhow::Result<()> {
+    match &args.command {
+        Commands::Info(args) => {
+            cmd_db_alert_info(datastore, fetch_opts, args).await
+        }
+        Commands::List(args) => {
+            cmd_db_alert_list(datastore, fetch_opts, args).await
+        }
+        Commands::Webhook(args) => {
+            cmd_db_webhook(opctx, datastore, fetch_opts, args).await
+        }
+    }
 }
 
-#[derive(Debug, Args, Clone)]
-struct EventListArgs {
-    /// If set, include event JSON payloads in the output.
-    ///
-    /// Note that this results in very wide output.
-    #[clap(long, short)]
-    payload: bool,
-
-    /// Include only events created before this timestamp
-    #[clap(long, short)]
-    before: Option<DateTime<Utc>>,
-
-    /// Include only events created after this timestamp
-    #[clap(long, short)]
-    after: Option<DateTime<Utc>>,
-
-    /// Include only events fully dispatched before this timestamp
-    #[clap(long)]
-    dispatched_before: Option<DateTime<Utc>>,
-
-    /// Include only events fully dispatched after this timestamp
-    #[clap(long)]
-    dispatched_after: Option<DateTime<Utc>>,
-
-    /// If `true`, include only events that have been fully dispatched.
-    /// If `false`, include only events that have not been fully dispatched.
-    ///
-    /// If this argument is not provided, both dispatched and un-dispatched
-    /// events are included.
-    #[clap(long, short)]
-    dispatched: Option<bool>,
-}
-
-#[derive(Debug, Args, Clone)]
-struct EventInfoArgs {
-    /// The ID of the event to show
-    event_id: WebhookEventUuid,
-}
-
-pub(super) async fn cmd_db_webhook(
+async fn cmd_db_webhook(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &WebhookArgs,
 ) -> anyhow::Result<()> {
     match &args.command {
-        Commands::Receiver { command: RxCommands::List(args) } => {
-            cmd_db_webhook_rx_list(opctx, datastore, fetch_opts, args).await
-        }
-        Commands::Receiver { command: RxCommands::Info(args) } => {
-            cmd_db_webhook_rx_info(datastore, fetch_opts, args).await
-        }
-        Commands::Delivery { command: DeliveryCommands::List(args) } => {
-            cmd_db_webhook_delivery_list(datastore, fetch_opts, args).await
-        }
-        Commands::Delivery { command: DeliveryCommands::Info(args) } => {
-            cmd_db_webhook_delivery_info(datastore, fetch_opts, args).await
-        }
-        Commands::Event { command: EventCommands::Info(args) } => {
-            cmd_db_webhook_event_info(datastore, fetch_opts, args).await
-        }
-        Commands::Event { command: EventCommands::List(args) } => {
-            cmd_db_webhook_event_list(datastore, fetch_opts, args).await
-        }
+        WebhookCommands::Receiver(WebhookRxArgs {
+            command: WebhookRxCommands::Info(args),
+        }) => cmd_db_webhook_rx_info(datastore, fetch_opts, args).await,
+        WebhookCommands::Receiver(WebhookRxArgs {
+            command: WebhookRxCommands::List(args),
+        }) => cmd_db_webhook_rx_list(opctx, datastore, fetch_opts, args).await,
+        WebhookCommands::Delivery(WebhookDeliveryArgs {
+            command: WebhookDeliveryCommands::List(args),
+        }) => cmd_db_webhook_delivery_list(datastore, fetch_opts, args).await,
+        WebhookCommands::Delivery(WebhookDeliveryArgs {
+            command: WebhookDeliveryCommands::Info(args),
+        }) => cmd_db_webhook_delivery_info(datastore, fetch_opts, args).await,
     }
 }
 
@@ -219,7 +244,7 @@ async fn cmd_db_webhook_rx_list(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    args: &RxListArgs,
+    args: &WebhookRxListArgs,
 ) -> anyhow::Result<()> {
     let ctx = || {
         if let Some(starting_at) = args.start_at {
@@ -233,7 +258,7 @@ async fn cmd_db_webhook_rx_list(
         ..first_page(fetch_opts.fetch_limit)
     };
     let rxs = datastore
-        .webhook_rx_list(opctx, &PaginatedBy::Id(pagparams))
+        .alert_rx_list(opctx, &PaginatedBy::Id(pagparams))
         .await
         .with_context(ctx)?;
 
@@ -279,10 +304,10 @@ async fn cmd_db_webhook_rx_list(
 async fn cmd_db_webhook_rx_info(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    args: &RxInfoArgs,
+    args: &WebhookRxInfoArgs,
 ) -> anyhow::Result<()> {
-    use nexus_db_schema::schema::webhook_rx_event_glob::dsl as glob_dsl;
-    use nexus_db_schema::schema::webhook_rx_subscription::dsl as subscription_dsl;
+    use nexus_db_schema::schema::alert_glob::dsl as glob_dsl;
+    use nexus_db_schema::schema::alert_subscription::dsl as subscription_dsl;
     use nexus_db_schema::schema::webhook_secret::dsl as secret_dsl;
 
     let conn = datastore.pool_connection_for_tests().await?;
@@ -320,9 +345,9 @@ async fn cmd_db_webhook_rx_info(
         GLOB_EXACT,
     ]);
 
-    let WebhookReceiver {
+    let AlertReceiver {
         identity:
-            nexus_db_model::WebhookReceiverIdentity {
+            nexus_db_model::AlertReceiverIdentity {
                 id,
                 name,
                 description,
@@ -382,7 +407,7 @@ async fn cmd_db_webhook_rx_info(
                              time_modified: _,
                              time_created,
                          },
-                     webhook_receiver_id: _,
+                     alert_receiver_id: _,
                      secret: _,
                      time_deleted,
                  }| SecretRow {
@@ -404,17 +429,17 @@ async fn cmd_db_webhook_rx_info(
     println!("\n{:=<80}", "== SUBSCRIPTIONS ");
     println!("    {GEN:>WIDTH$}: {}", subscription_gen.0);
 
-    let exact = subscription_dsl::webhook_rx_subscription
+    let exact = subscription_dsl::alert_subscription
         .filter(subscription_dsl::rx_id.eq(id.into_untyped_uuid()))
         .filter(subscription_dsl::glob.is_null())
-        .select(subscription_dsl::event_class)
-        .load_async::<WebhookEventClass>(&*conn)
+        .select(subscription_dsl::alert_class)
+        .load_async::<AlertClass>(&*conn)
         .await;
     match exact {
         Ok(exact) => {
             println!("    {EXACT:>WIDTH$}: {}", exact.len());
-            for event_class in exact {
-                println!("    - {event_class}");
+            for alert_class in exact {
+                println!("    - {alert_class}");
             }
         }
         Err(e) => {
@@ -422,18 +447,18 @@ async fn cmd_db_webhook_rx_info(
         }
     }
 
-    let globs = glob_dsl::webhook_rx_event_glob
+    let globs = glob_dsl::alert_glob
         .filter(glob_dsl::rx_id.eq(id.into_untyped_uuid()))
-        .select(db::model::WebhookRxEventGlob::as_select())
-        .load_async::<db::model::WebhookRxEventGlob>(&*conn)
+        .select(db::model::AlertRxGlob::as_select())
+        .load_async::<db::model::AlertRxGlob>(&*conn)
         .await;
     match globs {
         Ok(globs) => {
             println!("    {GLOBS:>WIDTH$}: {}", globs.len());
             for glob in globs {
-                let db::model::WebhookRxEventGlob {
+                let db::model::AlertRxGlob {
                     rx_id: _,
-                    glob: db::model::WebhookGlob { glob, regex },
+                    glob: db::model::AlertGlob { glob, regex },
                     time_created,
                     schema_version,
                 } = glob;
@@ -448,17 +473,17 @@ async fn cmd_db_webhook_rx_info(
                 }
 
                 println!("    {GLOB_REGEX:>WIDTH$}: {regex}");
-                let exact = subscription_dsl::webhook_rx_subscription
+                let exact = subscription_dsl::alert_subscription
                     .filter(subscription_dsl::rx_id.eq(id.into_untyped_uuid()))
                     .filter(subscription_dsl::glob.eq(glob))
-                    .select(subscription_dsl::event_class)
-                    .load_async::<WebhookEventClass>(&*conn)
+                    .select(subscription_dsl::alert_class)
+                    .load_async::<AlertClass>(&*conn)
                     .await;
                 match exact {
                     Ok(exact) => {
                         println!("    {GLOB_EXACT:>WIDTH$}: {}", exact.len());
-                        for event_class in exact {
-                            println!("      - {event_class}")
+                        for alert_class in exact {
+                            println!("      - {alert_class}")
                         }
                     }
                     Err(e) => eprintln!(
@@ -478,10 +503,16 @@ async fn cmd_db_webhook_rx_info(
 async fn cmd_db_webhook_delivery_list(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    args: &DeliveryListArgs,
+    args: &WebhookDeliveryListArgs,
 ) -> anyhow::Result<()> {
-    let DeliveryListArgs { before, after, receiver, states, triggers, event } =
-        args;
+    let WebhookDeliveryListArgs {
+        before,
+        after,
+        receiver,
+        states,
+        triggers,
+        event,
+    } = args;
     let conn = datastore.pool_connection_for_tests().await?;
     let mut query = delivery_dsl::webhook_delivery
         .limit(fetch_opts.fetch_limit.get().into())
@@ -522,7 +553,7 @@ async fn cmd_db_webhook_delivery_list(
     }
 
     if let Some(id) = event {
-        query = query.filter(delivery_dsl::event_id.eq(id.into_untyped_uuid()));
+        query = query.filter(delivery_dsl::alert_id.eq(id.into_untyped_uuid()));
     }
 
     let ctx = || "listing webhook deliveries";
@@ -540,7 +571,7 @@ async fn cmd_db_webhook_delivery_list(
     struct WithEventId<T: Tabled> {
         #[tabled(inline)]
         inner: T,
-        event_id: Uuid,
+        alert_id: Uuid,
     }
 
     impl<'d, T> From<&'d WebhookDelivery> for WithEventId<T>
@@ -548,7 +579,7 @@ async fn cmd_db_webhook_delivery_list(
         T: From<&'d WebhookDelivery> + Tabled,
     {
         fn from(d: &'d WebhookDelivery) -> Self {
-            Self { event_id: d.event_id.into_untyped_uuid(), inner: T::from(d) }
+            Self { alert_id: d.alert_id.into_untyped_uuid(), inner: T::from(d) }
         }
     }
 
@@ -584,8 +615,8 @@ async fn cmd_db_webhook_delivery_list(
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
 struct DeliveryRow {
     id: Uuid,
-    trigger: nexus_db_model::WebhookDeliveryTrigger,
-    state: nexus_db_model::WebhookDeliveryState,
+    trigger: nexus_db_model::AlertDeliveryTrigger,
+    state: nexus_db_model::AlertDeliveryState,
     attempts: u8,
     #[tabled(display_with = "datetime_rfc3339_concise")]
     time_created: DateTime<Utc>,
@@ -608,7 +639,7 @@ impl From<&'_ WebhookDelivery> for DeliveryRow {
             // event and receiver UUIDs are toggled on and off based on
             // whether or not we are filtering by receiver and event, so
             // ignore them here.
-            event_id: _,
+            alert_id: _,
             rx_id: _,
             attempts,
             state,
@@ -644,24 +675,24 @@ where
 async fn lookup_webhook_rx(
     datastore: &DataStore,
     name_or_id: &NameOrId,
-) -> anyhow::Result<Option<WebhookReceiver>> {
-    use nexus_db_schema::schema::webhook_receiver::dsl;
+) -> anyhow::Result<Option<AlertReceiver>> {
+    use nexus_db_schema::schema::alert_receiver::dsl;
 
     let conn = datastore.pool_connection_for_tests().await?;
     match name_or_id {
         NameOrId::Id(id) => {
-            dsl::webhook_receiver
+            dsl::alert_receiver
                 .filter(dsl::id.eq(*id))
                 .limit(1)
-                .select(WebhookReceiver::as_select())
+                .select(AlertReceiver::as_select())
                 .get_result_async(&*conn)
                 .await
         }
         NameOrId::Name(ref name) => {
-            dsl::webhook_receiver
+            dsl::alert_receiver
                 .filter(dsl::name.eq(name.to_string()))
                 .limit(1)
-                .select(WebhookReceiver::as_select())
+                .select(AlertReceiver::as_select())
                 .get_result_async(&*conn)
                 .await
         }
@@ -673,11 +704,11 @@ async fn lookup_webhook_rx(
 async fn cmd_db_webhook_delivery_info(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    args: &DeliveryInfoArgs,
+    args: &WebhookDeliveryInfoArgs,
 ) -> anyhow::Result<()> {
     use db::model::WebhookDeliveryAttempt;
 
-    let DeliveryInfoArgs { delivery_id } = args;
+    let WebhookDeliveryInfoArgs { delivery_id } = args;
     let conn = datastore.pool_connection_for_tests().await?;
     let delivery = delivery_dsl::webhook_delivery
         .filter(delivery_dsl::id.eq(*delivery_id))
@@ -716,7 +747,7 @@ async fn cmd_db_webhook_delivery_info(
 
     let WebhookDelivery {
         id,
-        event_id,
+        alert_id,
         rx_id,
         triggered_by,
         attempts,
@@ -728,7 +759,7 @@ async fn cmd_db_webhook_delivery_info(
     } = delivery;
     println!("\n{:=<80}", "== DELIVERY ");
     println!("    {ID:>WIDTH$}: {id}");
-    println!("    {EVENT_ID:>WIDTH$}: {event_id}");
+    println!("    {EVENT_ID:>WIDTH$}: {alert_id}");
     println!("    {RECEIVER_ID:>WIDTH$}: {rx_id}");
     println!("    {STATE:>WIDTH$}: {state}");
     println!("    {TRIGGER:>WIDTH$}: {triggered_by}");
@@ -831,12 +862,12 @@ async fn cmd_db_webhook_delivery_info(
     Ok(())
 }
 
-async fn cmd_db_webhook_event_list(
+async fn cmd_db_alert_list(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    args: &EventListArgs,
+    args: &AlertListArgs,
 ) -> anyhow::Result<()> {
-    let EventListArgs {
+    let AlertListArgs {
         payload,
         before,
         after,
@@ -863,46 +894,46 @@ async fn cmd_db_webhook_event_list(
 
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let mut query = event_dsl::webhook_event
+    let mut query = alert_dsl::alert
         .limit(fetch_opts.fetch_limit.get().into())
-        .order_by(event_dsl::time_created.asc())
-        .select(WebhookEvent::as_select())
+        .order_by(alert_dsl::time_created.asc())
+        .select(Alert::as_select())
         .into_boxed();
 
     if let Some(before) = before {
-        query = query.filter(event_dsl::time_created.lt(*before));
+        query = query.filter(alert_dsl::time_created.lt(*before));
     }
 
     if let Some(after) = after {
-        query = query.filter(event_dsl::time_created.gt(*after));
+        query = query.filter(alert_dsl::time_created.gt(*after));
     }
 
     if let Some(before) = dispatched_before {
-        query = query.filter(event_dsl::time_dispatched.lt(*before));
+        query = query.filter(alert_dsl::time_dispatched.lt(*before));
     }
 
     if let Some(after) = dispatched_after {
-        query = query.filter(event_dsl::time_dispatched.gt(*after));
+        query = query.filter(alert_dsl::time_dispatched.gt(*after));
     }
 
     if let Some(dispatched) = dispatched {
         if *dispatched {
-            query = query.filter(event_dsl::time_dispatched.is_not_null());
+            query = query.filter(alert_dsl::time_dispatched.is_not_null());
         } else {
-            query = query.filter(event_dsl::time_dispatched.is_null());
+            query = query.filter(alert_dsl::time_dispatched.is_null());
         }
     }
 
-    let ctx = || "loading webhook events";
-    let events = query.load_async(&*conn).await.with_context(ctx)?;
+    let ctx = || "loading alerts";
+    let alerts = query.load_async(&*conn).await.with_context(ctx)?;
 
-    check_limit(&events, fetch_opts.fetch_limit, ctx);
+    check_limit(&alerts, fetch_opts.fetch_limit, ctx);
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct EventRow {
+    struct AlertRow {
         id: Uuid,
-        class: WebhookEventClass,
+        class: AlertClass,
         #[tabled(display_with = "datetime_rfc3339_concise")]
         time_created: DateTime<Utc>,
         #[tabled(display_with = "datetime_opt_rfc3339_concise")]
@@ -910,43 +941,43 @@ async fn cmd_db_webhook_event_list(
         dispatched: i64,
     }
 
-    impl From<&'_ WebhookEvent> for EventRow {
-        fn from(event: &'_ WebhookEvent) -> Self {
+    impl From<&'_ Alert> for AlertRow {
+        fn from(alert: &'_ Alert) -> Self {
             Self {
-                id: event.identity.id.into_untyped_uuid(),
-                class: event.event_class,
-                time_created: event.identity.time_created,
-                time_dispatched: event.time_dispatched,
-                dispatched: event.num_dispatched,
+                id: alert.identity.id.into_untyped_uuid(),
+                class: alert.class,
+                time_created: alert.identity.time_created,
+                time_dispatched: alert.time_dispatched,
+                dispatched: alert.num_dispatched,
             }
         }
     }
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct EventRowWithPayload {
+    struct AlertRowWithPayload {
         #[tabled(inline)]
-        row: EventRow,
+        row: AlertRow,
         payload: String,
     }
 
     let mut table = if *payload {
-        let rows = events.iter().map(|event| {
-            let payload = match serde_json::to_string(&event.event) {
+        let rows = alerts.iter().map(|alert| {
+            let payload = match serde_json::to_string(&alert.payload) {
                 Ok(payload) => payload,
                 Err(e) => {
                     eprintln!(
                         "/!\\ failed to serialize payload for {:?}: {e}",
-                        event.identity.id
+                        alert.identity.id
                     );
                     "<error>".to_string()
                 }
             };
-            EventRowWithPayload { row: event.into(), payload }
+            AlertRowWithPayload { row: alert.into(), payload }
         });
         tabled::Table::new(rows)
     } else {
-        let rows = events.iter().map(EventRow::from);
+        let rows = alerts.iter().map(AlertRow::from);
         tabled::Table::new(rows)
     };
     table
@@ -957,32 +988,31 @@ async fn cmd_db_webhook_event_list(
     Ok(())
 }
 
-async fn cmd_db_webhook_event_info(
+async fn cmd_db_alert_info(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    args: &EventInfoArgs,
+    args: &AlertInfoArgs,
 ) -> anyhow::Result<()> {
-    let EventInfoArgs { event_id } = args;
+    let AlertInfoArgs { id } = args;
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let event = event_dsl::webhook_event
-        .filter(event_dsl::id.eq(event_id.into_untyped_uuid()))
-        .select(WebhookEvent::as_select())
+    let alert = alert_dsl::alert
+        .filter(alert_dsl::id.eq(id.into_untyped_uuid()))
+        .select(Alert::as_select())
         .limit(1)
         .get_result_async(&*conn)
         .await
         .optional()
-        .with_context(|| format!("loading webhook event {event_id}"))?
-        .ok_or_else(|| anyhow::anyhow!("no webhook event {event_id} exists"))?;
+        .with_context(|| format!("loading alert {id}"))?
+        .ok_or_else(|| anyhow::anyhow!("no alert {id} exists"))?;
 
-    let WebhookEvent {
-        identity:
-            db::model::WebhookEventIdentity { id, time_created, time_modified },
+    let Alert {
+        identity: db::model::AlertIdentity { id, time_created, time_modified },
         time_dispatched,
-        event_class,
-        event,
+        class,
+        payload,
         num_dispatched,
-    } = event;
+    } = alert;
 
     const CLASS: &str = "class";
     const TIME_DISPATCHED: &str = "fully dispatched at";
@@ -997,9 +1027,9 @@ async fn cmd_db_webhook_event_info(
         CLASS,
     ]);
 
-    println!("\n{:=<80}", "== EVENT ");
+    println!("\n{:=<80}", "== ALERT ");
     println!("    {ID:>WIDTH$}: {id:?}");
-    println!("    {CLASS:>WIDTH$}: {event_class}");
+    println!("    {CLASS:>WIDTH$}: {class}");
     println!("    {TIME_CREATED:>WIDTH$}: {time_created}");
     println!("    {TIME_MODIFIED:>WIDTH$}: {time_modified}");
     println!();
@@ -1008,12 +1038,12 @@ async fn cmd_db_webhook_event_info(
         println!("    {TIME_DISPATCHED:>WIDTH$}: {t}")
     }
 
-    println!("\n{:=<80}", "== EVENT PAYLOAD ");
-    serde_json::to_writer_pretty(std::io::stdout(), &event).with_context(
-        || format!("failed to serialize event payload: {event:?}"),
+    println!("\n{:=<80}", "== ALERT PAYLOAD ");
+    serde_json::to_writer_pretty(std::io::stdout(), &payload).with_context(
+        || format!("failed to serialize alert payload: {payload:?}"),
     )?;
 
-    let ctx = || format!("listing deliveries for event {event_id:?}");
+    let ctx = || format!("listing deliveries for alert {id:?}");
     let deliveries = delivery_dsl::webhook_delivery
         .limit(fetch_opts.fetch_limit.get().into())
         .order_by(delivery_dsl::time_created.desc())
@@ -1035,7 +1065,7 @@ async fn cmd_db_webhook_event_info(
         println!("{table}")
     } else if num_dispatched > 0 {
         println!(
-            "/!\\ WEIRD: event claims to have {num_dispatched} deliveries \
+            "/!\\ WEIRD: alert claims to have {num_dispatched} deliveries \
              dispatched, but no delivery records were found"
         )
     }

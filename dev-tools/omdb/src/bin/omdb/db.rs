@@ -23,6 +23,7 @@ use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
 use crate::helpers::display_option_blank;
+use alert::AlertArgs;
 use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -122,6 +123,10 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -148,6 +153,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -169,11 +175,9 @@ use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 use uuid::Uuid;
-use webhook::WebhookArgs;
-use webhook::cmd_db_webhook;
 
+mod alert;
 mod saga;
-mod webhook;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
@@ -387,8 +391,8 @@ enum DbCommands {
     Vmms(VmmListArgs),
     /// Print information about the oximeter collector.
     Oximeter(OximeterArgs),
-    /// Print information about webhooks
-    Webhook(WebhookArgs),
+    /// Print information about alerts
+    Alert(AlertArgs),
     /// Commands for querying and interacting with pools
     Zpool(ZpoolArgs),
 }
@@ -1467,7 +1471,7 @@ impl DbArgs {
                         command: OximeterCommands::ListProducers
                     }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
 
-                    DbCommands::Webhook(args) => cmd_db_webhook(&opctx, &datastore, &fetch_opts, &args).await,
+                    DbCommands::Alert(args) => alert::cmd_db_alert(&opctx, &datastore, &fetch_opts, &args).await,
                     DbCommands::Zpool(ZpoolArgs {
                         command: ZpoolCommands::List(args)
                     }) => cmd_db_zpool_list(&opctx, &datastore, &args).await,
@@ -7330,24 +7334,201 @@ fn inv_collection_print_sleds(collection: &Collection) {
             println!("        reservation: {reservation:?}, quota: {quota:?}");
         }
 
-        println!(
-            "    zones generation: {} (count: {})",
-            sled.omicron_zones.generation,
-            sled.omicron_zones.zones.len(),
-        );
-
-        if sled.omicron_zones.zones.is_empty() {
-            continue;
+        if let Some(config) = &sled.ledgered_sled_config {
+            inv_collection_print_sled_config("LEDGERED", config);
+        } else {
+            println!("    no ledgered sled config");
         }
 
-        println!("    ZONES FOUND");
-        for z in &sled.omicron_zones.zones {
-            println!(
-                "      zone {} (type {})",
-                z.id,
-                z.zone_type.kind().report_str()
-            );
+        if let Some(last_reconciliation) = &sled.last_reconciliation {
+            if Some(&last_reconciliation.last_reconciled_config)
+                == sled.ledgered_sled_config.as_ref()
+            {
+                println!("    last reconciled config: matches ledgered config");
+            } else {
+                inv_collection_print_sled_config(
+                    "LAST RECONCILED CONFIG",
+                    &last_reconciliation.last_reconciled_config,
+                );
+                let disk_errs = collect_config_reconciler_errors(
+                    &last_reconciliation.external_disks,
+                );
+                let dataset_errs = collect_config_reconciler_errors(
+                    &last_reconciliation.datasets,
+                );
+                let zone_errs = collect_config_reconciler_errors(
+                    &last_reconciliation.zones,
+                );
+                for (label, errs) in [
+                    ("disk", disk_errs),
+                    ("dataset", dataset_errs),
+                    ("zone", zone_errs),
+                ] {
+                    if errs.is_empty() {
+                        println!("    all {label}s reconciled successfully");
+                    } else {
+                        println!(
+                            "    {} {label} reconciliation errors:",
+                            errs.len()
+                        );
+                        for err in errs {
+                            println!("      {err}");
+                        }
+                    }
+                }
+            }
         }
+
+        print!("    reconciler task status: ");
+        match &sled.reconciler_status {
+            ConfigReconcilerInventoryStatus::NotYetRun => {
+                println!("not yet run");
+            }
+            ConfigReconcilerInventoryStatus::Running {
+                config,
+                started_at,
+                running_for,
+            } => {
+                println!("running for {running_for:?} (since {started_at})");
+                if Some(config) == sled.ledgered_sled_config.as_ref() {
+                    println!("    reconciling currently-ledgered config");
+                } else {
+                    inv_collection_print_sled_config(
+                        "RECONCILING CONFIG",
+                        config,
+                    );
+                }
+            }
+            ConfigReconcilerInventoryStatus::Idle { completed_at, ran_for } => {
+                println!(
+                    "idle (finished at {completed_at} \
+                     after running for {ran_for:?})"
+                );
+            }
+        }
+    }
+}
+
+fn collect_config_reconciler_errors<T: Ord + Display>(
+    results: &BTreeMap<T, ConfigReconcilerInventoryResult>,
+) -> Vec<String> {
+    results
+        .iter()
+        .filter_map(|(id, result)| match result {
+            ConfigReconcilerInventoryResult::Ok => None,
+            ConfigReconcilerInventoryResult::Err { message } => {
+                Some(format!("{id}: {message}"))
+            }
+        })
+        .collect()
+}
+
+fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
+    let OmicronSledConfig {
+        generation,
+        disks,
+        datasets,
+        zones,
+        remove_mupdate_override,
+    } = config;
+
+    println!("\n{label} SLED CONFIG");
+    println!("    generation: {}", generation);
+    println!("    remove_mupdate_override: {remove_mupdate_override:?}");
+
+    if disks.is_empty() {
+        println!("    disk config empty");
+    } else {
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct DiskRow {
+            id: PhysicalDiskUuid,
+            zpool_id: ZpoolUuid,
+            vendor: String,
+            model: String,
+            serial: String,
+        }
+
+        let rows = disks.iter().map(|d| DiskRow {
+            id: d.id,
+            zpool_id: d.pool_id,
+            vendor: d.identity.vendor.clone(),
+            model: d.identity.model.clone(),
+            serial: d.identity.serial.clone(),
+        });
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(8, 1, 0, 0))
+            .to_string();
+        println!("    DISKS: {}", disks.len());
+        println!("{table}");
+    }
+
+    if datasets.is_empty() {
+        println!("    dataset config empty");
+    } else {
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct DatasetRow {
+            id: DatasetUuid,
+            name: String,
+            compression: String,
+            quota: String,
+            reservation: String,
+        }
+
+        let rows = datasets.iter().map(|d| DatasetRow {
+            id: d.id,
+            name: d.name.full_name(),
+            compression: d.inner.compression.to_string(),
+            quota: d
+                .inner
+                .quota
+                .map(|q| q.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            reservation: d
+                .inner
+                .reservation
+                .map(|r| r.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+        });
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(8, 1, 0, 0))
+            .to_string();
+        println!("    DATASETS: {}", datasets.len());
+        println!("{table}");
+    }
+
+    if zones.is_empty() {
+        println!("    zone config empty");
+    } else {
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct ZoneRow {
+            id: OmicronZoneUuid,
+            kind: &'static str,
+            image_source: String,
+        }
+
+        let rows = zones.iter().map(|z| ZoneRow {
+            id: z.id,
+            kind: z.zone_type.kind().report_str(),
+            image_source: match &z.image_source {
+                OmicronZoneImageSource::InstallDataset => {
+                    "install-dataset".to_string()
+                }
+                OmicronZoneImageSource::Artifact { hash } => {
+                    format!("artifact: {hash}")
+                }
+            },
+        });
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(8, 1, 0, 0))
+            .to_string();
+        println!("    ZONES: {}", zones.len());
+        println!("{table}");
     }
 }
 
