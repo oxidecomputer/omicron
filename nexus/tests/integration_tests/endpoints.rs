@@ -2832,9 +2832,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
                     AllowedMethod::Get,
-                    AllowedMethod::Put(
-                        serde_json::to_value(true).unwrap(),
-                    ),
+                    AllowedMethod::Put(serde_json::to_value(true).unwrap()),
                 ],
             },
             // Alerts
