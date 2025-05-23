@@ -12,21 +12,26 @@ use std::{
 use anyhow::{Context, Result, anyhow, ensure};
 use async_trait::async_trait;
 use buf_list::BufList;
-use bytes::Buf;
+use bytes::{Buf, Bytes};
 use camino::{Utf8Path, Utf8PathBuf};
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::{Zpool, ZpoolName};
 use installinator_common::{
     ControlPlaneZonesSpec, ControlPlaneZonesStepId, RawDiskWriter, StepContext,
     StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
     WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
-use omicron_common::{disk::M2Slot, update::MupdateOverrideInfo};
+use omicron_common::{
+    disk::M2Slot,
+    update::{MupdateOverrideInfo, MupdateOverrideZone},
+};
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sha2::{Digest, Sha256};
 use slog::{Logger, info, warn};
 use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt},
+    task::JoinSet,
 };
 use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
 use tufaceous_lib::ControlPlaneZoneImages;
@@ -678,7 +683,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                 async move |cx| {
                     let transport = transport.into_value(cx.token()).await;
                     let mupdate_json =
-                        self.mupdate_override_artifact(mupdate_uuid);
+                        self.mupdate_override_artifact(mupdate_uuid).await;
 
                     let out_path = self
                         .output_directory
@@ -759,21 +764,61 @@ impl ControlPlaneZoneWriteContext<'_> {
             .register();
     }
 
-    fn mupdate_override_artifact(
+    async fn mupdate_override_artifact(
         &self,
         mupdate_uuid: MupdateOverrideUuid,
     ) -> BufList {
-        // Might be worth writing out individual hash IDs for each zone in the
-        // future.
         let hash_ids =
             [self.host_phase_2_id.clone(), self.control_plane_id.clone()]
                 .into_iter()
                 .collect();
-        let mupdate_override = MupdateOverrideInfo { mupdate_uuid, hash_ids };
+        let zones = compute_zone_hashes(&self.zones).await;
+
+        let mupdate_override =
+            MupdateOverrideInfo { mupdate_uuid, hash_ids, zones };
         let json_bytes = serde_json::to_vec(&mupdate_override)
             .expect("this serialization is infallible");
         BufList::from(json_bytes)
     }
+}
+
+/// Computes the zone hash IDs.
+///
+/// Hash computation is done in parallel on blocking tasks.
+///
+/// # Panics
+///
+/// Panics if the runtime shuts down causing a task abort, or a task panics.
+async fn compute_zone_hashes(
+    images: &ControlPlaneZoneImages,
+) -> IdOrdMap<MupdateOverrideZone> {
+    let mut tasks = JoinSet::new();
+    for (file_name, data) in &images.zones {
+        let file_name = file_name.clone();
+        // data is a Bytes so is cheap to clone.
+        let data: Bytes = data.clone();
+        // Compute hashes in parallel.
+        tasks.spawn_blocking(move || {
+            let mut hasher = Sha256::new();
+            hasher.update(&data);
+            let hash = hasher.finalize();
+            MupdateOverrideZone {
+                file_name,
+                file_size: u64::try_from(data.len()).unwrap(),
+                hash: ArtifactHash(hash.into()),
+            }
+        });
+    }
+
+    let mut output = IdOrdMap::new();
+    while let Some(res) = tasks.join_next().await {
+        // Propagate panics across tasks—this is the standard pattern we follow
+        // in installinator.
+        output
+            .insert_unique(res.expect("task panicked"))
+            .expect("filenames are unique");
+    }
+    output
 }
 
 fn remove_contents_of(path: &Utf8Path) -> io::Result<()> {

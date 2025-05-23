@@ -4554,9 +4554,9 @@ dependencies = [
 
 [[package]]
 name = "iddqd"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8129594fa2dd41828ac3a1f3080037c24b7588fff5422b0dba0ace331b95a7b2"
+checksum = "9587e8716deb4541c7adc854ee832d6c099882c8630f86d7efda88b87b8ddc51"
 dependencies = [
  "daft",
  "debug-ignore",
@@ -4814,6 +4814,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "http",
+ "iddqd",
  "illumos-utils",
  "installinator-client",
  "installinator-common",
@@ -7141,6 +7142,7 @@ dependencies = [
  "hex",
  "http",
  "id-map",
+ "iddqd",
  "ipnetwork",
  "libc",
  "macaddr",
@@ -11715,6 +11717,7 @@ dependencies = [
  "camino-tempfile-ext",
  "dropshot",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "nexus-sled-agent-shared",
  "omicron-common",
