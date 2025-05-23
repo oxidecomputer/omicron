@@ -2,5 +2,5 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#[cfg(any(test, feature = "test-events"))]
+#[cfg(any(test, feature = "test-alerts"))]
 pub mod test;
