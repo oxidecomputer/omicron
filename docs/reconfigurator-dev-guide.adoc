@@ -2,6 +2,17 @@
 :numbered:
 :toc: left
 
+// TODO: This guide could use more sections:
+// - task: generate a new blueprint using the planner
+// - task: export reconfigurator state
+// - task: generate a new blueprint using reconfigurator-cli
+// - task: import blueprint
+// - task: execute blueprint (via Nexus)
+// - task: monitor blueprint execution
+// - task: previewing what changes a blueprint will make
+// - task: trigger inventory collection (and add back reference from `omdb` section)
+// - task: wait for inventory collection to complete
+
 = Reconfigurator Developer Guide
 
 This document covers practical tips for working on Reconfigurator.  For principles and design, see xref:reconfigurator.adoc[Reconfigurator Overview].
@@ -59,8 +70,6 @@ graph TD
     style Executor fill:#ffe0b2,stroke:#fb8c00
     style MgsUpdateDriver fill:#ffe0b2,stroke:#fb8c00
 ```
-
-// XXX-dap fix diagrams not working well in dark mode
 
 == Key Rust packages
 
@@ -896,25 +905,4 @@ Sled SimGimlet00
 ...
 ```
 
-// XXX-dap link to section showing how to trigger an inventory collection, which itself should link to a section on waiting for it to complete.
 This is a handy summary, but it only gets updated when inventory is collected.  This is more cumbersome than `faux-mgs` when you only need to get one piece of information and need it to be up-to-date.
-
-
-// XXX-dap task: generate a new blueprint using the planner
-// XXX-dap task: export reconfigurator state
-// XXX-dap task: generate a new blueprint using reconfigurator-cli
-// XXX-dap task: import blueprint
-// XXX-dap task: execute blueprint (via Nexus)
-// XXX-dap task: monitor blueprint execution
-// XXX-dap task: previewing what changes a blueprint will make
-// XXX-dap task: trigger inventory collection
-// XXX-dap task: wait for inventory collection to complete
-// XXX-dap task: download a TUF repo from CI (and link this where we do it above)
-// XXX-dap task: figure out which SP image you need
-// XXX-dap task: figure out which RoT image you need from a TUF repo
-// XXX-dap task: serve a local, unpacked TUF repo via repo-depot-API
-
-// XXX-dap diagram showing:
-// - planner creates blueprints and stores them into database
-// - user can import blueprints with reconfigurator-cli
-// - execution reads blueprints
