@@ -9,12 +9,8 @@ use serde::Serialize;
 /// Range request headers
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RangeRequest {
-    /// A request to access a portion of the resource, such as:
+    /// A request to access a portion of the resource, such as `bytes=0-499`
     ///
-    /// ```text
-    /// bytes=0-499
-    /// ```
-    ///
-    /// <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>
+    /// See: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>
     pub range: Option<String>,
 }
