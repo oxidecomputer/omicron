@@ -523,8 +523,9 @@ mismatched zone type: after: InternalNtp(
     cluster.preserve_downgrade_option:   (do not modify) (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-*   external DNS version:   1 -> 2
+    internal DNS version:::   1 (unchanged)
+*   external DNS version:::   1 -> 2
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)

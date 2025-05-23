@@ -42,6 +42,8 @@ pub mod constants {
     pub const CREATED_AT: &str = "created at";
     pub const INTERNAL_DNS_VERSION: &str = "internal DNS version";
     pub const EXTERNAL_DNS_VERSION: &str = "external DNS version";
+    // Keep this a bit short to not make the key column too wide.
+    pub const TARGET_RELEASE_MIN_GEN: &str = "target release min gen";
     pub const COMMENT: &str = "comment";
 
     pub const UNCHANGED_PARENS: &str = "(unchanged)";

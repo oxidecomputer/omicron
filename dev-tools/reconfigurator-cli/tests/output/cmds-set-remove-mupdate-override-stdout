@@ -202,11 +202,12 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   reconfigurator-cli
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   reconfigurator-cli
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -283,8 +284,258 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
     cluster.preserve_downgrade_option:   (do not modify) (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   1 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    name: 00320471-945d-413c-85e7-03e091a70b3c.sled          (records: 1)
+        AAAA fd00:1122:3344:108::1
+    name: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: 9a867dc9-d505-427f-9eff-cdb1d4d9bd73.sled          (records: 1)
+        AAAA fd00:1122:3344:106::1
+    name: _repo-depot._tcp                                   (records: 7)
+        SRV  port 12348 00320471-945d-413c-85e7-03e091a70b3c.sled.control-plane.oxide.internal
+        SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal
+        SRV  port 12348 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled.control-plane.oxide.internal
+        SRV  port 12348 9a867dc9-d505-427f-9eff-cdb1d4d9bd73.sled.control-plane.oxide.internal
+        SRV  port 12348 aff6c093-197d-42c5-ad80-9f10ba051a34.sled.control-plane.oxide.internal
+        SRV  port 12348 b82ede02-399c-48c6-a1de-411df4fa49a7.sled.control-plane.oxide.internal
+        SRV  port 12348 d81c6a84-79b8-4958-ae41-ea46c9b19763.sled.control-plane.oxide.internal
+    name: aff6c093-197d-42c5-ad80-9f10ba051a34.sled          (records: 1)
+        AAAA fd00:1122:3344:104::1
+    name: b82ede02-399c-48c6-a1de-411df4fa49a7.sled          (records: 1)
+        AAAA fd00:1122:3344:105::1
+    name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: example-silo.sys                                   (records: 0)
+
+
+
+
+> # Set the target release minimum generation for the blueprint.
+> blueprint-edit latest set-target-release-min-gen 2
+blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 created from latest blueprint (afb09faf-a586-4483-9289-04d4f1d8ba23): set target release minimum generation to 2
+
+> blueprint-show latest
+blueprint  ce365dff-2cdb-4f35-a186-b15e20e1e700
+parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
+
+  sled: 00320471-945d-413c-85e7-03e091a70b3c (active, config generation 2)
+    will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 1)
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2)
+    will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 (active, config generation 3)
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: aff6c093-197d-42c5-ad80-9f10ba051a34 (active, config generation 2)
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: b82ede02-399c-48c6-a1de-411df4fa49a7 (active, config generation 3)
+    will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+
+  sled: d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 3)
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000
+
+    physical disks:
+    -------------------------------------
+    vendor   model   serial   disposition
+    -------------------------------------
+
+
+    datasets:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
+    omicron zones:
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none)
+    cluster.preserve_downgrade_option:   (do not modify)
+
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
+ METADATA:
+    created by:::::::::::::   reconfigurator-cli
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   2
+
+ PENDING MGS-MANAGED UPDATES: 0
+
+
+> blueprint-diff afb09faf-a586-4483-9289-04d4f1d8ba23 latest
+from: blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
+to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
+
+ UNCHANGED SLEDS:
+
+  sled 00320471-945d-413c-85e7-03e091a70b3c (active, config generation 2):
+    will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
+
+  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 1):
+
+  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2):
+    will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
+
+  sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 (active, config generation 3):
+
+  sled aff6c093-197d-42c5-ad80-9f10ba051a34 (active, config generation 2):
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000
+
+  sled b82ede02-399c-48c6-a1de-411df4fa49a7 (active, config generation 3):
+    will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
+
+  sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 3):
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+*   target release min gen:   1 -> 2
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
