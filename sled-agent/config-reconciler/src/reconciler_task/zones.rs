@@ -326,6 +326,7 @@ impl OmicronZones {
                 zone_facilities,
                 is_time_synchronized,
                 &all_u2_pools,
+                log,
             )
             .map(move |result| (zone.clone(), result))
         });
@@ -334,7 +335,7 @@ impl OmicronZones {
         let start_results = future::join_all(start_futures).await;
         for (config, result) in start_results {
             let state = match result {
-                Ok(running_zone) => ZoneState::Running(Arc::new(running_zone)),
+                Ok(state) => state,
                 Err(err) => ZoneState::FailedToStart(err),
             };
             self.zones.insert(OmicronZone { config, state });
@@ -348,13 +349,25 @@ impl OmicronZones {
         zone_facilities: &U,
         is_time_synchronized: bool,
         all_u2_pools: &[ZpoolName],
-    ) -> Result<RunningZone, ZoneStartError> {
+        log: &Logger,
+    ) -> Result<ZoneState, ZoneStartError> {
         // Ensure no zone by this name exists. This should only happen in the
         // event of a sled-agent restart, in which case all the zones the
         // previous sled-agent process had started are still running.
-        self.ensure_removed_before_starting(zone, zone_facilities).await?;
+        if let Some(state) = self
+            .ensure_removed_before_starting(
+                zone,
+                sled_agent_facilities,
+                zone_facilities,
+                log,
+            )
+            .await?
+        {
+            return Ok(state);
+        }
 
-        sled_agent_facilities
+        // The zone is not running - start it.
+        match sled_agent_facilities
             .start_omicron_zone(
                 zone,
                 &self.mount_config,
@@ -362,22 +375,70 @@ impl OmicronZones {
                 all_u2_pools,
             )
             .await
-            .map_err(ZoneStartError::SledAgentStartFailed)
+        {
+            Ok(running_zone) => Ok(ZoneState::Running(Arc::new(running_zone))),
+            Err(err) => Err(ZoneStartError::SledAgentStartFailed(err)),
+        }
     }
 
-    async fn ensure_removed_before_starting<U: ZoneFacilities>(
+    // The return type of this function is strange. The possible values are:
+    //
+    // * `Ok(None)` - the zone is not running
+    // * `Err(_)` - we had an error related to zone startup
+    // * `Ok(Some(state))` - the zone is still running and is in some state that
+    //    we need to do more work to handle (e.g., we found a running zone but
+    //    failed to shut it down cleanly, in which case we'll return
+    //    `Ok(Some(ZoneState::PartiallyShutDown { .. }))`). In this case, our
+    //    caller should do no further work to try to start `zone`, and should
+    //    instead bubble the `state` up to be recorded.
+    async fn ensure_removed_before_starting<
+        T: SledAgentFacilities,
+        U: ZoneFacilities,
+    >(
         &self,
         zone: &OmicronZoneConfig,
+        sled_agent_facilities: &T,
         zone_facilities: &U,
-    ) -> Result<(), ZoneStartError> {
+        log: &Logger,
+    ) -> Result<Option<ZoneState>, ZoneStartError> {
         let zone_name = ZoneName::new(zone);
 
         // If no zone by this name exists, there's nothing to remove.
         if !zone_facilities.zone_with_name_exists(&zone_name).await? {
-            return Ok(());
+            return Ok(None);
         }
 
-        Ok(())
+        // NOTE: We might want to tell the sled-agent's metrics task to stop
+        // tracking any links in this zone. However, we don't have very easy
+        // access to them, without running a command in the zone. These links
+        // are about to be deleted, and the metrics task will expire them after
+        // a while anyway, but it might be worth the trouble to do that in the
+        // future.
+        //
+        // Skipping that for now, follow the normal zone shutdown process
+        // _after_ metrics (i.e., shut down and clean up the zone).
+        //
+        // TODO-correctness There's a (very unlikely?) chance that this cleanup
+        // isn't right: if the running zone (which we have no active knowledge
+        // of) was started with a different `OmicronZoneConfig`, the cleanup
+        // steps we do here might not be right.
+        match resume_shutdown_from_stop(
+            zone,
+            sled_agent_facilities,
+            zone_facilities,
+            &zone_name,
+            log,
+        )
+        .await
+        {
+            Ok(()) => Ok(None),
+            Err((state, err)) => {
+                // We didn't fail to _start_ the zone, so it doesn't make sense
+                // to return a `ZoneStartError`, but the zone is in a state that
+                // we need to remember.
+                Ok(Some(ZoneState::PartiallyShutDown { state, err }))
+            }
+        }
     }
 
     /// Check the timesync status from a running NTP zone (if it exists)
@@ -545,7 +606,8 @@ impl OmicronZone {
                 state: PartiallyShutDownState::FailedToStop(running_zone),
                 ..
             } => {
-                self.resume_shutdown_from_stop(
+                resume_shutdown_from_stop(
+                    &self.config,
                     sled_agent_facilities,
                     zone_facilities,
                     running_zone,
@@ -557,7 +619,8 @@ impl OmicronZone {
                 state: PartiallyShutDownState::FailedToCleanUp,
                 ..
             } => {
-                self.resume_shutdown_from_cleanup(
+                resume_shutdown_from_cleanup(
+                    &self.config,
                     sled_agent_facilities,
                     zone_facilities,
                     &log,
@@ -607,7 +670,8 @@ impl OmicronZone {
             ));
         }
 
-        self.resume_shutdown_from_stop(
+        resume_shutdown_from_stop(
+            &self.config,
             sled_agent_facilities,
             zone_facilities,
             &ZoneName::from(running_zone.name()),
@@ -615,75 +679,74 @@ impl OmicronZone {
         )
         .await
     }
+}
 
-    async fn resume_shutdown_from_stop<
-        T: SledAgentFacilities,
-        U: ZoneFacilities,
-    >(
-        &self,
-        sled_agent_facilities: &T,
-        zone_facilities: &U,
-        zone_name: &ZoneName<'_>,
-        log: &Logger,
-    ) -> Result<(), (PartiallyShutDownState, ZoneShutdownError)> {
-        if let Err(err) = zone_facilities.halt_zone(zone_name, log).await {
+async fn resume_shutdown_from_stop<
+    T: SledAgentFacilities,
+    U: ZoneFacilities,
+>(
+    config: &OmicronZoneConfig,
+    sled_agent_facilities: &T,
+    zone_facilities: &U,
+    zone_name: &ZoneName<'_>,
+    log: &Logger,
+) -> Result<(), (PartiallyShutDownState, ZoneShutdownError)> {
+    if let Err(err) = zone_facilities.halt_zone(zone_name, log).await {
+        warn!(
+            log,
+            "Failed to stop running zone";
+            InlineErrorChain::new(&err),
+        );
+        return Err((
+            PartiallyShutDownState::FailedToStop(zone_name.to_static()),
+            err,
+        ));
+    }
+
+    resume_shutdown_from_cleanup(
+        config,
+        sled_agent_facilities,
+        zone_facilities,
+        log,
+    )
+    .await
+}
+
+async fn resume_shutdown_from_cleanup<
+    T: SledAgentFacilities,
+    U: ZoneFacilities,
+>(
+    config: &OmicronZoneConfig,
+    sled_agent_facilities: &T,
+    zone_facilities: &U,
+    log: &Logger,
+) -> Result<(), (PartiallyShutDownState, ZoneShutdownError)> {
+    // Special teardown for internal DNS zones: delete the global zone
+    // address we created for it, and tell DDM to stop advertising the
+    // prefix of that address.
+    if let OmicronZoneType::InternalDns {
+        gz_address, gz_address_index, ..
+    } = &config.zone_type
+    {
+        let addrobj = AddrObject::new(
+            &sled_agent_facilities.underlay_vnic().0,
+            &internal_dns_addrobj_name(*gz_address_index),
+        )
+        .expect("internal DNS address object name is well-formed");
+        if let Err(err) = zone_facilities.delete_gz_address(addrobj).await {
             warn!(
                 log,
-                "Failed to stop running zone";
+                "Failed to delete internal-dns gz address";
                 InlineErrorChain::new(&err),
             );
-            return Err((
-                PartiallyShutDownState::FailedToStop(zone_name.to_static()),
-                err,
-            ));
+            return Err((PartiallyShutDownState::FailedToCleanUp, err));
         }
 
-        self.resume_shutdown_from_cleanup(
-            sled_agent_facilities,
-            zone_facilities,
-            log,
-        )
-        .await
+        sled_agent_facilities
+            .ddm_remove_internal_dns_prefix(Ipv6Subnet::new(*gz_address));
     }
 
-    async fn resume_shutdown_from_cleanup<
-        T: SledAgentFacilities,
-        U: ZoneFacilities,
-    >(
-        &self,
-        sled_agent_facilities: &T,
-        zone_facilities: &U,
-        log: &Logger,
-    ) -> Result<(), (PartiallyShutDownState, ZoneShutdownError)> {
-        // Special teardown for internal DNS zones: delete the global zone
-        // address we created for it, and tell DDM to stop advertising the
-        // prefix of that address.
-        if let OmicronZoneType::InternalDns {
-            gz_address,
-            gz_address_index,
-            ..
-        } = &self.config.zone_type
-        {
-            let addrobj = AddrObject::new(
-                &sled_agent_facilities.underlay_vnic().0,
-                &internal_dns_addrobj_name(*gz_address_index),
-            )
-            .expect("internal DNS address object name is well-formed");
-            if let Err(err) = zone_facilities.delete_gz_address(addrobj).await {
-                warn!(
-                    log,
-                    "Failed to delete internal-dns gz address";
-                    InlineErrorChain::new(&err),
-                );
-                return Err((PartiallyShutDownState::FailedToCleanUp, err));
-            }
-
-            sled_agent_facilities
-                .ddm_remove_internal_dns_prefix(Ipv6Subnet::new(*gz_address));
-        }
-
-        Ok(())
-    }
+    Ok(())
 }
 
 fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
