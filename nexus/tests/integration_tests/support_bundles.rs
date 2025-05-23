@@ -451,6 +451,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
         Some(SupportBundleCollectionReport {
             bundle: bundle.id,
             listed_in_service_sleds: true,
+            listed_sps: true,
             activated_in_db_ok: true,
         })
     );
@@ -463,6 +464,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let mut names = archive.file_names();
     assert_eq!(names.next(), Some("bundle_id.txt"));
     assert_eq!(names.next(), Some("rack/"));
+    assert!(names.any(|n| n == "sp_task_dumps/"));
     // There's much more data in the bundle, but validating it isn't the point
     // of this test, which cares more about bundle lifecycle.
 
