@@ -32,7 +32,6 @@ use crate::bootstrap::early_networking::{
 use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
-use crate::params::{DendriteAsic, OmicronZoneTypeExt};
 use crate::profile::*;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -99,6 +98,7 @@ use rand::prelude::SliceRandom;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use sled_agent_zone_images::ZoneImageSourceResolver;
+use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;

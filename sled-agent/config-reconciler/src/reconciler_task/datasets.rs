@@ -13,13 +13,28 @@ use crate::dataset_serialization_task::DatasetTaskHandle;
 use id_map::IdMap;
 use id_map::IdMappable;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetKind;
+use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+#[derive(Debug, thiserror::Error)]
+pub(super) enum ZoneDatasetDependencyError {
+    #[error("zone config is missing a filesystem pool")]
+    MissingFilesystemPool,
+    #[error(
+        "zone's transient root dataset is not available: {}", .0.full_name(),
+    )]
+    TransientZoneDatasetNotAvailable(DatasetName),
+    #[error("zone's durable dataset is not available: {}", .0.full_name())]
+    DurableDatasetNotAvailable(DatasetName),
+}
 
 #[derive(Debug)]
 pub(super) struct OmicronDatasets {
@@ -28,8 +43,76 @@ pub(super) struct OmicronDatasets {
 }
 
 impl OmicronDatasets {
+    #[cfg(any(test, feature = "testing"))]
+    pub(super) fn with_datasets<I>(datasets: I) -> Self
+    where
+        I: Iterator<Item = (DatasetConfig, Result<(), DatasetEnsureError>)>,
+    {
+        let dataset_task = DatasetTaskHandle::spawn_noop();
+        let datasets = datasets
+            .map(|(config, result)| OmicronDataset {
+                config,
+                state: match result {
+                    Ok(()) => DatasetState::Ensured,
+                    Err(err) => DatasetState::FailedToEnsure(Arc::new(err)),
+                },
+            })
+            .collect();
+        Self { datasets, dataset_task }
+    }
+
     pub(super) fn new(dataset_task: DatasetTaskHandle) -> Self {
         Self { datasets: IdMap::default(), dataset_task }
+    }
+
+    pub(super) fn validate_zone_dependencies(
+        &self,
+        zone: &OmicronZoneConfig,
+    ) -> Result<(), ZoneDatasetDependencyError> {
+        // Confirm that there's an ensured `TransientZoneRoot` dataset on this
+        // zone's filesystem pool.
+        let Some(filesystem_pool) = zone.filesystem_pool else {
+            return Err(ZoneDatasetDependencyError::MissingFilesystemPool);
+        };
+
+        let filesystem_dataset_name = DatasetName::new(
+            filesystem_pool,
+            DatasetKind::TransientZone { name: zone.zone_name() },
+        );
+
+        // TODO-cleanup It would be nicer if the zone included the filesystem
+        // dataset ID, so we could just do a lookup here instead of searching.
+        if !self.datasets.iter().any(|d| {
+            matches!(d.state, DatasetState::Ensured)
+                && d.config.name == filesystem_dataset_name
+        }) {
+            return Err(
+                ZoneDatasetDependencyError::TransientZoneDatasetNotAvailable(
+                    filesystem_dataset_name,
+                ),
+            );
+        }
+
+        // Confirm that the durable dataset for this zone has been ensured, if
+        // it has one.
+        let Some(durable_dataset) = zone.dataset_name() else {
+            return Ok(());
+        };
+
+        // TODO-cleanup As above, if we had an ID we could look up instead of
+        // searching.
+        if !self.datasets.iter().any(|d| {
+            matches!(d.state, DatasetState::Ensured)
+                && d.config.name == durable_dataset
+        }) {
+            return Err(
+                ZoneDatasetDependencyError::DurableDatasetNotAvailable(
+                    durable_dataset,
+                ),
+            );
+        }
+
+        Ok(())
     }
 
     pub(super) fn remove_datasets_if_needed(
