@@ -241,7 +241,7 @@ Many other tasks work with Reconfigurator, too (e.g., region replacement and reg
 
 Notably absent from this list is anything related to planning.  This has not been automated as a background task yet.
 
-== Testing and developer workflow
+== Manual testing and developer workflow
 
 There are a bunch of different environments that you can set up and use to test Omicron.
 
@@ -301,13 +301,16 @@ There are a bunch of different environments that you can set up and use to test 
 ** No service processors
 ** Networking simulation is incomplete (connectivity depends on how your dev system is set up)
 
-|Racklette
-|Real Oxide hardware (sleds and switches), essentially indistinguishable from a real Oxide rack
+|https://github.com/oxidecomputer/meta/blob/master/engineering/lab/environments.adoc[Racklette]
+|Real Oxide hardware (sleds and switches)
+|
+* Essentially indistinguishable from a real Oxide rack
 |Everything.  Worthwhile for:
 * any testing involving real "customer" VMs
 * final smoke testing for work developed with simulated components
 |
 * Very limited, shared resource
+
 |===
 
 https://github.com/oxidecomputer/omicron/pull/7424[Work is ongoing] to add `cargo xtask` commands for launching an a4x2 environment.  This would significantly streamline the process of using a4x2 and also make it possible to use a4x2 in CI.
