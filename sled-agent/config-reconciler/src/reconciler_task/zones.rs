@@ -951,6 +951,7 @@ impl ZoneFacilities for RealZoneFacilities {
 mod tests {
     use super::*;
     use crate::CurrentlyManagedZpoolsReceiver;
+    use crate::dataset_serialization_task::DatasetEnsureError;
     use anyhow::anyhow;
     use assert_matches::assert_matches;
     use camino_tempfile::Utf8TempDir;
@@ -1186,33 +1187,67 @@ mod tests {
         }
     }
 
-    // Helper to build an `OmicronDatasets` for the given zone config.
-    fn make_datasets<'a>(
-        zones: impl Iterator<Item = &'a OmicronZoneConfig>,
-    ) -> OmicronDatasets {
-        let mut datasets = Vec::new();
-        for zone in zones {
-            if let Some(pool) = zone.filesystem_pool {
-                datasets.push(DatasetConfig {
+    #[derive(Default)]
+    struct DatasetsBuilder {
+        datasets: Vec<(DatasetConfig, Result<(), DatasetEnsureError>)>,
+    }
+
+    impl DatasetsBuilder {
+        fn push_root(
+            &mut self,
+            zone: &OmicronZoneConfig,
+            result: Result<(), DatasetEnsureError>,
+        ) {
+            let Some(pool) = zone.filesystem_pool else {
+                return;
+            };
+            self.datasets.push((
+                DatasetConfig {
                     id: DatasetUuid::new_v4(),
                     name: DatasetName::new(
                         pool,
                         DatasetKind::TransientZone { name: zone.zone_name() },
                     ),
                     inner: SharedDatasetConfig::default(),
-                });
-            }
-            if let Some(dataset) = zone.dataset_name() {
-                datasets.push(DatasetConfig {
+                },
+                result,
+            ));
+        }
+
+        fn push_durable(
+            &mut self,
+            zone: &OmicronZoneConfig,
+            result: Result<(), DatasetEnsureError>,
+        ) {
+            let Some(dataset) = zone.dataset_name() else {
+                return;
+            };
+            self.datasets.push((
+                DatasetConfig {
                     id: DatasetUuid::new_v4(),
                     name: dataset,
                     inner: SharedDatasetConfig::default(),
-                });
-            }
+                },
+                result,
+            ));
         }
-        OmicronDatasets::with_datasets(
-            datasets.into_iter().map(|d| (d, Ok(()))),
-        )
+
+        fn build(self) -> OmicronDatasets {
+            OmicronDatasets::with_datasets(self.datasets.into_iter())
+        }
+    }
+
+    // Helper to build an all-dependencies-met `OmicronDatasets` for the given
+    // zone config.
+    fn make_datasets<'a>(
+        zones: impl Iterator<Item = &'a OmicronZoneConfig>,
+    ) -> OmicronDatasets {
+        let mut builder = DatasetsBuilder::default();
+        for zone in zones {
+            builder.push_root(zone, Ok(()));
+            builder.push_durable(zone, Ok(()));
+        }
+        builder.build()
     }
 
     #[tokio::test]
@@ -1573,6 +1608,177 @@ mod tests {
             zone_facilities.inner.lock().unwrap().removed_gz_addresses,
             [expected_addr].into_iter().collect::<BTreeSet<_>>(),
         );
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn start_zone_fails_if_missing_root_dataset() {
+        let logctx =
+            dev::test_setup_log("start_zone_fails_if_missing_root_dataset");
+
+        // Construct a zone we want to start.
+        let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
+        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+
+        // datasets0: missing root dataset entirely
+        let datasets0 = {
+            let mut builder = DatasetsBuilder::default();
+            for zone in &desired_zones {
+                builder.push_durable(zone, Ok(()));
+            }
+            builder.build()
+        };
+
+        // datasets1: root exists but failed to ensure
+        let datasets1 = {
+            let mut builder = DatasetsBuilder::default();
+            for zone in &desired_zones {
+                builder.push_root(
+                    zone,
+                    Err(DatasetEnsureError::TestError("boom")),
+                );
+                builder.push_durable(zone, Ok(()));
+            }
+            builder.build()
+        };
+
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(
+                desired_zones.iter().map(|z| z.filesystem_pool.unwrap()),
+            )
+            .current();
+
+        let zone_facilities = FakeZoneFacilities::default();
+        let sled_agent_facilities = FakeSledAgentFacilities::default();
+
+        // Both dataset variations should fail the same way.
+        for datasets in [&datasets0, &datasets1] {
+            let mut zones = OmicronZones::new(
+                nonexistent_mount_config(),
+                TimeSyncConfig::Skip,
+            );
+
+            zones
+                .start_zones_if_needed_impl(
+                    &desired_zones,
+                    &sled_agent_facilities,
+                    &zone_facilities,
+                    true,
+                    datasets,
+                    &currently_managed_zpools,
+                    &logctx.log,
+                )
+                .await;
+
+            assert_eq!(zones.zones.len(), 1);
+            let zone = zones.zones.get(&fake_zone.id).expect("zone is present");
+            assert_eq!(zone.config, *desired_zones.get(&fake_zone.id).unwrap());
+
+            // The zone should now be in the "partially shut down" state.
+            match &zone.state {
+                ZoneState::FailedToStart(err) => {
+                    assert_matches!(
+                        err,
+                        ZoneStartError::DatasetDependency(
+                            ZoneDatasetDependencyError::TransientZoneDatasetNotAvailable(_)
+                        )
+                    );
+                }
+                other => panic!("unexpected zone state: {other:?}"),
+            }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn start_zone_fails_if_missing_durable_dataset() {
+        let logctx =
+            dev::test_setup_log("start_zone_fails_if_missing_durable_dataset");
+
+        // Construct a zone we want to start, using a zone type that has a
+        // durable dataset.
+        let fake_zone = OmicronZoneConfig {
+            id: OmicronZoneUuid::new_v4(),
+            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
+            zone_type: OmicronZoneType::Crucible {
+                address: "[::1]:0".parse().unwrap(),
+                dataset: OmicronZoneDataset {
+                    pool_name: ZpoolName::new_external(ZpoolUuid::new_v4()),
+                },
+            },
+            image_source: OmicronZoneImageSource::InstallDataset,
+        };
+        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+
+        // datasets0: missing durable dataset entirely
+        let datasets0 = {
+            let mut builder = DatasetsBuilder::default();
+            for zone in &desired_zones {
+                builder.push_root(zone, Ok(()));
+            }
+            builder.build()
+        };
+
+        // datasets1: durable exists but failed to ensure
+        let datasets1 = {
+            let mut builder = DatasetsBuilder::default();
+            for zone in &desired_zones {
+                builder.push_root(zone, Ok(()));
+                builder.push_durable(
+                    zone,
+                    Err(DatasetEnsureError::TestError("boom")),
+                );
+            }
+            builder.build()
+        };
+
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(
+                desired_zones.iter().map(|z| z.filesystem_pool.unwrap()),
+            )
+            .current();
+
+        let zone_facilities = FakeZoneFacilities::default();
+        let sled_agent_facilities = FakeSledAgentFacilities::default();
+
+        // Both dataset variations should fail the same way.
+        for datasets in [&datasets0, &datasets1] {
+            let mut zones = OmicronZones::new(
+                nonexistent_mount_config(),
+                TimeSyncConfig::Skip,
+            );
+
+            zones
+                .start_zones_if_needed_impl(
+                    &desired_zones,
+                    &sled_agent_facilities,
+                    &zone_facilities,
+                    true,
+                    datasets,
+                    &currently_managed_zpools,
+                    &logctx.log,
+                )
+                .await;
+
+            assert_eq!(zones.zones.len(), 1);
+            let zone = zones.zones.get(&fake_zone.id).expect("zone is present");
+            assert_eq!(zone.config, *desired_zones.get(&fake_zone.id).unwrap());
+
+            // The zone should now be in the "partially shut down" state.
+            match &zone.state {
+                ZoneState::FailedToStart(err) => {
+                    assert_matches!(
+                        err,
+                        ZoneStartError::DatasetDependency(
+                            ZoneDatasetDependencyError::DurableDatasetNotAvailable(_)
+                        )
+                    );
+                }
+                other => panic!("unexpected zone state: {other:?}"),
+            }
+        }
 
         logctx.cleanup_successful();
     }
