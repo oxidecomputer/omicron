@@ -548,6 +548,7 @@ async fn test_support_bundle_range_requests(
         Some(SupportBundleCollectionReport {
             bundle: bundle.id,
             listed_in_service_sleds: true,
+            listed_sps: true,
             activated_in_db_ok: true,
         })
     );
