@@ -269,6 +269,9 @@ pub struct Nexus {
 
     /// reports status of pending MGS-managed updates
     mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
+
+    /// Collection of JSON schemas for alert classes and versions.
+    alert_schemas: alert::AlertSchemaRegistry,
 }
 
 impl Nexus {
@@ -496,6 +499,7 @@ impl Nexus {
             )),
             tuf_artifact_replication_tx,
             mgs_update_status_rx,
+            alert_schemas: alert::schemas(),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

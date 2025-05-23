@@ -150,7 +150,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::model::Alert;
+use nexus_db_queries::db::model::Alert as DbAlert;
 use nexus_db_queries::db::model::AlertClass;
 use nexus_db_queries::db::model::AlertDeliveryState;
 use nexus_db_queries::db::model::AlertDeliveryTrigger;
@@ -182,12 +182,12 @@ impl nexus_alerts::PublishAlert for Nexus {
         opctx: &OpContext,
         id: AlertUuid,
         alert: A,
-    ) -> Result<Alert, Error> {
+    ) -> Result<DbAlert, Error> {
         self.alert_publish(opctx, id, alert).await
     }
 }
 
-pub(crate) fn alert_schemas() -> AlertSchemaRegistry {
+pub(crate) fn schemas() -> AlertSchemaRegistry {
     let mut registry = AlertSchemaRegistry::new();
 
     #[cfg(debug_assertions)]
@@ -217,7 +217,7 @@ impl Nexus {
         opctx: &OpContext,
         id: AlertUuid,
         alert: A,
-    ) -> Result<Alert, Error> {
+    ) -> Result<DbAlert, Error> {
         #[cfg(debug_assertions)]
         {
             // In test builds, assert that this is a schema that we know about.
@@ -229,8 +229,8 @@ impl Nexus {
                 None => panic!(
                     "You have attempted to publish an alert type whose class \
                      was not added to the alert schema registry in \
-                     `nexus::app::alert::alert_schemas()`! This means that \
-                     the alert type's schema will not be included in the \
+                     `nexus::app::alert::schemas()`! This means that the \
+                     alert type's schema will not be included in the \
                      alert JSON schema. This is probably a mistake. Since I \
                      am a test build, I will now panic!\n    \
                          alert class: {}\n  \
@@ -244,7 +244,7 @@ impl Nexus {
                 panic!(
                     "You have attempted to publish an alert type whose schema \
                      version is not present in the alert schema registry in \
-                     `nexus::app::alert::alert_schemas()`! This is probably a \
+                     `nexus::app::alert::schemas()`! This is probably a \
                      mistake. Since I am a test build, I will  now panic!\n    \
                          alert class: {}\n  \
                        alert version: {}",
@@ -255,7 +255,7 @@ impl Nexus {
         }
 
         let payload =
-            serde_json::to_value(event).map_err(|e| Error::InternalError {
+            serde_json::to_value(&alert).map_err(|e| Error::InternalError {
                 internal_message: format!(
                     "failed to convert {} (class: {} v{}) to JSON: {e}",
                     std::any::type_name::<A>(),
@@ -264,8 +264,10 @@ impl Nexus {
                 ),
             })?;
 
-        let alert =
-            self.datastore().alert_create(opctx, id, class, payload).await?;
+        let alert = self
+            .datastore()
+            .alert_create(opctx, id, A::CLASS, A::VERSION, payload)
+            .await?;
 
         slog::debug!(
             &opctx.log,
