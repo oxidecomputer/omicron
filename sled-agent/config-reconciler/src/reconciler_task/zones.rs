@@ -20,6 +20,7 @@ use illumos_utils::zone::AdmError;
 use illumos_utils::zone::Api as _;
 use illumos_utils::zone::DeleteAddressError;
 use illumos_utils::zone::Zones;
+use illumos_utils::zpool::ZpoolName;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -32,6 +33,7 @@ use slog::Logger;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -249,6 +251,29 @@ impl OmicronZones {
         all_u2_pools: &CurrentlyManagedZpools,
         log: &Logger,
     ) {
+        self.start_zones_if_needed_impl(
+            desired_zones,
+            sled_agent_facilities,
+            &RealZoneFacilities,
+            is_time_synchronized,
+            all_u2_pools,
+            log,
+        )
+        .await
+    }
+
+    async fn start_zones_if_needed_impl<
+        T: SledAgentFacilities,
+        U: ZoneFacilities,
+    >(
+        &mut self,
+        desired_zones: &IdMap<OmicronZoneConfig>,
+        sled_agent_facilities: &T,
+        zone_facilities: &U,
+        is_time_synchronized: bool,
+        all_u2_pools: &CurrentlyManagedZpools,
+        log: &Logger,
+    ) {
         // Filter desired zones down to just those that we need to start. See
         // [`ZoneState`] for more discussion of why we're willing (or unwilling)
         // to start zones in various current states.
@@ -295,19 +320,14 @@ impl OmicronZones {
         // Build up the futures for starting each zone.
         let all_u2_pools = all_u2_pools.clone().into_vec();
         let start_futures = zones_to_start.map(|zone| {
-            sled_agent_facilities
-                .start_omicron_zone(
-                    zone,
-                    &self.mount_config,
-                    is_time_synchronized,
-                    &all_u2_pools,
-                )
-                .map(move |result| {
-                    (
-                        zone.clone(),
-                        result.map_err(ZoneStartError::SledAgentStartFailed),
-                    )
-                })
+            self.start_single_zone(
+                zone,
+                sled_agent_facilities,
+                zone_facilities,
+                is_time_synchronized,
+                &all_u2_pools,
+            )
+            .map(move |result| (zone.clone(), result))
         });
 
         // Concurrently start all zones, then record the results.
@@ -319,6 +339,45 @@ impl OmicronZones {
             };
             self.zones.insert(OmicronZone { config, state });
         }
+    }
+
+    async fn start_single_zone<T: SledAgentFacilities, U: ZoneFacilities>(
+        &self,
+        zone: &OmicronZoneConfig,
+        sled_agent_facilities: &T,
+        zone_facilities: &U,
+        is_time_synchronized: bool,
+        all_u2_pools: &[ZpoolName],
+    ) -> Result<RunningZone, ZoneStartError> {
+        // Ensure no zone by this name exists. This should only happen in the
+        // event of a sled-agent restart, in which case all the zones the
+        // previous sled-agent process had started are still running.
+        self.ensure_removed_before_starting(zone, zone_facilities).await?;
+
+        sled_agent_facilities
+            .start_omicron_zone(
+                zone,
+                &self.mount_config,
+                is_time_synchronized,
+                all_u2_pools,
+            )
+            .await
+            .map_err(ZoneStartError::SledAgentStartFailed)
+    }
+
+    async fn ensure_removed_before_starting<U: ZoneFacilities>(
+        &self,
+        zone: &OmicronZoneConfig,
+        zone_facilities: &U,
+    ) -> Result<(), ZoneStartError> {
+        let zone_name = ZoneName::new(zone);
+
+        // If no zone by this name exists, there's nothing to remove.
+        if !zone_facilities.zone_with_name_exists(&zone_name).await? {
+            return Ok(());
+        }
+
+        Ok(())
     }
 
     /// Check the timesync status from a running NTP zone (if it exists)
@@ -551,7 +610,7 @@ impl OmicronZone {
         self.resume_shutdown_from_stop(
             sled_agent_facilities,
             zone_facilities,
-            running_zone,
+            &ZoneName::from(running_zone.name()),
             log,
         )
         .await
@@ -564,17 +623,17 @@ impl OmicronZone {
         &self,
         sled_agent_facilities: &T,
         zone_facilities: &U,
-        running_zone: &Arc<RunningZone>,
+        zone_name: &ZoneName<'_>,
         log: &Logger,
     ) -> Result<(), (PartiallyShutDownState, ZoneShutdownError)> {
-        if let Err(err) = zone_facilities.halt_zone(running_zone, log).await {
+        if let Err(err) = zone_facilities.halt_zone(zone_name, log).await {
             warn!(
                 log,
                 "Failed to stop running zone";
                 InlineErrorChain::new(&err),
             );
             return Err((
-                PartiallyShutDownState::FailedToStop(Arc::clone(running_zone)),
+                PartiallyShutDownState::FailedToStop(zone_name.to_static()),
                 err,
             ));
         }
@@ -688,17 +747,52 @@ enum ZoneState {
     FailedToStart(ZoneStartError),
 }
 
+#[derive(Debug, Clone)]
+struct ZoneName<'a>(Cow<'a, str>);
+
+impl<'a> From<&'a str> for ZoneName<'a> {
+    fn from(value: &'a str) -> Self {
+        Self(Cow::Borrowed(value))
+    }
+}
+
+impl ZoneName<'_> {
+    fn new(config: &OmicronZoneConfig) -> Self {
+        Self(Cow::Owned(config.zone_name()))
+    }
+
+    fn to_string(&self) -> String {
+        self.0.clone().into_owned()
+    }
+
+    fn to_static(&self) -> ZoneName<'static> {
+        ZoneName(Cow::Owned(self.0.clone().into_owned()))
+    }
+}
+
 #[derive(Debug)]
 enum PartiallyShutDownState {
     FailedToUntrackMetrics(Arc<RunningZone>),
-    FailedToStop(Arc<RunningZone>),
+    FailedToStop(ZoneName<'static>),
     FailedToCleanUp,
 }
 
 #[derive(Debug, thiserror::Error)]
 enum ZoneStartError {
+    #[error("could not determine whether zone already exists")]
+    CheckZoneExists(#[from] CheckZoneExistsError),
     #[error("sled agent failed to start service")]
     SledAgentStartFailed(#[source] anyhow::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum CheckZoneExistsError {
+    #[error("failed to find zone {name}")]
+    FindByName {
+        name: String,
+        #[source]
+        err: AdmError,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -712,9 +806,14 @@ enum ZoneShutdownError {
 }
 
 trait ZoneFacilities {
+    async fn zone_with_name_exists(
+        &self,
+        name: &ZoneName<'_>,
+    ) -> Result<bool, CheckZoneExistsError>;
+
     async fn halt_zone(
         &self,
-        zone: &RunningZone,
+        zone: &ZoneName,
         log: &Logger,
     ) -> Result<(), ZoneShutdownError>;
 
@@ -727,20 +826,32 @@ trait ZoneFacilities {
 struct RealZoneFacilities;
 
 impl ZoneFacilities for RealZoneFacilities {
+    async fn zone_with_name_exists(
+        &self,
+        name: &ZoneName<'_>,
+    ) -> Result<bool, CheckZoneExistsError> {
+        match Zones::real_api().find(&name.0).await {
+            Ok(maybe_zone) => Ok(maybe_zone.is_some()),
+            Err(err) => Err(CheckZoneExistsError::FindByName {
+                name: name.to_string(),
+                err,
+            }),
+        }
+    }
+
     async fn halt_zone(
         &self,
-        zone: &RunningZone,
+        zone: &ZoneName<'_>,
         log: &Logger,
     ) -> Result<(), ZoneShutdownError> {
-        // We don't use `zone.stop()` here because it doesn't allow repeated
-        // attempts after a failure:
-        // https://github.com/oxidecomputer/omicron/issues/7881. Instead, use
-        // the lower-level `Zones::halt_and_remove_logged()` function directly.
-        // This may leave our `RunningZone` is a bogus state where it still
-        // holds a `zoneid_t` that doesn't exist anymore, but if we're in the
-        // shutdown path we never use that `zoneid_t`.
+        // We don't use `RunningZone::stop()` here because it doesn't allow
+        // repeated attempts after a failure
+        // (https://github.com/oxidecomputer/omicron/issues/7881) and because in
+        // the case of "an unexpected zone is running", all we have is the name.
+        // Instead, use the lower-level `Zones::halt_and_remove_logged()`
+        // function directly.
         Zones::real_api()
-            .halt_and_remove_logged(log, zone.name())
+            .halt_and_remove_logged(log, &zone.0)
             .await
             .map_err(ZoneShutdownError::HaltAndRemove)
     }
@@ -845,9 +956,16 @@ mod tests {
     }
 
     impl ZoneFacilities for FakeZoneFacilities {
+        async fn zone_with_name_exists(
+            &self,
+            _name: &ZoneName<'_>,
+        ) -> Result<bool, CheckZoneExistsError> {
+            Ok(false)
+        }
+
         async fn halt_zone(
             &self,
-            _zone: &RunningZone,
+            _zone: &ZoneName<'_>,
             _log: &Logger,
         ) -> Result<(), ZoneShutdownError> {
             // If a test has called `push_halt_response`, respsect that;
@@ -1064,15 +1182,17 @@ mod tests {
         // Configure our fake sled-agent to fail to start a zone.
         let sled_agent_facilities = FakeSledAgentFacilities::default();
         sled_agent_facilities.push_start_response(Err(anyhow!("test-boom")));
+        let zone_facilities = FakeZoneFacilities::default();
 
         // Starting with no zones, we should try and fail to start the one zone
         // in `desired_zones`.
         let mut zones =
             OmicronZones::new(nonexistent_mount_config(), TimeSyncConfig::Skip);
         zones
-            .start_zones_if_needed(
+            .start_zones_if_needed_impl(
                 &desired_zones,
                 &sled_agent_facilities,
+                &zone_facilities,
                 true,
                 &currently_managed_zpools,
                 &logctx.log,
@@ -1104,9 +1224,10 @@ mod tests {
         // Starting from the "zone failed to start" state, we should try again
         // to start the zone (and succeed this time).
         zones
-            .start_zones_if_needed(
+            .start_zones_if_needed_impl(
                 &desired_zones,
                 &sled_agent_facilities,
+                &zone_facilities,
                 true,
                 &currently_managed_zpools,
                 &logctx.log,
