@@ -245,67 +245,55 @@ Notably absent from this list is anything related to planning.  This has not bee
 
 There are a bunch of different environments that you can set up and use to test Omicron.
 
-=== xref:how-to-run-simulated.adoc[`cargo xtask omicron-dev run-all`]
+.Kinds of Omicron test environments
+[cols="1,2,2a,2a,2a",options="header"]
+|===
+|Name
+|Summary
+|Pros
+|Good for
+|Limitations
 
-This is a command-line tool that stands up real instances of much of the control plane locally (in-process and child processes): Nexus, CockroachDB, Clickhouse, Management Gateway Service, Oximeter, Crucible Pantry.  Limitations result from using simulated sled agent, simulated service processors, and loopback networking.
-
-Pros:
-
+|xref:how-to-run-simulated.adoc[`cargo xtask omicron-dev run-all`]
+|Command-line tool that stands up real instances of much of the control plane locally (in-process and child processes): Nexus, CockroachDB, Clickhouse, Management Gateway Service, Oximeter, Crucible Pantry.  Limitations result from using simulated sled agent, simulated service processors, and loopback networking.
+|
 * Easy (one command), quick (starts in ~10s)
 * Fast to iterate (rebuilds in a minute or two, depending on what component you're changing)
 * Exactly matches the environment provided to Nexus integration tests (so it can be useful for developing and debugging these tests).
-
-Good for:
-
+|
 * Nexus internal/external API changes
 * Most of development for anything that can be simulated (e.g., inventory, most parts of execution)
 * `omdb`-only changes
-
-Limitations:
-
+|
 * Simulated sled agent has many limitations: cannot run VMs, does not simulate the actual control plane components that it pretends to run, no simulation of Crucible storage, etc.
 * Simulated SPs have limited fidelity to the real thing (e.g., resetting SP will not simulate reset of the sled, even though a real one would)
 * No Wicket, no full RSS path
 * No meaningful simulation of networking (so can't be used to test behavior of underlay connectivity, external connectivity, configuring Dendrite, etc.)
 
-=== https://github.com/oxidecomputer/testbed/tree/main/a4x2[`a4x2`]
-
-This uses VMs, fancy local networking config, and a software-based switch (https://github.com/oxidecomputer/softnpu[softnpu]) to create a multi-sled environment that looks much more realistic to the control plane than `omicron-dev run-all`.
-
-Pros:
-
+|https://github.com/oxidecomputer/testbed/tree/main/a4x2[`a4x2`]
+|Uses VMs, fancy local networking config, and a software-based switch (https://github.com/oxidecomputer/softnpu[softnpu]) to create a multi-sled environment that looks much more realistic to the control plane than `omicron-dev run-all`.
+|
 * Much higher fidelity to real systems than `omicron-dev run-all`:
 ** most components' environments look largely like a real system (e.g., run in a zone, using the SMF start methods)
 ** softnpu implements the same (runtime-configurable) networking behavior that real switches do
 ** real sled agent runs real instances of all components except simulated networking (which is full-fidelity) and simulated service processors
-
-Good for:
-
-* Testing that can't be done with `omicron-dev run-all` but does not require real hardware
-
-Limitations:
-
+|
+* Testing that can't be done with `omicron-dev run-all`
+|
 * More time required up front to get started (may need beefier dev machine)
 * Somewhat bumpy developer experience (see README)
 * Longer iteration time (rebuild and redeploy takes ~30-60 minutes)
 * Limitations in fidelity:
 ** Cannot run instances (sleds are running in VMs and we don't support nested virt)
 ** Service processors are simulated (just like `omicron-dev run-all`)
-** Host OS is installed to physical disks, rather than running out of a ramdisk loaded from M2s like on real systems.  System behavior after a reboot may differ from real deployments.
 
-https://github.com/oxidecomputer/omicron/pull/7424[Work is ongoing] to add `cargo xtask` commands for launching an a4x2 environment.  This would significantly streamline the process of using a4x2 and also make it possible to use a4x2 in CI.
-
-=== xref:how-to-run.adoc[Running non-simulated Omicron on a single system]
-
-This runs real Sled Agent and all other components directly on your dev system the same way they'd run on a real system
-
-Pros:
-
+|xref:how-to-run.adoc[Running non-simulated Omicron on a single system]
+|Runs real Sled Agent and all other components directly on your dev system the same way they'd run on a real system
+|
 * Moderate iteration time (rebuild and redeploy could take minutes, depending on what you're changing)
 * Could support running VMs
-
-Limitations:
-
+| ?
+|
 * "Takes over" your dev system -- does not clearly delineate what global state it's responsible for and have a way to clean it all up
 * Somewhat brittle (e.g., after reboot, SMF service for sled agent may start but not find the files it needs)
 * Limitations in fidelity:
@@ -313,20 +301,16 @@ Limitations:
 ** No service processors
 ** Networking simulation is incomplete (connectivity depends on how your dev system is set up)
 
-=== Racklette
-
-This is Real Oxide hardware (sleds and switches), essentially indistinguishable from a real Oxide rack.
-
-Can be used to test just about everything, but particularly good for:
-
+|Racklette
+|Real Oxide hardware (sleds and switches), essentially indistinguishable from a real Oxide rack
+|Everything.  Worthwhile for:
 * any testing involving real "customer" VMs
 * final smoke testing for work developed with simulated components
-
-Limitations:
-
+|
 * Very limited, shared resource
+|===
 
-=== Development workflow
+https://github.com/oxidecomputer/omicron/pull/7424[Work is ongoing] to add `cargo xtask` commands for launching an a4x2 environment.  This would significantly streamline the process of using a4x2 and also make it possible to use a4x2 in CI.
 
 A common development workflow is:
 
