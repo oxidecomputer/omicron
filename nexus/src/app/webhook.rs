@@ -386,6 +386,8 @@ impl<'a> ReceiverClient<'a> {
             HeaderName::from_static("x-oxide-alert-id");
         const HDR_ALERT_CLASS: HeaderName =
             HeaderName::from_static("x-oxide-alert-class");
+        const HDR_ALERT_VERSION: HeaderName =
+            HeaderName::from_static("x-oxide-alert-version");
         const HDR_SIG: HeaderName =
             HeaderName::from_static("x-oxide-signature");
         const HDR_TIMESTAMP: HeaderName =

@@ -174,30 +174,105 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::WebhookDeliveryUuid;
 use uuid::Uuid;
 
-impl Nexus {
-    /// Publish a new alert, with the provided `id`, `alert_class`, and
-    /// JSON data payload.
-    ///
-    /// If this method returns `Ok`, the event has been durably recorded in
-    /// CockroachDB.  Once the new event record is inserted into the database,
-    /// the webhook dispatcher background task is activated to dispatch the
-    /// event to receivers.  However, if (for whatever reason) this Nexus fails
-    /// to do that, the event remains durably in the database to be dispatched
-    /// and delivered by someone else.
-    pub async fn alert_publish(
+pub use nexus_alerts::{Alert, AlertSchemaRegistry};
+
+impl nexus_alerts::PublishAlert for Nexus {
+    async fn publish_event<A: Alert>(
         &self,
         opctx: &OpContext,
         id: AlertUuid,
-        class: AlertClass,
-        event: serde_json::Value,
+        alert: A,
     ) -> Result<Alert, Error> {
+        self.alert_publish(opctx, id, alert).await
+    }
+}
+
+pub(crate) fn alert_schemas() -> AlertSchemaRegistry {
+    let mut registry = AlertSchemaRegistry::new();
+
+    #[cfg(debug_assertions)]
+    nexus_alerts::alerts::test::register_all(&mut registry);
+
+    // WHEN ADDING NEW ALERT CLASSES OR NEW SCHEMA VERSIONS, REMEMBER TO
+    // REGISTER THEM HERE!
+
+    registry
+}
+
+impl Nexus {
+    /// Publish a new alert.
+    ///
+    /// The alert payload is represented by a type that implements the [`Event`]
+    /// trait defined in this module. Publishing the alert converts it to a JSON
+    /// object that's stored in the database.
+    ///
+    /// If this method returns `Ok`, the alert has been durably recorded in
+    /// CockroachDB.  Once the new alert record is inserted into the database,
+    /// the alert dispatcher background task is activated to dispatch the
+    /// alert to receivers.  However, if (for whatever reason) this Nexus fails
+    /// to do that, the alert remains durably in the database to be dispatched
+    /// and delivered by someone else.
+    pub async fn alert_publish<A: Alert>(
+        &self,
+        opctx: &OpContext,
+        id: AlertUuid,
+        alert: A,
+    ) -> Result<Alert, Error> {
+        #[cfg(debug_assertions)]
+        {
+            // In test builds, assert that this is a schema that we know about.
+            let versions = match self
+                .alert_schemas
+                .schema_versions_for(A::CLASS)
+            {
+                Some(versions) => versions,
+                None => panic!(
+                    "You have attempted to publish an alert type whose class \
+                     was not added to the alert schema registry in \
+                     `nexus::app::alert::alert_schemas()`! This means that \
+                     the alert type's schema will not be included in the \
+                     alert JSON schema. This is probably a mistake. Since I \
+                     am a test build, I will now panic!\n    \
+                         alert class: {}\n  \
+                       alert version: {}",
+                    A::CLASS,
+                    A::VERSION,
+                ),
+            };
+
+            if !versions.contains_key(&A::VERSION) {
+                panic!(
+                    "You have attempted to publish an alert type whose schema \
+                     version is not present in the alert schema registry in \
+                     `nexus::app::alert::alert_schemas()`! This is probably a \
+                     mistake. Since I am a test build, I will  now panic!\n    \
+                         alert class: {}\n  \
+                       alert version: {}",
+                    A::CLASS,
+                    A::VERSION,
+                );
+            }
+        }
+
+        let payload =
+            serde_json::to_value(event).map_err(|e| Error::InternalError {
+                internal_message: format!(
+                    "failed to convert {} (class: {} v{}) to JSON: {e}",
+                    std::any::type_name::<A>(),
+                    A::CLASS,
+                    A::VERSION,
+                ),
+            })?;
+
         let alert =
-            self.datastore().alert_create(opctx, id, class, event).await?;
+            self.datastore().alert_create(opctx, id, class, payload).await?;
+
         slog::debug!(
             &opctx.log,
             "published alert";
             "alert_id" => ?id,
-            "alert_class" => %alert.class,
+            "alert_class" => %A::CLASS,
+            "alert_version" => %A::VERSION,
             "time_created" => ?alert.identity.time_created,
         );
 
