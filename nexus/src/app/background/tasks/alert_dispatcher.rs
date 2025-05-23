@@ -454,7 +454,8 @@ mod test {
                 &opctx,
                 alert_id,
                 db::model::AlertClass::TestQuuxBar,
-                serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
+                1,
+                serde_json::json!({"msg": "help im trapped in an alert factory"}),
             )
             .await
             .expect("creating the event should work");

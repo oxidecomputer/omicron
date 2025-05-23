@@ -1711,11 +1711,7 @@ async fn subscription_remove_test(
     // Publish an event. This should be received, as it matches the subscription
     // we are about to delete.
     let event = nexus
-        .alert_publish(
-            &opctx,
-            id1,
-           test_alerts::FooBar { hello: "joe" }),
-        )
+        .alert_publish(&opctx, id1, test_alerts::FooBar { hello: "joe" })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -1742,11 +1738,7 @@ async fn subscription_remove_test(
     // Publish an event. This one should not be received, as we are no longer
     // subscribed to its event class.
     let event = nexus
-        .alert_publish(
-            &opctx,
-            id2,
-            test_alerts::FooBar { hello: "robert" }
-        )
+        .alert_publish(&opctx, id2, test_alerts::FooBar { hello: "robert" })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -1788,11 +1780,7 @@ async fn subscription_remove_test(
     };
 
     let event = nexus
-        .alert_publish(
-            &opctx,
-            id3,
-            test_alerts::Foo { hello_world: true }
-        )
+        .alert_publish(&opctx, id3, test_alerts::Foo { hello_world: true })
         .await
         .expect("event should be published successfully");
     dbg!(event);

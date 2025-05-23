@@ -196,7 +196,7 @@ impl Nexus {
             LazyLock::new(|| serde_json::json!({}));
 
         let attempt = match client
-            .send_delivery_request(opctx, &delivery, CLASS, &DATA)
+            .send_delivery_request(opctx, &delivery, CLASS, 1, &DATA)
             .await
         {
             Ok(attempt) => attempt,
@@ -376,6 +376,7 @@ impl<'a> ReceiverClient<'a> {
         opctx: &OpContext,
         delivery: &WebhookDelivery,
         alert_class: AlertClass,
+        version: u32,
         data: &serde_json::Value,
     ) -> Result<WebhookDeliveryAttempt, anyhow::Error> {
         const HDR_DELIVERY_ID: HeaderName =
@@ -437,6 +438,7 @@ impl<'a> ReceiverClient<'a> {
                     "webhook {MSG}";
                     "alert_id" => %delivery.alert_id,
                     "alert_class" => %alert_class,
+                    "alert_version" => version,
                     "delivery_id" => %delivery.id,
                     "delivery_trigger" => %delivery.triggered_by,
                     "error" => %e,
