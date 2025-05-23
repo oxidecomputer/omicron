@@ -301,7 +301,6 @@ internal DNS:
         AAAA fd00:1122:3344:101::1
     name: 9a867dc9-d505-427f-9eff-cdb1d4d9bd73.sled          (records: 1)
         AAAA fd00:1122:3344:106::1
-    name: @                                                  (records: 0)
     name: _repo-depot._tcp                                   (records: 7)
         SRV  port 12348 00320471-945d-413c-85e7-03e091a70b3c.sled.control-plane.oxide.internal
         SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal

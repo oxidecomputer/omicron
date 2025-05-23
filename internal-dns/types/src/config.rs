@@ -664,7 +664,9 @@ impl DnsConfigBuilder {
                 )
             })
             .collect::<Vec<_>>();
-        internal_dns_records.push(("@".to_string(), internal_nameservers));
+        if internal_nameservers.len() > 0 {
+            internal_dns_records.push(("@".to_string(), internal_nameservers));
+        }
 
         // Assemble the set of SRV records, which implicitly point back at
         // zones' AAAA records.

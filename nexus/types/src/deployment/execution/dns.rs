@@ -243,7 +243,7 @@ pub fn blueprint_external_dns_config<'a>(
     if !zone_records.is_empty() {
         records.entry(ZONE_APEX_NAME.to_string())
             .or_insert(Vec::new())
-            .extend(zone_records.into_iter());
+            .extend(zone_records);
     }
 
     DnsConfigZone {
