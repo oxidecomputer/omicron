@@ -636,21 +636,46 @@ impl<Item> ShiftGenerator<Item> for DefaultShiftGenerator<Item> {
 ///     (
 ///         SELECT next_item AS <item_column>
 ///         FROM (
-///             SELECT
-///                 <item_column> + 1 AS next_item
-///             FROM
-///                 <table>
-///             WHERE
-///                 <scope_column> = <scope_key> AND
-///                 time_deleted IS NULL
+///             (
+///                 SELECT
+///                     <item_column> - 1 AS next_item
+///                 FROM
+///                     <table>
+///                 WHERE
+///                     <scope_column> = <scope_key> AND
+///                     time_deleted IS NULL
+///                 ORDER BY next_item
+///                 LIMIT 1
+///             )
+///             UNION
+///             (
+///                 SELECT
+///                     <item_column> + 1 AS next_item
+///                 FROM
+///                     <table>
+///                 WHERE
+///                     <scope_column> = <scope_key> AND
+///                     time_deleted IS NULL
+///             )
 ///         )
 ///         LEFT OUTER JOIN
 ///             <table>
 ///         ON
-///             (<scope_column>, next_item <= <max_item>, time_deleted IS NULL) =
-///             (<scope_key>, TRUE, TRUE)
+///             (
+///                 <scope_column>,
+///                 next_item,
+///                 next_item BETWEEN <min_item> AND <max_item>,
+///                 time_deleted IS NULL
+///             ) =
+///             (
+///                 <scope_key>,
+///                 <item_column>,
+///                 TRUE,
+///                 TRUE
+///            )
 ///         WHERE
-///             <item_column> IS NULL AND next_item <= <max_item>
+///             <item_column> IS NULL AND
+///             next_item BETWEEN <min_item> AND <max_item>
 ///         ORDER BY next_item
 ///         LIMIT 1
 ///     ),
@@ -766,7 +791,22 @@ where
         )?;
         out.push_sql(" AND ");
         out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
-        out.push_sql(" IS NULL LIMIT 1), (SELECT ");
+        out.push_sql(" IS NULL LIMIT 1), ((SELECT ");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" - 1 AS ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(" FROM ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(ScopeColumn::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<<ScopeColumn as Expression>::SqlType, ScopeKey>(
+            &self.scope_key,
+        )?;
+        out.push_sql(" AND ");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql("IS NULL) UNION (SELECT ");
+
         out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
         out.push_sql(" AS ");
         out.push_identifier(ItemColumn::NAME)?;
@@ -784,7 +824,7 @@ where
         )?;
         out.push_sql(" AND ");
         out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
-        out.push_sql(" IS NULL) LEFT OUTER JOIN ");
+        out.push_sql(" IS NULL)) LEFT OUTER JOIN ");
         self.table.walk_ast(out.reborrow())?;
         out.push_sql(" ON (");
         out.push_identifier(ScopeColumn::NAME)?;
@@ -792,7 +832,11 @@ where
         out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
         out.push_sql(", ");
         out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" <= ");
+        out.push_sql(" BETWEEN ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_min,
+        )?;
+        out.push_sql(" AND ");
         out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
             &self.item_max,
         )?;
@@ -808,7 +852,11 @@ where
         out.push_identifier(ItemColumn::NAME)?;
         out.push_sql(" IS NULL AND ");
         out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" <= ");
+        out.push_sql(" BETWEEN ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_min,
+        )?;
+        out.push_sql(" AND ");
         out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
             &self.item_max,
         )?;
@@ -865,7 +913,16 @@ where
         out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
         out.push_sql(" AS ");
         out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(" FROM (SELECT ");
+        out.push_sql(" FROM ((SELECT ");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" - 1 AS ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(" FROM ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+
+        out.push_sql(" IS NULL) UNION (SELECT ");
         out.push_identifier(ItemColumn::NAME)?;
         out.push_sql(" + 1 AS ");
         out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
@@ -873,13 +930,17 @@ where
         self.table.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
         out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
-        out.push_sql(" IS NULL) LEFT OUTER JOIN ");
+        out.push_sql(" IS NULL)) LEFT OUTER JOIN ");
         self.table.walk_ast(out.reborrow())?;
         out.push_sql(" ON (");
         out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
         out.push_sql(", ");
         out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" <= ");
+        out.push_sql(" BETWEEN ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_min,
+        )?;
+        out.push_sql(" AND ");
         out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
             &self.item_max,
         )?;
@@ -891,7 +952,11 @@ where
         out.push_identifier(ItemColumn::NAME)?;
         out.push_sql(" IS NULL AND ");
         out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" <= ");
+        out.push_sql(" BETWEEN ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_min,
+        )?;
+        out.push_sql(" AND ");
         out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
             &self.item_max,
         )?;
@@ -1303,7 +1368,10 @@ mod tests {
         setup_test_schema(&pool).await;
 
         // Insert mostly the same items, but leave some gaps.
-        const TO_SKIP: [i32; 2] = [3, 7];
+        //
+        // It's important that we skip the _first_ item here. See
+        // https://github.com/oxidecomputer/omicron/issues/8208 for details.
+        const TO_SKIP: [i32; 3] = [0, 3, 7];
         let items: Vec<_> = (0..10)
             .filter_map(|value| {
                 if TO_SKIP.contains(&value) {

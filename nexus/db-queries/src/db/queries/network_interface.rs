@@ -100,7 +100,7 @@ pub enum InsertError {
     /// interface that is associated with another VPC.
     ResourceSpansMultipleVpcs(Uuid),
     /// There are no available IP addresses in the requested subnet
-    NoAvailableIpAddresses,
+    NoAvailableIpAddresses { name: String, id: Uuid },
     /// An explicitly-requested IP address is already in use
     IpAddressNotAvailable(std::net::IpAddr),
     /// An explicity-requested MAC address is already in use
@@ -170,10 +170,11 @@ impl InsertError {
             ) => {
                 unimplemented!("probe network interface")
             }
-            InsertError::NoAvailableIpAddresses => {
-                external::Error::invalid_request(
-                    "No available IP addresses for interface",
-                )
+            InsertError::NoAvailableIpAddresses { name, id } => {
+                external::Error::invalid_request(format!(
+                    "No available IP addresses for interface in \
+                        subnet '{name}' with ID '{id}'"
+                ))
             }
             InsertError::ResourceSpansMultipleVpcs(_) => {
                 external::Error::invalid_request(concat!(
@@ -326,7 +327,10 @@ fn decode_database_error(
             DatabaseErrorKind::NotNullViolation,
             info,
         ) if info.message() == IP_EXHAUSTION_ERROR_MESSAGE => {
-            InsertError::NoAvailableIpAddresses
+            InsertError::NoAvailableIpAddresses {
+                name: interface.subnet.identity.name.to_string(),
+                id: interface.subnet.identity.id,
+            }
         }
 
         // This catches the error intentionally introduced by the
@@ -2810,7 +2814,7 @@ mod tests {
             .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
-            matches!(result, Err(InsertError::NoAvailableIpAddresses)),
+            matches!(result, Err(InsertError::NoAvailableIpAddresses { .. })),
             "Address exhaustion should be detected and handled, found {:?}",
             result,
         );
