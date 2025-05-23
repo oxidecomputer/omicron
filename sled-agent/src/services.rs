@@ -3283,12 +3283,6 @@ impl ServiceManager {
         time_is_synchronized: bool,
         all_u2_pools: &[ZpoolName],
     ) -> Result<RunningZone, Error> {
-        // Ensure the zone has been fully removed before we try to boot it.
-        //
-        // This ensures that old "partially booted/stopped" zones do not
-        // interfere with our installation.
-        self.ensure_removed(&zone).await?;
-
         // If this zone requires timesync and we aren't ready, fail it early.
         if zone.zone_type.requires_timesync() && !time_is_synchronized {
             return Err(Error::TimeNotSynchronized);
@@ -3320,95 +3314,6 @@ impl ServiceManager {
             .await?;
 
         Ok(runtime)
-    }
-
-    // Ensures that if a zone is about to be installed, it does not exist.
-    async fn ensure_removed(
-        &self,
-        zone_config: &OmicronZoneConfig,
-    ) -> Result<(), Error> {
-        let zone_name = zone_config.zone_name();
-        match self.inner.system_api.zones().find(&zone_name).await {
-            Ok(Some(zone)) => {
-                warn!(
-                    self.inner.log,
-                    "removing zone";
-                    "zone" => &zone_name,
-                    "state" => ?zone.state(),
-                );
-                // NOTE: We might want to tell the sled-agent's metrics task to
-                // stop tracking any links in this zone. However, we don't have
-                // very easy access to them, without running a command in the
-                // zone. These links are about to be deleted, and the metrics
-                // task will expire them after a while anyway, but it might be
-                // worth the trouble to do that in the future.
-                if let Err(e) = self
-                    .inner
-                    .system_api
-                    .zones()
-                    .halt_and_remove_logged(&self.inner.log, &zone_name)
-                    .await
-                {
-                    error!(
-                        self.inner.log,
-                        "Failed to remove zone";
-                        "zone" => &zone_name,
-                        InlineErrorChain::new(&e),
-                    );
-                    return Err(Error::ZoneRemoval {
-                        zone_name: zone_name.to_string(),
-                        err: e,
-                    });
-                }
-                if let Err(e) =
-                    self.clean_up_after_zone_shutdown(zone_config).await
-                {
-                    error!(
-                        self.inner.log,
-                        "Failed to clean up after removing zone";
-                        "zone" => &zone_name,
-                        InlineErrorChain::new(&e),
-                    );
-                    return Err(e);
-                }
-                Ok(())
-            }
-            Ok(None) => Ok(()),
-            Err(err) => Err(Error::ZoneList(err)),
-        }
-    }
-
-    // Perform any outside-the-zone cleanup required after shutting down a zone.
-    async fn clean_up_after_zone_shutdown(
-        &self,
-        zone: &OmicronZoneConfig,
-    ) -> Result<(), Error> {
-        // Special teardown for internal DNS zones: delete the global zone
-        // address we created for it, and tell DDM to stop advertising the
-        // prefix of that address.
-        if let OmicronZoneType::InternalDns {
-            gz_address,
-            gz_address_index,
-            ..
-        } = &zone.zone_type
-        {
-            let addrobj = AddrObject::new(
-                &self.inner.underlay_vnic.0,
-                &internal_dns_addrobj_name(*gz_address_index),
-            )
-            .expect("internal DNS address object name is well-formed");
-            Zones::delete_address(None, &addrobj).await.map_err(|err| {
-                Error::ZoneCleanup {
-                    zone_name: zone.zone_name(),
-                    err: Box::new(err),
-                }
-            })?;
-
-            self.ddm_reconciler()
-                .remove_internal_dns_subnet(Ipv6Subnet::new(*gz_address));
-        }
-
-        Ok(())
     }
 
     // Returns a zone filesystem mountpoint, after ensuring that U.2 storage
