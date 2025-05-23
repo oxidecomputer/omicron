@@ -13,14 +13,47 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_schema::schema::device_access_token;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
 impl DataStore {
+    pub async fn device_token_lookup_by_token(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> LookupResult<(authz::DeviceAccessToken, DeviceAccessToken)> {
+        let db_token = device_access_token::table
+            .filter(device_access_token::token.eq(token))
+            .select(DeviceAccessToken::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|_e| Error::ObjectNotFound {
+                type_name: ResourceType::DeviceAccessToken,
+                lookup_type: LookupType::ByOther("access token".to_string()),
+            })?;
+
+        // we have to construct the authz resource after the lookup because we don't
+        // have its ID on hand until then
+        let authz_token = authz::DeviceAccessToken::new(
+            authz::FLEET,
+            db_token.id(),
+            LookupType::ById(db_token.id().into_untyped_uuid()),
+        );
+
+        // This check might seem superfluous, but (for now at least) only the
+        // fleet external authenticator user can read a token, so this is
+        // essentially checking that the opctx comes from that user.
+        opctx.authorize(authz::Action::Read, &authz_token).await?;
+
+        Ok((authz_token, db_token))
+    }
+
     /// Start a device authorization grant flow by recording the request
     /// and initial response parameters.
     pub async fn device_auth_request_create(
