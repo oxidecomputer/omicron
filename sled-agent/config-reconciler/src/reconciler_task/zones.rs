@@ -810,12 +810,18 @@ enum ZoneState {
     FailedToStart(ZoneStartError),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct ZoneName<'a>(Cow<'a, str>);
 
 impl<'a> From<&'a str> for ZoneName<'a> {
     fn from(value: &'a str) -> Self {
         Self(Cow::Borrowed(value))
+    }
+}
+
+impl From<String> for ZoneName<'static> {
+    fn from(value: String) -> Self {
+        Self(Cow::Owned(value))
     }
 }
 
@@ -933,6 +939,7 @@ impl ZoneFacilities for RealZoneFacilities {
 mod tests {
     use super::*;
     use crate::CurrentlyManagedZpoolsReceiver;
+    use assert_matches::assert_matches;
     use anyhow::anyhow;
     use camino_tempfile::Utf8TempDir;
     use illumos_utils::dladm::Etherstub;
@@ -1007,11 +1014,17 @@ mod tests {
 
     #[derive(Debug, Default)]
     struct FakeZoneFacilitiesInner {
+        existing_zones: BTreeSet<String>,
         halt_responses: Option<VecDeque<Result<(), ZoneShutdownError>>>,
         removed_gz_addresses: BTreeSet<AddrObject>,
     }
 
     impl FakeZoneFacilities {
+        fn push_existing_zone(&self, name: String) {
+            let mut inner = self.inner.lock().unwrap();
+            inner.existing_zones.insert(name);
+        }
+
         fn push_halt_response(&self, response: Result<(), ZoneShutdownError>) {
             let mut inner = self.inner.lock().unwrap();
             inner.halt_responses.get_or_insert_default().push_back(response);
@@ -1021,14 +1034,15 @@ mod tests {
     impl ZoneFacilities for FakeZoneFacilities {
         async fn zone_with_name_exists(
             &self,
-            _name: &ZoneName<'_>,
+            name: &ZoneName<'_>,
         ) -> Result<bool, CheckZoneExistsError> {
-            Ok(false)
+            let inner = self.inner.lock().unwrap();
+            Ok(inner.existing_zones.contains(&*name.0))
         }
 
         async fn halt_zone(
             &self,
-            _zone: &ZoneName<'_>,
+            zone: &ZoneName<'_>,
             _log: &Logger,
         ) -> Result<(), ZoneShutdownError> {
             // If a test has called `push_halt_response`, respsect that;
@@ -1036,9 +1050,18 @@ mod tests {
             let mut inner = self.inner.lock().unwrap();
             match inner.halt_responses.as_mut() {
                 Some(resp) => {
-                    resp.pop_front().expect("have a response for halt_zone()")
+                    let resp = resp
+                        .pop_front()
+                        .expect("have a response for halt_zone()");
+                    if resp.is_ok() {
+                        inner.existing_zones.remove(&*zone.0);
+                    }
+                    resp
                 }
-                None => Ok(()),
+                None => {
+                    inner.existing_zones.remove(&*zone.0);
+                    Ok(())
+                }
             }
         }
 
@@ -1306,6 +1329,128 @@ mod tests {
         );
         match &zone_should_be_running.state {
             ZoneState::Running(_) => (),
+            other => panic!("unexpected zone state: {other:?}"),
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn start_zone_stops_preexisting_zones() {
+        let logctx = dev::test_setup_log("start_zone_stops_preexisting_zones");
+
+        // Construct a zone we want to start.
+        let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
+        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(
+                desired_zones.iter().map(|z| z.filesystem_pool.unwrap()),
+            )
+            .current();
+
+        // Configure our fake zone facilities to report a zone with this name as
+        // already running.
+        let sled_agent_facilities = FakeSledAgentFacilities::default();
+        let zone_facilities = FakeZoneFacilities::default();
+        zone_facilities.push_existing_zone(fake_zone.zone_name());
+
+        let mut zones =
+            OmicronZones::new(nonexistent_mount_config(), TimeSyncConfig::Skip);
+
+        // Set up our fake sled-agent to return success once the old zone has
+        // been halted.
+        let fake_zone_builder = FakeZoneBuilder::new();
+        sled_agent_facilities.push_start_response(Ok(fake_zone_builder
+            .make_running_zone("test", logctx.log.clone())
+            .await));
+
+        // Start zones: this should halt the preexisting zone.
+        zones
+            .start_zones_if_needed_impl(
+                &desired_zones,
+                &sled_agent_facilities,
+                &zone_facilities,
+                true,
+                &currently_managed_zpools,
+                &logctx.log,
+            )
+            .await;
+
+        assert_eq!(
+            zone_facilities.inner.lock().unwrap().existing_zones,
+            BTreeSet::new()
+        );
+
+        assert_eq!(zones.zones.len(), 1);
+        let zone_should_be_running =
+            zones.zones.get(&fake_zone.id).expect("zone is present");
+        assert_eq!(
+            zone_should_be_running.config,
+            *desired_zones.get(&fake_zone.id).unwrap()
+        );
+        match &zone_should_be_running.state {
+            ZoneState::Running(_) => (),
+            other => panic!("unexpected zone state: {other:?}"),
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn start_zone_fails_if_halting_preexisting_zone_fails() {
+        let logctx = dev::test_setup_log(
+            "start_zone_fails_if_halting_preexisting_zone_fails",
+        );
+
+        // Construct a zone we want to start.
+        let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
+        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(
+                desired_zones.iter().map(|z| z.filesystem_pool.unwrap()),
+            )
+            .current();
+
+        // Configure our fake zone facilities to report a zone with this name as
+        // already running, and configure halting this zone to fail.
+        let zone_facilities = FakeZoneFacilities::default();
+        zone_facilities.push_existing_zone(fake_zone.zone_name());
+        zone_facilities.push_halt_response(Err(
+            ZoneShutdownError::UntrackMetrics(anyhow!("boom")),
+        ));
+        let sled_agent_facilities = FakeSledAgentFacilities::default();
+
+        let mut zones =
+            OmicronZones::new(nonexistent_mount_config(), TimeSyncConfig::Skip);
+
+        // Start zones: this should try and fail to halt the preexisting zone.
+        zones
+            .start_zones_if_needed_impl(
+                &desired_zones,
+                &sled_agent_facilities,
+                &zone_facilities,
+                true,
+                &currently_managed_zpools,
+                &logctx.log,
+            )
+            .await;
+
+        assert_eq!(
+            zone_facilities.inner.lock().unwrap().existing_zones,
+            [fake_zone.zone_name()].into_iter().collect::<BTreeSet<_>>(),
+        );
+
+        assert_eq!(zones.zones.len(), 1);
+        let zone = zones.zones.get(&fake_zone.id).expect("zone is present");
+        assert_eq!(zone.config, *desired_zones.get(&fake_zone.id).unwrap());
+
+        // The zone should now be in the "partially shut down" state.
+        match &zone.state {
+            ZoneState::PartiallyShutDown { state, err } => {
+                assert_matches!(state, PartiallyShutDownState::FailedToStop(_));
+                let err = InlineErrorChain::new(err).to_string();
+                assert!(err.contains("boom"), "unexpected error: {err}");
+            }
             other => panic!("unexpected zone state: {other:?}"),
         }
 
