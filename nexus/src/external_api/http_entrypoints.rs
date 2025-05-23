@@ -4048,7 +4048,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<params::BgpAnnounceSetCreate>,
-    ) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError> {
+    ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4056,7 +4056,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let result = nexus.bgp_update_announce_set(&opctx, &config).await?;
-            Ok(HttpResponseCreated::<BgpAnnounceSet>(result.0.into()))
+            Ok(HttpResponseOk::<BgpAnnounceSet>(result.0.into()))
         };
         apictx
             .context

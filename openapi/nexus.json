@@ -8949,8 +8949,8 @@
           "required": true
         },
         "responses": {
-          "201": {
-            "description": "successful creation",
+          "200": {
+            "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
@@ -20246,11 +20246,8 @@
           "management_ip": {
             "nullable": true,
             "description": "The LLDP management IP TLV.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpNet"
-              }
-            ]
+            "type": "string",
+            "format": "ip"
           },
           "system_description": {
             "nullable": true,

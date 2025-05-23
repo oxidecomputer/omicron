@@ -1887,6 +1887,37 @@ pub struct LldpLinkConfigCreate {
     pub management_ip: Option<IpAddr>,
 }
 
+impl PartialEq<LldpLinkConfigCreate>
+    for omicron_common::api::external::LldpLinkConfig
+{
+    fn eq(&self, other: &LldpLinkConfigCreate) -> bool {
+        self.enabled == other.enabled
+            && self.link_name == other.link_name
+            && self.link_description == other.link_description
+            && self.chassis_id == other.chassis_id
+            && self.system_name == other.system_name
+            && self.system_description == other.system_description
+            && self.management_ip == other.management_ip
+    }
+}
+
+impl PartialEq<omicron_common::api::external::LldpLinkConfig>
+    for LldpLinkConfigCreate
+{
+    fn eq(
+        &self,
+        other: &omicron_common::api::external::LldpLinkConfig,
+    ) -> bool {
+        self.enabled == other.enabled
+            && self.link_name == other.link_name
+            && self.link_description == other.link_description
+            && self.chassis_id == other.chassis_id
+            && self.system_name == other.system_name
+            && self.system_description == other.system_description
+            && self.management_ip == other.management_ip
+    }
+}
+
 /// A layer-3 switch interface configuration. When IPv6 is enabled, a link local
 /// address will be created for the interface.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

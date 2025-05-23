@@ -1884,7 +1884,7 @@ pub trait NexusExternalApi {
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<Self::Context>,
         config: TypedBody<params::BgpAnnounceSetCreate>,
-    ) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError>;
+    ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError>;
 
     /// List BGP announce sets
     #[endpoint {

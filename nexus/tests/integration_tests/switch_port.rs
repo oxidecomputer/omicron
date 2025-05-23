@@ -30,7 +30,7 @@ type ControlPlaneTestContext =
 // TODO: unfortunately this test can no longer be run in the integration test
 //       suite because it depends on communicating with MGS which is not part
 //       of the infrastructure available in the integration test context.
-#[ignore]
+// #[ignore]
 #[nexus_test]
 async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let client = &ctx.external_client;
@@ -76,10 +76,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         }],
     };
 
-    NexusRequest::objects_post(
+    NexusRequest::object_put(
         client,
         "/v1/system/networking/bgp-announce-set",
-        &announce_set,
+        Some(&announce_set),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -119,19 +119,21 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let link_name =
         Name::from_str("phy0").expect("phy0 should be a valid name");
 
+    let lldp_params = LldpLinkConfigCreate {
+        enabled: true,
+        link_name: Some("Link Name".into()),
+        link_description: Some("link_ Dscription".into()),
+        chassis_id: Some("Chassis ID".into()),
+        system_name: Some("System Name".into()),
+        system_description: Some("System description".into()),
+        management_ip: None,
+    };
+
     // links
     settings.links.push(LinkConfigCreate {
         link_name: link_name.clone(),
         mtu: 4700,
-        lldp: LldpLinkConfigCreate {
-            enabled: true,
-            link_name: Some("Link Name".into()),
-            link_description: Some("link_ Dscription".into()),
-            chassis_id: Some("Chassis ID".into()),
-            system_name: Some("System Name".into()),
-            system_description: Some("System description".into()),
-            management_ip: None,
-        },
+        lldp: lldp_params.clone(),
         fec: Some(LinkFec::None),
         speed: LinkSpeed::Speed100G,
         autoneg: false,
@@ -184,16 +186,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(link0.mtu, 4700);
 
     let lldp0 = link0.lldp_link_config.clone().unwrap();
-    assert_eq!(lldp0.enabled, true);
-    assert_eq!(lldp0.link_name, Some("Link Name".to_string()));
-    assert_eq!(lldp0.link_description, Some("Link Description".to_string()));
-    assert_eq!(lldp0.chassis_id, Some("Chassis ID".to_string()));
-    assert_eq!(lldp0.system_name, Some("System Name".to_string()));
-    assert_eq!(
-        lldp0.system_description,
-        Some("System Description".to_string())
-    );
-    assert_eq!(lldp0.management_ip, None);
+    assert_eq!(lldp0, lldp_params);
 
     let ifx0 = &created.interfaces[0];
     assert_eq!(&ifx0.interface_name, "phy0");
@@ -228,16 +221,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(link0.mtu, 4700);
 
     let lldp0 = link0.lldp_link_config.clone().unwrap();
-    assert_eq!(lldp0.enabled, true);
-    assert_eq!(lldp0.link_name, Some("Link Name".to_string()));
-    assert_eq!(lldp0.link_description, Some("Link Description".to_string()));
-    assert_eq!(lldp0.chassis_id, Some("Chassis ID".to_string()));
-    assert_eq!(lldp0.system_name, Some("System Name".to_string()));
-    assert_eq!(
-        lldp0.system_description,
-        Some("System Description".to_string())
-    );
-    assert_eq!(lldp0.management_ip, None);
+    assert_eq!(lldp0, lldp_params);
 
     let ifx0 = &roundtrip.interfaces[0];
     assert_eq!(&ifx0.interface_name, "phy0");

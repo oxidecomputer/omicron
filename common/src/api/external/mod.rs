@@ -2675,7 +2675,7 @@ pub struct LldpLinkConfig {
     pub system_description: Option<String>,
 
     /// The LLDP management IP TLV.
-    pub management_ip: Option<oxnet::IpNet>,
+    pub management_ip: Option<IpAddr>,
 }
 
 /// Information about LLDP advertisements from other network entities directly

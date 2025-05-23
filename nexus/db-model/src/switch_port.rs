@@ -471,7 +471,7 @@ impl Into<external::LldpLinkConfig> for LldpLinkConfig {
             chassis_id: self.chassis_id.clone(),
             system_name: self.system_name.clone(),
             system_description: self.system_description.clone(),
-            management_ip: self.management_ip.map(|a| a.into()),
+            management_ip: self.management_ip.map(|a| a.ip()),
         }
     }
 }
