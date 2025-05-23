@@ -7,7 +7,6 @@ pub use omicron_uuid_kinds::AlertUuid;
 
 use nexus_auth::context::OpContext;
 use omicron_common::api::external::Error;
-use schemars::SchemaGenerator;
 use schemars::{JsonSchema, schema::Schema};
 use serde::Serialize;
 use std::borrow::Cow;
@@ -17,9 +16,9 @@ pub mod alerts;
 
 /// Trait implemented by types that represent the data payload of an alert.
 pub trait Alert: Serialize + JsonSchema {
-    /// The event's event class.
-    const CLASS: EventClass;
-    /// The version number of the event's payload.
+    /// The alert's class.
+    const CLASS: AlertClass;
+    /// The version number of the alert's payload schema.
     const VERSION: u32;
 }
 
@@ -63,7 +62,7 @@ impl SchemaVersion {
     fn for_alert<A: Alert>() -> Self {
         Self {
             gen_schema: Box::new(|generator| A::json_schema(generator)),
-            name: A::name(),
+            name: A::schema_name(),
             schema_id: A::schema_id(),
         }
     }
@@ -71,8 +70,8 @@ impl SchemaVersion {
 
 impl AlertSchemaRegistry {
     pub fn register<A: Alert>(&mut self) {
-        let class = E::CLASS;
-        let version = E::VERSION;
+        let class = A::CLASS;
+        let version = A::VERSION;
 
         if self
             .schemas
@@ -94,14 +93,14 @@ impl AlertSchemaRegistry {
 
     pub fn schema_versions_for(
         &self,
-        class: EventClass,
+        class: AlertClass,
     ) -> Option<&BTreeMap<u32, SchemaVersion>> {
         Some(&self.schemas.get(&class)?.0)
     }
 
     pub fn schema_for(
         &self,
-        class: EventClass,
+        class: AlertClass,
         version: u32,
     ) -> Option<&SchemaVersion> {
         self.schema_versions_for(class)?.get(&version)
