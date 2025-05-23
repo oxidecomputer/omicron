@@ -31,6 +31,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_model::Certificate;
 use nexus_db_model::ServiceKind;
 use nexus_db_model::SiloQuotas;
+use nexus_db_model::SiloSettings;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::SiloRole;
@@ -300,6 +301,12 @@ impl DataStore {
                     ),
                 )
                 .await?;
+                self.silo_settings_create(
+                    &conn,
+                    &authz_silo,
+                    SiloSettings::new(authz_silo.id()),
+                )
+                .await?;
 
                 Ok::<Silo, TransactionError<Error>>(silo)
             })
@@ -451,6 +458,7 @@ impl DataStore {
                 }
 
                 self.silo_quotas_delete(opctx, &conn, &authz_silo).await?;
+                self.silo_settings_delete(opctx, &conn, &authz_silo).await?;
 
                 self.virtual_provisioning_collection_delete_on_connection(
                     &opctx.log, &conn, id,

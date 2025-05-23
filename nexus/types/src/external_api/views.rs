@@ -116,6 +116,13 @@ impl SimpleIdentityOrName for SiloUtilization {
     }
 }
 
+/// A collection of resource counts used to set the virtual capacity of a silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloSettings {
+    pub silo_id: Uuid,
+    pub device_token_max_ttl_seconds: Option<i64>,
+}
+
 // AFFINITY GROUPS
 
 /// View of an Affinity Group
