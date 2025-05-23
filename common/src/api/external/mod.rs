@@ -1888,13 +1888,13 @@ impl Display for VpcFirewallRuleProtocol {
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallIcmpFilter {
-    pub ty: u8,
+    pub icmp_type: u8,
     pub code: Option<IcmpParamRange>,
 }
 
 impl Display for VpcFirewallIcmpFilter {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
-        write!(f, "{}", self.ty)?;
+        write!(f, "{}", self.icmp_type)?;
         if let Some(code) = self.code {
             write!(f, ",{code}")?;
         }
@@ -1912,7 +1912,7 @@ impl FromStr for VpcFirewallIcmpFilter {
         };
 
         Ok(Self {
-            ty: ty_str.parse::<u8>().map_err(|e| e.to_string())?,
+            icmp_type: ty_str.parse::<u8>().map_err(|e| e.to_string())?,
             code: code_str.map(|v| v.parse()).transpose()?,
         })
     }
@@ -1926,7 +1926,8 @@ impl From<u8> for IcmpParamRange {
 
 impl From<RangeInclusive<u8>> for IcmpParamRange {
     fn from(value: RangeInclusive<u8>) -> Self {
-        Self { first: *value.start(), last: *value.end() }
+        let (first, last) = value.into_inner();
+        Self { first, last }
     }
 }
 
@@ -3471,6 +3472,7 @@ mod test {
     use super::Generation;
     use super::RouteDestination;
     use super::RouteTarget;
+    use super::VpcFirewallIcmpFilter;
     use super::VpcFirewallRuleHostFilter;
     use super::VpcFirewallRuleTarget;
     use super::{
@@ -4067,6 +4069,45 @@ mod test {
         );
         assert!("foo:foo".parse::<VpcFirewallRuleHostFilter>().is_err());
         assert!("foo".parse::<VpcFirewallRuleHostFilter>().is_err());
+    }
+
+    #[test]
+    fn test_firewall_rule_proto_filter_parse() {
+        assert_eq!(VpcFirewallRuleProtocol::Tcp, "tcp".parse().unwrap());
+        assert_eq!(VpcFirewallRuleProtocol::Udp, "udp".parse().unwrap());
+
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(None),
+            "icmp".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                icmp_type: 4,
+                code: None
+            })),
+            "icmp:4".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                icmp_type: 60,
+                code: Some(0.into())
+            })),
+            "icmp:60,0".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                icmp_type: 60,
+                code: Some((0..=10).into())
+            })),
+            "icmp:60,0-10".parse().unwrap()
+        );
+        assert!("icmp:".parse::<VpcFirewallRuleHostFilter>().is_err());
+        assert!("icmp:20-30".parse::<VpcFirewallRuleHostFilter>().is_err());
+        assert!("icmp:10,".parse::<VpcFirewallRuleHostFilter>().is_err());
+        assert!("icmp:257".parse::<VpcFirewallRuleHostFilter>().is_err());
+        assert!(
+            "icmp:0,1000-1001".parse::<VpcFirewallRuleHostFilter>().is_err()
+        );
     }
 
     #[test]

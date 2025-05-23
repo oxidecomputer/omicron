@@ -100,13 +100,13 @@ pub static NEXUS_ICMP_FW_RULE: LazyLock<VpcFirewallRuleUpdate> =
             protocols: Some(vec![
                 VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
                     // Type 3 -- Destination Unreachable
-                    ty: 3,
+                    icmp_type: 3,
                     // Code 4 -- Fragmentation needed
                     code: Some(4.into()),
                 })),
                 VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
                     // Type 11 -- Time Exceeded
-                    ty: 11,
+                    icmp_type: 11,
                     code: None,
                 })),
             ]),

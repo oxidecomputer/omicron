@@ -7649,14 +7649,14 @@
               }
             ]
           },
-          "ty": {
+          "icmp_type": {
             "type": "integer",
             "format": "uint8",
             "minimum": 0
           }
         },
         "required": [
-          "ty"
+          "icmp_type"
         ]
       },
       "VpcFirewallRuleAction": {

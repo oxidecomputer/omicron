@@ -105,7 +105,7 @@ impl FromVpcFirewallRule for ResolvedVpcFirewallRule {
                     VpcFirewallRuleProtocol::Icmp(v) => {
                         ProtoFilter::Icmp(v.map(|v| {
                             oxide_vpc::api::IcmpFilter {
-                                ty: v.ty,
+                                ty: v.icmp_type,
                                 codes: v.code.map(Into::into),
                             }
                         }))
