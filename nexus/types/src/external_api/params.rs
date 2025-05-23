@@ -481,6 +481,22 @@ pub struct SiloQuotasUpdate {
     pub storage: Option<ByteCount>,
 }
 
+// TODO: Unlike quota values, silo settings are nullable, so we need passing
+// null to be meaningful here. But it's confusing for it to work that way here
+// and differently for quotas. Maybe the best thing would be to make them all
+// non-nullable on SiloQuotasUpdate. I vaguely remember the latter being the
+// direction we wanted to go in general anyway. Can't find the issue where it
+// was discussed.
+
+/// Updateable properties of a silo's settings.
+/// If a value is omitted it will not be updated.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloSettingsUpdate {
+    /// Maximum lifetime of a device token in seconds. If unset (or set to
+    /// null), users will be able to create tokens that do not expire.
+    pub device_token_max_ttl_seconds: Option<i64>,
+}
+
 /// Create-time parameters for a `User`
 #[derive(Clone, Deserialize, JsonSchema)]
 pub struct UserCreate {

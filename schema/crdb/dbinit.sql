@@ -1065,6 +1065,14 @@ WHERE
 AND
     s.time_deleted IS NULL;
 
+CREATE TABLE IF NOT EXISTS omicron.public.silo_settings (
+    silo_id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- null means no max: users can tokens that never expire
+    device_token_max_ttl_seconds INT8
+);
 /*
  * Projects
  */
@@ -5682,7 +5690,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '145.0.0', NULL)
+    (TRUE, NOW(), NOW(), '146.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

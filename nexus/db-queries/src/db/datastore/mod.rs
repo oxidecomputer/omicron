@@ -91,6 +91,7 @@ mod role;
 mod saga;
 mod silo;
 mod silo_group;
+mod silo_settings;
 mod silo_user;
 mod sled;
 mod sled_instance;
