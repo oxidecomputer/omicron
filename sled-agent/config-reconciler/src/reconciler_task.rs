@@ -465,6 +465,7 @@ impl ReconcilerTask {
                         &sled_config.zones,
                         sled_agent_facilities,
                         timesync_status.is_synchronized(),
+                        &self.datasets,
                         &currently_managed_zpools,
                         &self.log,
                     )
