@@ -30,11 +30,52 @@ pub fn run_repl_from_file<C: Parser>(
     let file = File::open(&input_file)
         .with_context(|| format!("open {:?}", &input_file))?;
     let bufread = BufReader::new(file);
-    for maybe_buffer in bufread.lines() {
-        let buffer =
-            maybe_buffer.with_context(|| format!("read {:?}", &input_file))?;
-        println!("> {}", buffer);
-        match process_entry(buffer, run_one) {
+    let mut lines = bufread.lines().peekable();
+    while let Some(line_res) = lines.next() {
+        let line =
+            line_res.with_context(|| format!("read {:?}", &input_file))?;
+
+        // Extract and handle multi-line comments.
+        if line.starts_with('#') {
+            println!("> {}", line);
+            loop {
+                let next = lines.next_if(|l| {
+                    match l {
+                        Ok(line) => line.starts_with('#'),
+                        Err(_) => {
+                            // If an error occurs, bail out immediately.
+                            true
+                        }
+                    }
+                });
+                let Some(next_res) = next else {
+                    // Next line is not part of a multi-line comment (or is an
+                    // EOF), so exit the loop.
+                    break;
+                };
+                let next_line = next_res
+                    .with_context(|| format!("read {:?}", &input_file))?;
+                println!("> {}", next_line);
+            }
+
+            continue;
+        }
+
+        if line.is_empty() {
+            // We print empty lines as-is, relying on the println! at the end of
+            // the loop.
+        } else {
+            // Print the command with a prompt sign.
+            println!("> {}", line);
+        }
+
+        // Strip everything after '#' as a comment.
+        let entry = match line.split_once('#') {
+            Some((real, _comment)) => real,
+            None => &line,
+        };
+
+        match process_entry(entry, run_one) {
             LoopResult::Continue => (),
             LoopResult::Bail(error) => return Err(error),
         }
@@ -74,11 +115,17 @@ pub fn run_repl_on_stdin<C: Parser>(
     );
     loop {
         match ed.read_line(&prompt) {
-            Ok(Signal::Success(buffer)) => match process_entry(buffer, run_one)
-            {
-                LoopResult::Continue => (),
-                LoopResult::Bail(error) => return Err(error),
-            },
+            Ok(Signal::Success(buffer)) => {
+                // Strip everything after '#' as a comment.
+                let entry = match buffer.split_once('#') {
+                    Some((real, _comment)) => real,
+                    None => &buffer,
+                };
+                match process_entry(entry, run_one) {
+                    LoopResult::Continue => (),
+                    LoopResult::Bail(error) => return Err(error),
+                }
+            }
             Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => break,
             Err(error) => {
                 bail!("unexpected error: {:#}", error);
@@ -90,15 +137,9 @@ pub fn run_repl_on_stdin<C: Parser>(
 }
 
 fn process_entry<C: Parser>(
-    entry: String,
+    entry: &str,
     run_one: &mut dyn FnMut(C) -> anyhow::Result<Option<String>>,
 ) -> LoopResult {
-    // Strip everything after '#' as a comment.
-    let entry = match entry.split_once('#') {
-        Some((real, _comment)) => real,
-        None => &entry,
-    };
-
     // If no input was provided, take another lap (print the prompt and accept
     // another line).  This gets handled specially because otherwise clap would
     // treat this as a usage error and print a help message, which isn't what we

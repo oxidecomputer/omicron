@@ -5,13 +5,13 @@
 //! Prototype code for collecting information from systems in the rack
 
 use crate::Omdb;
+use crate::db::option_impl_display;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
 use clap::Args;
 use clap::Subcommand;
 use futures::StreamExt;
 use gateway_client::types::PowerState;
-use gateway_client::types::RotSlot;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpComponentInfo;
@@ -21,6 +21,7 @@ use gateway_client::types::SpIgnitionInfo;
 use gateway_client::types::SpIgnitionSystemType;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use gateway_types::rot::RotSlot;
 use internal_dns_types::names::ServiceName;
 use tabled::Tabled;
 
@@ -533,6 +534,8 @@ async fn show_sp_details(
         git_commit: String,
         name: String,
         version: String,
+        #[tabled(display_with = "option_impl_display")]
+        sign: Option<String>,
     }
 
     impl<'a> From<(&'a SpIdentifier, &'a SpComponentInfo, SpComponentCaboose)>
@@ -551,6 +554,7 @@ async fn show_sp_details(
                 git_commit: caboose.git_commit,
                 name: caboose.name,
                 version: caboose.version,
+                sign: caboose.sign,
             }
         }
     }

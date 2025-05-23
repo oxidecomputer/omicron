@@ -82,6 +82,20 @@ impl SpComponentUpdate {
                 firmware_slot: 0,
                 update_id,
             },
+            PendingMgsUpdateDetails::Rot { expected_active_slot, .. } => {
+                SpComponentUpdate {
+                    log: log.clone(),
+                    component: SpComponent::ROT,
+                    target_sp_type: request.sp_type,
+                    target_sp_slot: request.slot_id,
+                    // Like the SP, we request an update to the inactive slot
+                    firmware_slot: expected_active_slot
+                        .slot()
+                        .toggled()
+                        .to_u16(),
+                    update_id,
+                }
+            }
         }
     }
 }
@@ -570,11 +584,14 @@ async fn wait_for_update_done(
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
 
-            // An incorrect version in the "inactive" slot is normal during the
-            // upgrade.  We have no reason to think this won't converge so we
-            // proceed with waiting.
+            // An incorrect version in the "inactive" slot, incorrect active slot,
+            // or non-empty pending_persistent_boot_preference/transient_boot_preference
+            // are normal during the upgrade. We have no reason to think these won't
+            // converge so we proceed with waiting.
             Err(PrecheckError::GatewayClientError(_))
             | Err(PrecheckError::WrongInactiveVersion { .. })
+            | Err(PrecheckError::WrongActiveSlot { .. })
+            | Err(PrecheckError::EphemeralRotBootPreferenceSet)
             | Ok(PrecheckStatus::ReadyForUpdate) => {
                 if before.elapsed() >= timeout {
                     return Err(UpdateWaitError::Timeout(timeout));
@@ -585,7 +602,8 @@ async fn wait_for_update_done(
             }
 
             Err(error @ PrecheckError::WrongDevice { .. })
-            | Err(error @ PrecheckError::WrongActiveVersion { .. }) => {
+            | Err(error @ PrecheckError::WrongActiveVersion { .. })
+            | Err(error @ PrecheckError::RotCommunicationFailed { .. }) => {
                 // Stop trying to make this update happen.  It's not going to
                 // happen.
                 return Err(UpdateWaitError::Indeterminate(error));

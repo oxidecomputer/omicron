@@ -23,12 +23,15 @@ use crate::sled_agent::SledAgent;
 use crate::storage_monitor::{StorageMonitor, StorageMonitorHandle};
 use crate::zone_bundle::ZoneBundler;
 use bootstore::schemes::v0 as bootstore;
+use illumos_utils::zpool::ZpoolName;
 use key_manager::{KeyManager, StorageKeyRequester};
 use sled_agent_types::zone_bundle::CleanupContext;
+use sled_agent_zone_images::{ZoneImageSourceResolver, ZoneImageZpools};
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
 use sled_storage::manager::{StorageHandle, StorageManager};
+use sled_storage::resources::AllDisks;
 use slog::{Logger, info};
 use std::net::Ipv6Addr;
 use tokio::sync::oneshot;
@@ -59,6 +62,13 @@ pub struct LongRunningTaskHandles {
 
     // A reference to the object used to manage zone bundles
     pub zone_bundler: ZoneBundler,
+
+    /// Resolver for zone image sources.
+    ///
+    /// This isn't really implemented in the backend as a task per se, but it
+    /// looks like one from the outside, and is convenient to put here. (If it
+    /// had any async involved within it, it would be a task.)
+    pub zone_image_resolver: ZoneImageSourceResolver,
 }
 
 /// Spawn all long running tasks
@@ -95,18 +105,22 @@ pub async fn spawn_all_longrunning_tasks(
     // Wait for the boot disk so that we can work with any ledgers,
     // such as those needed by the bootstore and sled-agent
     info!(log, "Waiting for boot disk");
-    let (disk_id, _) = storage_manager.wait_for_boot_disk().await;
+    let (disk_id, boot_zpool) = storage_manager.wait_for_boot_disk().await;
     info!(log, "Found boot disk {:?}", disk_id);
 
+    let all_disks = storage_manager.get_latest_disks().await;
     let bootstore = spawn_bootstore_tasks(
         log,
-        &mut storage_manager,
+        &all_disks,
         &hardware_manager,
         global_zone_bootstrap_ip,
     )
     .await;
 
-    let zone_bundler = spawn_zone_bundler_tasks(log, &mut storage_manager);
+    let zone_bundler =
+        spawn_zone_bundler_tasks(log, &mut storage_manager).await;
+    let zone_image_resolver =
+        make_zone_image_resolver(log, &all_disks, &boot_zpool);
 
     (
         LongRunningTaskHandles {
@@ -116,6 +130,7 @@ pub async fn spawn_all_longrunning_tasks(
             hardware_manager,
             bootstore,
             zone_bundler,
+            zone_image_resolver,
         },
         sled_agent_started_tx,
         service_manager_ready_tx,
@@ -195,13 +210,12 @@ fn spawn_hardware_monitor(
 
 async fn spawn_bootstore_tasks(
     log: &Logger,
-    storage_handle: &mut StorageHandle,
+    all_disks: &AllDisks,
     hardware_manager: &HardwareManager,
     global_zone_bootstrap_ip: Ipv6Addr,
 ) -> bootstore::NodeHandle {
-    let iter_all = storage_handle.get_latest_disks().await;
     let config = new_bootstore_config(
-        &iter_all,
+        all_disks,
         hardware_manager.baseboard(),
         global_zone_bootstrap_ip,
     )
@@ -224,13 +238,26 @@ async fn spawn_bootstore_tasks(
 }
 
 // `ZoneBundler::new` spawns a periodic cleanup task that runs indefinitely
-fn spawn_zone_bundler_tasks(
+async fn spawn_zone_bundler_tasks(
     log: &Logger,
     storage_handle: &mut StorageHandle,
 ) -> ZoneBundler {
     info!(log, "Starting ZoneBundler related tasks");
     let log = log.new(o!("component" => "ZoneBundler"));
     ZoneBundler::new(log, storage_handle.clone(), CleanupContext::default())
+        .await
+}
+
+fn make_zone_image_resolver(
+    log: &Logger,
+    all_disks: &AllDisks,
+    boot_zpool: &ZpoolName,
+) -> ZoneImageSourceResolver {
+    let zpools = ZoneImageZpools {
+        root: &all_disks.mount_config().root,
+        all_m2_zpools: all_disks.all_m2_zpools(),
+    };
+    ZoneImageSourceResolver::new(log, &zpools, boot_zpool)
 }
 
 async fn upsert_synthetic_disks_if_needed(

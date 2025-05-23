@@ -13,12 +13,14 @@ async-trait.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+gateway-ereport-messages.workspace = true
 gateway-messages.workspace = true
 gateway-types.workspace = true
 hex = { workspace = true, features = [ "serde" ] }
 hubtools.workspace = true
 omicron-common.workspace = true
 serde.workspace = true
+serde_cbor.workspace = true
 sha3.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
@@ -27,6 +29,8 @@ tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true
 omicron-workspace-hack.workspace = true
 nix.workspace = true
+uuid.workspace = true
+zerocopy.workspace = true
 
 [[bin]]
 name = "sp-sim"

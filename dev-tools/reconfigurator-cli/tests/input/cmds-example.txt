@@ -1,3 +1,5 @@
+# This is a legacy test; new tests shouldn't need to set a seed
+
 load-example --seed test-basic
 load-example --seed test-basic
 

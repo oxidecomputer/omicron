@@ -4,6 +4,7 @@
 
 //! Types helpful for rendering blueprints.
 
+use daft::Leaf;
 use omicron_common::api::external::Generation;
 use std::fmt;
 
@@ -18,6 +19,10 @@ pub mod constants {
     pub(super) const SUB_LAST: &str = "└─";
 
     pub const ARROW: &str = "->";
+    pub const WILL_REMOVE_MUPDATE_OVERRIDE: &str =
+        "will remove mupdate override";
+    pub const WOULD_HAVE_REMOVED_MUPDATE_OVERRIDE: &str =
+        "would have removed mupdate override";
     pub const COCKROACHDB_HEADING: &str = "COCKROACHDB SETTINGS";
     pub const COCKROACHDB_FINGERPRINT: &str = "state fingerprint";
     pub const COCKROACHDB_PRESERVE_DOWNGRADE: &str =
@@ -452,6 +457,37 @@ impl KvPair {
         val: S2,
     ) -> KvPair {
         KvPair { state, key: key.into(), val: val.into() }
+    }
+
+    /// Create a new `KvPair` with option semantics, tracking unchanged and
+    /// modified entries.
+    pub fn new_option_leaf<K: Into<String>, V: fmt::Display + Eq>(
+        key: K,
+        leaf: Leaf<Option<V>>,
+    ) -> KvPair {
+        match (leaf.before, leaf.after) {
+            (None, None) => {
+                KvPair::new_unchanged(key, linear_table_unchanged(&NONE_PARENS))
+            }
+            (None, Some(after)) => KvPair::new(
+                BpDiffState::Added,
+                key,
+                linear_table_modified(&NONE_PARENS, &after),
+            ),
+            (Some(before), None) => KvPair::new(
+                BpDiffState::Removed,
+                key,
+                linear_table_modified(&before, &NONE_PARENS),
+            ),
+            (Some(before), Some(after)) if before == after => {
+                KvPair::new_unchanged(key, linear_table_unchanged(&after))
+            }
+            (Some(before), Some(after)) => KvPair::new(
+                BpDiffState::Modified,
+                key,
+                linear_table_modified(&before, &after),
+            ),
+        }
     }
 }
 

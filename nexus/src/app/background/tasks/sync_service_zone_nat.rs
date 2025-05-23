@@ -17,9 +17,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::Ipv4NatValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-};
+use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
 use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
@@ -127,8 +125,22 @@ impl BackgroundTask for ServiceZoneNatTracker {
 
                 let sled_address = oxnet::Ipv6Net::host_net(*sled.ip);
 
-                let zones_config: OmicronZonesConfig = sa.omicron_zones;
-                let zones: Vec<OmicronZoneConfig> = zones_config.zones;
+                // TODO-correctness Looking at inventory here is a little
+                // sketchy. We currently check the most-recently-ledgered zones
+                // which tells us what services sled-agent things it's supposed
+                // to be running. It might be better to check either:
+                //
+                // * `sa.last_reconciliation` (to know what zones are actually
+                //   running; this requires
+                //   https://github.com/oxidecomputer/omicron/pull/8064 landing)
+                //   if the goal is to sync what's actually on the sled
+                // * a rendezvous table populated by reconfigurator if the goal
+                //   is to sync with what's Nexus thinks is supposed to be
+                //   running on the sled
+                let zones = sa
+                    .ledgered_sled_config
+                    .map(|config| config.zones)
+                    .unwrap_or_default();
 
                 for zone in zones {
                     let zone_type: OmicronZoneType = zone.zone_type;

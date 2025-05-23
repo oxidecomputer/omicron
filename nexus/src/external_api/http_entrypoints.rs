@@ -19,6 +19,7 @@ use crate::context::ApiContext;
 use crate::external_api::shared;
 use dropshot::Body;
 use dropshot::EmptyScanParams;
+use dropshot::Header;
 use dropshot::HttpError;
 use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
@@ -49,6 +50,7 @@ use nexus_external_api::*;
 use nexus_types::{
     authn::cookies::Cookies,
     external_api::{
+        headers::RangeRequest,
         params::SystemMetricsPathParam,
         shared::{BfdStatus, ProbeInfo},
     },
@@ -108,6 +110,7 @@ use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::{
     CloseFrame, Role as WebSocketRole,
 };
+use range_requests::PotentialRange;
 use range_requests::RequestContextEx;
 use ref_cast::RefCast;
 
@@ -706,7 +709,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn saml_identity_provider_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ProviderPath>,
-        query_params: Query<params::SiloSelector>,
+        query_params: Query<params::OptionalSiloSelector>,
     ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -717,7 +720,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let query = query_params.into_inner();
             let saml_identity_provider_selector =
                 params::SamlIdentityProviderSelector {
-                    silo: Some(query.silo),
+                    silo: query.silo,
                     saml_identity_provider: path.provider,
                 };
             let (.., provider) = nexus
@@ -7060,7 +7063,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let bundle = nexus
                 .support_bundle_view(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                 )
                 .await?;
 
@@ -7090,7 +7093,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                     SupportBundleQueryType::Index,
                     head,
                     range,
@@ -7107,6 +7110,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -7117,12 +7121,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
             let head = false;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                     SupportBundleQueryType::Whole,
                     head,
                     range,
@@ -7153,9 +7160,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(
-                        path.bundle.support_bundle,
-                    ),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle.bundle_id),
                     SupportBundleQueryType::Path { file_path: path.file },
                     head,
                     range,
@@ -7186,7 +7191,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                     SupportBundleQueryType::Whole,
                     head,
                     range,
@@ -7217,9 +7222,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(
-                        path.bundle.support_bundle,
-                    ),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle.bundle_id),
                     SupportBundleQueryType::Path { file_path: path.file },
                     head,
                     range,
@@ -7271,7 +7274,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .support_bundle_delete(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                 )
                 .await?;
 
@@ -7803,13 +7806,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_event_class_list(
+    async fn alert_class_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<
-            PaginationParams<EmptyScanParams, params::EventClassPage>,
+            PaginationParams<EmptyScanParams, params::AlertClassPage>,
         >,
-        filter: Query<params::EventClassFilter>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError> {
+        filter: Query<params::AlertClassFilter>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertClass>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -7827,13 +7830,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 direction: PaginationOrder::Ascending,
                 marker,
             };
-            let event_classes = nexus
-                .webhook_event_class_list(&opctx, filter, pag_params)
-                .await?;
+            let alert_classes =
+                nexus.alert_class_list(&opctx, filter, pag_params).await?;
             Ok(HttpResponseOk(ResultsPage::new(
-                event_classes,
+                alert_classes,
                 &EmptyScanParams {},
-                |class: &views::EventClass, _| class.name.clone(),
+                |class: &views::AlertClass, _| class.name.clone(),
             )?))
         };
         apictx
@@ -7843,10 +7845,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_receiver_list(
+    async fn alert_receiver_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookReceiver>>, HttpError>
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertReceiver>>, HttpError>
     {
         let apictx = rqctx.context();
         let handler = async {
@@ -7861,10 +7863,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let paginated_by = name_or_id_pagination(&pagparams, scan_params)?;
 
             let rxs = nexus
-                .webhook_receiver_list(&opctx, &paginated_by)
+                .alert_receiver_list(&opctx, &paginated_by)
                 .await?
                 .into_iter()
-                .map(views::WebhookReceiver::try_from)
+                .map(|webhook| {
+                    views::WebhookReceiver::try_from(webhook)
+                        .map(views::AlertReceiver::from)
+                })
                 .collect::<Result<Vec<_>, _>>()?;
 
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
@@ -7881,10 +7886,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_receiver_view(
+    async fn alert_receiver_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-    ) -> Result<HttpResponseOk<views::WebhookReceiver>, HttpError> {
+        path_params: Path<params::AlertReceiverSelector>,
+    ) -> Result<HttpResponseOk<views::AlertReceiver>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -7892,10 +7897,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let webhook_selector = path_params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
-            let webhook =
-                nexus.webhook_receiver_config_fetch(&opctx, rx).await?;
-            Ok(HttpResponseOk(views::WebhookReceiver::try_from(webhook)?))
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
+            let webhook = nexus.alert_receiver_config_fetch(&opctx, rx).await?;
+            Ok(HttpResponseOk(
+                views::WebhookReceiver::try_from(webhook)?.into(),
+            ))
         };
         apictx
             .context
@@ -7928,7 +7934,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_receiver_update(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
+        path_params: Path<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
@@ -7940,7 +7946,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let webhook_selector = path_params.into_inner();
             let params = params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             nexus.webhook_receiver_update(&opctx, rx, params).await?;
 
             Ok(HttpResponseUpdatedNoContent())
@@ -7952,9 +7958,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_receiver_delete(
+    async fn alert_receiver_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
+        path_params: Path<params::AlertReceiverSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -7964,7 +7970,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
             let webhook_selector = path_params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             nexus.webhook_receiver_delete(&opctx, rx).await?;
 
             Ok(HttpResponseDeleted())
@@ -7976,11 +7982,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_receiver_subscription_add(
+    async fn alert_receiver_subscription_add(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-        params: TypedBody<params::WebhookSubscriptionCreate>,
-    ) -> Result<HttpResponseCreated<views::WebhookSubscriptionCreated>, HttpError>
+        path_params: Path<params::AlertReceiverSelector>,
+        params: TypedBody<params::AlertSubscriptionCreate>,
+    ) -> Result<HttpResponseCreated<views::AlertSubscriptionCreated>, HttpError>
     {
         let apictx = rqctx.context();
         let handler = async {
@@ -7991,10 +7997,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let webhook_selector = path_params.into_inner();
             let subscription = params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
 
             let subscription = nexus
-                .webhook_receiver_subscription_add(&opctx, rx, subscription)
+                .alert_receiver_subscription_add(&opctx, rx, subscription)
                 .await?;
 
             Ok(HttpResponseCreated(subscription))
@@ -8006,9 +8012,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_receiver_subscription_remove(
+    async fn alert_receiver_subscription_remove(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookSubscriptionSelector>,
+        path_params: Path<params::AlertSubscriptionSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -8017,12 +8023,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            let params::WebhookSubscriptionSelector { receiver, subscription } =
+            let params::AlertSubscriptionSelector { receiver, subscription } =
                 path_params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, receiver)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, receiver)?;
 
             nexus
-                .webhook_receiver_subscription_remove(&opctx, rx, subscription)
+                .alert_receiver_subscription_remove(&opctx, rx, subscription)
                 .await?;
 
             Ok(HttpResponseDeleted())
@@ -8034,11 +8040,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_receiver_probe(
+    async fn alert_receiver_probe(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-        query_params: Query<params::WebhookProbe>,
-    ) -> Result<HttpResponseOk<views::WebhookProbeResult>, HttpError> {
+        path_params: Path<params::AlertReceiverSelector>,
+        query_params: Query<params::AlertReceiverProbe>,
+    ) -> Result<HttpResponseOk<views::AlertProbeResult>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -8048,7 +8054,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let webhook_selector = path_params.into_inner();
             let probe_params = query_params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let result =
                 nexus.webhook_receiver_probe(&opctx, rx, probe_params).await?;
             Ok(HttpResponseOk(result))
@@ -8062,7 +8068,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_secrets_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::WebhookReceiverSelector>,
+        query_params: Query<params::AlertReceiverSelector>,
     ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -8072,7 +8078,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
             let webhook_selector = query_params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let secrets = nexus
                 .webhook_receiver_secrets_list(&opctx, rx)
                 .await?
@@ -8092,7 +8098,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     /// Add a secret to a webhook.
     async fn webhook_secrets_add(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::WebhookReceiverSelector>,
+        query_params: Query<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookSecret>, HttpError> {
         let apictx = rqctx.context();
@@ -8103,7 +8109,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let params::WebhookSecretCreate { secret } = params.into_inner();
             let webhook_selector = query_params.into_inner();
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let secret =
                 nexus.webhook_receiver_secret_add(&opctx, rx, secret).await?;
             Ok(HttpResponseCreated(secret))
@@ -8141,12 +8147,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_delivery_list(
+    async fn alert_delivery_list(
         rqctx: RequestContext<Self::Context>,
-        receiver: Query<params::WebhookReceiverSelector>,
-        filter: Query<params::WebhookDeliveryStateFilter>,
+        receiver: Path<params::AlertReceiverSelector>,
+        filter: Query<params::AlertDeliveryStateFilter>,
         query: Query<PaginatedByTimeAndId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertDelivery>>, HttpError>
     {
         let apictx = rqctx.context();
         let handler = async {
@@ -8159,9 +8165,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let filter = filter.into_inner();
             let query = query.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let deliveries = nexus
-                .webhook_receiver_delivery_list(&opctx, rx, filter, &pag_params)
+                .alert_receiver_delivery_list(&opctx, rx, filter, &pag_params)
                 .await?;
 
             Ok(HttpResponseOk(ScanByTimeAndId::results_page(
@@ -8177,11 +8183,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_delivery_resend(
+    async fn alert_delivery_resend(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookEventSelector>,
-        receiver: Query<params::WebhookReceiverSelector>,
-    ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError> {
+        path_params: Path<params::AlertSelector>,
+        receiver: Query<params::AlertReceiverSelector>,
+    ) -> Result<HttpResponseCreated<views::AlertDeliveryId>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -8191,12 +8197,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let event_selector = path_params.into_inner();
             let webhook_selector = receiver.into_inner();
-            let event = nexus.webhook_event_lookup(&opctx, event_selector)?;
-            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let event = nexus.alert_lookup(&opctx, event_selector)?;
+            let rx = nexus.alert_receiver_lookup(&opctx, webhook_selector)?;
             let delivery_id =
-                nexus.webhook_receiver_event_resend(&opctx, rx, event).await?;
+                nexus.alert_receiver_resend(&opctx, rx, event).await?;
 
-            Ok(HttpResponseCreated(views::WebhookDeliveryId {
+            Ok(HttpResponseCreated(views::AlertDeliveryId {
                 delivery_id: delivery_id.into_untyped_uuid(),
             }))
         };

@@ -250,6 +250,7 @@ impl<'a> RequestBuilder<'a> {
     pub fn expect_range_requestable(mut self) -> Self {
         self.allowed_headers.as_mut().unwrap().extend([
             http::header::CONTENT_LENGTH,
+            http::header::CONTENT_RANGE,
             http::header::CONTENT_TYPE,
             http::header::ACCEPT_RANGES,
         ]);

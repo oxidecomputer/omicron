@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use camino::Utf8PathBuf;
 use dropshot::{
-    Body, FreeformBody, HttpError, HttpResponseAccepted, HttpResponseCreated,
-    HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
-    TypedBody,
+    Body, FreeformBody, Header, HttpError, HttpResponseAccepted,
+    HttpResponseCreated, HttpResponseDeleted, HttpResponseHeaders,
+    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
+    StreamingBody, TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronSledConfig, OmicronSledConfigResult, SledRole,
@@ -190,6 +190,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
@@ -673,6 +674,14 @@ pub trait SledAgentApi {
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
 
+    #[endpoint {
+        method = GET,
+        path = "/support/health-check",
+    }]
+    async fn support_health_check(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
     /// This endpoint returns a list of known zones on a sled that have service
     /// logs that can be collected into a support bundle.
     #[endpoint {
@@ -801,6 +810,19 @@ pub enum SupportBundleState {
 pub struct SupportBundleMetadata {
     pub support_bundle_id: SupportBundleUuid,
     pub state: SupportBundleState,
+}
+
+/// Range request headers
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RangeRequestHeaders {
+    /// A request to access a portion of the resource, such as:
+    ///
+    /// ```text
+    /// bytes=0-499
+    /// ```
+    ///
+    /// <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>
+    pub range: Option<String>,
 }
 
 /// Path parameters for sled-diagnostics log requests used by support bundles

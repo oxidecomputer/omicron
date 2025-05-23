@@ -10,6 +10,7 @@ use nexus_config::SchemaConfig;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
+use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
 use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
@@ -25,6 +26,7 @@ use pretty_assertions::{assert_eq, assert_ne};
 use semver::Version;
 use similar_asserts;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::sync::Mutex;
@@ -64,10 +66,16 @@ async fn test_setup<'a>(
 // Only returns an error if the transaction failed to commit.
 async fn apply_update_as_transaction_inner(
     client: &omicron_test_utils::dev::db::Client,
-    sql: &str,
+    step: &SchemaUpgradeStep,
 ) -> Result<(), tokio_postgres::Error> {
     client.batch_execute("BEGIN;").await.expect("Failed to BEGIN transaction");
-    client.batch_execute(&sql).await.expect("Failed to execute update");
+    if let Err(err) = client.batch_execute(step.sql()).await {
+        panic!(
+            "Failed to execute update step {}: {}",
+            step.label(),
+            InlineErrorChain::new(&err)
+        );
+    };
     client.batch_execute("COMMIT;").await?;
     Ok(())
 }
@@ -78,13 +86,16 @@ async fn apply_update_as_transaction_inner(
 async fn apply_update_as_transaction(
     log: &Logger,
     client: &omicron_test_utils::dev::db::Client,
-    sql: &str,
+    step: &SchemaUpgradeStep,
 ) {
     loop {
-        match apply_update_as_transaction_inner(client, sql).await {
+        match apply_update_as_transaction_inner(client, step).await {
             Ok(()) => break,
             Err(err) => {
-                warn!(log, "Failed to apply update as transaction"; "err" => err.to_string());
+                warn!(
+                    log, "Failed to apply update as transaction";
+                    InlineErrorChain::new(&err),
+                );
                 client
                     .batch_execute("ROLLBACK;")
                     .await
@@ -95,7 +106,7 @@ async fn apply_update_as_transaction(
                         continue;
                     }
                 }
-                panic!("Failed to apply update: {err}");
+                panic!("Failed to apply update {}: {err}", step.label());
             }
         }
     }
@@ -142,7 +153,7 @@ async fn apply_update(
         );
 
         for _ in 0..times_to_apply {
-            apply_update_as_transaction(&log, &client, step.sql()).await;
+            apply_update_as_transaction(&log, &client, step).await;
 
             // The following is a set of "versions exempt from being
             // re-applied" multiple times. PLEASE AVOID ADDING TO THIS LIST.
@@ -2044,7 +2055,7 @@ fn after_134_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 
 fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async {
-        let probe_event_id: Uuid =
+        let probe_alert_id: Uuid =
             "001de000-7768-4000-8000-000000000001".parse().unwrap();
         let rows = ctx
             .client
@@ -2080,7 +2091,7 @@ fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         assert_eq!(
             records[0].values,
             vec![
-                ColumnValue::new("id", probe_event_id),
+                ColumnValue::new("id", probe_alert_id),
                 ColumnValue::new(
                     "event_class",
                     SqlEnum::from(("webhook_event_class", "probe")),
@@ -2187,7 +2198,7 @@ fn after_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn before_142_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_145_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Create one console_session without id, and one device_access_token without id.
         ctx.client
@@ -2196,20 +2207,20 @@ fn before_142_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         INSERT INTO omicron.public.console_session
           (token, time_created, time_last_used, silo_user_id)
         VALUES
-          ('tok-console-142', now(), now(), gen_random_uuid());
+          ('tok-console-145', now(), now(), gen_random_uuid());
 
         INSERT INTO omicron.public.device_access_token
           (token, client_id, device_code, silo_user_id, time_created, time_requested)
         VALUES
-          ('tok-device-142', gen_random_uuid(), 'code-142', gen_random_uuid(), now(), now());
+          ('tok-device-145', gen_random_uuid(), 'code-145', gen_random_uuid(), now(), now());
         ",
             )
             .await
-            .expect("failed to insert pre-migration rows for 142");
+            .expect("failed to insert pre-migration rows for 145");
     })
 }
 
-fn after_142_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_145_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // After the migration each row should have a non-null id,
         // keep its token, and enforce primary-key/unique index.
@@ -2218,7 +2229,7 @@ fn after_142_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         let rows = ctx
             .client
             .query(
-                "SELECT id, token FROM omicron.public.console_session WHERE token = 'tok-console-142';",
+                "SELECT id, token FROM omicron.public.console_session WHERE token = 'tok-console-145';",
                 &[],
             )
             .await
@@ -2229,13 +2240,13 @@ fn after_142_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         assert!(id.is_some());
 
         let token: &str = (&rows[0]).get("token");
-        assert_eq!(token, "tok-console-142");
+        assert_eq!(token, "tok-console-145");
 
         // device_access_token: same checks
         let rows = ctx
             .client
             .query(
-                "SELECT id, token FROM omicron.public.device_access_token WHERE token = 'tok-device-142';",
+                "SELECT id, token FROM omicron.public.device_access_token WHERE token = 'tok-device-145';",
                 &[],
             )
             .await
@@ -2246,7 +2257,7 @@ fn after_142_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         assert!(id.is_some());
 
         let token: &str = (&rows[0]).get("token");
-        assert_eq!(token, "tok-device-142",);
+        assert_eq!(token, "tok-device-145",);
     })
 }
 
@@ -2315,8 +2326,8 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new().before(before_140_0_0).after(after_140_0_0),
     );
     map.insert(
-        Version::new(142, 0, 0),
-        DataMigrationFns::new().before(before_142_0_0).after(after_142_0_0),
+        Version::new(145, 0, 0),
+        DataMigrationFns::new().before(before_145_0_0).after(after_145_0_0),
     );
 
     map

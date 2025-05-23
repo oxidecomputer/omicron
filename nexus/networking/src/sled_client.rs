@@ -25,16 +25,32 @@ pub fn sled_lookup<'a>(
     Ok(sled)
 }
 
+pub fn default_reqwest_client_builder() -> reqwest::ClientBuilder {
+    let dur = std::time::Duration::from_secs(60);
+    reqwest::ClientBuilder::new().connect_timeout(dur).timeout(dur)
+}
+
 pub async fn sled_client(
     datastore: &DataStore,
     lookup_opctx: &OpContext,
     sled_id: Uuid,
     log: &Logger,
 ) -> Result<SledAgentClient, Error> {
+    let client = default_reqwest_client_builder().build().unwrap();
+    sled_client_ext(datastore, lookup_opctx, sled_id, log, client).await
+}
+
+pub async fn sled_client_ext(
+    datastore: &DataStore,
+    lookup_opctx: &OpContext,
+    sled_id: Uuid,
+    log: &Logger,
+    client: reqwest::Client,
+) -> Result<SledAgentClient, Error> {
     let (.., sled) =
         sled_lookup(datastore, lookup_opctx, sled_id)?.fetch().await?;
 
-    Ok(sled_client_from_address(sled_id, sled.address(), log))
+    Ok(sled_client_from_address_ext(sled_id, sled.address(), log, client))
 }
 
 pub fn sled_client_from_address(
@@ -42,12 +58,16 @@ pub fn sled_client_from_address(
     address: SocketAddrV6,
     log: &Logger,
 ) -> SledAgentClient {
+    let client = default_reqwest_client_builder().build().unwrap();
+    sled_client_from_address_ext(sled_id, address, log, client)
+}
+
+pub fn sled_client_from_address_ext(
+    sled_id: Uuid,
+    address: SocketAddrV6,
+    log: &Logger,
+    client: reqwest::Client,
+) -> SledAgentClient {
     let log = log.new(o!("SledAgent" => sled_id.to_string()));
-    let dur = std::time::Duration::from_secs(60);
-    let client = reqwest::ClientBuilder::new()
-        .connect_timeout(dur)
-        .timeout(dur)
-        .build()
-        .unwrap();
     SledAgentClient::new_with_client(&format!("http://{address}"), client, log)
 }

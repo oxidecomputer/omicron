@@ -4,9 +4,10 @@
 
 //! Utilities for managing Zpools.
 
-use crate::{ExecutionError, PFEXEC, execute};
+use crate::{ExecutionError, PFEXEC, execute_async};
 use camino::{Utf8Path, Utf8PathBuf};
 use std::str::FromStr;
+use tokio::process::Command;
 
 pub use omicron_common::zpool_name::ZpoolName;
 
@@ -203,29 +204,30 @@ pub struct Zpool(());
 /// Describes the API for interfacing with zpools
 ///
 /// This is a trait so that it can be faked out for tests.
+#[async_trait::async_trait]
 pub trait Api: Send + Sync {
-    fn create(
+    async fn create(
         &self,
         name: &ZpoolName,
         vdev: &Utf8Path,
     ) -> Result<(), CreateError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).args(["create", "-o", "ashift=12"]);
         cmd.arg(&name.to_string());
         cmd.arg(vdev);
-        execute(&mut cmd).map_err(Error::from)?;
+        execute_async(&mut cmd).await.map_err(Error::from)?;
 
         // Ensure that this zpool has the encryption feature enabled
-        let mut cmd = std::process::Command::new(PFEXEC);
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL)
             .arg("set")
             .arg("feature@encryption=enabled")
             .arg(&name.to_string());
-        execute(&mut cmd).map_err(Error::from)?;
+        execute_async(&mut cmd).await.map_err(Error::from)?;
 
         Ok(())
     }
@@ -238,23 +240,23 @@ impl Zpool {
         Self(())
     }
 
-    pub fn destroy(name: &ZpoolName) -> Result<(), DestroyError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn destroy(name: &ZpoolName) -> Result<(), DestroyError> {
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).arg("destroy");
         cmd.arg(&name.to_string());
-        execute(&mut cmd).map_err(Error::from)?;
+        execute_async(&mut cmd).await.map_err(Error::from)?;
         Ok(())
     }
 
-    pub fn import(name: &ZpoolName) -> Result<(), Error> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn import(name: &ZpoolName) -> Result<(), Error> {
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).arg("import").arg("-f");
         cmd.arg(&name.to_string());
-        match execute(&mut cmd) {
+        match execute_async(&mut cmd).await {
             Ok(_) => Ok(()),
             Err(ExecutionError::CommandFailure(err_info)) => {
                 // I'd really prefer to match on a specific error code, but the
@@ -272,34 +274,34 @@ impl Zpool {
         }
     }
 
-    pub fn export(name: &ZpoolName) -> Result<(), Error> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn export(name: &ZpoolName) -> Result<(), Error> {
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).arg("export").arg(&name.to_string());
-        execute(&mut cmd)?;
+        execute_async(&mut cmd).await?;
 
         Ok(())
     }
 
     /// `zpool set failmode=continue <name>`
-    pub fn set_failmode_continue(name: &ZpoolName) -> Result<(), Error> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn set_failmode_continue(name: &ZpoolName) -> Result<(), Error> {
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL)
             .arg("set")
             .arg("failmode=continue")
             .arg(&name.to_string());
-        execute(&mut cmd)?;
+        execute_async(&mut cmd).await?;
         Ok(())
     }
 
-    pub fn list() -> Result<Vec<ZpoolName>, ListError> {
-        let mut command = std::process::Command::new(ZPOOL);
+    pub async fn list() -> Result<Vec<ZpoolName>, ListError> {
+        let mut command = Command::new(ZPOOL);
         let cmd = command.args(&["list", "-Hpo", "name"]);
 
-        let output = execute(cmd).map_err(Error::from)?;
+        let output = execute_async(cmd).await.map_err(Error::from)?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let zpool = stdout
             .lines()
@@ -309,8 +311,8 @@ impl Zpool {
     }
 
     #[cfg_attr(test, allow(dead_code))]
-    pub fn get_info(name: &str) -> Result<ZpoolInfo, GetInfoError> {
-        let mut command = std::process::Command::new(ZPOOL);
+    pub async fn get_info(name: &str) -> Result<ZpoolInfo, GetInfoError> {
+        let mut command = Command::new(ZPOOL);
         let cmd = command.args(&[
             "list",
             "-Hpo",
@@ -318,7 +320,7 @@ impl Zpool {
             name,
         ]);
 
-        let output = execute(cmd).map_err(|err| GetInfoError {
+        let output = execute_async(cmd).await.map_err(|err| GetInfoError {
             name: name.to_string(),
             err: err.into(),
         })?;

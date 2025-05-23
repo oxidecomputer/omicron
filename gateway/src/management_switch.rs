@@ -29,6 +29,9 @@ use gateway_sp_comms::SharedSocket;
 use gateway_sp_comms::SingleSp;
 use gateway_sp_comms::SpRetryConfig;
 use gateway_sp_comms::default_discovery_addr;
+use gateway_sp_comms::default_ereport_addr;
+use gateway_sp_comms::ereport;
+use gateway_sp_comms::shared_socket;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::Logger;
@@ -48,6 +51,8 @@ use tokio::task::JoinHandle;
 pub struct SwitchConfig {
     #[serde(default = "default_udp_listen_port")]
     pub udp_listen_port: u16,
+    #[serde(default = "default_ereport_listen_port")]
+    pub ereport_udp_listen_port: u16,
     pub local_ignition_controller_interface: String,
     pub rpc_retry_config: RetryConfig,
     pub location: LocationConfig,
@@ -75,6 +80,10 @@ impl From<RetryConfig> for SpRetryConfig {
 
 fn default_udp_listen_port() -> u16 {
     gateway_sp_comms::MGS_PORT
+}
+
+fn default_ereport_listen_port() -> u16 {
+    gateway_sp_comms::ereport::MGS_PORT
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -161,7 +170,7 @@ pub struct ManagementSwitch {
     // `new()`. We need to hold onto it to prevent it being dropped, though:
     // When it's dropped, it cancels the background tokio task that loops on
     // that socket receiving incoming packets.
-    _shared_socket: Option<SharedSocket>,
+    _shared_socket: Option<SharedSocket<shared_socket::SingleSpMessage>>,
     location_map: Arc<OnceLock<Result<LocationMap, String>>>,
     discovery_task: JoinHandle<()>,
     log: Logger,
@@ -186,6 +195,7 @@ impl ManagementSwitch {
         // Convert our config into actual SP handles and sockets, keyed by
         // `SwitchPort` (newtype around an index into `config.port`).
         let mut shared_socket = None;
+        let mut ereport_socket = None;
         let mut port_to_handle = Vec::with_capacity(config.port.len());
         let mut port_to_desc = Vec::with_capacity(config.port.len());
         let mut port_to_ignition_target = Vec::with_capacity(config.port.len());
@@ -202,10 +212,10 @@ impl ManagementSwitch {
                             shared_socket = Some(
                                 SharedSocket::bind(
                                     config.udp_listen_port,
-                                    Arc::clone(&host_phase2_provider),
-                                    log.clone(),
+                                    shared_socket::ControlPlaneAgentHandler::new(&host_phase2_provider),
+                                    log.new(slog::o!("socket" => "control-plane-agent")),
                                 )
-                                .await?,
+                                .await?
                             );
 
                             shared_socket.as_ref().unwrap()
@@ -214,10 +224,28 @@ impl ManagementSwitch {
                         Some(v) => v,
                     };
 
+                    let ereport_socket = match &mut ereport_socket {
+                        None => {
+                            ereport_socket = Some(
+                                SharedSocket::bind(
+                                    config.ereport_udp_listen_port,
+                                    ereport::EreportHandler::default(),
+                                    log.new(slog::o!("socket" => "ereport")),
+                                )
+                                .await?,
+                            );
+
+                            ereport_socket.as_ref().unwrap()
+                        }
+
+                        Some(v) => v,
+                    };
                     SingleSp::new(
                         &socket,
+                        ereport_socket,
                         gateway_sp_comms::SwitchPortConfig {
                             discovery_addr: default_discovery_addr(),
+                            ereport_addr: default_ereport_addr(),
                             interface: interface.clone(),
                         },
                         retry_config,
@@ -225,7 +253,11 @@ impl ManagementSwitch {
                     .await
                 }
 
-                SwitchPortConfig::Simulated { addr, .. } => {
+                SwitchPortConfig::Simulated {
+                    addr,
+                    ereport_addr,
+                    fake_interface,
+                } => {
                     // Bind a new socket for each simulated switch port.
                     let bind_addr: SocketAddrV6 =
                         SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
@@ -236,11 +268,25 @@ impl ManagementSwitch {
                                 err,
                             })
                         })?;
+                    let ereport_bind_addr: SocketAddrV6 =
+                        SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
+                    let ereport_socket = UdpSocket::bind(ereport_bind_addr)
+                        .await
+                        .map_err(|err| {
+                            StartupError::BindError(BindError {
+                                addr: ereport_bind_addr,
+                                err,
+                            })
+                        })?;
                     SingleSp::new_direct_socket_for_testing(
                         socket,
                         *addr,
+                        ereport_socket,
+                        *ereport_addr,
                         retry_config,
-                        log.clone(),
+                        log.new(
+                            slog::o!("interface" => fake_interface.clone()),
+                        ),
                     )
                 }
             };

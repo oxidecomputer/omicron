@@ -50,7 +50,8 @@
 #![allow(dead_code)]
 
 mod dataset_serialization_task;
-mod external_disks;
+mod disks_common;
+mod dump_setup_task;
 mod handle;
 mod internal_disks;
 mod ledger;
@@ -70,6 +71,7 @@ pub use dataset_serialization_task::NestedDatasetMountError;
 pub use handle::AvailableDatasetsReceiver;
 pub use handle::ConfigReconcilerHandle;
 pub use handle::ConfigReconcilerSpawnToken;
+pub use handle::InventoryError;
 pub use handle::ReconcilerInventory;
 pub use handle::TimeSyncConfig;
 pub use internal_disks::InternalDisks;
@@ -80,6 +82,7 @@ pub use ledger::LedgerTaskError;
 pub use raw_disks::RawDisksSender;
 pub use reconciler_task::CurrentlyManagedZpools;
 pub use reconciler_task::CurrentlyManagedZpoolsReceiver;
+pub use reconciler_task::TimeSyncError;
 pub use reconciler_task::TimeSyncStatus;
 pub use sled_agent_facilities::SledAgentArtifactStore;
 pub use sled_agent_facilities::SledAgentFacilities;

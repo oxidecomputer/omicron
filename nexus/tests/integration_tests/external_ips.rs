@@ -34,6 +34,7 @@ use nexus_test_utils::resource_helpers::object_delete;
 use nexus_test_utils::resource_helpers::object_delete_error;
 use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_put;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
@@ -297,7 +298,7 @@ async fn test_floating_ip_create_non_admin(
         client,
         &silo,
         &"user".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await;
 

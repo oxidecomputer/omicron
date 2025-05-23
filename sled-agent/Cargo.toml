@@ -33,7 +33,6 @@ dns-service-client.workspace = true
 dpd-client.workspace = true
 display-error-chain.workspace = true
 dropshot.workspace = true
-ereport-api.workspace = true
 flate2.workspace = true
 flume.workspace = true
 futures.workspace = true

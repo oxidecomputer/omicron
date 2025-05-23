@@ -22,11 +22,14 @@ use crate::contract_stub::ContractError;
 
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
+const KSTAT: &str = "/usr/bin/kstat";
 const NVMEADM: &str = "/usr/sbin/nvmeadm";
 const PFEXEC: &str = "/usr/bin/pfexec";
 const PFILES: &str = "/usr/bin/pfiles";
 const PSTACK: &str = "/usr/bin/pstack";
 const PARGS: &str = "/usr/bin/pargs";
+const SVCS: &str = "/usr/bin/svcs";
+const UPTIME: &str = "/usr/bin/uptime";
 const ZFS: &str = "/usr/sbin/zfs";
 const ZONEADM: &str = "/usr/sbin/zoneadm";
 const ZPOOL: &str = "/usr/sbin/zpool";
@@ -260,6 +263,99 @@ pub fn pstack_process(pid: i32) -> Command {
 pub fn pfiles_process(pid: i32) -> Command {
     let mut cmd = std::process::Command::new(PFEXEC);
     cmd.env_clear().arg(PFILES).arg(pid.to_string());
+    cmd
+}
+
+pub fn uptime() -> Command {
+    let mut cmd = std::process::Command::new(UPTIME);
+    cmd.env_clear();
+    cmd
+}
+
+pub fn kstat_low_page() -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(KSTAT).arg("-p").arg("unix::system_pages:low_mem_scan");
+    cmd
+}
+
+pub fn svcs_enabled_but_not_running() -> Command {
+    let mut cmd = std::process::Command::new(PFEXEC);
+    cmd.env_clear().arg(SVCS).arg("-xZ");
+    cmd
+}
+
+pub fn count_disks() -> Command {
+    let mut cmd = std::process::Command::new("bash");
+    cmd.env_clear().args([
+        "-c",
+        "(pfexec diskinfo -pH | tee | wc -l | xargs | grep -x '12' > /dev/null) \
+            && echo 'OK: All expected disks found' \
+            || echo 'WARN: Unexpected number of physical disks (expected 12)'",
+    ]);
+    cmd
+}
+
+pub fn zfs_list_unmounted() -> Command {
+    let mut cmd = std::process::Command::new("bash");
+    cmd.env_clear().args([
+        "-c",
+        "pfexec zfs list -r -o name,mounted | grep oxp | grep -v yes$ \
+             && echo 'WARN: Found unmounted dataset(s)' \
+             || echo 'OK: No unmounted datasets'",
+    ]);
+    cmd
+}
+
+pub fn count_crucibles() -> Command {
+    let mut cmd = std::process::Command::new("bash");
+    cmd.env_clear()
+        .args([
+            "-c",
+            "(zoneadm list | grep crucible | grep -v pantry | tee | wc -l | xargs | grep -x '10' > /dev/null) \
+            && echo 'OK: 10 Crucibles found' \
+            || echo 'WARN: Unexpected number of crucible zones (expected 10)'"
+        ]);
+    cmd
+}
+
+pub fn identify_datasets_close_to_quota() -> Command {
+    let mut cmd = std::process::Command::new("bash");
+    cmd.env_clear()
+        .args([
+            "-c",
+            "zfs list -Hp -o used,quota,name,avail,mountpoint | \
+                egrep 'oxp|oxi' | \
+                egrep -v 'none|crucible' | \
+                awk '$2 > 0 && $1 / $2 >= 0.8 { any=1; print } END { exit !any }' \
+            && echo 'WARN: Found near-quota datasets' \
+            || echo 'OK: No near-quota datasets found'"
+        ]);
+    cmd
+}
+
+pub fn identify_datasets_with_less_than_300_gib_avail() -> Command {
+    let mut cmd = std::process::Command::new("bash");
+    cmd.env_clear().args([
+        "-c",
+        "zfs list -Hp -o used,quota,name,avail,mountpoint | \
+                egrep 'oxp|oxi' | \
+                egrep -v 'none|crucible' | \
+                awk '$4 < (300 * (1024^3)) { any=1; print } END { exit !any }' \
+            && echo 'WARN: Found low-space datasets' \
+            || echo 'OK: No low-space datasets found'",
+    ]);
+    cmd
+}
+
+pub fn dimm_check() -> Command {
+    let mut cmd = std::process::Command::new("bash");
+    cmd.env_clear().args([
+        "-c",
+        "prtconf -m | \
+                grep -v -e 1036271 -e 2084847 \
+            && echo 'WARN: Unexpected quantity of system memory' \
+            || echo 'OK: Found expected quantity of system memory'",
+    ]);
     cmd
 }
 

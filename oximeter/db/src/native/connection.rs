@@ -135,7 +135,9 @@ impl Connection {
         reader: &mut FramedRead<OwnedReadHalf, Decoder>,
         writer: &mut FramedWrite<OwnedWriteHalf, Encoder>,
     ) -> Result<ServerHello, Error> {
-        writer.send(ClientPacket::Hello(OXIMETER_HELLO.clone())).await?;
+        writer
+            .send(ClientPacket::Hello(Box::new(OXIMETER_HELLO.clone())))
+            .await?;
         let hello = match reader.next().await {
             Some(Ok(ServerPacket::Hello(hello))) => hello,
             Some(Ok(packet)) => {
@@ -245,7 +247,7 @@ impl Connection {
             profile_events: None,
         };
         let query = Query::new(query_result.id, self.address, query);
-        self.writer.send(ClientPacket::Query(query)).await?;
+        self.writer.send(ClientPacket::Query(Box::new(query))).await?;
         probes::packet__sent!(|| "Query");
         self.outstanding_query = true;
 

@@ -148,6 +148,16 @@ impl super::Nexus {
         &self,
         id: &SledUuid,
     ) -> Result<Arc<SledAgentClient>, Error> {
+        let client =
+            nexus_networking::default_reqwest_client_builder().build().unwrap();
+        self.sled_client_ext(id, client).await
+    }
+
+    pub async fn sled_client_ext(
+        &self,
+        id: &SledUuid,
+        client: reqwest::Client,
+    ) -> Result<Arc<SledAgentClient>, Error> {
         // TODO: We should consider injecting connection pooling here,
         // but for now, connections to sled agents are constructed
         // on an "as requested" basis.
@@ -155,11 +165,12 @@ impl super::Nexus {
         // Frankly, returning an "Arc" here without a connection pool is a
         // little silly; it's not actually used if each client connection exists
         // as a one-shot.
-        let client = nexus_networking::sled_client(
+        let client = nexus_networking::sled_client_ext(
             &self.db_datastore,
             &self.opctx_alloc,
             id.into_untyped_uuid(),
             &self.log,
+            client,
         )
         .await?;
         Ok(Arc::new(client))

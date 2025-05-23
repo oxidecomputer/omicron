@@ -94,7 +94,7 @@ path_param!(AddressLotPath, address_lot, "address lot");
 path_param!(ProbePath, probe, "probe");
 path_param!(CertificatePath, certificate, "certificate");
 
-id_path_param!(SupportBundlePath, support_bundle, "support bundle");
+id_path_param!(SupportBundlePath, bundle_id, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
@@ -483,7 +483,7 @@ pub struct SiloQuotasUpdate {
 }
 
 /// Create-time parameters for a `User`
-#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub struct UserCreate {
     /// username used to log in
     pub external_id: UserId,
@@ -492,14 +492,13 @@ pub struct UserCreate {
 }
 
 /// A password used for authenticating a local-only user
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize)]
 #[serde(try_from = "String")]
-#[serde(into = "String")]
 // We store both the raw String and omicron_passwords::Password forms of the
 // password.  That's because `omicron_passwords::Password` does not support
 // getting the String back out (by design), but we may need to do that in order
 // to impl Serialize.  See the `From<Password> for String` impl below.
-pub struct Password(String, omicron_passwords::Password);
+pub struct Password(omicron_passwords::Password);
 
 impl FromStr for Password {
     type Err = String;
@@ -517,16 +516,7 @@ impl TryFrom<String> for Password {
         // TODO-security If we want to apply password policy rules, this seems
         // like the place.  We presumably want to also document them in the
         // OpenAPI schema below.  See omicron#2307.
-        Ok(Password(value, inner))
-    }
-}
-
-// This "From" impl only exists to make it easier to derive `Serialize`.  That
-// in turn is only to make this easier to use from the test suite.  (There's no
-// other reason structs in this file should need to impl Serialize at all.)
-impl From<Password> for String {
-    fn from(password: Password) -> Self {
-        password.0
+        Ok(Password(inner))
     }
 }
 
@@ -568,12 +558,12 @@ impl JsonSchema for Password {
 
 impl AsRef<omicron_passwords::Password> for Password {
     fn as_ref(&self) -> &omicron_passwords::Password {
-        &self.1
+        &self.0
     }
 }
 
 /// Parameters for setting a user's password
-#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "mode", content = "value")]
 pub enum UserPassword {
@@ -584,7 +574,7 @@ pub enum UserPassword {
 }
 
 /// Credentials for local user login
-#[derive(Clone, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Deserialize, JsonSchema)]
 pub struct UsernamePasswordCredentials {
     pub username: UserId,
     pub password: Password,
@@ -2381,26 +2371,41 @@ pub struct DeviceAccessTokenRequest {
     pub client_id: Uuid,
 }
 
-// Webhooks
+// Alerts
 
-/// Query params for listing webhook event classes.
+/// Query params for listing alert classes.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EventClassFilter {
-    /// An optional glob pattern for filtering event class names.
+pub struct AlertClassFilter {
+    /// An optional glob pattern for filtering alert class names.
     ///
-    /// If provided, only event classes which match this glob pattern will be
+    /// If provided, only alert classes which match this glob pattern will be
     /// included in the response.
-    pub filter: Option<shared::WebhookSubscription>,
+    pub filter: Option<shared::AlertSubscription>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AlertSelector {
+    /// UUID of the alert
+    pub alert_id: Uuid,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EventClassPage {
+pub struct AlertSubscriptionSelector {
+    /// The webhook receiver that the subscription is attached to.
+    #[serde(flatten)]
+    pub receiver: AlertReceiverSelector,
+    /// The event class subscription itself.
+    pub subscription: shared::AlertSubscription,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertClassPage {
     /// The last webhook event class returned by a previous page.
     pub last_seen: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookReceiverSelector {
+pub struct AlertReceiverSelector {
     /// The name or ID of the webhook receiver.
     pub receiver: NameOrId,
 }
@@ -2421,7 +2426,7 @@ pub struct WebhookCreate {
     /// If this list is empty or is not included in the request body, the
     /// webhook will not be subscribed to any events.
     #[serde(default)]
-    pub subscriptions: Vec<shared::WebhookSubscription>,
+    pub subscriptions: Vec<shared::AlertSubscription>,
 }
 
 /// Parameters to update a webhook configuration.
@@ -2435,9 +2440,9 @@ pub struct WebhookReceiverUpdate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookSubscriptionCreate {
+pub struct AlertSubscriptionCreate {
     /// The event class pattern to subscribe to.
-    pub subscription: shared::WebhookSubscription,
+    pub subscription: shared::AlertSubscription,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -2452,23 +2457,8 @@ pub struct WebhookSecretSelector {
     pub secret_id: Uuid,
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct WebhookEventSelector {
-    /// UUID of the event
-    pub event_id: Uuid,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookSubscriptionSelector {
-    /// The webhook receiver that the subscription is attached to.
-    #[serde(flatten)]
-    pub receiver: WebhookReceiverSelector,
-    /// The event class subscription itself.
-    pub subscription: shared::WebhookSubscription,
-}
-
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookDeliveryStateFilter {
+pub struct AlertDeliveryStateFilter {
     /// If true, include deliveries which are currently in progress.
     ///
     /// If any of the "pending", "failed", or "delivered" query parameters are
@@ -2499,13 +2489,13 @@ pub struct WebhookDeliveryStateFilter {
     pub delivered: Option<bool>,
 }
 
-impl Default for WebhookDeliveryStateFilter {
+impl Default for AlertDeliveryStateFilter {
     fn default() -> Self {
         Self::ALL
     }
 }
 
-impl WebhookDeliveryStateFilter {
+impl AlertDeliveryStateFilter {
     pub const ALL: Self =
         Self { pending: Some(true), failed: Some(true), delivered: Some(true) };
 
@@ -2536,7 +2526,7 @@ impl WebhookDeliveryStateFilter {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookProbe {
+pub struct AlertReceiverProbe {
     /// If true, resend all events that have not been delivered successfully if
     /// the probe request succeeds.
     #[serde(default)]

@@ -1,0 +1,41 @@
+# Load example system with 7 sleds:
+#
+# sled 0: unset -> unset (unchanged)
+# sled 1: unset -> set
+# sled 2: set -> unset
+# sled 3: set -> set (unchanged)
+# sled 4: set -> set (changed)
+# sled 5: set -> set (unchanged) but change something else
+# sled 6: set -> sled removed
+#
+# We'll also add another sled below (new_sled_id) with
+# remove_mupdate_override set.
+#
+# We don't need any zones for this test, so disable that to keep the
+# outputs minimal.
+
+load-example --nsleds 7 --ndisks-per-sled 0 --no-zones
+
+# Set the field on sleds 2-6 (0-indexed).
+blueprint-edit latest set-remove-mupdate-override 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 00000000-0000-0000-0000-000000000000
+blueprint-edit latest set-remove-mupdate-override aff6c093-197d-42c5-ad80-9f10ba051a34 00000000-0000-0000-0000-000000000000
+blueprint-edit latest set-remove-mupdate-override b82ede02-399c-48c6-a1de-411df4fa49a7 00000000-0000-0000-0000-000000000000
+blueprint-edit latest set-remove-mupdate-override d81c6a84-79b8-4958-ae41-ea46c9b19763 00000000-0000-0000-0000-000000000000
+blueprint-edit latest set-remove-mupdate-override e96e226f-4ed9-4c01-91b9-69a9cd076c9e 00000000-0000-0000-0000-000000000000
+
+blueprint-show latest
+
+# Now make another blueprint, starting by adding a new sled and removing sled 6.
+sled-add --ndisks 0
+blueprint-edit latest debug remove-sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e
+sled-remove e96e226f-4ed9-4c01-91b9-69a9cd076c9e
+inventory-generate
+
+# Edit sleds 1, 2, 4, 5, and the new one.
+blueprint-edit latest set-remove-mupdate-override 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 ffffffff-ffff-ffff-ffff-ffffffffffff
+blueprint-edit latest set-remove-mupdate-override 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 unset
+blueprint-edit latest set-remove-mupdate-override b82ede02-399c-48c6-a1de-411df4fa49a7 ffffffff-ffff-ffff-ffff-ffffffffffff
+blueprint-edit latest debug force-sled-generation-bump d81c6a84-79b8-4958-ae41-ea46c9b19763
+blueprint-edit latest set-remove-mupdate-override 00320471-945d-413c-85e7-03e091a70b3c ffffffff-ffff-ffff-ffff-ffffffffffff
+
+blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba latest

@@ -208,6 +208,9 @@ impl DataStore {
                 sled_id: sled_id.into(),
                 sled_state: sled.state.into(),
                 sled_agent_generation: sled.sled_agent_generation.into(),
+                remove_mupdate_override: sled
+                    .remove_mupdate_override
+                    .map(|id| id.into()),
             })
             .collect::<Vec<_>>();
 
@@ -514,6 +517,9 @@ impl DataStore {
                         disks: IdMap::new(),
                         datasets: IdMap::new(),
                         zones: IdMap::new(),
+                        remove_mupdate_override: s
+                            .remove_mupdate_override
+                            .map(|id| id.into()),
                     };
                     let old = sled_configs.insert(s.sled_id.into(), config);
                     bail_unless!(
@@ -2129,7 +2135,7 @@ mod tests {
         assert_eq!(blueprint1.sleds.len(), collection.sled_agents.len());
         assert_eq!(
             blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count(),
-            collection.all_omicron_zones().count()
+            collection.all_ledgered_omicron_zones().count()
         );
         // All zones should be in service.
         assert_all_zones_in_service(&blueprint1);

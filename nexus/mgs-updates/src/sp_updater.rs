@@ -213,7 +213,13 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
             let PendingMgsUpdateDetails::Sp {
                 expected_active_version,
                 expected_inactive_version,
-            } = &update.details;
+            } = &update.details
+            else {
+                unreachable!(
+                    "pending MGS update details within ReconfiguratorSpUpdater \
+                    will always be for the SP"
+                );
+            };
             if caboose.version != expected_active_version.to_string() {
                 return Err(PrecheckError::WrongActiveVersion {
                     expected: expected_active_version.clone(),

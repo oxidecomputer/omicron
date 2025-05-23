@@ -5,24 +5,44 @@
 //! Provides thin wrappers around a watch channel managing the set of
 //! [`RawDisk`]s sled-agent is aware of.
 
-use id_map::Entry;
 use id_map::IdMap;
 use id_map::IdMappable;
+use nexus_sled_agent_shared::inventory::InventoryDisk;
 use omicron_common::disk::DiskIdentity;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
 use slog::info;
 use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use tokio::sync::watch;
 
-pub(crate) fn new() -> (RawDisksSender, watch::Receiver<IdMap<RawDiskWithId>>) {
-    let (tx, rx) = watch::channel(IdMap::default());
-    (RawDisksSender(tx), rx)
+pub(crate) fn new() -> (RawDisksSender, RawDisksReceiver) {
+    let (tx, rx) = watch::channel(Arc::default());
+    (RawDisksSender(tx), RawDisksReceiver(rx))
 }
 
 #[derive(Debug, Clone)]
-pub struct RawDisksSender(watch::Sender<IdMap<RawDiskWithId>>);
+pub(crate) struct RawDisksReceiver(
+    pub(crate) watch::Receiver<Arc<IdMap<RawDiskWithId>>>,
+);
+
+impl Deref for RawDisksReceiver {
+    type Target = watch::Receiver<Arc<IdMap<RawDiskWithId>>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for RawDisksReceiver {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RawDisksSender(watch::Sender<Arc<IdMap<RawDiskWithId>>>);
 
 impl RawDisksSender {
     /// Set the complete set of raw disks visible to sled-agent.
@@ -44,10 +64,10 @@ impl RawDisksSender {
                 }
             }
 
-            if *disks == new_disks {
+            if **disks == new_disks {
                 false
             } else {
-                *disks = new_disks;
+                *disks = Arc::new(new_disks);
                 true
             }
         });
@@ -57,29 +77,27 @@ impl RawDisksSender {
     pub fn add_or_update_raw_disk(&self, disk: RawDisk, log: &Logger) -> bool {
         let disk = RawDiskWithId::from(disk);
         self.0.send_if_modified(|disks| {
-            match disks.entry(Arc::clone(&disk.identity)) {
-                Entry::Vacant(entry) => {
+            match disks.get(&disk.identity) {
+                Some(existing) if *existing == disk => {
+                    return false;
+                }
+                Some(existing) => {
+                    info!(
+                        log, "Updating raw disk";
+                        "old" => ?existing.disk,
+                        "new" => ?disk.disk,
+                    );
+                }
+                None => {
                     info!(
                         log, "Adding new raw disk";
-                        "identity" => ?disk.identity,
+                        "disk" => ?disk.disk,
                     );
-                    entry.insert(disk);
-                    true
-                }
-                Entry::Occupied(mut entry) => {
-                    if *entry.get() == disk {
-                        false
-                    } else {
-                        info!(
-                            log, "Updating raw disk";
-                            "old" => ?entry.get().disk,
-                            "new" => ?disk.disk,
-                        );
-                        entry.insert(disk);
-                        true
-                    }
                 }
             }
+
+            Arc::make_mut(disks).insert(disk);
+            true
         })
     }
 
@@ -103,9 +121,29 @@ impl RawDisksSender {
             }
 
             info!(log, "Removing disk"; "identity" => ?identity);
-            disks.remove(identity);
+            Arc::make_mut(disks).remove(identity);
             true
         })
+    }
+
+    pub(crate) fn to_inventory(&self) -> Vec<InventoryDisk> {
+        self.0
+            .borrow()
+            .iter()
+            .map(|disk| {
+                let firmware = disk.firmware();
+                InventoryDisk {
+                    identity: disk.identity().clone(),
+                    variant: disk.variant(),
+                    slot: disk.slot(),
+                    active_firmware_slot: firmware.active_slot(),
+                    next_active_firmware_slot: firmware.next_active_slot(),
+                    number_of_firmware_slots: firmware.number_of_slots(),
+                    slot1_is_read_only: firmware.slot1_read_only(),
+                    slot_firmware_versions: firmware.slots().to_vec(),
+                }
+            })
+            .collect()
     }
 }
 

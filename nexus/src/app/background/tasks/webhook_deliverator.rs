@@ -6,7 +6,7 @@
 //! active webhook deliveries.
 //!
 //! This task reads [`WebhookDelivery`] records from the database (created by the
-//! [`webhook_dispatcher`] task) and sends HTTP requests to the receivers for
+//! [`alert_dispatcher`] task) and sends HTTP requests to the receivers for
 //! those records.  The deliverator is responsible for recording the status of
 //! each of these attempts, and for retrying failed attempts as needed.  For
 //! an overview of all the components of the webhook subsystem, their roles, and
@@ -27,7 +27,7 @@
 //! eventually time out, and other Nexii will attempt that delivery.
 //!
 //! [`WebhookDelivery`]: nexus_db_model::WebhookDelivery
-//! [`webhook_dispatcher`]: super::webhook_dispatcher
+//! [`alert_dispatcher`]: super::alert_dispatcher
 //! [`app::webhook`]: crate::app::webhook
 
 use crate::app::background::BackgroundTask;
@@ -48,9 +48,8 @@ use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, WebhookDeliveryUuid};
-use std::num::NonZeroU32;
+use parallel_task_set::ParallelTaskSet;
 use std::sync::Arc;
-use tokio::task::JoinSet;
 
 // The Deliverator belongs to an elite order, a hallowed sub-category. He's got
 // esprit up to here. Right now he is preparing to carry out his third mission
@@ -141,27 +140,21 @@ impl WebhookDeliverator {
         Self { datastore, nexus_id, cfg, client }
     }
 
-    const MAX_CONCURRENT_RXS: NonZeroU32 = {
-        match NonZeroU32::new(8) {
-            Some(nz) => nz,
-            None => unreachable!(),
-        }
-    };
+    const MAX_CONCURRENT_RXS: usize = 8;
 
     async fn actually_activate(
         &mut self,
         opctx: &OpContext,
         status: &mut WebhookDeliveratorStatus,
     ) -> Result<(), Error> {
-        let mut tasks = JoinSet::new();
-        let mut paginator = Paginator::new(Self::MAX_CONCURRENT_RXS);
+        let mut tasks =
+            ParallelTaskSet::new_with_parallelism(Self::MAX_CONCURRENT_RXS);
+        let mut paginator =
+            Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
             let rxs = self
                 .datastore
-                .webhook_rx_list(
-                    &opctx,
-                    &PaginatedBy::Id(p.current_pagparams()),
-                )
+                .alert_rx_list(&opctx, &PaginatedBy::Id(p.current_pagparams()))
                 .await?;
             paginator = p
                 .found_batch(&rxs, &|WebhookReceiverConfig { rx, .. }| {
@@ -175,7 +168,9 @@ impl WebhookDeliverator {
                     "rx_name".to_string() => rx.rx.name().to_string(),
                 });
                 let deliverator = self.clone();
-                tasks.spawn(async move {
+                // Spawn the next delivery attempt, potentially joining a
+                // previous one if the concurrency limit has been reached.
+                let prev_result = tasks.spawn(async move {
                     let status = match deliverator.rx_deliver(&opctx, rx).await
                     {
                         Ok(status) => status,
@@ -192,17 +187,23 @@ impl WebhookDeliverator {
                         }
                     };
                     (rx_id, status)
-                });
-            }
-
-            while let Some(result) = tasks.join_next().await {
-                let (rx_id, rx_status) = result.expect(
-                "delivery tasks should not be canceled, and nexus is compiled \
-                with `panic=\"abort\"`, so they will not have panicked",
-            );
-                status.by_rx.insert(rx_id, rx_status);
+                }).await;
+                if let Some((rx_id, rx_status)) = prev_result {
+                    status.by_rx.insert(rx_id, rx_status);
+                }
             }
         }
+
+        // Wait for the remaining batch of tasks to come back.
+        while let Some((rx_id, rx_status)) = tasks.join_next().await {
+            status.by_rx.insert(rx_id, rx_status);
+        }
+
+        slog::info!(
+            &opctx.log,
+            "all webhook delivery tasks completed";
+            "num_receivers" => status.by_rx.len(),
+        );
 
         Ok(())
     }
@@ -230,7 +231,7 @@ impl WebhookDeliverator {
             ..Default::default()
         };
 
-        for DeliveryAndEvent { delivery, event_class, event } in deliveries {
+        for DeliveryAndEvent { delivery, alert_class, event } in deliveries {
             let attempt = (*delivery.attempts) + 1;
             let delivery_id = WebhookDeliveryUuid::from(delivery.id);
             match self
@@ -246,8 +247,8 @@ impl WebhookDeliverator {
                 Ok(DeliveryAttemptState::Started) => {
                     slog::trace!(&opctx.log,
                         "webhook event delivery attempt started";
-                        "event_id" => %delivery.event_id,
-                        "event_class" => %event_class,
+                        "alert_id" => %delivery.alert_id,
+                        "alert_class" => %alert_class,
                         "delivery_id" => %delivery_id,
                         "attempt" => ?attempt,
                     );
@@ -257,8 +258,8 @@ impl WebhookDeliverator {
                         &opctx.log,
                         "delivery of this webhook event was already completed \
                          at {time:?}";
-                        "event_id" => %delivery.event_id,
-                        "event_class" => %event_class,
+                        "alert_id" => %delivery.alert_id,
+                        "alert_class" => %alert_class,
                         "delivery_id" => %delivery_id,
                         "time_completed" => ?time,
                     );
@@ -270,8 +271,8 @@ impl WebhookDeliverator {
                         &opctx.log,
                         "delivery of this webhook event is in progress by \
                          another Nexus";
-                        "event_id" => %delivery.event_id,
-                        "event_class" => %event_class,
+                        "alert_id" => %delivery.alert_id,
+                        "alert_class" => %alert_class,
                         "delivery_id" => %delivery_id,
                         "nexus_id" => %nexus_id,
                         "time_started" => ?started,
@@ -284,8 +285,8 @@ impl WebhookDeliverator {
                         &opctx.log,
                         "unexpected database error error starting webhook \
                          delivery attempt";
-                        "event_id" => %delivery.event_id,
-                        "event_class" => %event_class,
+                        "alert_id" => %delivery.alert_id,
+                        "alert_class" => %alert_class,
                         "delivery_id" => %delivery_id,
                         "error" => %error,
                     );
@@ -298,7 +299,7 @@ impl WebhookDeliverator {
 
             // okay, actually do the thing...
             let delivery_attempt = match client
-                .send_delivery_request(opctx, &delivery, event_class, &event)
+                .send_delivery_request(opctx, &delivery, alert_class, &event)
                 .await
             {
                 Ok(delivery) => delivery,
@@ -324,8 +325,8 @@ impl WebhookDeliverator {
                 slog::error!(
                     &opctx.log,
                     "{MSG}";
-                    "event_id" => %delivery.event_id,
-                    "event_class" => %event_class,
+                    "alert_id" => %delivery.alert_id,
+                    "alert_class" => %alert_class,
                     "delivery_id" => %delivery_id,
                     "error" => %e,
                 );
@@ -342,7 +343,7 @@ impl WebhookDeliverator {
                 delivery_status.failed_deliveries.push(
                     WebhookDeliveryFailure {
                         delivery_id,
-                        event_id: delivery.event_id.into(),
+                        alert_id: delivery.alert_id.into(),
                         attempt: delivery_attempt.attempt.0 as usize,
                         result: delivery_attempt.result.into(),
                         response_status: delivery_attempt

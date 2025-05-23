@@ -10,6 +10,7 @@ use crate::context::ApiContext;
 use crate::external_api::shared;
 use dropshot::ApiDescription;
 use dropshot::Body;
+use dropshot::Header;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
@@ -28,6 +29,7 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
+use nexus_types::external_api::headers::RangeRequest;
 use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::SupportBundleFilePath;
@@ -63,6 +65,7 @@ use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use range_requests::PotentialRange;
 use range_requests::RequestContextEx;
 use std::collections::BTreeMap;
 
@@ -979,7 +982,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let bundle = nexus
                 .support_bundle_view(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                 )
                 .await?;
 
@@ -1009,7 +1012,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                     SupportBundleQueryType::Index,
                     head,
                     range,
@@ -1026,6 +1029,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -1036,12 +1040,15 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
 
             let head = false;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                     SupportBundleQueryType::Whole,
                     head,
                     range,
@@ -1072,9 +1079,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(
-                        path.bundle.support_bundle,
-                    ),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle.bundle_id),
                     SupportBundleQueryType::Path { file_path: path.file },
                     head,
                     range,
@@ -1105,7 +1110,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                     SupportBundleQueryType::Whole,
                     head,
                     range,
@@ -1136,9 +1141,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(
-                        path.bundle.support_bundle,
-                    ),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle.bundle_id),
                     SupportBundleQueryType::Path { file_path: path.file },
                     head,
                     range,
@@ -1190,7 +1193,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             nexus
                 .support_bundle_delete(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                 )
                 .await?;
 

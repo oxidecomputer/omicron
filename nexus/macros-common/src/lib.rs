@@ -12,15 +12,15 @@ use syn::parse_quote;
 #[derive(Debug)]
 pub enum PrimaryKeyType {
     /// A regular type.
-    Standard(syn::Type),
+    Standard(Box<syn::Type>),
 
     /// A typed UUID, which requires special handling.
     TypedUuid {
         /// The external type. This is used almost everywhere.
-        external: syn::Type,
+        external: Box<syn::Type>,
 
         /// The internal type used in nexus-db-model.
-        db: syn::Type,
+        db: Box<syn::Type>,
     },
 }
 
@@ -43,8 +43,8 @@ impl PrimaryKeyType {
     /// Converts self into the external type.
     pub fn into_external(self) -> syn::Type {
         match self {
-            PrimaryKeyType::Standard(path) => path,
-            PrimaryKeyType::TypedUuid { external, .. } => external,
+            PrimaryKeyType::Standard(path) => *path,
+            PrimaryKeyType::TypedUuid { external, .. } => *external,
         }
     }
 
@@ -62,8 +62,8 @@ impl PrimaryKeyType {
     /// Converts self into the database type.
     pub fn into_db(self) -> syn::Type {
         match self {
-            PrimaryKeyType::Standard(path) => path,
-            PrimaryKeyType::TypedUuid { db, .. } => db,
+            PrimaryKeyType::Standard(path) => *path,
+            PrimaryKeyType::TypedUuid { db, .. } => *db,
         }
     }
 

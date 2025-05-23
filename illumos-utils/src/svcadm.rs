@@ -5,23 +5,24 @@
 //! Utilities for manipulating SMF services.
 
 use crate::zone::SVCADM;
-use crate::{ExecutionError, PFEXEC, execute};
+use crate::{ExecutionError, PFEXEC, execute_async};
+use tokio::process::Command;
 
 /// Wraps commands for interacting with svcadm.
 pub struct Svcadm {}
 
 impl Svcadm {
-    pub fn refresh_logadm_upgrade() -> Result<(), ExecutionError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn refresh_logadm_upgrade() -> Result<(), ExecutionError> {
+        let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCADM, "refresh", "logadm-upgrade"]);
-        execute(cmd)?;
+        execute_async(cmd).await?;
         Ok(())
     }
 
-    pub fn enable_service(fmri: String) -> Result<(), ExecutionError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn enable_service(fmri: String) -> Result<(), ExecutionError> {
+        let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCADM, "enable", "-s", &fmri]);
-        execute(cmd)?;
+        execute_async(cmd).await?;
         Ok(())
     }
 }

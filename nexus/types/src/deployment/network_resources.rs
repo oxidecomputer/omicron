@@ -2,10 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::tri_map::TriMap;
-use super::tri_map::TriMapEntry;
 use anyhow::anyhow;
 use daft::Diffable;
+use iddqd::TriHashItem;
+use iddqd::TriHashMap;
+use iddqd::tri_upcast;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::ExternalIpUuid;
@@ -46,17 +47,17 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OmicronZoneNetworkResources {
     /// external IPs allocated to Omicron zones
-    omicron_zone_external_ips: TriMap<OmicronZoneExternalIpEntry>,
+    omicron_zone_external_ips: TriHashMap<OmicronZoneExternalIpEntry>,
 
     /// vNICs allocated to Omicron zones
-    omicron_zone_nics: TriMap<OmicronZoneNicEntry>,
+    omicron_zone_nics: TriHashMap<OmicronZoneNicEntry>,
 }
 
 impl OmicronZoneNetworkResources {
     pub fn new() -> Self {
         Self {
-            omicron_zone_external_ips: TriMap::new(),
-            omicron_zone_nics: TriMap::new(),
+            omicron_zone_external_ips: TriHashMap::new(),
+            omicron_zone_nics: TriHashMap::new(),
         }
     }
 
@@ -83,11 +84,11 @@ impl OmicronZoneNetworkResources {
         ip: OmicronZoneExternalIp,
     ) -> Result<(), AddNetworkResourceError> {
         let entry = OmicronZoneExternalIpEntry { zone_id, ip };
-        self.omicron_zone_external_ips.insert_no_dups(entry).map_err(|err| {
+        self.omicron_zone_external_ips.insert_unique(entry).map_err(|err| {
             AddNetworkResourceError::DuplicateOmicronZoneExternalIp {
                 zone_id,
                 ip,
-                err: anyhow!(err),
+                err: anyhow!(err.into_owned()),
             }
         })
     }
@@ -98,11 +99,11 @@ impl OmicronZoneNetworkResources {
         nic: OmicronZoneNic,
     ) -> Result<(), AddNetworkResourceError> {
         let entry = OmicronZoneNicEntry { zone_id, nic };
-        self.omicron_zone_nics.insert_no_dups(entry).map_err(|err| {
+        self.omicron_zone_nics.insert_unique(entry).map_err(|err| {
             AddNetworkResourceError::DuplicateOmicronZoneNic {
                 zone_id,
                 nic,
-                err: anyhow!(err),
+                err: anyhow!(err.into_owned()),
             }
         })
     }
@@ -301,25 +302,27 @@ pub struct OmicronZoneExternalIpEntry {
 }
 
 /// Specification for the tri-map of Omicron zone external IPs.
-impl TriMapEntry for OmicronZoneExternalIpEntry {
-    type K1 = OmicronZoneUuid;
-    type K2 = ExternalIpUuid;
+impl TriHashItem for OmicronZoneExternalIpEntry {
+    type K1<'a> = OmicronZoneUuid;
+    type K2<'a> = ExternalIpUuid;
 
     // Note: cannot use IpAddr here, because SNAT IPs can overlap as long as
     // their port blocks are disjoint.
-    type K3 = OmicronZoneExternalIpKey;
+    type K3<'a> = OmicronZoneExternalIpKey;
 
-    fn key1(&self) -> Self::K1 {
+    fn key1(&self) -> Self::K1<'_> {
         self.zone_id
     }
 
-    fn key2(&self) -> Self::K2 {
+    fn key2(&self) -> Self::K2<'_> {
         self.ip.id()
     }
 
-    fn key3(&self) -> Self::K3 {
+    fn key3(&self) -> Self::K3<'_> {
         self.ip.ip_key()
     }
+
+    tri_upcast!();
 }
 
 /// A pair of an Omicron zone ID and a network interface.
@@ -331,22 +334,24 @@ pub struct OmicronZoneNicEntry {
     pub nic: OmicronZoneNic,
 }
 
-impl TriMapEntry for OmicronZoneNicEntry {
-    type K1 = OmicronZoneUuid;
-    type K2 = VnicUuid;
-    type K3 = MacAddr;
+impl TriHashItem for OmicronZoneNicEntry {
+    type K1<'a> = OmicronZoneUuid;
+    type K2<'a> = VnicUuid;
+    type K3<'a> = MacAddr;
 
-    fn key1(&self) -> Self::K1 {
+    fn key1(&self) -> Self::K1<'_> {
         self.zone_id
     }
 
-    fn key2(&self) -> Self::K2 {
+    fn key2(&self) -> Self::K2<'_> {
         self.nic.id
     }
 
-    fn key3(&self) -> Self::K3 {
+    fn key3(&self) -> Self::K3<'_> {
         self.nic.mac
     }
+
+    tri_upcast!();
 }
 
 #[derive(Debug, Error)]

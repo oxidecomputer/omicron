@@ -70,7 +70,7 @@ impl HardwareManager {
     }
 }
 
-pub fn ensure_partition_layout(
+pub async fn ensure_partition_layout(
     _log: &Logger,
     _paths: &DiskPaths,
     _variant: DiskVariant,

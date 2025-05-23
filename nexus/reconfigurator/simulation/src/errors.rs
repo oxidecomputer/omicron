@@ -3,9 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use omicron_common::api::external::{Generation, Name};
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use thiserror::Error;
+
+use crate::{BlueprintId, ResolvedBlueprintId};
 
 /// The caller attempted to insert a duplicate key.
 #[derive(Clone, Debug, Error)]
@@ -23,7 +24,7 @@ impl DuplicateError {
         Self { id: ObjectId::Collection(id) }
     }
 
-    pub(crate) fn blueprint(id: BlueprintUuid) -> Self {
+    pub(crate) fn blueprint(id: BlueprintId) -> Self {
         Self { id: ObjectId::Blueprint(id) }
     }
 
@@ -43,7 +44,8 @@ impl DuplicateError {
 #[derive(Clone, Debug)]
 pub enum ObjectId {
     Collection(CollectionUuid),
-    Blueprint(BlueprintUuid),
+    Blueprint(BlueprintId),
+    ResolvedBlueprint(ResolvedBlueprintId),
     InternalDns(Generation),
     ExternalDns(Generation),
     SiloName(Name),
@@ -55,9 +57,16 @@ impl ObjectId {
             ObjectId::Collection(id) => {
                 format!("collection ID {id}")
             }
-            ObjectId::Blueprint(id) => {
+            ObjectId::Blueprint(BlueprintId::Latest) => {
+                "no latest blueprint found".to_string()
+            }
+            ObjectId::Blueprint(BlueprintId::Target) => {
+                "no target blueprint found".to_string()
+            }
+            ObjectId::Blueprint(BlueprintId::Id(id)) => {
                 format!("blueprint ID {id}")
             }
+            ObjectId::ResolvedBlueprint(id) => id.to_string(),
             ObjectId::InternalDns(generation) => {
                 format!("internal DNS at generation {generation}")
             }
@@ -87,8 +96,12 @@ impl KeyError {
         Self { id: ObjectId::Collection(id) }
     }
 
-    pub(crate) fn blueprint(id: BlueprintUuid) -> Self {
+    pub(crate) fn blueprint(id: BlueprintId) -> Self {
         Self { id: ObjectId::Blueprint(id) }
+    }
+
+    pub(crate) fn resolved_blueprint(id: ResolvedBlueprintId) -> Self {
+        Self { id: ObjectId::ResolvedBlueprint(id) }
     }
 
     pub(crate) fn internal_dns(generation: Generation) -> Self {

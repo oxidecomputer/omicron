@@ -45,7 +45,10 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::sync::watch::error::RecvError;
 
+use crate::disks_common::MaybeUpdatedDisk;
+use crate::disks_common::update_properties_from_raw_disk;
 use crate::raw_disks::RawDiskWithId;
+use crate::raw_disks::RawDisksReceiver;
 
 /// A thin wrapper around a [`watch::Receiver`] that presents a similar API.
 #[derive(Debug, Clone)]
@@ -141,7 +144,7 @@ impl InternalDisksReceiver {
 
     pub(crate) fn spawn_internal_disks_task(
         mount_config: Arc<MountConfig>,
-        raw_disks_rx: watch::Receiver<IdMap<RawDiskWithId>>,
+        raw_disks_rx: RawDisksReceiver,
         base_log: &Logger,
     ) -> Self {
         Self::spawn_with_disk_adopter(
@@ -152,9 +155,13 @@ impl InternalDisksReceiver {
         )
     }
 
+    pub(crate) fn mount_config(&self) -> &Arc<MountConfig> {
+        &self.mount_config
+    }
+
     fn spawn_with_disk_adopter<T: DiskAdopter>(
         mount_config: Arc<MountConfig>,
-        raw_disks_rx: watch::Receiver<IdMap<RawDiskWithId>>,
+        raw_disks_rx: RawDisksReceiver,
         base_log: &Logger,
         disk_adopter: T,
     ) -> Self {
@@ -531,7 +538,7 @@ impl IdMappable for InternalDisk {
 
 struct InternalDisksTask {
     // Input channel for changes to the raw disks sled-agent sees.
-    raw_disks_rx: watch::Receiver<IdMap<RawDiskWithId>>,
+    raw_disks_rx: RawDisksReceiver,
 
     // The set of disks we've successfully started managing.
     disks_tx: watch::Sender<IdMap<InternalDisk>>,
@@ -728,36 +735,16 @@ impl InternalDisksTask {
                 let existing_disk = disks
                     .get(raw_disk.identity())
                     .expect("disk should still be present");
-                let existing_raw_disk =
-                    RawDisk::from(existing_disk.disk.clone());
-
-                if *raw_disk != existing_raw_disk {
-                    // The only property we expect to change is the firmware
-                    // metadata. Update that and check again; if they're still
-                    // not equal, something weird is going on. At least log a
-                    // warning.
-                    let mut updated_disk = existing_disk.clone();
-                    updated_disk.disk.update_firmware_metadata(&raw_disk);
-
-                    if *raw_disk == RawDisk::from(updated_disk.disk.clone()) {
-                        info!(
-                            self.log, "Updated disk firmware metadata";
-                            "old" => ?updated_disk.firmware(),
-                            "new" => ?raw_disk.firmware(),
-                            "identity" => ?updated_disk.id(),
-                        );
-                    } else {
-                        warn!(
-                            self.log,
-                            "Updated disk firmware metadata, \
-                             but other disk properties are different!";
-                            "old" => ?existing_raw_disk,
-                            "new" => ?*raw_disk,
-                        );
+                match update_properties_from_raw_disk(
+                    &existing_disk.disk,
+                    &raw_disk,
+                    &self.log,
+                ) {
+                    MaybeUpdatedDisk::Updated(new_disk) => {
+                        disks.insert(InternalDisk::from(new_disk));
+                        changed = true;
                     }
-
-                    disks.insert(updated_disk);
-                    changed = true;
+                    MaybeUpdatedDisk::Unchanged => (),
                 }
             }
 
@@ -948,11 +935,11 @@ mod tests {
     async fn only_m2_disks_are_adopted() {
         let logctx = dev::test_setup_log("only_m2_disks_are_adopted");
 
-        let (raw_disks_tx, raw_disks_rx) = watch::channel(IdMap::new());
+        let (raw_disks_tx, raw_disks_rx) = watch::channel(Arc::default());
         let disk_adopter = Arc::new(TestDiskAdopter::default());
         let mut disks_rx = InternalDisksReceiver::spawn_with_disk_adopter(
             Arc::new(any_mount_config()),
-            raw_disks_rx,
+            RawDisksReceiver(raw_disks_rx),
             &logctx.log,
             Arc::clone(&disk_adopter),
         );
@@ -962,6 +949,7 @@ mod tests {
 
         // Add four disks: two M.2 and two U.2.
         raw_disks_tx.send_modify(|disks| {
+            let disks = Arc::make_mut(disks);
             for disk in [
                 new_raw_test_disk(DiskVariant::M2, "m2-0"),
                 new_raw_test_disk(DiskVariant::U2, "u2-0"),
@@ -1008,12 +996,13 @@ mod tests {
 
         // Setup: one disk.
         let mut raw_disk = new_raw_test_disk(DiskVariant::M2, "test-m2");
-        let (raw_disks_tx, raw_disks_rx) =
-            watch::channel([raw_disk.clone().into()].into_iter().collect());
+        let (raw_disks_tx, raw_disks_rx) = watch::channel(Arc::new(
+            [raw_disk.clone().into()].into_iter().collect(),
+        ));
         let disk_adopter = Arc::new(TestDiskAdopter::default());
         let mut disks_rx = InternalDisksReceiver::spawn_with_disk_adopter(
             Arc::new(any_mount_config()),
-            raw_disks_rx,
+            RawDisksReceiver(raw_disks_rx),
             &logctx.log,
             Arc::clone(&disk_adopter),
         );
@@ -1035,7 +1024,7 @@ mod tests {
         );
         *raw_disk.firmware_mut() = new_firmware;
         raw_disks_tx.send_modify(|disks| {
-            disks.insert(raw_disk.clone().into());
+            Arc::make_mut(disks).insert(raw_disk.clone().into());
         });
 
         // Wait for the change to be noticed.
@@ -1065,17 +1054,17 @@ mod tests {
         // Setup: two disks.
         let raw_disk1 = new_raw_test_disk(DiskVariant::M2, "m2-1");
         let raw_disk2 = new_raw_test_disk(DiskVariant::M2, "m2-2");
-        let (raw_disks_tx, raw_disks_rx) = watch::channel(
+        let (raw_disks_tx, raw_disks_rx) = watch::channel(Arc::new(
             [&raw_disk1, &raw_disk2]
                 .into_iter()
                 .cloned()
                 .map(From::from)
                 .collect(),
-        );
+        ));
         let disk_adopter = Arc::new(TestDiskAdopter::default());
         let mut disks_rx = InternalDisksReceiver::spawn_with_disk_adopter(
             Arc::new(any_mount_config()),
-            raw_disks_rx,
+            RawDisksReceiver(raw_disks_rx),
             &logctx.log,
             Arc::clone(&disk_adopter),
         );
@@ -1089,7 +1078,7 @@ mod tests {
 
         // Remove test disk 1.
         raw_disks_tx.send_modify(|raw_disks| {
-            raw_disks.remove(raw_disk1.identity());
+            Arc::make_mut(raw_disks).remove(raw_disk1.identity());
         });
 
         // Wait for the removal to be propagated.
@@ -1114,9 +1103,9 @@ mod tests {
 
         // Setup: one disk, and configure the disk adopter to fail.
         let raw_disk = new_raw_test_disk(DiskVariant::M2, "test-m2");
-        let (_raw_disks_tx, raw_disks_rx) = watch::channel(
+        let (_raw_disks_tx, raw_disks_rx) = watch::channel(Arc::new(
             [&raw_disk].into_iter().cloned().map(From::from).collect(),
-        );
+        ));
         let disk_adopter = Arc::new(TestDiskAdopter::default());
         disk_adopter.inner.lock().unwrap().should_fail_requests.insert(
             raw_disk.identity().clone(),
@@ -1127,7 +1116,7 @@ mod tests {
 
         let mut disks_rx = InternalDisksReceiver::spawn_with_disk_adopter(
             Arc::new(any_mount_config()),
-            raw_disks_rx,
+            RawDisksReceiver(raw_disks_rx),
             &logctx.log,
             Arc::clone(&disk_adopter),
         );

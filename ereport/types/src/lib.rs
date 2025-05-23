@@ -5,19 +5,19 @@
 //! Core types for representing ereports.
 
 use core::fmt;
-pub use omicron_uuid_kinds::EreporterGenerationUuid;
+pub use omicron_uuid_kinds::EreporterRestartUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use uuid::Uuid;
+use std::num::NonZeroU32;
 
 /// An ereport message.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Ereport {
     /// The ENA of the ereport.
     pub ena: Ena,
-    /// The body of the ereport.
-    pub report: ReportKind,
+    #[serde(flatten)]
+    pub data: serde_json::Map<String, serde_json::Value>,
 }
 
 /// An Error Numeric Association (ENA)
@@ -58,47 +58,48 @@ impl fmt::LowerHex for Ena {
         fmt::LowerHex::fmt(&self.0, f)
     }
 }
-/// Uniquely identifies the entity that generated an ereport.
-#[derive(
-    Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema,
-)]
-pub struct Reporter {
-    pub reporter_id: Uuid,
-    pub gen_id: EreporterGenerationUuid,
+
+/// Query parameters to request a tranche of ereports from a reporter.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct EreportQuery {
+    /// The restart ID of the reporter at which all other query parameters are
+    /// valid.
+    ///
+    /// If this value does not match the reporter's restart ID, the
+    /// reporter's response will include the current generation, and will start
+    /// at the earliest known ENA, rather than the provided `start_at` ENA.
+    pub restart_id: EreporterRestartUuid,
+
+    /// If present, the reporter should not include ENAs earlier than this one
+    /// in its response, provided that the query's requested restart ID matches
+    /// the current restart ID.
+    pub start_at: Option<Ena>,
+
+    /// The ENA of the last ereport committed to persistent storage from the
+    /// requested reporter restart generation.
+    ///
+    /// If the restart ID parameter matches the reporter's current restart ID,
+    /// it is permitted to discard any ereports with ENAs up to and including
+    /// this value. If the restart ID has changed from the provided one, the
+    /// reporter will not discard data.
+    pub committed: Option<Ena>,
+
+    /// Maximum number of ereports to return in this tranche.
+    pub limit: NonZeroU32,
 }
 
-/// The body of an ereport: either an event is reported, or a loss report.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ReportKind {
-    /// An ereport.
-    Event(Event),
-    /// Ereports were lost, or may have been lost.
-    Loss(LossReport),
-}
-
-/// The number of ereports that were discarded, if it is known.
-///
-/// If ereports are dropped because a buffer has reached its capacity,
-/// the reporter is strongly encouraged to attempt to count the number
-/// of ereports lost. In other cases, such as a reporter crashing and
-/// restarting, the reporter may not be capable of determining the
-/// number of ereports that were lost, or even *if* data loss actually
-/// occurred.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "type", content = "lost")]
-pub enum LossReport {
-    /// An unknown number of ereports MAY have been lost.
-    Unknown,
-    /// The provided number of ereports are known to have been lost.
-    Exact(u32),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct Event {
-    pub class: String,
-    pub data: serde_json::Value,
+/// A tranche of ereports received from a reporter.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct Ereports {
+    /// The reporter's current restart ID.
+    ///
+    /// If this is not equal to the current known restart ID, then the reporter
+    /// has restarted.
+    pub restart_id: EreporterRestartUuid,
+    /// The ereports in this tranche, and the ENA of the next page of ereports
+    /// (if one exists).)
+    #[serde(flatten)]
+    pub reports: dropshot::ResultsPage<Ereport>,
 }
 
 #[cfg(test)]
@@ -106,47 +107,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_roundtrip() {
-        let ereport = Ereport {
-            ena: Ena(0x3cae76440c100001),
-            report: ReportKind::Event(Event {
-                // Example ereport taken from https://rfd.shared.oxide.computer/rfd/0520#_ereports_in_the_fma
-                class: "ereport.cpu.generic-x86.cache".to_string(),
-                data: serde_json::json!({
+    fn test_arb_json_deserializes() {
+        let ereport = serde_json::json!({
+            "ena": Ena(0x3cae76440c100001),
+            "version": 0x0,
+            "class": "list.suspect",
+            "uuid": "0348743e-0600-4c77-b7ea-6eda191536e4",
+            "code": "FMD-8000-0W",
+            "diag-time": "1705014884 472900",
+            "de": {
+                "version": 0x0,
+                "scheme": "fmd",
+                "authority": {
                     "version": 0x0,
-                    "class": "list.suspect",
-                    "uuid": "0348743e-0600-4c77-b7ea-6eda191536e4",
-                    "code": "FMD-8000-0W",
-                    "diag-time": "1705014884 472900",
-                    "de": {
-                        "version": 0x0,
-                        "scheme": "fmd",
-                        "authority": {
-                            "version": 0x0,
-                            "product-id": "oxide",
-                            "server-id": "BRM42220016",
-                        },
-                        "mod-name": "fmd-self-diagnosis",
-                        "mod-version": "1.0",
-                    },
-                    "fault-list": [
-                        {
-                            "version": 0x0,
-                            "class": "defect.sunos.fmd.nosub",
-                            "certainty": 0x64,
-                            "nosub_class": "ereport.cpu.generic-x86.cache",
-                        }
-                    ],
-                    "fault-status": 0x1,
-                    "severity": "minor",
-                }),
-            }),
-        };
+                    "product-id": "oxide",
+                    "server-id": "BRM42220016",
+                },
+                "mod-name": "fmd-self-diagnosis",
+                "mod-version": "1.0",
+            },
+            "fault-list": [
+                {
+                    "version": 0x0,
+                    "class": "defect.sunos.fmd.nosub",
+                    "certainty": 0x64,
+                    "nosub_class": "ereport.cpu.generic-x86.cache",
+                }
+            ],
+            "fault-status": 0x1,
+            "severity": "minor",
+        });
         let ereport_string = serde_json::to_string_pretty(&ereport)
             .expect("ereport should serialize");
         eprintln!("JSON: {ereport_string}");
-        let deserialized = dbg!(serde_json::from_str(&ereport_string))
-            .expect("ereport should deserialize");
-        assert_eq!(ereport, deserialized)
+        let deserialized =
+            dbg!(serde_json::from_str::<Ereport>(&ereport_string))
+                .expect("ereport should deserialize");
+        eprintln!("EREPORT: {deserialized:#?}");
     }
 }

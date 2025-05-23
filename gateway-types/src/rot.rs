@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use daft::Diffable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -165,7 +166,9 @@ impl From<gateway_messages::RotBootInfo> for RotState {
 
 #[derive(
     Debug,
+    Diffable,
     Clone,
+    Copy,
     PartialEq,
     Eq,
     PartialOrd,
@@ -178,6 +181,22 @@ impl From<gateway_messages::RotBootInfo> for RotState {
 pub enum RotSlot {
     A,
     B,
+}
+
+impl RotSlot {
+    pub fn to_u16(&self) -> u16 {
+        match self {
+            RotSlot::A => 0,
+            RotSlot::B => 1,
+        }
+    }
+
+    pub fn toggled(&self) -> Self {
+        match self {
+            RotSlot::A => RotSlot::B,
+            RotSlot::B => RotSlot::A,
+        }
+    }
 }
 
 impl From<gateway_messages::RotSlotId> for RotSlot {

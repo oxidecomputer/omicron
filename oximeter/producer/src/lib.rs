@@ -264,7 +264,7 @@ impl Server {
                     our_addr,
                 )
                 .map_err(Error::Resolution)
-                .map(FindNexus::WithResolver)?
+                .map(|resolver| FindNexus::WithResolver(Box::new(resolver)))?
             }
         };
 
@@ -294,7 +294,7 @@ enum FindNexus {
     ByAddr(SocketAddr),
     /// An address was not provided, we'll resolve it on each attempt to renew
     /// the lease.
-    WithResolver(Resolver),
+    WithResolver(Box<Resolver>),
 }
 
 /// The rate at which we renew, as a fraction of the renewal interval.

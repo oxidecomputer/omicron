@@ -8,6 +8,8 @@ use crate::config::Config;
 use crate::config::SidecarConfig;
 use crate::config::SimulatedSpsConfig;
 use crate::config::SpComponentConfig;
+use crate::ereport;
+use crate::ereport::EreportState;
 use crate::helpers::rot_state_v2;
 use crate::sensors::Sensors;
 use crate::serial_number_padded;
@@ -72,6 +74,7 @@ pub const SIM_SIDECAR_BOARD: &str = "SimSidecarSp";
 
 pub struct Sidecar {
     local_addrs: Option<[SocketAddrV6; 2]>,
+    ereport_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
     commands: mpsc::UnboundedSender<Command>,
     inner_task: Option<JoinHandle<()>>,
@@ -101,6 +104,14 @@ impl SimulatedSp for Sidecar {
             SpPort::Two => 1,
         };
         self.local_addrs.map(|addrs| addrs[i])
+    }
+
+    fn local_ereport_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
+        let i = match port {
+            SpPort::One => 0,
+            SpPort::Two => 1,
+        };
+        self.ereport_addrs.map(|addrs| addrs[i])
     }
 
     async fn set_responsiveness(&self, r: Responsiveness) {
@@ -156,6 +167,28 @@ impl SimulatedSp for Sidecar {
         }
         tx
     }
+
+    async fn ereport_restart(&self, restart: crate::config::EreportRestart) {
+        let (tx, rx) = oneshot::channel();
+        if self
+            .commands
+            .send(Command::Ereport(ereport::Command::Restart(restart, tx)))
+            .is_ok()
+        {
+            rx.await.unwrap();
+        }
+    }
+
+    async fn ereport_append(
+        &self,
+        ereport: crate::config::Ereport,
+    ) -> gateway_ereport_messages::Ena {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::Ereport(ereport::Command::Append(ereport, tx)))
+            .expect("simulated sidecar task has died");
+        rx.await.unwrap()
+    }
 }
 
 impl Sidecar {
@@ -168,49 +201,88 @@ impl Sidecar {
 
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
-        let (local_addrs, inner_task, handler, responses_sent_count) =
-            if let Some(network_config) = &sidecar.common.network_config {
-                // bind to our two local "KSZ" ports
-                let servers = future::try_join(
-                    UdpServer::new(&network_config[0], &log),
-                    UdpServer::new(&network_config[1], &log),
-                )
-                .await?;
+        if let Some(network_config) = &sidecar.common.network_config {
+            // bind to our two local "KSZ" ports
+            let servers = future::try_join(
+                UdpServer::new(&network_config[0], &log),
+                UdpServer::new(&network_config[1], &log),
+            )
+            .await?;
 
-                let servers = [servers.0, servers.1];
-                let local_addrs =
-                    [servers[0].local_addr(), servers[1].local_addr()];
+            let servers = [servers.0, servers.1];
+            let local_addrs =
+                [servers[0].local_addr(), servers[1].local_addr()];
 
-                let (inner, handler, responses_sent_count) = Inner::new(
-                    servers,
-                    sidecar.common.components.clone(),
-                    sidecar.common.serial_number.clone(),
-                    FakeIgnition::new(&config.simulated_sps),
-                    commands_rx,
-                    log,
-                    sidecar.common.old_rot_state,
-                    sidecar.common.no_stage0_caboose,
-                );
-                let inner_task =
-                    task::spawn(async move { inner.run().await.unwrap() });
+            let ereport_log = log.new(slog::o!("component" => "ereport-sim"));
+            let (ereport_servers, ereport_addrs) =
+                match &sidecar.common.ereport_network_config {
+                    Some(cfg) => {
+                        assert_eq!(cfg.len(), 2); // gimlet SP always has 2 ports
 
-                (
-                    Some(local_addrs),
-                    Some(inner_task),
-                    Some(handler),
-                    Some(responses_sent_count),
-                )
-            } else {
-                (None, None, None, None)
+                        let servers = future::try_join(
+                            UdpServer::new(&cfg[0], &ereport_log),
+                            UdpServer::new(&cfg[1], &ereport_log),
+                        )
+                        .await?;
+                        let addrs =
+                            [servers.0.local_addr(), servers.1.local_addr()];
+                        (Some([servers.0, servers.1]), Some(addrs))
+                    }
+                    None => (None, None),
+                };
+            let ereport_state = {
+                let mut cfg = sidecar.common.ereport_config.clone();
+                if cfg.restart.metadata.is_empty() {
+                    let map = &mut cfg.restart.metadata;
+                    map.insert(
+                        "chassis_model".to_string(),
+                        SIM_SIDECAR_BOARD.into(),
+                    );
+                    map.insert(
+                        "chassis_serial".to_string(),
+                        sidecar.common.serial_number.clone().into(),
+                    );
+                    map.insert(
+                        "hubris_archive_id".to_string(),
+                        "asdfasdfasdf".into(),
+                    );
+                }
+                EreportState::new(cfg, ereport_log)
             };
 
-        Ok(Self {
-            local_addrs,
-            handler,
-            commands,
-            inner_task,
-            responses_sent_count,
-        })
+            let (inner, handler, responses_sent_count) = Inner::new(
+                servers,
+                ereport_servers,
+                ereport_state,
+                sidecar.common.components.clone(),
+                sidecar.common.serial_number.clone(),
+                FakeIgnition::new(&config.simulated_sps),
+                commands_rx,
+                log,
+                sidecar.common.old_rot_state,
+                sidecar.common.no_stage0_caboose,
+            );
+            let inner_task =
+                task::spawn(async move { inner.run().await.unwrap() });
+
+            Ok(Self {
+                local_addrs: Some(local_addrs),
+                ereport_addrs,
+                handler: Some(handler),
+                commands,
+                inner_task: Some(inner_task),
+                responses_sent_count: Some(responses_sent_count),
+            })
+        } else {
+            Ok(Self {
+                local_addrs: None,
+                ereport_addrs: None,
+                handler: None,
+                commands,
+                inner_task: None,
+                responses_sent_count: None,
+            })
+        }
     }
 
     pub async fn current_ignition_state(&self) -> Vec<IgnitionState> {
@@ -228,6 +300,7 @@ enum Command {
     CurrentIgnitionState(oneshot::Sender<Vec<IgnitionState>>),
     SetResponsiveness(Responsiveness, oneshot::Sender<Ack>),
     SetThrottler(Option<mpsc::UnboundedReceiver<usize>>, oneshot::Sender<Ack>),
+    Ereport(ereport::Command),
 }
 
 #[derive(Debug)]
@@ -237,6 +310,9 @@ struct Inner {
     handler: Arc<TokioMutex<Handler>>,
     udp0: UdpServer,
     udp1: UdpServer,
+    ereport0: Option<UdpServer>,
+    ereport1: Option<UdpServer>,
+    ereport_state: EreportState,
     commands: mpsc::UnboundedReceiver<Command>,
     responses_sent_count: watch::Sender<usize>,
 }
@@ -245,6 +321,8 @@ impl Inner {
     #[allow(clippy::too_many_arguments)]
     fn new(
         servers: [UdpServer; 2],
+        ereport_servers: Option<[UdpServer; 2]>,
+        ereport_state: EreportState,
         components: Vec<SpComponentConfig>,
         serial_number: String,
         ignition: FakeIgnition,
@@ -264,9 +342,16 @@ impl Inner {
         )));
         let responses_sent_count = watch::Sender::new(0);
         let responses_sent_count_rx = responses_sent_count.subscribe();
+        let (ereport0, ereport1) = match ereport_servers {
+            Some([e0, e1]) => (Some(e0), Some(e1)),
+            None => (None, None),
+        };
         (
             Self {
                 handler: Arc::clone(&handler),
+                ereport0,
+                ereport1,
+                ereport_state,
                 udp0,
                 udp1,
                 commands,
@@ -282,6 +367,7 @@ impl Inner {
         let mut responsiveness = Responsiveness::Responsive;
         let mut throttle_count = usize::MAX;
         let mut throttler: Option<mpsc::UnboundedReceiver<usize>> = None;
+
         loop {
             let incr_throttle_count: Pin<
                 Box<dyn Future<Output = Option<usize>> + Send>,
@@ -323,6 +409,18 @@ impl Inner {
                     }
                 }
 
+                recv = ereport::recv_request(self.ereport0.as_mut()) => {
+                    let (req, addr, sock) = recv?;
+                    let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
+                    sock.send_to(rsp, addr).await?;
+                }
+
+                recv = ereport::recv_request(self.ereport1.as_mut()) => {
+                    let (req, addr, sock) = recv?;
+                    let rsp = self.ereport_state.handle_request(&req, addr, &mut out_buf);
+                    sock.send_to(rsp, addr).await?;
+                }
+
                 command = self.commands.recv() => {
                     // if sending half is gone, we're about to be killed anyway
                     let command = match command {
@@ -358,6 +456,7 @@ impl Inner {
                             tx.send(Ack)
                                 .map_err(|_| "receiving half died").unwrap();
                         }
+                        Command::Ereport(cmd) => self.ereport_state.handle_command(cmd),
                     }
                 }
             }
@@ -771,14 +870,21 @@ impl SpHandler for Handler {
         &mut self,
         sender: Sender<Self::VLanId>,
         power_state: gateway_messages::PowerState,
-    ) -> Result<(), SpError> {
+    ) -> Result<gateway_messages::PowerStateTransition, SpError> {
+        // NOTE(eliza): This is *currently* accurate to real life sidecar
+        // behavior, as the sidecar sequencer does not treat `set_power_state`
+        // calls with the current power state idempotently, the way the compute
+        // sled sequencer does.
+        // See: https://github.com/oxidecomputer/hubris/blob/13808140c49fdf8f1ce462184395d3b28212c217/task/control-plane-agent/src/mgs_sidecar.rs#L838-L840
+        let transition = gateway_messages::PowerStateTransition::Changed;
         debug!(
             &self.log, "received set power state";
             "sender" => ?sender,
             "power_state" => ?power_state,
+            "transition" => ?transition,
         );
         self.power_state = power_state;
-        Ok(())
+        Ok(transition)
     }
 
     fn reset_component_prepare(

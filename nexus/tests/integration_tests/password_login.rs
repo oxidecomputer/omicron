@@ -6,9 +6,9 @@ use dropshot::test_util::ClientTestContext;
 use http::{StatusCode, header, method::Method};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::grant_iam;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params;
 use nexus_types::external_api::shared::{self, SiloRole};
 use nexus_types::external_api::views;
 use omicron_common::api::external::{Name, UserId};
@@ -62,20 +62,19 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         client,
         &silo_name,
         UserId::from_str("bigfoot").unwrap(),
-        params::Password::from_str("ahh").unwrap(),
+        "ahh".to_string(),
     )
     .await;
 
     // Create a test user with a known password.
     let test_user = UserId::from_str("abe-simpson").unwrap();
-    let test_password =
-        params::Password::from_str("let me in you idiot!").unwrap();
+    let test_password = "let me in you idiot!";
 
     let created_user = create_local_user(
         client,
         silo,
         &test_user,
-        params::UserPassword::Password(test_password.clone()),
+        test_params::UserPassword::Password(test_password.to_string()),
     )
     .await;
 
@@ -84,7 +83,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         client,
         &silo_name,
         test_user.clone(),
-        params::Password::from_str("something else").unwrap(),
+        "something else".to_string(),
     )
     .await;
 
@@ -94,15 +93,14 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         client,
         &silo_name,
         test_user.clone(),
-        test_password.clone(),
+        test_password.to_string(),
     )
     .await;
     let found_user = expect_session_valid(client, &session_token).await;
     assert_eq!(created_user, found_user.user);
 
     // While we're still logged in, change the password.
-    let test_password2 =
-        params::Password::from_str("as was the style at the time").unwrap();
+    let test_password2 = "as was the style at the time";
     let user_password_url = format!(
         "/v1/system/identity-providers/local/users/{}/set-password?silo={}",
         created_user.id, silo_name
@@ -110,8 +108,8 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
             .expect_status(Some(StatusCode::NO_CONTENT))
-            .body(Some(&params::UserPassword::Password(
-                test_password2.clone(),
+            .body(Some(&test_params::UserPassword::Password(
+                test_password2.to_string(),
             ))),
     )
     .authn_as(AuthnMode::Session(session_token.to_string()))
@@ -124,7 +122,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         client,
         &silo_name,
         test_user.clone(),
-        test_password.clone(),
+        test_password.to_string(),
     )
     .await;
 
@@ -133,7 +131,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         client,
         &silo_name,
         test_user.clone(),
-        test_password2.clone(),
+        test_password2.to_string(),
     )
     .await;
 
@@ -160,12 +158,12 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     // Now, let's create an admin user and verify that they can change this
     // user's password.
     let admin_user = UserId::from_str("comic-book-guy").unwrap();
-    let admin_password = params::Password::from_str("toodle-ooh").unwrap();
+    let admin_password = "toodle-ooh";
     let admin_user_obj = create_local_user(
         client,
         silo,
         &admin_user,
-        params::UserPassword::Password(admin_password.clone()),
+        test_params::UserPassword::Password(admin_password.to_string()),
     )
     .await;
     let admin_password_url = format!(
@@ -187,17 +185,16 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         client,
         &silo_name,
         admin_user.clone(),
-        admin_password.clone(),
+        admin_password.to_string(),
     )
     .await;
 
-    let hijacked_password =
-        params::Password::from_str("sarcasm detector").unwrap();
+    let hijacked_password = "sarcasm detector";
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
             .expect_status(Some(StatusCode::NO_CONTENT))
-            .body(Some(&params::UserPassword::Password(
-                hijacked_password.clone(),
+            .body(Some(&test_params::UserPassword::Password(
+                hijacked_password.to_string(),
             ))),
     )
     .authn_as(AuthnMode::Session(admin_session.to_string()))
@@ -210,14 +207,14 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         client,
         &silo_name,
         test_user.clone(),
-        hijacked_password.clone(),
+        hijacked_password.to_string(),
     )
     .await;
     expect_login_failure(
         client,
         &silo_name,
         test_user.clone(),
-        test_password2.clone(),
+        test_password2.to_string(),
     )
     .await;
 
@@ -226,14 +223,14 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         client,
         &silo_name,
         admin_user.clone(),
-        admin_password.clone(),
+        admin_password.to_string(),
     )
     .await;
     expect_login_failure(
         client,
         &silo_name,
         admin_user.clone(),
-        hijacked_password.clone(),
+        hijacked_password.to_string(),
     )
     .await;
 
@@ -241,7 +238,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
             .expect_status(Some(StatusCode::NO_CONTENT))
-            .body(Some(&params::UserPassword::LoginDisallowed)),
+            .body(Some(&test_params::UserPassword::LoginDisallowed)),
     )
     .authn_as(AuthnMode::Session(admin_session.to_string()))
     .execute()
@@ -251,7 +248,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         client,
         &silo_name,
         test_user.clone(),
-        hijacked_password.clone(),
+        hijacked_password.to_string(),
     )
     .await;
     // And we did not modify the admin user's password.
@@ -259,14 +256,14 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         client,
         &silo_name,
         admin_user.clone(),
-        admin_password.clone(),
+        admin_password.to_string(),
     )
     .await;
     expect_login_failure(
         client,
         &silo_name,
         admin_user.clone(),
-        hijacked_password.clone(),
+        hijacked_password.to_string(),
     )
     .await;
 
@@ -279,7 +276,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         StatusCode::FORBIDDEN,
         Method::POST,
         &admin_password_url,
-        &params::UserPassword::Password(test_password.clone()),
+        &test_params::UserPassword::Password(test_password.to_string()),
     )
     .authn_as(AuthnMode::Session(session_token2.clone()))
     .execute()
@@ -291,7 +288,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
         StatusCode::FORBIDDEN,
         Method::POST,
         &admin_password_url,
-        &params::UserPassword::LoginDisallowed,
+        &test_params::UserPassword::LoginDisallowed,
     )
     .authn_as(AuthnMode::Session(session_token2.clone()))
     .execute()
@@ -311,21 +308,16 @@ async fn test_local_user_with_no_initial_password(
         client,
         silo,
         &test_user,
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await;
 
     // Logging in should not work.  (What password would we use, anyway?)
-    expect_login_failure(
-        client,
-        &silo_name,
-        test_user.clone(),
-        params::Password::from_str("").unwrap(),
-    )
-    .await;
+    expect_login_failure(client, &silo_name, test_user.clone(), "".to_string())
+        .await;
 
     // Now, set a password.
-    let test_password2 = params::Password::from_str("joshua").unwrap();
+    let test_password2 = "joshua";
     let user_password_url = format!(
         "/v1/system/identity-providers/local/users/{}/set-password?silo={}",
         created_user.id, silo_name,
@@ -333,8 +325,8 @@ async fn test_local_user_with_no_initial_password(
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
             .expect_status(Some(StatusCode::NO_CONTENT))
-            .body(Some(&params::UserPassword::Password(
-                test_password2.clone(),
+            .body(Some(&test_params::UserPassword::Password(
+                test_password2.to_string(),
             ))),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -347,7 +339,7 @@ async fn test_local_user_with_no_initial_password(
         client,
         &silo_name,
         test_user.clone(),
-        test_password2.clone(),
+        test_password2.to_string(),
     )
     .await;
     let found_user = expect_session_valid(client, &session_token).await;
@@ -386,7 +378,7 @@ async fn expect_login_failure(
     client: &ClientTestContext,
     silo_name: &Name,
     username: UserId,
-    password: params::Password,
+    password: String,
 ) {
     let start = std::time::Instant::now();
     let login_url = format!("/v1/login/{}/local", silo_name);
@@ -396,7 +388,7 @@ async fn expect_login_failure(
             StatusCode::UNAUTHORIZED,
             Method::POST,
             &login_url,
-            &params::UsernamePasswordCredentials { username, password },
+            &test_params::UsernamePasswordCredentials { username, password },
         )
         .execute()
         .await
@@ -426,12 +418,15 @@ async fn expect_login_success(
     client: &ClientTestContext,
     silo_name: &Name,
     username: UserId,
-    password: params::Password,
+    password: String,
 ) -> String {
     let start = std::time::Instant::now();
     let login_url = format!("/v1/login/{}/local", silo_name);
     let response = RequestBuilder::new(client, Method::POST, &login_url)
-        .body(Some(&params::UsernamePasswordCredentials { username, password }))
+        .body(Some(&test_params::UsernamePasswordCredentials {
+            username,
+            password,
+        }))
         .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()
         .await

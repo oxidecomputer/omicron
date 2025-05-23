@@ -6,12 +6,13 @@
 
 use crate::link::{Link, LinkKind};
 use crate::zone::IPADM;
-use crate::{ExecutionError, PFEXEC, execute};
+use crate::{ExecutionError, PFEXEC, execute_async};
 use omicron_common::api::external::MacAddr;
 use omicron_common::vlan::VlanID;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::str::Utf8Error;
+use tokio::process::Command;
 
 pub const VNIC_PREFIX: &str = "ox";
 pub const VNIC_PREFIX_CONTROL: &str = "oxControl";
@@ -153,7 +154,7 @@ pub struct Etherstub(pub String);
 pub struct EtherstubVnic(pub String);
 
 /// Identifies that an object may be used to create a VNIC.
-pub trait VnicSource {
+pub trait VnicSource: Send + Sync {
     fn name(&self) -> &str;
 }
 
@@ -175,6 +176,7 @@ pub struct Dladm(());
 /// Describes the API for interfacing with Data links.
 ///
 /// This is a trait so that it can be faked out for tests.
+#[async_trait::async_trait]
 pub trait Api: Send + Sync {
     /// Creates a new VNIC atop a physical device.
     ///
@@ -183,7 +185,7 @@ pub trait Api: Send + Sync {
     /// * `vnic_name`: Exact name of the VNIC to be created.
     /// * `mac`: An optional unicast MAC address for the newly created NIC.
     /// * `vlan`: An optional VLAN ID for VLAN tagging.
-    fn create_vnic(
+    async fn create_vnic(
         &self,
         source: &(dyn VnicSource + 'static),
         vnic_name: &str,
@@ -191,7 +193,7 @@ pub trait Api: Send + Sync {
         vlan: Option<VlanID>,
         mtu: usize,
     ) -> Result<(), CreateVnicError> {
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
         let mut args = vec![
             DLADM.to_string(),
             "create-vnic".to_string(),
@@ -216,7 +218,7 @@ pub trait Api: Send + Sync {
         args.push(vnic_name.to_string());
 
         let cmd = command.args(&args);
-        execute(cmd).map_err(|err| CreateVnicError {
+        execute_async(cmd).await.map_err(|err| CreateVnicError {
             name: vnic_name.to_string(),
             link: source.name().to_string(),
             err,
@@ -226,7 +228,7 @@ pub trait Api: Send + Sync {
         // the mtu to N. Set it here using `set-linkprop`.
         //
         // See https://www.illumos.org/issues/15695 for the illumos bug.
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
         let prop = format!("mtu={}", mtu);
         let cmd = command.args(&[
             DLADM,
@@ -236,7 +238,7 @@ pub trait Api: Send + Sync {
             &prop,
             vnic_name,
         ]);
-        execute(cmd).map_err(|err| CreateVnicError {
+        execute_async(cmd).await.map_err(|err| CreateVnicError {
             name: vnic_name.to_string(),
             link: source.name().to_string(),
             err,
@@ -246,10 +248,13 @@ pub trait Api: Send + Sync {
     }
 
     /// Verify that the given link exists
-    fn verify_link(&self, link: &str) -> Result<Link, FindPhysicalLinkError> {
-        let mut command = std::process::Command::new(PFEXEC);
+    async fn verify_link(
+        &self,
+        link: &str,
+    ) -> Result<Link, FindPhysicalLinkError> {
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-link", "-p", "-o", "LINK", link]);
-        let output = execute(cmd)?;
+        let output = execute_async(cmd).await?;
         match String::from_utf8_lossy(&output.stdout)
             .lines()
             .next()
@@ -261,10 +266,11 @@ pub trait Api: Send + Sync {
     }
 
     /// Remove a vnic from the sled.
-    fn delete_vnic(&self, name: &str) -> Result<(), DeleteVnicError> {
-        let mut command = std::process::Command::new(PFEXEC);
+    async fn delete_vnic(&self, name: &str) -> Result<(), DeleteVnicError> {
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "delete-vnic", name]);
-        execute(cmd)
+        execute_async(cmd)
+            .await
             .map_err(|err| DeleteVnicError { name: name.to_string(), err })?;
         Ok(())
     }
@@ -282,21 +288,23 @@ impl Dladm {
     }
 
     /// Creates an etherstub, or returns one which already exists.
-    pub fn ensure_etherstub(name: &str) -> Result<Etherstub, ExecutionError> {
-        if let Ok(stub) = Self::get_etherstub(name) {
+    pub async fn ensure_etherstub(
+        name: &str,
+    ) -> Result<Etherstub, ExecutionError> {
+        if let Ok(stub) = Self::get_etherstub(name).await {
             return Ok(stub);
         }
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "create-etherstub", "-t", name]);
-        execute(cmd)?;
+        execute_async(cmd).await?;
         Ok(Etherstub(name.to_string()))
     }
 
     /// Finds an etherstub.
-    fn get_etherstub(name: &str) -> Result<Etherstub, ExecutionError> {
-        let mut command = std::process::Command::new(PFEXEC);
+    async fn get_etherstub(name: &str) -> Result<Etherstub, ExecutionError> {
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-etherstub", name]);
-        execute(cmd)?;
+        execute_async(cmd).await?;
         Ok(Etherstub(name.to_string()))
     }
 
@@ -304,7 +312,7 @@ impl Dladm {
     ///
     /// This VNIC is not tracked like [`crate::link::Link`], because
     /// it is expected to exist for the lifetime of the sled.
-    pub fn ensure_etherstub_vnic(
+    pub async fn ensure_etherstub_vnic(
         source: &Etherstub,
     ) -> Result<EtherstubVnic, CreateVnicError> {
         let (vnic_name, mtu) = match source.0.as_str() {
@@ -312,65 +320,73 @@ impl Dladm {
             BOOTSTRAP_ETHERSTUB_NAME => (BOOTSTRAP_ETHERSTUB_VNIC_NAME, 1500),
             _ => unreachable!(),
         };
-        if let Ok(vnic) = Self::get_etherstub_vnic(vnic_name) {
+        if let Ok(vnic) = Self::get_etherstub_vnic(vnic_name).await {
             return Ok(vnic);
         }
-        Self::real_api().create_vnic(source, vnic_name, None, None, mtu)?;
+        Self::real_api()
+            .create_vnic(source, vnic_name, None, None, mtu)
+            .await?;
         Ok(EtherstubVnic(vnic_name.to_string()))
     }
 
-    fn get_etherstub_vnic(name: &str) -> Result<EtherstubVnic, ExecutionError> {
-        let mut command = std::process::Command::new(PFEXEC);
+    async fn get_etherstub_vnic(
+        name: &str,
+    ) -> Result<EtherstubVnic, ExecutionError> {
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-vnic", name]);
-        execute(cmd)?;
+        execute_async(cmd).await?;
         Ok(EtherstubVnic(name.to_string()))
     }
 
     // Return the name of the IP interface over the etherstub VNIC, if it
     // exists.
-    fn get_etherstub_vnic_interface(
+    async fn get_etherstub_vnic_interface(
         name: &str,
     ) -> Result<String, ExecutionError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+        let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[IPADM, "show-if", "-p", "-o", "IFNAME", name]);
-        execute(cmd)?;
+        execute_async(cmd).await?;
         Ok(name.to_string())
     }
 
     /// Delete the VNIC over the inter-zone comms etherstub.
-    pub fn delete_etherstub_vnic(name: &str) -> Result<(), ExecutionError> {
+    pub async fn delete_etherstub_vnic(
+        name: &str,
+    ) -> Result<(), ExecutionError> {
         // It's not clear why, but this requires deleting the _interface_ that's
         // over the VNIC first. Other VNICs don't require this for some reason.
-        if Self::get_etherstub_vnic_interface(name).is_ok() {
-            let mut cmd = std::process::Command::new(PFEXEC);
+        if Self::get_etherstub_vnic_interface(name).await.is_ok() {
+            let mut cmd = Command::new(PFEXEC);
             let cmd = cmd.args(&[IPADM, "delete-if", name]);
-            execute(cmd)?;
+            execute_async(cmd).await?;
         }
 
-        if Self::get_etherstub_vnic(name).is_ok() {
-            let mut cmd = std::process::Command::new(PFEXEC);
+        if Self::get_etherstub_vnic(name).await.is_ok() {
+            let mut cmd = Command::new(PFEXEC);
             let cmd = cmd.args(&[DLADM, "delete-vnic", name]);
-            execute(cmd)?;
+            execute_async(cmd).await?;
         }
         Ok(())
     }
 
     /// Delete the inter-zone comms etherstub.
-    pub fn delete_etherstub(name: &str) -> Result<(), ExecutionError> {
-        if Self::get_etherstub(name).is_ok() {
-            let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn delete_etherstub(name: &str) -> Result<(), ExecutionError> {
+        if Self::get_etherstub(name).await.is_ok() {
+            let mut cmd = Command::new(PFEXEC);
             let cmd = cmd.args(&[DLADM, "delete-etherstub", name]);
-            execute(cmd)?;
+            execute_async(cmd).await?;
         }
         Ok(())
     }
 
     /// Returns the name of the first observed physical data link.
-    pub fn find_physical() -> Result<PhysicalLink, FindPhysicalLinkError> {
+    pub async fn find_physical() -> Result<PhysicalLink, FindPhysicalLinkError>
+    {
         // TODO: This is arbitrary, but we're currently grabbing the first
         // physical device. Should we have a more sophisticated method for
         // selection?
-        Self::list_physical()?
+        Self::list_physical()
+            .await?
             .into_iter()
             .next()
             .ok_or_else(|| FindPhysicalLinkError::NoPhysicalLinkFound)
@@ -379,10 +395,11 @@ impl Dladm {
     /// List the extant physical data links on the system.
     ///
     /// Note that this returns _all_ links.
-    pub fn list_physical() -> Result<Vec<PhysicalLink>, FindPhysicalLinkError> {
-        let mut command = std::process::Command::new(PFEXEC);
+    pub async fn list_physical()
+    -> Result<Vec<PhysicalLink>, FindPhysicalLinkError> {
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-phys", "-p", "-o", "LINK"]);
-        let output = execute(cmd)?;
+        let output = execute_async(cmd).await?;
         std::str::from_utf8(&output.stdout)
             .map_err(FindPhysicalLinkError::NonUtf8Output)
             .map(|stdout| {
@@ -394,8 +411,8 @@ impl Dladm {
     }
 
     /// Returns the MAC address of a physical link.
-    pub fn get_mac(link: &PhysicalLink) -> Result<MacAddr, GetMacError> {
-        let mut command = std::process::Command::new(PFEXEC);
+    pub async fn get_mac(link: &PhysicalLink) -> Result<MacAddr, GetMacError> {
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[
             DLADM,
             "show-phys",
@@ -405,7 +422,7 @@ impl Dladm {
             "ADDRESS",
             &link.0,
         ]);
-        let output = execute(cmd)?;
+        let output = execute_async(cmd).await?;
         let name = String::from_utf8_lossy(&output.stdout)
             .lines()
             .next()
@@ -425,10 +442,11 @@ impl Dladm {
     }
 
     /// Returns VNICs that may be managed by the Sled Agent.
-    pub fn get_vnics() -> Result<Vec<String>, GetVnicError> {
-        let mut command = std::process::Command::new(PFEXEC);
+    pub async fn get_vnics() -> Result<Vec<String>, GetVnicError> {
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-vnic", "-p", "-o", "LINK"]);
-        let output = execute(cmd).map_err(|err| GetVnicError { err })?;
+        let output =
+            execute_async(cmd).await.map_err(|err| GetVnicError { err })?;
 
         let vnics = String::from_utf8_lossy(&output.stdout)
             .lines()
@@ -445,10 +463,12 @@ impl Dladm {
     }
 
     /// Returns simnet links masquerading as tfport devices
-    pub fn get_simulated_tfports() -> Result<Vec<String>, GetSimnetError> {
-        let mut command = std::process::Command::new(PFEXEC);
+    pub async fn get_simulated_tfports() -> Result<Vec<String>, GetSimnetError>
+    {
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[DLADM, "show-simnet", "-p", "-o", "LINK"]);
-        let output = execute(cmd).map_err(|err| GetSimnetError { err })?;
+        let output =
+            execute_async(cmd).await.map_err(|err| GetSimnetError { err })?;
 
         let tfports = String::from_utf8_lossy(&output.stdout)
             .lines()
@@ -464,11 +484,11 @@ impl Dladm {
     }
 
     /// Get a link property value on a VNIC
-    pub fn get_linkprop(
+    pub async fn get_linkprop(
         vnic: &str,
         prop_name: &str,
     ) -> Result<String, GetLinkpropError> {
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[
             DLADM,
             "show-linkprop",
@@ -479,24 +499,25 @@ impl Dladm {
             prop_name,
             vnic,
         ]);
-        let result = execute(cmd).map_err(|err| GetLinkpropError {
-            link_name: vnic.to_string(),
-            prop_name: prop_name.to_string(),
-            err,
-        })?;
+        let result =
+            execute_async(cmd).await.map_err(|err| GetLinkpropError {
+                link_name: vnic.to_string(),
+                prop_name: prop_name.to_string(),
+                err,
+            })?;
         Ok(String::from_utf8_lossy(&result.stdout).into_owned())
     }
     /// Set a link property on a VNIC
-    pub fn set_linkprop(
+    pub async fn set_linkprop(
         vnic: &str,
         prop_name: &str,
         prop_value: &str,
     ) -> Result<(), SetLinkpropError> {
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
         let prop = format!("{}={}", prop_name, prop_value);
         let cmd =
             command.args(&[DLADM, "set-linkprop", "-t", "-p", &prop, vnic]);
-        execute(cmd).map_err(|err| SetLinkpropError {
+        execute_async(cmd).await.map_err(|err| SetLinkpropError {
             link_name: vnic.to_string(),
             prop_name: prop_name.to_string(),
             prop_value: prop_value.to_string(),
@@ -506,11 +527,11 @@ impl Dladm {
     }
 
     /// Reset a link property on a VNIC
-    pub fn reset_linkprop(
+    pub async fn reset_linkprop(
         vnic: &str,
         prop_name: &str,
     ) -> Result<(), ResetLinkpropError> {
-        let mut command = std::process::Command::new(PFEXEC);
+        let mut command = Command::new(PFEXEC);
         let cmd = command.args(&[
             DLADM,
             "reset-linkprop",
@@ -519,7 +540,7 @@ impl Dladm {
             prop_name,
             vnic,
         ]);
-        execute(cmd).map_err(|err| ResetLinkpropError {
+        execute_async(cmd).await.map_err(|err| ResetLinkpropError {
             link_name: vnic.to_string(),
             prop_name: prop_name.to_string(),
             err,
