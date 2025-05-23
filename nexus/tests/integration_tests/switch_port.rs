@@ -27,10 +27,6 @@ use omicron_common::api::external::{ImportExportPolicy, Name};
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-// TODO: unfortunately this test can no longer be run in the integration test
-//       suite because it depends on communicating with MGS which is not part
-//       of the infrastructure available in the integration test context.
-// #[ignore]
 #[nexus_test]
 async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let client = &ctx.external_client;
