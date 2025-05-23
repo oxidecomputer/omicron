@@ -9,19 +9,23 @@ use chrono::Utc;
 use either::Either;
 use futures::future;
 use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use omicron_common::disk::DatasetKind;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::U2_DEBUG_DATASET;
+use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::disk::Disk;
 use slog::Logger;
 use slog::info;
 use slog::warn;
-use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -30,15 +34,16 @@ use std::time::Instant;
 use tokio::sync::watch;
 
 use crate::TimeSyncConfig;
-use crate::dataset_serialization_task::DatasetEnsureResult;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::ledger::CurrentSledConfig;
 use crate::raw_disks::RawDisksReceiver;
 use crate::sled_agent_facilities::SledAgentFacilities;
 
+mod datasets;
 mod external_disks;
 mod zones;
 
+use self::datasets::OmicronDatasets;
 use self::external_disks::ExternalDisks;
 use self::zones::OmicronZones;
 
@@ -66,17 +71,18 @@ pub(crate) fn spawn<T: SledAgentFacilities>(
         currently_managed_zpools_tx,
         external_disks_tx,
     );
+    let datasets = OmicronDatasets::new(dataset_task);
 
     let zones = OmicronZones::new(mount_config, time_sync_config);
 
     tokio::spawn(
         ReconcilerTask {
             key_requester,
-            dataset_task,
             current_config_rx,
             reconciler_result_tx,
             raw_disks_rx,
             external_disks,
+            datasets,
             zones,
             log,
         }
@@ -115,8 +121,7 @@ impl ReconcilerResult {
         };
         Either::Right(
             latest_result
-                .datasets
-                .all_mounted_debug_datasets(&self.mount_config),
+                .all_mounted_datasets(&self.mount_config, DatasetKind::Debug),
         )
     }
 
@@ -126,11 +131,10 @@ impl ReconcilerResult {
         let Some(latest_result) = &self.latest_result else {
             return Either::Left(std::iter::empty());
         };
-        Either::Right(
-            latest_result
-                .datasets
-                .all_mounted_zone_root_datasets(&self.mount_config),
-        )
+        Either::Right(latest_result.all_mounted_datasets(
+            &self.mount_config,
+            DatasetKind::TransientZoneRoot,
+        ))
     }
 
     pub(crate) fn to_inventory(
@@ -192,7 +196,7 @@ struct LatestReconciliationResult {
     sled_config: OmicronSledConfig,
     external_disks_inventory:
         BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
-    datasets: DatasetEnsureResult,
+    datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
     zones_inventory: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     timesync_status: TimeSyncStatus,
 }
@@ -202,19 +206,54 @@ impl LatestReconciliationResult {
         ConfigReconcilerInventory {
             last_reconciled_config: self.sled_config.clone(),
             external_disks: self.external_disks_inventory.clone(),
-            datasets: self.datasets.to_inventory(),
+            datasets: self.datasets.clone(),
             zones: self.zones_inventory.clone(),
         }
+    }
+
+    fn all_mounted_datasets<'a>(
+        &'a self,
+        mount_config: &'a MountConfig,
+        kind: DatasetKind,
+    ) -> impl Iterator<Item = PathInPool> + 'a {
+        // This is a private method only called by this file; we only have to
+        // handle the specific `DatasetKind`s used by our callers.
+        let mountpoint = match &kind {
+            DatasetKind::Debug => U2_DEBUG_DATASET,
+            DatasetKind::TransientZoneRoot => ZONE_DATASET,
+            _ => unreachable!(
+                "private function called with unexpected kind {kind:?}"
+            ),
+        };
+        self.datasets
+            .iter()
+            // Fitler down to successfully-ensured datasets
+            .filter_map(|(dataset_id, result)| match result {
+                ConfigReconcilerInventoryResult::Ok => {
+                    self.sled_config.datasets.get(dataset_id)
+                }
+                ConfigReconcilerInventoryResult::Err { .. } => None,
+            })
+            // Filter down to matching dataset kinds
+            .filter(move |config| *config.name.kind() == kind)
+            .map(|config| {
+                let pool = *config.name.pool();
+                PathInPool {
+                    pool: ZpoolOrRamdisk::Zpool(pool),
+                    path: pool
+                        .dataset_mountpoint(&mount_config.root, mountpoint),
+                }
+            })
     }
 }
 
 struct ReconcilerTask {
     key_requester: StorageKeyRequester,
-    dataset_task: DatasetTaskHandle,
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     raw_disks_rx: RawDisksReceiver,
     external_disks: ExternalDisks,
+    datasets: OmicronDatasets,
     zones: OmicronZones,
     log: Logger,
 }
@@ -369,10 +408,12 @@ impl ReconcilerTask {
             )
             .await;
 
-        // Next, delete datasets that need to be deleted.
+        // Next, remove datasets we have but that aren't present in the config.
         //
-        // TODO We don't do this yet:
+        // Note: this doesn't actually delete them yet!
         // https://github.com/oxidecomputer/omicron/issues/6177
+        self.datasets
+            .remove_datasets_if_needed(&sled_config.datasets, &self.log);
 
         // Finally, remove any external disks we're no longer supposed to use
         // (either due to config changes or the raw disk being gone).
@@ -398,30 +439,9 @@ impl ReconcilerTask {
             .await;
 
         // Ensure all the datasets we want exist.
-        let datasets = match self
-            .dataset_task
-            .datasets_ensure(sled_config.datasets.clone())
-            .await
-        {
-            Ok(result) => result,
-            Err(err) => {
-                warn!(
-                    self.log, "failed to contact dataset task";
-                    InlineErrorChain::new(&err),
-                );
-                // If we can't contact the dataset task, reuse the result from
-                // our previous attempt. This should still be correct (until we
-                // start deleting datasets, at which point we'll need a more
-                // holistic tracker for dataset status like we already have for
-                // disks and zones).
-                self.reconciler_result_tx
-                    .borrow()
-                    .latest_result
-                    .as_ref()
-                    .map(|inner| inner.datasets.clone())
-                    .unwrap_or_else(DatasetEnsureResult::default)
-            }
-        };
+        self.datasets
+            .ensure_datasets_if_needed(sled_config.datasets.clone(), &self.log)
+            .await;
 
         // Collect the current timesync status (needed to start any new zones,
         // and also we want to report it as part of each reconciler result).
@@ -465,7 +485,7 @@ impl ReconcilerTask {
         let result = if !timesync_status.is_synchronized()
             || self.external_disks.has_retryable_error()
             || self.zones.has_retryable_error()
-            || datasets.has_retryable_error()
+            || self.datasets.has_retryable_error()
         {
             ReconciliationResult::ShouldRetry
         } else {
@@ -475,7 +495,7 @@ impl ReconcilerTask {
         let inner = LatestReconciliationResult {
             sled_config,
             external_disks_inventory: self.external_disks.to_inventory(),
-            datasets,
+            datasets: self.datasets.to_inventory(),
             zones_inventory: self.zones.to_inventory(),
             timesync_status,
         };
