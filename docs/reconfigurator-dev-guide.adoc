@@ -6,6 +6,8 @@
 
 This document covers practical tips for working on Reconfigurator.  For principles and design, see xref:reconfigurator.adoc[Reconfigurator Overview].
 
+NOTE: Documents like this tend to get out of date as the software evolves.  If you notice errors, _please_ consider fixing it.  If you're not sure how, reach out for help.
+
 == Introduction
 
 Reconfigurator is a control plane subsystem that's responsible for runtime changes to the control plane.  It's used to add, remove, and upgrade components.  It's divided into two big pieces:
@@ -357,10 +359,100 @@ The easiest way to test Reconfigurator-driven updates is using `reconfigurator-s
 
 Regardless of how you perform updates, it's useful to use `faux-mgs` to read the ground truth state from the SP about its configuration (what versions are in each slot and which slots are active).  More on this below.
 
-[task-download-TUF-repo]
+[#task-testing-reconfigurator-driven-sp-updates]
+=== Testing Reconfigurator-driven updates
+
+You can test Reconfigurator-driven updates using any of the test environments mentioned above (`omicron-dev run-all`, a4x2, or a racklette).  However, the flow is a bit different in each case.
+
+With **`omicron-dev run-all`**, the flow is:
+
+. Build the binaries you need (by cloning the corresponding repo and using `cargo build --bin=BINARY`):
+** `reconfigurator-sp-updater` (built from Omicron repo)
+** `repo-depot-standalone` (built from Omicron repo)
+** `faux-mgs` (built from `management-gateway-service` repo)
+. Get _and unpack_ at least one TUF repository with images for **simulated** SPs (probably by <<task-build-fake-TUF-repo,building your own>>).  You'll want two different TUF repos if you want to be able to do multiple updates, switching between two different versions.
+. Start `cargo xtask omicron-dev run-all`.
+. <<task-decide-sp-artifact,Figure out which artifacts you want to use for testing.>>
+. <<task-repo-depot-standalone,Start `repo-depot-standalone`>> backed by this TUF repository.
+. <<task-start-sp-updater,Start `reconfigurator-sp-updater`>>.
+. <<task-sp-update,Do an SP update>>.
+
+With **a4x2**, the flow is:
+
+. Build the binaries you need (by cloning the corresponding repo and using `cargo build --bin=BINARY`):
+** `reconfigurator-sp-updater` (built from Omicron repo)
+** `repo-depot-standalone` (built from Omicron repo)
+** `faux-mgs` (built from `management-gateway-service` repo)
+. Get at least one TUF repository with images for **simulated** SPs (probably by <<task-build-fake-TUF-repo,building your own>>).  You'll want two different TUF repos if you want to be able to do multiple updates, switching between two different versions.
+. Use `scp` to copy the TUF repository and the binaries to a switch zone in your racklette.  For example:
++
+```
+scp \
+    my-tuf-repo.zip \
+    omicron/target/debug/repo-depot-standalone \
+    omicron/target/debug/reconfigurator-sp-updater \
+    management-gateway-service/target/debug/faux-mgs \
+    root@MY_A4X2_G0_GZ_IP:/zone/oxz_switch/root/root
+```
+. <<task-decide-sp-artifact,Figure out which artifacts you want to use for testing.>>
+. From inside the switch zone:
+.. Unpack the TUF repository (with `unzip`).
+.. <<task-repo-depot-standalone,Start `repo-depot-standalone`>> backed by this TUF repository.
+.. <<task-start-sp-updater,Start `reconfigurator-sp-updater`>>.
+.. <<task-sp-update,Do an SP update>>.
+
+With a **racklette**, the flow is:
+
+. Build the binaries you need (by cloning the corresponding repo and using `cargo build --bin=BINARY`):
+** `reconfigurator-sp-updater` (built from Omicron repo)
+** `repo-depot-standalone` (built from Omicron repo)
+** `faux-mgs` (built from `management-gateway-service` repo)
+. Get at least one TUF repository with images for **real** SPs (probably by <<task-download-TUF-repo,getting one from CI>> or using an official release one).  You'll want two different TUF repos if you want to be able to do multiple updates, switching between two different versions.
+. <<task-trim-TUF-repo,Trim the TUF repo(s) that you want to use>> so that they will fit in the switch zone of your racklette.
+. Use `scp` to copy the _trimmed_ TUF repository and the binaries to a switch zone in your racklette.  For example:
++
+```
+scp \
+    my-trimmed-tuf-repo.zip \
+    omicron/target/debug/repo-depot-standalone \
+    omicron/target/debug/reconfigurator-sp-updater \
+    management-gateway-service/target/debug/faux-mgs \
+    root@racklet_gz_ip:/zone/oxz_switch/root/root
+```
+. <<task-decide-sp-artifact,Figure out which artifacts you want to use for testing.>>
+. From inside the switch zone:
+.. Unpack the TUF repository (with `unzip`).
+.. <<task-repo-depot-standalone,Start `repo-depot-standalone`>> backed by this TUF repository.
+.. <<task-start-sp-updater,Start `reconfigurator-sp-updater`>>.
+.. <<task-sp-update,Do an SP update>>.
+
+
+These steps are described in sections below.
+
+[#task-build-fake-TUF-repo]
+=== Task: build a TUF repo with images targeting simulated SPs
+
+The artifacts in TUF repos built by the Omicron build process do not work with simulated SPs.  That's because simulated SPs report a different board type than real Oxide hardware.  But you can easily build your own TUF repo with images that do work with simulated SPs.
+
+. You'll need a copy of the `tufaceous` binary.
+.. Clone the https://github.com/oxidecomputer/tufaceous[tufaceous] repository.
+.. Build with `cargo build --bin=tufaceous`.
+. You'll need a TUF repository manifest that specifies that `tufaceous` should conjure up fake Hubris images for simulated SPs.  There's one in the Omicron repo at xref:../update-common/manifests/fake.toml[].
+. Run:
++
+```
+$ tufaceous assemble update-common/manifests/fake.toml /var/tmp/my-fake-repo.zip
+```
+. Confirm the contents of the repo:
++
+```
+$ zipinfo /var/tmp/my-fake-repo.zip
+```
+
+[#task-download-TUF-repo]
 === Task: downloading a TUF repo from CI
 
-Reconfigurator-driven updates always use artifacts from a TUF repository.  TUF repos are built from each Omicron commit, both on "main" and pull request branches.
+To test Reconfigurator-driven updates of real SPs, you can use the artifacts from TUF repositories that are built with each Omicron commit on GitHub, including those on "main" and pull request branches.
 
 First, decide the commit you want to use.  We'll call that `OMICRON_COMMIT`.  If you don't care all that much (because you're just testing update itself, not the image that you're deploying), just https://github.com/oxidecomputer/omicron/commits/main/[list the recent commits to "main"] and pick the latest one that has passed all CI checks.
 
@@ -391,7 +483,7 @@ Download the repo with:
 $ curl -L -C - -O $TUF_REPO_DOWNLOAD_URL
 ```
 
-If this gets interrupted, you can run the same command again to resume it where it left off.
+Sometimes this download gets interrupted.  If that happens, you can run the same command again to resume the download where it left off.
 
 For some of the workflows here, you'll want an _unpacked_ TUF repo.  You can unpack it with:
 
@@ -402,7 +494,7 @@ $ unzip FILENAME
 This should create a directory called `repo` with subdirectories `metadata` and `targets`.
 
 
-[task-trim-TUF-repo]
+[#task-trim-TUF-repo]
 === Task: trim TUF repo for shipping to a switch zone
 
 On a4x2 or a racklette, it's handy to run `reconfigurator-sp-updater` and `repo-depot-standalone` from the switch zone, with the TUF repo you're using also in the switch zone.  But the switch zone generally doesn't have enough space for a full TUF repo.  You can work around this by deleting some large artifacts that we don't need for our purposes.
@@ -417,53 +509,320 @@ $ rm -f repo/targets/*.host* repo/targets/*.trampoline-* repo/targets/*.control-
 
 Then copy this directory tree over to the switch zone.
 
-[task-repo-depot-standalone]
+[#task-decide-sp-artifact]
+=== Task: decide which SP artifact you want to deploy
+
+Prerequisite:
+
+* You must have an unpacked TUF repo.
+
+You must first decide which SP you're going to update.  With simulated SPs (`cargo xtask omicron-dev run-all` and a4x2), this choice doesn't matter much.  With real hardware, it's a bigger deal because resetting the SP will reset the corresponding host.  You don't want to update the SP for the host you're doing your testing from!
+
+If you don't particularly care because you just to want to test update itself, sled 15 is a good choice on a racklette (since it's not a Scrimlet) and `SimGimlet00` (the first sled) is a good choice in simulated deployments.
+
+Once you've picked an SP, you need to know what kind of board it is.
+
+* With real hardware, it will be specific Gimlet revision (e.g., `gimlet-e`), Sidecar revision (`sidecar-c`), or PSC (e.g., `psc-c`).
+* With simulated SPs, it will be `SimGimletSp` or `SimSidecarSp`.
+
+Once you know which SP you're going to update, you can identify the board in one of two ways:
+
+* Using <<task-using-omdb,omdb>> to view inventory, you want the value of the BOARD column for the `SpSlot0` caboose.  (It will be the same for `SpSlot1`.)
+* Using <<task-using-faux-mgs,faux-mgs>>, you first need to figure out how to get `faux-mgs` to talk to the SP you care about (described in the linked section), and then you can use the `read-component-caboose` command, like this:
++
+```
+$ faux-mgs --log-level warn --sp-sim-addr [::1]:42084 read-component-caboose --component sp --slot 0 BORD
+SimGimletSp
+```
+
+Finally, you need to find the artifact in your TUF repo that corresponds to the SP image for this type of board.  Here's an example list of TUF repo artifacts:
+
+```
+repo $ ls targets/
+005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236.gimlet_rot_bootloader-fake-gimlet-rot-bootloader-1.0.0.tar.gz
+005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236.psc_rot_bootloader-fake-psc-rot-bootloader-1.0.0.tar.gz
+005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236.switch_rot_bootloader-fake-switch-rot-bootloader-1.0.0.tar.gz
+019d84b563f32a85467235d23142de2fff11eb4e70b18c9567a374af8aa2422b.control_plane-fake-control-plane-1.0.0.tar.gz
+339cb54072f5f61b36377062e64e6e41f5491e5eccbf1caec637bfbf1ae069ac.psc_rot-fake-psc-rot-1.0.0.tar.gz
+4cd56ec2380cbbbc1da842c44776e421bf0cb2362e22dd2ff65eb8cba337fe00.artifacts.json
+64f911b96c7b2f08222d25c1a37f039173da7461897ec28d5850c986c9e29e50.trampoline-fake-trampoline-1.0.0.tar.gz
+727d2cc5e0d4677940fb8a66156ab376f7485bde7e55963694913d94aa92d119.gimlet_rot-fake-gimlet-rot-1.0.0.tar.gz
+727d2cc5e0d4677940fb8a66156ab376f7485bde7e55963694913d94aa92d119.switch_rot-fake-switch-rot-1.0.0.tar.gz
+7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670.gimlet_sp-fake-gimlet-sp-1.0.0.tar.gz
+ab32ec86e942e1a16c8d43ea143cd80dd05a9639529d3569b1c24dfa2587ee74.switch_sp-fake-switch-sp-1.0.0.tar.gz
+d51b8fd66c631346459725b8868d0614f0884dba05faec20fc0fdd334eb5d0fd.host-fake-host-1.0.0.tar.gz
+f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b.psc_sp-fake-psc-sp-1.0.0.tar.gz
+```
+
+For the SP, we want an artifact whose name looks like `\*.*_sp*`.  It's one of these:
+
+```
+repo $ ls targets/*.*_sp*
+targets/7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670.gimlet_sp-fake-gimlet-sp-1.0.0.tar.gz
+targets/ab32ec86e942e1a16c8d43ea143cd80dd05a9639529d3569b1c24dfa2587ee74.switch_sp-fake-switch-sp-1.0.0.tar.gz
+targets/f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b.psc_sp-fake-psc-sp-1.0.0.tar.gz
+```
+
+This is a TUF repo for simulated hardware.  In that case, there's only one image for each type of board so it's pretty easy.  A TUF repo for real hardware will look more like this:
+
+```
+repo $ ls targets/*.*_sp*
+targets/48d00f59dacc27e8cbb3abcfff2a263d5dbd361fe018e1bf06fb936811cc2446.switch_sp-sidecar-b-1.0.32.tar.gz
+targets/556dcf6416e6da79d49657c0cf77d02e286ba28dc481f92e87136c44b1e9f329.gimlet_sp-gimlet-f-1.0.32.tar.gz
+targets/7576f5a13feefe75f6390c78666cc62ebef4b36d16959dc38141497ece21198b.psc_sp-psc-b-1.0.31.tar.gz
+targets/7f6cf23a3cf26fe9c7a40a76d7e2be8a418723ef505786c8e41df89fd8d1f77e.gimlet_sp-gimlet-d-1.0.32.tar.gz
+targets/90d483ff62ad16fb82d7e8831f222071dda4aba046fba1603b823555c6bb096e.switch_sp-sidecar-d-1.0.32.tar.gz
+targets/9e53e5f408e9a0026955c31ae52d222ed192f098de57f24855e67fda114a4ed7.psc_sp-psc-c-1.0.31.tar.gz
+targets/c9cb6c6d2b3fd9e198074b4160119caa21ca88632b218420a570725ffd0b8616.gimlet_sp-gimlet-e-1.0.32.tar.gz
+targets/d761c7f19bb33c9250c847ce83ade57a137013b8497ffa81e4ded85014571dd0.gimlet_sp-gimlet-c-1.0.32.tar.gz
+targets/e151c800331d0e20a9be15eecd1511dcd576f16bc5c4deebcf2d7bf48e77e0f6.switch_sp-sidecar-c-1.0.32.tar.gz
+targets/f2fcb24dbb85a8be78235226fc95dd183250f75819bc813befdf5a166a72acd0.gimlet_sp-gimlet-b-1.0.32.tar.gz
+```
+
+Find the one that matches your board (e.g., `gimlet-e`).
+
+In either case, the artifact id is the long shasum at the beginning of the filename.  If you wanted the `gimlet-e` SP image, you'd use `c9cb6c6d2b3fd9e198074b4160119caa21ca88632b218420a570725ffd0b8616`.
+
+This document uses simulated images, and we'll update a simulated sled SP, so we'll choose `7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670` from the output above.
+
+---
+
+That's the quick-and-dirty way.  The more precise way to work this out is:
+
+. Look at `targets/*.artifacts.json` and find the entry in the `artifacts` array having `kind` = `gimlet_sp` (or `switch_sp` or `psc_sp`, if you're updating a switch or PSC) and `name` matching your board.  Note the `"target"` property.
+. Find the file in `targets` whose suffix matches the `"target"` property.
+
+For example, in our case, the first entry in `artifacts` is the one that we want:
+
+```json
+{
+  "system_version": "1.0.0",
+  "artifacts": [
+    {
+      "name": "fake-gimlet-sp",
+      "version": "1.0.0",
+      "kind": "gimlet_sp",
+      "target": "gimlet_sp-fake-gimlet-sp-1.0.0.tar.gz"
+    },
+    ...
+```
+
+That tells us that we want `targets/*.gimlet_sp-fake-gimlet-sp-1.0.0.tar.gz`, which is `targets/7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670.gimlet_sp-fake-gimlet-sp-1.0.0.tar.gz`, whose artifact id is `7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670`.
+
+[#task-repo-depot-standalone]
 === Task: use `repo-depot-standalone` to serve artifacts from a local TUF repo
 
-Prerequisite: you must already have an _unpacked_ TUF repo.  You could <<task-download-TUF-repo,download one from CI>>.
+Prerequisite: you must already have one or more _unpacked_ TUF repos.  See above for which ones to use.
 
-We'll call UNPACKED_TUF_REPO_PATH the path to the "repo" directory that you get after unpacking it.
+If you're testing with `cargo xtask omicron-dev run-all`, you can run `repo-depot-standalone` right in the repo.  If you're testing on a4x2 or a racklette, you'll want to copy this binary (and the TUF repo(s)) to the switch zone.  See above for more on this.
 
-```
-$ UNPACKED_TUF_REPO_PATH=./repo
-```
-
-Now, over in a clone of Omicron, build the `repo-depot-standalone` tool in the usual way:
+Once you have the binary and unpacked TUF repo(s) where you want them, you just run the command with one or more paths to the "repo" directory in each unpacked TUF repo.  We'll also use the `--listen-addr` argument to start it on a predictable port, but you can leave this off to pick any unused port:
 
 ```
-$ cargo build --bin=repo-depot-standalone
-```
-
-If you're using `omicron-dev run-all`, you can probably run `repo-depot-standalone` right in the repo as either `./target/debug/repo-depot-standalone` or `cargo run --bin=repo-depot-standalone`.  If you're testing in a4x2 or on a racklette, you'll likely want to copy `repo-depot-standalone` _and_ the TUF repo (probably <<task-trim-TUF-repo,trimmed>>) to the switch zone in your system and do the rest there.
-
-One the system where you want to run `repo-depot-standalone`, and where the unpacked TUF repo is at `$UNPACKED_TUF_REPO_PATH`, you can now just run:
-
-```
-$ ./repo-depot-standalone $UNPACKED_TUF_REPO_PATH
+$ ./repo-depot-standalone --listen-addr [::]:64761 /home/dap/tuf-repos/R12/repo
 May 22 23:05:52.057 INFO loaded Omicron TUF repository, path: /home/dap/tuf-repos/R12/repo
 May 22 23:05:52.061 INFO listening, local_addr: [::]:64761
 ```
 
-As the log implies, this is now running a repo depot server on IPv6 localhost (`::`) port 64761.  (If you want to specify a specific IP and port to listen on, which is useful so that the port doesn't keep changing on you, you can do that with the `--listen-addr` argument.)
+As the log implies, this is now running a repo depot server on IPv6 localhost (`::`) port 64761.
 
-=== Task: manually performing Reconfigurator-driven update of SPs and RoTs
+[#task-start-sp-updater]
+=== Task: start `reconfigurator-sp-updater`
 
-Prerequisite: you must have something serving the TUF repo depot API.  Usually you will:
+Prerequisites:
 
-* <<task-download-TUF-repo>>
-* For a4x2 and racklettes: <<task-trim-TUF-repo>>
-* <<task-repo-depot-standalone>>
+* you must have something serving the TUF repo depot API (see above)
+* you have a system running a DNS server and MGS that points at one or more SPs to update.  This is usually `cargo xtask omicron-dev run-all`, a4x2, or a racklette.
 
-We'll call the IP:port where the repo depot API is being served `REPO_DEPOT_SOCKADDR`:
+In our example, we'll assume the repo depot server is running on `[::]:64761`.
+
+If you're using a4x2 or a racklette, you can start the updater with:
 
 ```
-$ REPO_DEPOT_SOCKADDR=[::]:64761
+$ reconfigurator-sp-updater [::1]:64761
 ```
 
-// XXX-dap working here
-// XXX-dap build and start reconfigurator-sp-updater and then use it
+If you're using `omicron-dev run-all`, you'll also need the IP:port where the internal DNS server is running.  This is printed out by `omicron-dev run-all`, which emits a line like this:
 
-=== Task: setting up `faux-mgs`
+```
+...
+omicron-dev: internal DNS:          [::1]:63673
+...
+```
+
+In this case, we'd say:
+
+```
+$ reconfigurator-sp-updater --dns-server [::1]:63673 [::1]:64761
+
+```
+
+Once `reconfigurator-sp-updater` starts, you'll get a REPL and can try an SP update.
+
+[#task-sp-update]
+=== Task: Do an SP update
+
+Prerequisites:
+
+* you must already be running `reconfigurator-sp-updater` (see above)
+* you must have already decided which SP to update and which artifact to deploy.  See <<task-decide-sp-artifact>>.  Here, we're going to update `SimGimlet00` to artifact id `7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670`.
+
+In the `reconfigurator-sp-updater` REPL, you can use `help` to see what's available:
+
+```
+〉help
+reconfigurator-sp-updater: interactively manage SP updates
+
+Usage: <COMMAND>
+
+Commands:
+  config  Show configured updates
+  status  Show status of recent and in-progress updates
+  set     Configure an update
+  delete  Delete a configured update
+  help    Print this message or the help of the given subcommand(s)
+```
+
+Initially, `config` will show no configured updates:
+
+```
+〉config
+configured updates (0):
+
+```
+
+and `status` will show nothing in progress or completed:
+
+```
+〉status
+recent completed attempts:
+
+currently in progress:
+
+waiting for retry:
+
+```
+
+In order to configure an SP update, you need to know what software is currently running on the SP.  You can view this with `omdb`:
+
+```
+$ omdb  --dns-server [::1]:63673 db inventory collections show latest sp
+...
+Sled SimGimlet00
+    part number: i86pc
+    power:    A2
+    revision: 0
+    MGS slot: Sled 0 (cubby 0)
+    found at: 2025-05-23 17:36:11.421897 UTC from http://[::1]:58672
+    cabooses:
+        SLOT       BOARD        NAME         VERSION GIT_COMMIT
+        SpSlot0    SimGimletSp  SimGimlet    0.0.2   ffffffff
+        SpSlot1    SimGimletSp  SimGimlet    0.0.1   fefefefe
+        RotSlotA   SimRot       SimGimletRot 0.0.4   eeeeeeee
+        RotSlotB   SimRot       SimGimletRot 0.0.3   edededed
+        Stage0     SimRotStage0 SimGimletRot 0.0.200 ddddddddd
+        Stage0Next SimRotStage0 SimGimletRot 0.0.200 dadadadad
+...
+```
+
+That shows version 0.0.2 in the SP active slot (slot 0) and 0.0.1 in the SP inactive slot (slot 1).  For more on using inventory like this, see <<task-using-omdb,Using `omdb`>> -- note that this information is cached and will not necessarily show the right thing after you perform the update.
+
+You can view the very latest state with `faux-mgs` (see <<task-using-faux-mgs,Using `faux-mgs`>>):
+
+```
+$ faux-mgs --log-level warn --sp-sim-addr [::1]:42084 read-component-caboose --component sp --slot 0 VERS
+0.0.2
+$ faux-mgs --log-level warn --sp-sim-addr [::1]:42084 read-component-caboose --component sp --slot 1 VERS
+0.0.1
+```
+
+Now we have enough information to configure an SP update:
+
+```
+〉help set
+Configure an update
+
+Usage: set <SERIAL> <ARTIFACT_HASH> <VERSION> <COMMAND>
+
+Commands:
+  sp
+  help  Print this message or the help of the given subcommand(s)
+
+Arguments:
+  <SERIAL>         serial number to update
+  <ARTIFACT_HASH>  artifact hash id
+  <VERSION>        version
+
+Options:
+  -h, --help  Print help
+
+〉set SimGimlet00 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670 1.0.0 sp help
+error: the following required arguments were not provided:
+  <EXPECTED_INACTIVE_VERSION>
+
+Usage: set <SERIAL> <ARTIFACT_HASH> <VERSION> sp <EXPECTED_ACTIVE_VERSION> <EXPECTED_INACTIVE_VERSION>
+
+For more information, try '--help'.
+
+〉set SimGimlet00 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670 1.0.0 sp 0.0.2 0.0.1
+updated configuration for SimGimlet00
+```
+
+NOTE: You will immediately start seeing log messages from `nexus_mgs_updates` spewing to the console.  This is ugly, but it's been convenient to be able to see these logs in real time.
+
+After a few seconds (20+ seconds on a racklette), you'd expect to see status like this:
+
+```
+〉status
+recent completed attempts:
+    2025-05-23T17:46:18.020Z to 2025-05-23T17:46:19.156Z (took 1s 135ms): serial SimGimlet00
+        attempt#: 1
+        version:  1.0.0
+        hash:     7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670
+        result:   Ok(CompletedUpdate)
+
+currently in progress:
+
+waiting for retry:
+    serial SimGimlet00: will try again at 2025-05-23 17:46:39.156210419 UTC (attempt 2)
+
+```
+
+We can see that it successfully performed the update.
+
+All updates (even successful ones) are re-attempted after 20 seconds.  So if you wait for another lap:
+
+```
+〉status
+recent completed attempts:
+    2025-05-23T17:46:18.020Z to 2025-05-23T17:46:19.156Z (took 1s 135ms): serial SimGimlet00
+        attempt#: 1
+        version:  1.0.0
+        hash:     7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670
+        result:   Ok(CompletedUpdate)
+    2025-05-23T17:46:39.158Z to 2025-05-23T17:46:39.238Z (took 79ms): serial SimGimlet00
+        attempt#: 2
+        version:  1.0.0
+        hash:     7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670
+        result:   Ok(FoundNoChangesNeeded)
+
+currently in progress:
+
+waiting for retry:
+    serial SimGimlet00: will try again at 2025-05-23 17:46:59.238220447 UTC (attempt 3)
+```
+
+This time, it was able to tell that it didn't need to do anything.
+
+To stop trying, unconfigure the update:
+
+```
+〉delete SimGimlet00
+deleted configured update for serial SimGimlet00
+```
+
+[#task-using-faux-mgs]
+=== Using `faux-mgs`
 
 https://github.com/oxidecomputer/management-gateway-service/tree/main/faux-mgs[`faux-mgs`] is a command-line tool that talks directly to SPs (without using MGS).  For Omicron developers, it's the lowest level tool we usually need to directly inspect SP state and issue commands to the SP.
 
@@ -495,6 +854,7 @@ Also useful are:
 * `faux-mgs ... reset`: resets a componnet (SP, RoT, etc.)
 * `faux-mgs ... update`: uploads a new software image for a particular component (SP, RoT, etc.) slot
 
+[#task-using-omdb]
 === Using `omdb` to read inventory
 
 The system inventory includes all the information we need about SPs and what software they're running.  You can print this with:
