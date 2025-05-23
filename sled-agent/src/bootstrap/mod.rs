@@ -10,6 +10,7 @@ pub mod config;
 pub mod early_networking;
 mod http_entrypoints;
 mod maghemite;
+pub(crate) mod measurements;
 pub(crate) mod params;
 mod pre_server;
 mod pumpkind;
