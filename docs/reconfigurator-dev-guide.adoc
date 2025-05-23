@@ -343,7 +343,7 @@ Broadly, we have several kinds of tests:
 
 The https://github.com/oxidecomputer/omicron/pull/7424[ongoing work mentioned above] will make it possible to run the live tests in a4x2 in CI.
 
-== Updates for SPs, RoTs, etc.
+== Updating SPs
 
 Updates for the following components get lumped together:
 
