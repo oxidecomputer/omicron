@@ -16,7 +16,9 @@ use tokio::{
     sync::{mpsc, watch},
     time::Instant,
 };
-use transceiver_controller::{ConfigBuilder, Controller, Error, ModuleId};
+use transceiver_controller::{
+    ConfigBuilder, Controller, Error, ModuleId, ModuleResult,
+};
 use transceiver_controller::{SpRequest, message::ExtendedStatus};
 use wicket_common::inventory::Transceiver;
 
@@ -214,7 +216,7 @@ async fn fetch_transceivers_from_one_switch(
         "poll_interval" => ?TRANSCEIVER_POLL_INTERVAL,
     );
 
-    // Spawn a task to swallow requessts from the SP.
+    // Spawn a task to swallow requests from the SP.
     let (sp_request_tx, sp_request_rx) = mpsc::channel(CHANNEL_CAPACITY);
     tokio::spawn(drop_sp_transceiver_requests(
         interface,
@@ -330,53 +332,63 @@ async fn fetch_transceiver_state(
 ) -> Result<Vec<Transceiver>, Error> {
     // Start by fetching the status of all modules.
     //
-    // As we ask for more data, the set of modules we address might get smaller.
-    // Each operation is fallible, and each module can fail independently. So we
-    // continually overwrite the set of modules we're considering at each
-    // operation, so that by the end, we have the modules for which we've
-    // successfully collected all the data.
-    let mut modules = ModuleId::all();
-    let all_status = controller.extended_status(modules).await?;
+    // Each operation is fallible, and each module can fail independently.
+    // Nonetheless, ask for all the data from all _present_ modules. That lets
+    // us collect as much information as we can about every module, even if
+    // there are failures to access some of its data.
+    let all_status = controller.extended_status(ModuleId::all()).await?;
 
     // From here, let's only address those which are present.
-    let present = all_status
-        .iter()
-        .filter(|(_, st)| st.contains(ExtendedStatus::PRESENT))
-        .map(|(p, _st)| p);
-    modules = ModuleId::from_index_iter(present).unwrap();
+    let present_modules = ModuleId::from_index_iter(
+        all_status
+            .iter()
+            .filter(|(_, st)| st.contains(ExtendedStatus::PRESENT))
+            .map(|(p, _st)| p),
+    )
+    .unwrap();
 
-    // Vendor details.
-    let all_vendor_info = controller.vendor_info(modules).await?;
-    modules = all_vendor_info.modules;
-
-    // Power information.
-    let all_power = controller.power(modules).await?;
-    modules = all_vendor_info.modules;
-
-    // Datapath state.
-    let all_datapaths = controller.datapath(modules).await?;
-    modules = all_datapaths.modules;
-
-    // And monitors.
-    let all_monitors = controller.monitors(modules).await?;
-    modules = all_monitors.modules;
+    // Collect all available data.
+    let all_vendor_info = controller.vendor_info(present_modules).await?;
+    let all_power = controller.power(present_modules).await?;
+    let all_datapaths = controller.datapath(present_modules).await?;
+    let all_monitors = controller.monitors(present_modules).await?;
 
     // Now, combine everything.
     //
-    // If we failed any operation for a module, we'll insert `None` so that we
-    // still have whatever data we _could_ collect.
-    let mut out = Vec::with_capacity(modules.selected_transceiver_count());
-    for i in modules.to_indices() {
+    // For each operation, we'll record either the successful data or the error.
+    // This could lead to a lot of duplicated error messages, but at this point
+    // we'd rather be explicit, and it's possible for errors to be different.
+    let mut out =
+        Vec::with_capacity(present_modules.selected_transceiver_count());
+    for i in present_modules.to_indices() {
         let tr = Transceiver {
             port: format!("qsfp{i}"),
-            power: all_power.nth(i).copied(),
-            vendor: all_vendor_info.nth(i).cloned(),
-            status: all_status.nth(i).copied(),
-            datapath: all_datapaths.nth(i).cloned(),
-            monitors: all_monitors.nth(i).cloned(),
+            power: result_copied(&all_power, i),
+            vendor: result_cloned(&all_vendor_info, i),
+            status: result_copied(&all_status, i),
+            datapath: result_cloned(&all_datapaths, i),
+            monitors: result_cloned(&all_monitors, i),
         };
         out.push(tr);
     }
 
     Ok(out)
+}
+
+fn result_copied<T: Copy>(res: &ModuleResult<T>, i: u8) -> Result<T, String> {
+    res.nth(i).copied().ok_or_else(|| {
+        res.failures
+            .nth(i)
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| String::from("Unknown failure"))
+    })
+}
+
+fn result_cloned<T: Clone>(res: &ModuleResult<T>, i: u8) -> Result<T, String> {
+    res.nth(i).cloned().ok_or_else(|| {
+        res.failures
+            .nth(i)
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| String::from("Unknown failure"))
+    })
 }
