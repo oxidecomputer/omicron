@@ -355,7 +355,7 @@ impl PortManager {
             "port_name" => &port_name,
             "rules" => ?&rules,
         );
-        hdl.set_fw_rules(&oxide_vpc::api::SetFwRulesReq {
+        hdl.set_firewall_rules(&oxide_vpc::api::SetFwRulesReq {
             port_name: port_name.clone(),
             rules,
         })?;
@@ -780,7 +780,7 @@ impl PortManager {
                 "port" => ?&port_name,
                 "rules" => ?&rules,
             );
-            hdl.set_fw_rules(&oxide_vpc::api::SetFwRulesReq {
+            hdl.set_firewall_rules(&oxide_vpc::api::SetFwRulesReq {
                 port_name,
                 rules,
             })?;
@@ -792,8 +792,7 @@ impl PortManager {
         &self,
     ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
         let hdl = Handle::new()?;
-        let v2p =
-            hdl.dump_v2p(&oxide_vpc::api::DumpVirt2PhysReq { unused: 99 })?;
+        let v2p = hdl.dump_v2p()?;
         let mut mappings: Vec<_> = vec![];
 
         for mapping in v2p.mappings {

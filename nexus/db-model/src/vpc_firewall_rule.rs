@@ -54,18 +54,40 @@ impl_enum_wrapper!(
 NewtypeFrom! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 
-impl_enum_wrapper!(
-    VpcFirewallRuleProtocolEnum:
-
-    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
-
-    Tcp => b"TCP"
-    Udp => b"UDP"
-    Icmp => b"ICMP"
-);
+/// Newtype wrapper around [`external::VpcFirewallRuleProtocol`] so we can derive
+/// diesel traits for it
+#[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
+#[diesel(sql_type = sql_types::Text)]
+#[repr(transparent)]
+pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
 NewtypeFrom! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
 NewtypeDeref! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
+
+impl ToSql<sql_types::Text, Pg> for VpcFirewallRuleProtocol {
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut serialize::Output<'a, '_, Pg>,
+    ) -> serialize::Result {
+        <String as ToSql<sql_types::Text, Pg>>::to_sql(
+            &self.0.to_string(),
+            &mut out.reborrow(),
+        )
+    }
+}
+
+// Deserialize the "VpcFirewallRuleProtocol" object from SQL TEXT.
+impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleProtocol
+where
+    DB: Backend,
+    String: FromSql<sql_types::Text, DB>,
+{
+    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
+        Ok(VpcFirewallRuleProtocol(
+            String::from_sql(bytes)?
+                .parse::<external::VpcFirewallRuleProtocol>()?,
+        ))
+    }
+}
 
 /// Newtype wrapper around [`external::VpcFirewallRuleTarget`] so we can derive
 /// diesel traits for it
