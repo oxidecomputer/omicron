@@ -66,6 +66,12 @@
           "generation": {
             "$ref": "#/components/schemas/Generation"
           },
+          "serial": {
+            "description": "A serial number for this DNS configuration, as should be used in SOA records describing the configuration's zones. This is a property of the overall DNS configuration for convenience: Nexus versions DNS configurations at this granularity, and we expect Nexus will derive serial numbers from that version.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "time_applied": {
             "type": "string",
             "format": "date-time"
@@ -83,6 +89,7 @@
         },
         "required": [
           "generation",
+          "serial",
           "time_applied",
           "time_created",
           "zones"
@@ -93,6 +100,12 @@
         "properties": {
           "generation": {
             "$ref": "#/components/schemas/Generation"
+          },
+          "serial": {
+            "description": "See [`DnsConfig`]'s `serial` field for how this is different from `generation`",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "time_created": {
             "type": "string",
@@ -107,6 +120,7 @@
         },
         "required": [
           "generation",
+          "serial",
           "time_created",
           "zones"
         ]
@@ -208,24 +222,6 @@
               "data",
               "type"
             ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "$ref": "#/components/schemas/Soa"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "SOA"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "type"
-            ]
           }
         ]
       },
@@ -253,48 +249,6 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
-      },
-      "Soa": {
-        "type": "object",
-        "properties": {
-          "expire": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "minimum": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "mname": {
-            "type": "string"
-          },
-          "refresh": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "retry": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "rname": {
-            "type": "string"
-          },
-          "serial": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "expire",
-          "minimum",
-          "mname",
-          "refresh",
-          "retry",
-          "rname",
-          "serial"
-        ]
       },
       "Srv": {
         "type": "object",

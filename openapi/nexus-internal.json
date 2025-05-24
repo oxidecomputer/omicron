@@ -4019,6 +4019,12 @@
           "generation": {
             "$ref": "#/components/schemas/Generation"
           },
+          "serial": {
+            "description": "See [`DnsConfig`]'s `serial` field for how this is different from `generation`",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "time_created": {
             "type": "string",
             "format": "date-time"
@@ -4032,6 +4038,7 @@
         },
         "required": [
           "generation",
+          "serial",
           "time_created",
           "zones"
         ]
@@ -4126,24 +4133,6 @@
                 "type": "string",
                 "enum": [
                   "NS"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "$ref": "#/components/schemas/Soa"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "SOA"
                 ]
               }
             },
@@ -6647,48 +6636,6 @@
         },
         "required": [
           "vmm_state"
-        ]
-      },
-      "Soa": {
-        "type": "object",
-        "properties": {
-          "expire": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "minimum": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "mname": {
-            "type": "string"
-          },
-          "refresh": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "retry": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "rname": {
-            "type": "string"
-          },
-          "serial": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "expire",
-          "minimum",
-          "mname",
-          "refresh",
-          "retry",
-          "rname",
-          "serial"
         ]
       },
       "SourceNatConfig": {
