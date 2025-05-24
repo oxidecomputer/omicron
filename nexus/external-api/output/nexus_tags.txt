@@ -150,6 +150,8 @@ group_list                               GET      /v1/groups
 group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
+settings_update                          PUT      /v1/settings
+settings_view                            GET      /v1/settings
 user_list                                GET      /v1/users
 utilization_view                         GET      /v1/utilization
 

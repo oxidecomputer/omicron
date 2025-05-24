@@ -6446,6 +6446,68 @@
         }
       }
     },
+    "/v1/settings": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Fetch current silo's settings",
+        "operationId": "settings_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Update current silo's settings",
+        "operationId": "settings_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiloSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/snapshots": {
       "get": {
         "tags": [
@@ -22872,6 +22934,36 @@
           "identity_type",
           "role_name"
         ]
+      },
+      "SiloSettings": {
+        "description": "A collection of resource counts used to set the virtual capacity of a silo",
+        "type": "object",
+        "properties": {
+          "device_token_max_ttl_seconds": {
+            "nullable": true,
+            "type": "integer",
+            "format": "int64"
+          },
+          "silo_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "silo_id"
+        ]
+      },
+      "SiloSettingsUpdate": {
+        "description": "Updateable properties of a silo's settings. If a value is omitted it will not be updated.",
+        "type": "object",
+        "properties": {
+          "device_token_max_ttl_seconds": {
+            "nullable": true,
+            "description": "Maximum lifetime of a device token in seconds. If unset (or set to null), users will be able to create tokens that do not expire.",
+            "type": "integer",
+            "format": "int64"
+          }
+        }
       },
       "SiloUtilization": {
         "description": "View of a silo's resource utilization and capacity",

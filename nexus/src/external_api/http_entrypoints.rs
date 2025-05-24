@@ -229,6 +229,62 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn settings_view(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<HttpResponseOk<views::SiloSettings>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let silo: NameOrId = opctx
+                .authn
+                .silo_required()
+                .internal_context("loading current silo")?
+                .id()
+                .into();
+
+            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let settings =
+                nexus.silo_fetch_settings(&opctx, &silo_lookup).await?;
+            Ok(HttpResponseOk(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn settings_update(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<params::SiloSettingsUpdate>,
+    ) -> Result<HttpResponseOk<views::SiloSettings>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let new_settings = new_settings.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let silo: NameOrId = opctx
+                .authn
+                .silo_required()
+                .internal_context("loading current silo")?
+                .id()
+                .into();
+            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let settings = nexus
+                .silo_update_settings(&opctx, &silo_lookup, &new_settings)
+                .await?;
+            Ok(HttpResponseOk(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn utilization_view(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<Utilization>, HttpError> {

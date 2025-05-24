@@ -7,11 +7,13 @@ use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::TestResponse;
+use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest, RequestBuilder},
     resource_helpers::grant_iam,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::{params, views};
 use nexus_types::external_api::{
     params::{DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify},
     views::{
@@ -192,6 +194,33 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     // project_list(&testctx, &token.access_token, StatusCode::UNAUTHORIZED)
     //     .await
     //     .expect("projects list should 401 after sleep makes token expire");
+}
+
+/// similar to the above except happy path only, focused on expiration
+#[nexus_test]
+async fn test_device_auth_expiration(cptestctx: &ControlPlaneTestContext) {
+    let testctx = &cptestctx.external_client;
+
+    // get a token for the privileged user. default silo max token expiration
+    // is null, so tokens don't expire
+
+    // test token works on project list
+
+    // set token expiration on silo
+    let _: views::SiloSettings = object_put(
+        testctx,
+        "/v1/settings",
+        &params::SiloSettingsUpdate { device_token_max_ttl_seconds: Some(3) },
+    )
+    .await;
+
+    // create token again
+
+    // immediately use token, it should work
+
+    // wait 2 seconds, confirm token has expired
+
+    // other token and it still works
 }
 
 async fn project_list(
