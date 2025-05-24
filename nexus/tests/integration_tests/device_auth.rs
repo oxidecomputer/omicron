@@ -7,7 +7,7 @@ use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::TestResponse;
-use nexus_test_utils::resource_helpers::object_put;
+use nexus_test_utils::resource_helpers::{object_get, object_put};
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest, RequestBuilder},
     resource_helpers::grant_iam,
@@ -186,20 +186,11 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     project_list(&testctx, &token.access_token, StatusCode::OK)
         .await
         .expect("failed to get projects with token");
-
-    // not ready yet for this, but it did work when I hard-coded the expiration
-
-    // wait 5 seconds and then run the request again, expecting 403 due to expiration
-    // sleep(Duration::from_secs(5)).await;
-    // project_list(&testctx, &token.access_token, StatusCode::UNAUTHORIZED)
-    //     .await
-    //     .expect("projects list should 401 after sleep makes token expire");
 }
 
-async fn get_device_token(
-    testctx: &ClientTestContext,
-    authn_mode: AuthnMode,
-) -> String {
+/// Helper to make the test cute. Goes through the whole flow, returns the token
+/// as a string
+async fn get_device_token(testctx: &ClientTestContext) -> String {
     let client_id = Uuid::new_v4();
     let authn_params = DeviceAuthRequest { client_id };
 
@@ -226,7 +217,7 @@ async fn get_device_token(
             .body(Some(&confirm_params))
             .expect_status(Some(StatusCode::NO_CONTENT)),
     )
-    .authn_as(authn_mode.clone())
+    .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .expect("failed to confirm");
@@ -244,7 +235,7 @@ async fn get_device_token(
             .body_urlencoded(Some(&token_params))
             .expect_status(Some(StatusCode::OK)),
     )
-    .authn_as(authn_mode)
+    .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .expect("failed to get token")
@@ -259,10 +250,13 @@ async fn get_device_token(
 async fn test_device_auth_expiration(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
+    let settings: views::SiloSettings =
+        object_get(testctx, "/v1/settings").await;
+    assert_eq!(settings.device_token_max_ttl_seconds, None);
+
     // get a token for the privileged user. default silo max token expiration
     // is null, so tokens don't expire
-    let initial_token =
-        get_device_token(testctx, AuthnMode::PrivilegedUser).await;
+    let initial_token = get_device_token(testctx).await;
 
     // test token works on project list
     project_list(&testctx, &initial_token, StatusCode::OK)
@@ -270,16 +264,22 @@ async fn test_device_auth_expiration(cptestctx: &ControlPlaneTestContext) {
         .expect("initial token should work");
 
     // set token expiration on silo to 3 seconds
-    let _: views::SiloSettings = object_put(
+    let settings: views::SiloSettings = object_put(
         testctx,
         "/v1/settings",
         &params::SiloSettingsUpdate { device_token_max_ttl_seconds: Some(3) },
     )
     .await;
 
+    assert_eq!(settings.device_token_max_ttl_seconds, Some(3));
+
+    // might as well test the get endpoint as well
+    let settings: views::SiloSettings =
+        object_get(testctx, "/v1/settings").await;
+    assert_eq!(settings.device_token_max_ttl_seconds, Some(3));
+
     // create token again (this one will have the 3-second expiration)
-    let expiring_token =
-        get_device_token(testctx, AuthnMode::PrivilegedUser).await;
+    let expiring_token = get_device_token(testctx).await;
 
     // immediately use token, it should work
     project_list(&testctx, &expiring_token, StatusCode::OK)
