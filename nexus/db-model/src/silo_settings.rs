@@ -57,7 +57,9 @@ pub struct SiloSettingsUpdate {
 impl From<params::SiloSettingsUpdate> for SiloSettingsUpdate {
     fn from(params: params::SiloSettingsUpdate) -> Self {
         Self {
-            device_token_max_ttl_seconds: params.device_token_max_ttl_seconds,
+            device_token_max_ttl_seconds: params
+                .device_token_max_ttl_seconds
+                .map(|ttl| ttl.get().into()),
             time_modified: Utc::now(),
         }
     }

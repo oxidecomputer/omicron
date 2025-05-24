@@ -22954,14 +22954,15 @@
         ]
       },
       "SiloSettingsUpdate": {
-        "description": "Updateable properties of a silo's settings. If a value is omitted it will not be updated.",
+        "description": "Updateable properties of a silo's settings.",
         "type": "object",
         "properties": {
           "device_token_max_ttl_seconds": {
             "nullable": true,
             "description": "Maximum lifetime of a device token in seconds. If unset (or set to null), users will be able to create tokens that do not expire.",
             "type": "integer",
-            "format": "int64"
+            "format": "uint32",
+            "minimum": 1
           }
         }
       },

@@ -27,6 +27,7 @@ use serde::{
 };
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::num::NonZeroU32;
 use std::{net::IpAddr, str::FromStr};
 use url::Url;
 use uuid::Uuid;
@@ -489,12 +490,12 @@ pub struct SiloQuotasUpdate {
 // was discussed.
 
 /// Updateable properties of a silo's settings.
-/// If a value is omitted it will not be updated.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloSettingsUpdate {
     /// Maximum lifetime of a device token in seconds. If unset (or set to
     /// null), users will be able to create tokens that do not expire.
-    pub device_token_max_ttl_seconds: Option<i64>,
+    #[schemars(range(min = 1))]
+    pub device_token_max_ttl_seconds: Option<NonZeroU32>,
 }
 
 /// Create-time parameters for a `User`
