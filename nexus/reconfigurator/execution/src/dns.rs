@@ -803,7 +803,7 @@ mod test {
 
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
-        let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
+        let omicron_zones_by_ip: BTreeMap<_, _> = blueprint
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .map(|(_, zone)| (zone.underlay_ip(), zone.id))
             .collect();
@@ -816,7 +816,7 @@ mod test {
 
         // We also want a mapping from underlay IP to the corresponding switch
         // zone.  In this case, the value is the Scrimlet's sled id.
-        let mut switch_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
+        let switch_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
             .iter()
             .filter_map(|(sled_id, sled)| {
                 if sled.is_scrimlet() {
@@ -832,7 +832,7 @@ mod test {
 
         // We also want a mapping from underlay IP to each sled global zone.
         // In this case, the value is the sled id.
-        let mut all_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
+        let all_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
             .keys()
             .map(|sled_id| {
                 let sled_subnet = sleds_by_id.get(sled_id).unwrap().subnet();
@@ -872,8 +872,12 @@ mod test {
         // any corresponding Omicron zone.  While doing this, construct a set of
         // the fully-qualified DNS names (i.e., with the zone name suffix
         // appended) that had AAAA records.  We'll use this later to make sure
-        // all the SRV records' targets that we find are valid.
+        // all the SRV records' targets that we find are valid.  Some IPs may be
+        // represented with multiple AAAA records, and not all AAAA records are
+        // the target of a SRV.
         let mut expected_srv_targets: BTreeSet<_> = BTreeSet::new();
+        let mut unaccounted_omicron_zones = omicron_zones_by_ip.clone();
+        let mut unaccounted_switch_zones = switch_sleds_by_ip.clone();
         for (name, records) in &blueprint_dns_zone.records {
             let addrs: Vec<_> = records
                 .iter()
@@ -883,7 +887,8 @@ mod test {
                 })
                 .collect();
             for addr in addrs {
-                if let Some(zone_id) = omicron_zones_by_ip.remove(addr) {
+                if let Some(zone_id) = omicron_zones_by_ip.get(addr) {
+                    unaccounted_omicron_zones.remove(addr);
                     println!(
                         "IP {} found in DNS corresponds with zone {}",
                         addr, zone_id
@@ -895,7 +900,8 @@ mod test {
                     continue;
                 }
 
-                if let Some(scrimlet_id) = switch_sleds_by_ip.remove(addr) {
+                if let Some(scrimlet_id) = switch_sleds_by_ip.get(addr) {
+                    unaccounted_switch_zones.remove(addr);
                     println!(
                         "IP {} found in DNS corresponds with switch zone \
                         for Scrimlet {}",
@@ -908,7 +914,7 @@ mod test {
                     continue;
                 }
 
-                if let Some(sled_id) = all_sleds_by_ip.remove(addr) {
+                if let Some(sled_id) = all_sleds_by_ip.get(addr) {
                     println!(
                         "IP {} found in DNS corresponds with global zone \
                         for sled {}",
@@ -932,19 +938,19 @@ mod test {
 
         println!(
             "Omicron zones whose IPs were not found in DNS: {:?}",
-            omicron_zones_by_ip,
+            unaccounted_omicron_zones,
         );
         assert!(
-            omicron_zones_by_ip.is_empty(),
+            unaccounted_omicron_zones.is_empty(),
             "some Omicron zones' IPs were not found in DNS"
         );
 
         println!(
             "Scrimlets whose switch zone IPs were not found in DNS: {:?}",
-            switch_sleds_by_ip,
+            unaccounted_switch_zones,
         );
         assert!(
-            switch_sleds_by_ip.is_empty(),
+            unaccounted_switch_zones.is_empty(),
             "some switch zones' IPs were not found in DNS"
         );
 

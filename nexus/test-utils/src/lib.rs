@@ -338,6 +338,42 @@ impl RackInitRequestBuilder {
             )
             .expect("Failed to setup ClickHouse DNS");
     }
+
+    // Special handling of internal DNS, which has a second A/AAAA record and an
+    // NS record pointing to it.
+    fn add_internal_name_server_to_dns(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        http_address: SocketAddrV6,
+        dns_address: SocketAddr,
+    ) {
+        self.internal_dns_config
+            .host_zone_internal_dns(
+                zone_id,
+                ServiceName::InternalDns,
+                http_address,
+                dns_address.into(),
+            )
+            .expect("Failed to setup internal DNS");
+    }
+
+    // Special handling of external DNS, which has a second A/AAAA record and an
+    // NS record pointing to it.
+    fn add_external_name_server_to_dns(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        http_address: SocketAddrV6,
+        dns_address: SocketAddr,
+    ) {
+        self.internal_dns_config
+            .host_zone_external_dns(
+                zone_id,
+                ServiceName::ExternalDns,
+                http_address,
+                dns_address,
+            )
+            .expect("Failed to setup external DNS");
+    }
 }
 
 pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
@@ -1227,10 +1263,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .next()
             .expect("ran out of MAC addresses");
         let zone_id = OmicronZoneUuid::new_v4();
-        self.rack_init_builder.add_service_to_dns(
+        self.rack_init_builder.add_external_name_server_to_dns(
             zone_id,
             dropshot_address,
-            ServiceName::ExternalDns,
+            dns.dropshot_server.local_addr(),
         );
 
         let zpool_id = ZpoolUuid::new_v4();
@@ -1290,10 +1326,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             panic!("Unsupported IPv4 DNS address");
         };
         let zone_id = OmicronZoneUuid::new_v4();
-        self.rack_init_builder.add_service_to_dns(
+        self.rack_init_builder.add_internal_name_server_to_dns(
             zone_id,
             http_address,
-            ServiceName::InternalDns,
+            dns.dropshot_server.local_addr(),
         );
 
         let zpool_id = ZpoolUuid::new_v4();
