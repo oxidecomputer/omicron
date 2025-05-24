@@ -664,7 +664,7 @@ impl DnsConfigBuilder {
                 )
             })
             .collect::<Vec<_>>();
-        if internal_nameservers.len() > 0 {
+        if !internal_nameservers.is_empty() {
             internal_dns_records.push(("@".to_string(), internal_nameservers));
         }
 

@@ -352,7 +352,7 @@ impl RackInitRequestBuilder {
                 zone_id,
                 ServiceName::InternalDns,
                 http_address,
-                dns_address.into(),
+                dns_address,
             )
             .expect("Failed to setup internal DNS");
     }

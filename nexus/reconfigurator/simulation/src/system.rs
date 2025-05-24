@@ -615,8 +615,7 @@ impl SimSystemBuilderInner {
             .expect("already checked that system is empty");
 
         let generation_to_serial = |generation: Generation| -> u32 {
-            generation.as_u64().try_into()
-                .expect("generation fits into a u32")
+            generation.as_u64().try_into().expect("generation fits into a u32")
         };
 
         self.system.internal_dns.insert(

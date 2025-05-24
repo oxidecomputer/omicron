@@ -241,7 +241,8 @@ pub fn blueprint_external_dns_config<'a>(
         .collect::<HashMap<String, Vec<DnsRecord>>>();
 
     if !zone_records.is_empty() {
-        records.entry(ZONE_APEX_NAME.to_string())
+        records
+            .entry(ZONE_APEX_NAME.to_string())
             .or_insert(Vec::new())
             .extend(zone_records);
     }
