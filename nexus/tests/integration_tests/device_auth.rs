@@ -2,12 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::num::NonZeroU32;
+
 use dropshot::test_util::ClientTestContext;
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::TestResponse;
-use nexus_test_utils::resource_helpers::{object_get, object_put};
+use nexus_test_utils::resource_helpers::{
+    object_get, object_put, object_put_error,
+};
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest, RequestBuilder},
     resource_helpers::grant_iam,
@@ -245,9 +249,8 @@ async fn get_device_token(testctx: &ClientTestContext) -> String {
     token.access_token
 }
 
-/// similar to the above except happy path only, focused on expiration
 #[nexus_test]
-async fn test_device_auth_expiration(cptestctx: &ControlPlaneTestContext) {
+async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     let settings: views::SiloSettings =
@@ -263,11 +266,26 @@ async fn test_device_auth_expiration(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("initial token should work");
 
+    //  passing negative or zero gives a 400
+    for value in [-3, 0] {
+        let error = object_put_error(
+            testctx,
+            "/v1/settings",
+            &serde_json::json!({ "device_token_max_ttl_seconds": value }),
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+        let msg = "unable to parse JSON body: device_token_max_ttl_seconds: invalid value";
+        assert!(error.message.starts_with(&msg));
+    }
+
     // set token expiration on silo to 3 seconds
     let settings: views::SiloSettings = object_put(
         testctx,
         "/v1/settings",
-        &params::SiloSettingsUpdate { device_token_max_ttl_seconds: Some(3) },
+        &params::SiloSettingsUpdate {
+            device_token_max_ttl_seconds: NonZeroU32::new(3),
+        },
     )
     .await;
 
