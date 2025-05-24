@@ -24,7 +24,7 @@ use nexus_types::external_api::{
 use http::{StatusCode, header, method::Method};
 use oxide_client::types::SiloRole;
 use serde::Deserialize;
-// use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -196,6 +196,64 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     //     .expect("projects list should 401 after sleep makes token expire");
 }
 
+async fn get_device_token(
+    testctx: &ClientTestContext,
+    authn_mode: AuthnMode,
+) -> String {
+    let client_id = Uuid::new_v4();
+    let authn_params = DeviceAuthRequest { client_id };
+
+    // Start a device authentication flow
+    let auth_response: DeviceAuthResponse =
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&authn_params))
+            .expect_status(Some(StatusCode::OK))
+            .execute()
+            .await
+            .expect("failed to start client authentication flow")
+            .parsed_body()
+            .expect("client authentication response");
+
+    let device_code = auth_response.device_code;
+    let user_code = auth_response.user_code;
+
+    let confirm_params = DeviceAuthVerify { user_code };
+
+    // Confirm the device authentication
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&confirm_params))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(authn_mode.clone())
+    .execute()
+    .await
+    .expect("failed to confirm");
+
+    let token_params = DeviceAccessTokenRequest {
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code".to_string(),
+        device_code,
+        client_id,
+    };
+
+    // Get the token
+    let token: DeviceAccessTokenGrant = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/token")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&token_params))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(authn_mode)
+    .execute()
+    .await
+    .expect("failed to get token")
+    .parsed_body()
+    .expect("failed to deserialize token response");
+
+    token.access_token
+}
+
 /// similar to the above except happy path only, focused on expiration
 #[nexus_test]
 async fn test_device_auth_expiration(cptestctx: &ControlPlaneTestContext) {
@@ -203,10 +261,15 @@ async fn test_device_auth_expiration(cptestctx: &ControlPlaneTestContext) {
 
     // get a token for the privileged user. default silo max token expiration
     // is null, so tokens don't expire
+    let initial_token =
+        get_device_token(testctx, AuthnMode::PrivilegedUser).await;
 
     // test token works on project list
+    project_list(&testctx, &initial_token, StatusCode::OK)
+        .await
+        .expect("initial token should work");
 
-    // set token expiration on silo
+    // set token expiration on silo to 3 seconds
     let _: views::SiloSettings = object_put(
         testctx,
         "/v1/settings",
@@ -214,13 +277,27 @@ async fn test_device_auth_expiration(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // create token again
+    // create token again (this one will have the 3-second expiration)
+    let expiring_token =
+        get_device_token(testctx, AuthnMode::PrivilegedUser).await;
 
     // immediately use token, it should work
+    project_list(&testctx, &expiring_token, StatusCode::OK)
+        .await
+        .expect("expiring token should work immediately");
 
-    // wait 2 seconds, confirm token has expired
+    // wait 4 seconds to ensure token has expired
+    sleep(Duration::from_secs(4)).await;
 
-    // other token and it still works
+    // confirm token has expired
+    project_list(&testctx, &expiring_token, StatusCode::UNAUTHORIZED)
+        .await
+        .expect("expiring token should fail after expiration");
+
+    // original token should still work (it was created before the expiration setting)
+    project_list(&testctx, &initial_token, StatusCode::OK)
+        .await
+        .expect("initial token should still work");
 }
 
 async fn project_list(
