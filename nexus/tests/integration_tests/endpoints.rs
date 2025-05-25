@@ -42,6 +42,7 @@ use omicron_test_utils::certificates::CertificateChain;
 use semver::Version;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
@@ -1627,6 +1628,20 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                             shared::SiloRole,
                         > {
                             role_assignments: vec![],
+                        })
+                        .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: "/v1/settings",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&params::SiloSettingsUpdate {
+                            device_token_max_ttl_seconds: NonZeroU32::new(3),
                         })
                         .unwrap(),
                     ),
